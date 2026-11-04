@@ -4,6 +4,7 @@
  * lay a cylinder on its side.
  */
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Axis, Material, Part } from "../shared/protocol";
 
 export interface Built {
@@ -52,6 +53,34 @@ function gearShape(teeth: number): THREE.Shape {
   hole.absarc(0, 0, 0.11, 0, TAU, true);
   s.holes.push(hole);
   return s;
+}
+
+/** A 3D arrow for flows and forces: a tube along `path` (or the axis) with a cone at the end. */
+export function arrowGeometry(p: Part): THREE.BufferGeometry {
+  const len = Math.max(0.2, p.size[idx[p.axis]]);
+  const run = p.path && p.path.length >= 2 ? p.path : [axisPoint([0, -len / 2, 0], p.axis), axisPoint([0, len / 2, 0], p.axis)];
+  const pts = run.map((v) => new THREE.Vector3(...v));
+  const r = p.radius ?? Math.max(0.05, Math.min(0.2, across(p.size, p.axis) / 4));
+  const head = Math.max(r * 3.2, 0.12);
+  const tip = pts[pts.length - 1];
+  const dir = tip.clone().sub(pts[pts.length - 2]).normalize();
+  // The shaft stops where the head begins.
+  const shaftEnd = tip.clone().addScaledVector(dir, -head * 0.9);
+  const shaftPts = [...pts.slice(0, -1), shaftEnd];
+  const shaft = shaftPts.length > 2
+    ? new THREE.TubeGeometry(new THREE.CatmullRomCurve3(shaftPts), 48, r, 12, false)
+    : new THREE.TubeGeometry(new THREE.LineCurve3(shaftPts[0], shaftPts[1]), 4, r, 12, false);
+  const cone = new THREE.ConeGeometry(r * 2.4, head, 24, 1);
+  cone.translate(0, head / 2, 0);
+  cone.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir));
+  cone.translate(shaftEnd.x, shaftEnd.y, shaftEnd.z);
+  return mergeGeometries([shaft.toNonIndexed(), cone.toNonIndexed()]) ?? shaft;
+}
+
+function axisPoint(v: number[], axis: Axis): number[] {
+  // [0, d, 0] along y becomes the same distance along the chosen axis.
+  const d = v[1];
+  return axis === "x" ? [d, 0, 0] : axis === "z" ? [0, 0, d] : [0, d, 0];
 }
 
 export function buildGeometry(p: Part): Built {
@@ -132,6 +161,8 @@ export function buildGeometry(p: Part): Built {
       g.translate(0, 0, -depth / 2 + bevel);
       return { geometry: fromZ(g, p.axis), scale: [1, 1, 1] };
     }
+    case "arrow":
+      return { geometry: arrowGeometry(p), scale: [1, 1, 1] };
     case "plane":
       return { geometry: new THREE.BoxGeometry(1, 1, 1), scale: [sx, Math.max(0.004, sy), sz] };
     case "rounded_box":

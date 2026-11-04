@@ -189,17 +189,24 @@ COMPANION_TOOLS: list[ToolSpec] = [
     ToolSpec(
         "build_3d_model",
         "Build a real-looking 3D model of a physical thing (machine, vehicle, device, organ, building) from parts, "
-        "with callouts and narrated, animated beats that play like a short video. Use it for 'how does X work', "
-        "'show me inside X', 'what happens when...' about physical things; use explain_in_3d for ideas and flows. "
-        "Units: y is up, the whole model about 2-12 units across, centred near the origin. Set `axis` instead of "
-        "rotating cylinders. Group assemblies with `parent` so they move together. Label only the 4-8 parts that "
-        "matter. Outer shells get casing=true so the cutaway can show the inside. Give 3-6 beats with rising `at` "
-        "times; animate with keyframes on the story timeline (one-off events) and spin/oscillate/looped keys for "
-        "machinery. Camera 'front' looks from +z at the x-y plane. Build shapes the way they really look: a "
-        "wing, fuselage outline, fin or blade is ONE extrude with its outline as `profile` (e.g. a flying wing: "
-        "axis y, profile [[0,2.5],[4,-0.5],[3.2,-1.2],[1.6,-0.6],[0,-1.4],[-1.6,-0.6],[-3.2,-1.2],[-4,-0.5]]), "
-        "not stacked boxes; long round parts are cylinders/capsules with axis set. Pick cameras that show the "
-        "subject (iso, front, side, top); use cutaway only when the inside is the point.",
+        "with sticky-note callouts and narrated, animated beats that play like a short video. It floats on the "
+        "screen with no background, so the object itself must look right and fill the frame. Use it for 'draw it "
+        "in 3D', 'show me inside X', 'show me how to attach/assemble X'; use sketch_diagram for quick 'is this "
+        "real / why' answers and explain_in_3d for ideas. Units: y is up, the whole model 6-12 units across, centred "
+        "near the origin. The same rules for anything (a jet, a heart, a lock, a camera, a phone, an engine). "
+        "Build shapes the way they really look: any flat outline (a fuselage, hull, wing, fin, blade, circuit "
+        "board, phone body, key) is ONE extrude with its real outline as `profile`, never stacked boxes; long "
+        "round parts are cylinders with `axis` set; fans and turbines are gears with many teeth; soft organic "
+        "parts (heart chambers, lungs) are overlapping spheres/capsules, vessels and pipes are tubes along a "
+        "`path`. Show what moves and flows: every fan, rotor, wheel or gear gets a spin motion; a beating, "
+        "breathing or pumping part gets an oscillate on scale (a heart: ventricles squeeze every 0.8 s); a "
+        "latch, trigger, piston or slide gets keyframes; whatever travels (air, blood, water, fuel, current, "
+        "data, force) gets `arrow` parts along its route (path [from, ..., to]; red/blue for oxygen-rich/poor "
+        "blood) which glow and glide by themselves. Label the 4-7 parts that matter with 1-3 words each and no `note`. Outer shells get "
+        "casing=true and cutaway=true when the inside is the point (the shell stays as a see-through ghost). Group "
+        "assemblies with `parent`. Give 3-5 beats with rising `at` times, each focusing the parts it talks about; "
+        "keyframes on the story timeline for one-off events (a latch lifting, a cable sliding in). Cameras: side "
+        "for vehicles and profiles, iso to show depth, close for a detail.",
         build_tool_schema(),
     ),
     ToolSpec(

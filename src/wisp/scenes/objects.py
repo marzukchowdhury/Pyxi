@@ -35,6 +35,7 @@ PartShape = Literal[
     "gear",
     "spring",
     "plane",
+    "arrow",
 ]
 Material = Literal[
     "metal",
@@ -123,7 +124,9 @@ class Part(BaseModel):
         None, ge=0.0, le=4.0, description="Cylinder top/bottom radius ratio."
     )
     path: list[list[float]] | None = Field(
-        None, description="tube: [[x,y,z], ...] centerline points."
+        None,
+        description="tube: [[x,y,z], ...] centerline points. arrow: [from, to] (or a curved "
+        "run), relative to position; the head is at the last point.",
     )
     radius: float | None = Field(None, gt=0, le=10, description="tube: pipe radius.")
     profile: list[list[float]] | None = Field(
@@ -309,6 +312,9 @@ class ObjectScene(BaseModel):
             if p.shape == "tube" and not p.path:
                 notes.append(f"{pid}: tube without path became a cylinder")
                 p = p.model_copy(update={"shape": "cylinder"})
+            if p.shape == "arrow" and p.color is None:
+                # Flows read best as one glowing colour, set apart from the machine.
+                p = p.model_copy(update={"color": "#7fbaff", "material": "emissive"})
             if p.shape == "extrude" and not p.profile:
                 notes.append(f"{pid}: extrude without profile became a box")
                 p = p.model_copy(update={"shape": "box"})

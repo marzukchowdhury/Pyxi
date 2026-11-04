@@ -17,7 +17,7 @@ import { useLinger } from "./linger";
 import { useOverlay, voice } from "./store";
 
 const STAGE = { w: 780, h: 560 };
-const CAPTION = 140; // the caption bar under the canvas, in CSS px
+const CAPTION = 52; // the slim step bar under the model, in CSS px
 const AUDIO_WAIT_MS = 9000; // Wisp's own voice for this step; after that the words show silently
 
 export function ObjectPanel() {
@@ -143,23 +143,18 @@ export function ObjectPanel() {
         <button className="icon" onClick={closeObject} title="Close"><Close /></button>
       </div>
       <ObjectView scene={spec} clock={clock} beat={current} beatIndex={beat} cutaway={cutaway} width={width} height={height} onPick={ask} />
-      <div className="object-caption">
-        <div className="progress">
+      {/* No card: the model floats on its own. A slim bar says where we are; the voice tells it. */}
+      <div className="object-bar" title={current.narration}>
+        <div className="object-dots">
           {spec.beats.map((_, i) => (
             <button key={i} className={i < beat ? "done" : i === beat ? "on" : ""} onClick={() => seek(i)} aria-label={`Beat ${i + 1}`} />
           ))}
         </div>
-        <div className="step-row">
-          <div className="step-text" key={`${spec.id}-${beat}-${object.version}`}>
-            <div className="kicker">{spec.title}<span>{beat + 1} / {spec.beats.length}</span></div>
-            <div className="step-title">{current.title}</div>
-            <div className="step-narration">{current.narration}</div>
-          </div>
-          <div className="buttons">
-            <button className="icon" onClick={() => seek(beat - 1)} disabled={beat === 0} aria-label="Previous"><Prev /></button>
-            <button className="icon primary" onClick={toggle} aria-label={playing ? "Pause" : "Play"}>{playing ? <Pause /> : <Play />}</button>
-            <button className="icon" onClick={() => seek(beat + 1)} disabled={beat >= spec.beats.length - 1} aria-label="Next"><Next /></button>
-          </div>
+        <div className="object-step" key={`${spec.id}-${beat}-${object.version}`}>{current.title}</div>
+        <div className="object-controls">
+          <button className="icon" onClick={() => seek(beat - 1)} disabled={beat === 0} aria-label="Previous"><Prev /></button>
+          <button className="icon" onClick={toggle} aria-label={playing ? "Pause" : "Play"}>{playing ? <Pause /> : <Play />}</button>
+          <button className="icon" onClick={() => seek(beat + 1)} disabled={beat >= spec.beats.length - 1} aria-label="Next"><Next /></button>
         </div>
       </div>
     </Interactive>

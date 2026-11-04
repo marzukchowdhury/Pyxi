@@ -46,7 +46,9 @@ interface Registered {
 }
 
 const FOV = 32;
+const TAGS = ["#ffe36e", "#ff9bb5", "#7fe0b0", "#8fc7ff", "#c5a8ff", "#ffb36b"]; // sticky-note colours
 const ICE = new THREE.Color("#9ecbff");
+const GHOST = new THREE.Color("#dfe7f2"); // cutaway shells
 const VIEWS: Record<Beat["camera"], [number, number, number]> = {
   iso: [0.82, 0.58, 1.3],
   front: [0, 0.14, 1],
@@ -87,14 +89,13 @@ export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, heig
         {labelled.map((p) => (
           <g key={p.id}>
             <path ref={(el) => { slot(callouts.current, p.id).line = el; }} className="callout-line" />
-            <circle ref={(el) => { slot(callouts.current, p.id).dot = el; }} r="2.6" className="callout-dot" />
+            <circle ref={(el) => { slot(callouts.current, p.id).dot = el; }} r="3.4" className="callout-dot" />
           </g>
         ))}
       </svg>
-      {labelled.map((p) => (
-        <div key={p.id} ref={(el) => { slot(callouts.current, p.id).el = el; }} className="callout" style={{ opacity: 0 }}>
-          <b>{p.label}</b>
-          {p.note && <span>{p.note}</span>}
+      {labelled.map((p, i) => (
+        <div key={p.id} ref={(el) => { slot(callouts.current, p.id).el = el; }} className="callout" style={{ opacity: 0, ["--tag" as string]: TAGS[i % TAGS.length] }} title={p.note ?? undefined}>
+          {p.label}
         </div>
       ))}
     </div>
@@ -166,6 +167,14 @@ function Model({ scene, clock, beat, cutaway, registry, onPick }: {
       reg.group.position.set(...st.position);
       reg.group.rotation.set(st.rotation[0], st.rotation[1], st.rotation[2]);
       reg.group.scale.set(...st.scale);
+      // Flows are alive: arrows glide a little along their direction and breathe.
+      if (p.shape === "arrow") {
+        const d = arrowDir(p);
+        const glide = (0.5 + 0.5 * Math.sin(t * 3.4 + p.position[0])) * 0.14;
+        reg.group.position.x += d[0] * glide;
+        reg.group.position.y += d[1] * glide;
+        reg.group.position.z += d[2] * glide;
+      }
       const parentOp = p.parent ? opacity.current.get(p.parent) ?? 1 : 1;
       const op = Math.max(0, Math.min(1, st.opacity)) * parentOp;
       opacity.current.set(p.id, op);
@@ -175,7 +184,14 @@ function Model({ scene, clock, beat, cutaway, registry, onPick }: {
       const ghost = cutaway && p.casing;
       const f = (fade.current.get(p.id) ?? 1) + ((blocking.has(p.id) ? 0.08 : 1) - (fade.current.get(p.id) ?? 1)) * k;
       fade.current.set(p.id, f);
-      const shown = (ghost ? 0.16 : 1) * op * f * (reg.mat.userData.factor as number);
+      const shown = (ghost ? 0.3 : 1) * op * f * (reg.mat.userData.factor as number);
+      // A see-through shell is pale silver, not its real paint: dark metal at low opacity on a
+      // transparent stage reads as a smudge, and the outline of the thing gets lost.
+      const ud = reg.mat.userData as { baseColor?: THREE.Color; baseMetal?: number };
+      ud.baseColor ??= reg.mat.color.clone();
+      ud.baseMetal ??= reg.mat.metalness;
+      reg.mat.color.lerp(ghost ? GHOST : ud.baseColor, k);
+      reg.mat.metalness += ((ghost ? 0.05 : ud.baseMetal) - reg.mat.metalness) * k;
       reg.mat.opacity = shown;
       const transparent = shown < 0.995;
       if (reg.mat.transparent !== transparent) {
@@ -210,6 +226,17 @@ function Model({ scene, clock, beat, cutaway, registry, onPick }: {
     </PartNode>
   );
   return <group>{(kids.get(null) ?? []).map(render)}</group>;
+}
+
+function arrowDir(p: Part): [number, number, number] {
+  const path = p.path;
+  if (path && path.length >= 2) {
+    const [a, b] = [path[path.length - 2], path[path.length - 1]];
+    const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const n = Math.hypot(d[0], d[1], d[2]) || 1;
+    return [d[0] / n, d[1] / n, d[2] / n];
+  }
+  return p.axis === "x" ? [1, 0, 0] : p.axis === "z" ? [0, 0, 1] : [0, 1, 0];
 }
 
 /** Parts that sit between the camera and what the beat is about (so they can fade out of the way). */
@@ -414,7 +441,8 @@ function expand(registry: Map<string, Registered>, ids: Set<string>): Set<string
   return out;
 }
 
-/** Projects labelled parts to the screen and lays their callouts out in two clean columns. */
+/** Projects labelled parts to the screen and hangs a sticky-note tag above or below each one,
+ * on a thin leader, spread so no two tags overlap and none leaves the stage. */
 function CalloutDriver({ registry, callouts, beat, width, height }: {
   registry: MutableRefObject<Map<string, Registered>>;
   callouts: MutableRefObject<Map<string, { el: HTMLDivElement | null; line: SVGPathElement | null; dot: SVGCircleElement | null }>>;
@@ -425,8 +453,9 @@ function CalloutDriver({ registry, callouts, beat, width, height }: {
   const { camera } = useThree();
   const v = useMemo(() => new THREE.Vector3(), []);
   const focus = useMemo(() => new Set(beat.focus), [beat]);
+  const sizes = useMemo(() => new Map<string, [number, number]>(), []);
   useFrame(() => {
-    const items: { id: string; ax: number; ay: number; op: number; left: boolean }[] = [];
+    const items: { id: string; ax: number; ay: number; op: number; w: number; h: number }[] = [];
     for (const [id, slotted] of callouts.current) {
       const r = registry.current.get(id);
       if (!r || !slotted.el) continue;
@@ -435,35 +464,45 @@ function CalloutDriver({ registry, callouts, beat, width, height }: {
       const ax = (v.x * 0.5 + 0.5) * width;
       const ay = (-v.y * 0.5 + 0.5) * height;
       const op = r.mesh.visible ? Math.min(1, r.mat.opacity / Math.max(0.05, r.mat.userData.factor as number)) : 0;
-      if (behind || op < 0.3 || ax < 0 || ax > width || ay < 0 || ay > height) {
+      // A ghosted casing still gets its tag; only parts that are really gone lose theirs.
+      if (behind || op < 0.12 || ax < 0 || ax > width || ay < 0 || ay > height) {
         hide(slotted);
         continue;
       }
-      items.push({ id, ax, ay, op, left: ax < width / 2 });
+      let size = sizes.get(id);
+      if (!size || !size[0]) sizes.set(id, (size = [slotted.el.offsetWidth, slotted.el.offsetHeight]));
+      items.push({ id, ax, ay, op: Math.max(op, 0.75), w: size[0] || 90, h: size[1] || 28 });
     }
-    for (const side of [true, false]) {
-      const col = items.filter((i) => i.left === side).sort((a, b) => a.ay - b.ay);
-      if (!col.length) continue;
-      // Columns sit beside the model but never let a label run off the stage.
-      const edgeX = side
-        ? Math.max(170, Math.min(...col.map((i) => i.ax)) - 70)
-        : Math.min(width - 170, Math.max(...col.map((i) => i.ax)) + 70);
-      // Spread labels so they never overlap, then pull the stack back inside the stage.
-      const ys = col.map((i) => i.ay);
-      for (let i = 1; i < ys.length; i++) ys[i] = Math.max(ys[i], ys[i - 1] + 34);
-      const overflow = ys[ys.length - 1] - (height - 20);
-      if (overflow > 0) for (let i = 0; i < ys.length; i++) ys[i] -= overflow;
-      for (let i = ys.length - 2; i >= 0; i--) ys[i] = Math.min(ys[i], ys[i + 1] - 34);
-      col.forEach((item, i) => {
+    if (!items.length) return;
+    // Tags go above the parts in the top half of the model and below the rest.
+    const midY = items.reduce((n, i) => n + i.ay, 0) / items.length;
+    const lift = Math.max(46, Math.min(96, height * 0.12));
+    for (const above of [true, false]) {
+      const row = items.filter((i) => (i.ay <= midY) === above).sort((a, b) => a.ax - b.ax);
+      if (!row.length) continue;
+      const xs = row.map((i) => i.ax);
+      // Push apart left to right, then slide the row back inside the stage.
+      for (let i = 1; i < row.length; i++) xs[i] = Math.max(xs[i], xs[i - 1] + (row[i - 1].w + row[i].w) / 2 + 10);
+      const over = xs[xs.length - 1] + row[row.length - 1].w / 2 - (width - 8);
+      if (over > 0) for (let i = 0; i < xs.length; i++) xs[i] -= over;
+      for (let i = xs.length - 2; i >= 0; i--) xs[i] = Math.min(xs[i], xs[i + 1] - (row[i].w + row[i + 1].w) / 2 - 10);
+      const under = 8 - (xs[0] - row[0].w / 2);
+      if (under > 0) for (let i = 0; i < xs.length; i++) xs[i] += under;
+      row.forEach((item, i) => {
         const s = callouts.current.get(item.id)!;
-        const ly = Math.max(16, ys[i]);
-        const dim = focus.size && !focus.has(item.id) ? 0.4 : 1;
-        const elbow = side ? edgeX + 18 : edgeX - 18;
+        // Crowded rows stagger in height so the leaders don't cross the tags.
+        const stagger = row.length > 3 && i % 2 ? item.h + 8 : 0;
+        const edge = above ? Math.min(...row.map((r) => r.ay)) : Math.max(...row.map((r) => r.ay));
+        let ty = above ? edge - lift - stagger - item.h : edge + lift + stagger;
+        ty = Math.max(6, Math.min(height - item.h - 6, ty));
+        const tx = xs[i] - item.w / 2;
+        const dim = focus.size && !focus.has(item.id) ? 0.72 : 1;
         s.el!.style.opacity = String(item.op * dim);
-        s.el!.style.transform = `translate(${edgeX}px, ${ly}px) translate(${side ? "-100%" : "0"}, -50%)`;
+        s.el!.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px)`;
         s.el!.classList.toggle("on", focus.has(item.id));
-        s.line?.setAttribute("d", `M ${item.ax} ${item.ay} L ${elbow} ${ly} L ${edgeX + (side ? 4 : -4)} ${ly}`);
-        s.line?.style.setProperty("opacity", String(item.op * dim * 0.9));
+        const ly = above ? ty + item.h : ty;
+        s.line?.setAttribute("d", `M ${item.ax.toFixed(1)} ${item.ay.toFixed(1)} L ${xs[i].toFixed(1)} ${ly.toFixed(1)}`);
+        s.line?.style.setProperty("opacity", String(item.op * dim));
         s.dot?.setAttribute("cx", String(item.ax));
         s.dot?.setAttribute("cy", String(item.ay));
         s.dot?.style.setProperty("opacity", String(item.op * dim));
