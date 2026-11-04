@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from otto.types import LLMResponse, ToolCall, Usage
 
 from conftest import fake_context
@@ -117,7 +119,7 @@ async def test_a_card_without_speech_narrates_itself(settings):
     brain, rec = make_brain(settings, llm=llm)
     await brain.turn("explain this")
     says = rec.of("say")
-    assert says[0]["text"].startswith("Here's the gist")
+    assert says[0]["text"] == "Dark mode flips it."  # straight into the points, no filler
     assert [n for s in says for n in s["notes"]] == [1, 2]
 
 
@@ -142,3 +144,40 @@ async def test_drawings_clear_when_the_user_switches_window(settings):
     titles.append("Facebook - Microsoft Edge")
     await asyncio.sleep(1.4)
     assert len(rec.of("clear")) == 1  # switched away: everything that points at pixels goes
+
+
+async def test_the_card_talks_through_its_points_after_the_opener(settings):
+    from test_connectors_and_docs import Script
+
+    card = {
+        "title": "Is this loss real?",
+        "closing": "Amazon lost money for years too. Want me to sketch where it all goes?",
+        "items": [
+            {
+                "text": "Headline says 'reportedly'",
+                "say": "Notice the word reportedly.",
+                "element_id": 3,
+            },
+            {
+                "text": "Labelled LEAKED",
+                "say": "And LEAKED is there to make you click.",
+                "element_id": 4,
+            },
+        ],
+    }
+    llm = Script(
+        [("say", {"text": "Big if true, but read it twice. [note:1]"}), ("explain_on_screen", card)]
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("explain what's on my screen")
+    for _ in range(100):
+        if any("LEAKED" in s["text"] for s in rec.of("say")):
+            break
+        await asyncio.sleep(0.02)
+    spoken = [(s["text"], s["notes"]) for s in rec.of("say")]
+    assert spoken[0][0].startswith("Big if true")
+    # Point 1 was named in the opener; point 2 gets its own sentence, revealed as it's said.
+    assert ("And LEAKED is there to make you click.", [2]) in spoken
+    assert not any("reportedly" in t for t, _ in spoken)  # no point is said twice
+    # It lands with a related fact and an offer instead of just stopping.
+    assert spoken[-1][0].endswith("Want me to sketch where it all goes?")

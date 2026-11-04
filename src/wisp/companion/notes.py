@@ -31,6 +31,7 @@ class NoteItem(BaseModel):
     kind: ItemKind = "point"
     mark: Mark = "frame"
     rect: tuple[int, int, int, int] | None = None  # physical screen px of what it's about
+    say: str | None = None  # the sentence Wisp speaks as this point appears
 
 
 class Sketch(BaseModel):
@@ -49,6 +50,7 @@ class NoteCard(BaseModel):
         None  # union of the targets, to place the card beside
     )
     place: tuple[int, int] | None = None  # top-left in screen px: the emptiest spot near the region
+    closing: str | None = None  # said after the last point: a related fact and an offer
 
 
 def _union(rects: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int] | None:
@@ -96,6 +98,7 @@ def build_card(
             NoteItem(
                 n=i,
                 text=str(raw["text"]).strip()[:120],
+                say=(str(raw.get("say") or "").strip()[:240] or None),
                 kind=kind,
                 mark=mark if rect else "none",
                 rect=rect,
@@ -128,6 +131,7 @@ def build_card(
     )
     card = NoteCard(
         title=str(args.get("title", "")).strip()[:60] or "Notes",
+        closing=(str(args.get("closing") or "").strip()[:300] or None),
         items=items,
         sketches=sketches,
         region=region,

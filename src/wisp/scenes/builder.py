@@ -44,7 +44,8 @@ model is drawn while the user waits, so every extra field is time they wait.
 - Beats: 3-5, rising `at` times (2-3 s apart), each focusing the parts it is about, with the \
 camera that shows them best (side for vehicles, iso for depth, front for faces, close for a \
 detail). Narration: one vivid spoken sentence each, a concrete fact or analogy, never a \
-description of the picture; the last one lands the "so that's why".
+description of the picture; the last one lands the "so that's why", adds one related fun \
+fact, and offers one specific thing to show next (inside a part, how it's assembled, a diagram).
 
 Two complete examples of the quality expected (different subjects; follow the rules, not the \
 shapes):

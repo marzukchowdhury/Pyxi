@@ -161,6 +161,8 @@ class Brain:
         self._round_say = ""  # this round's spoken reply
         self._say_in_board = False
         self._visual_retry = False
+        self._noted: set[int] = set()
+        self._narrated_card = ""
         self._placed = Placed()  # what's on screen now (cards, stages), so new things keep clear
         self.overlay_in_capture = (
             False  # the desktop app says whether screen shares see the overlay
@@ -312,6 +314,24 @@ class Brain:
             except Exception:
                 tz = None
         return now_block(tz)
+
+    def _narrate_card(self) -> None:
+        """Talk through the cue card: each point's own sentence, its mark drawing as it's said.
+        Wisp speaks its opener first (streamed, for speed), before the card even exists, so the
+        points are narrated here, after it, instead of relying on markers in the opener."""
+        card = self._turn_card
+        if card is None or self._narrated_card == card.id:
+            return
+        self._narrated_card = card.id
+        rest = [it for it in card.items if it.n not in self._noted]
+        lines = []
+        for it in rest:
+            line = (it.say or it.text).strip()
+            lines.append(f"[note:{it.n}] {line if line[-1:] in '.!?' else line + '.'}")
+        if card.closing:
+            lines.append(card.closing)  # land it, then offer what's next
+        if lines:
+            self._speak(" ".join(lines))
 
     def _builder_on(self) -> bool:
         return bool(self.settings.model_3d) and not self.settings.local_mode
@@ -514,6 +534,8 @@ class Brain:
             self._turn_card = None
             self._visual_turn = False
             self._say_in_board = False  # the reply became a drawing's narration
+            self._noted: set[int] = set()  # cue-card points the spoken lines have named
+            self._narrated_card = ""
             self._visual_retry = False
             self._user_text = user_text
             turn_id = "turn_" + secrets.token_hex(4)
@@ -709,6 +731,7 @@ class Brain:
                     needs_more = True
                 if note and note.startswith(("SCENE_INVALID", "MODEL_INVALID", "SKETCH_INVALID")):
                     self._visual_retry = True
+            self._narrate_card()
             return {
                 "round": round_no,
                 "notes": [*state.get("notes", []), *notes],
@@ -755,6 +778,9 @@ class Brain:
         ctx = self._ctx
         if name == "say":
             text = str(args.get("text", ""))
+            self._noted |= {
+                int(m.group(2)) for m in MARKER.finditer(text) if m.group(1).lower() == "note"
+            }
             if self._say_in_board:
                 return None  # already being said, step by step, by the drawing
             if self._visual_turn:

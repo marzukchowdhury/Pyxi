@@ -177,7 +177,8 @@ class Sketchboard(BaseModel):
 
 NARRATION = (
     "One spoken sentence, under 20 words, in your voice: a concrete fact, a vivid analogy or a "
-    "punchline, never a description of the picture ('Here is', 'This shows'). The last one lands the 'so that's why' moment."
+    "punchline, never a description of the picture ('Here is', 'This shows'). The last one "
+    "lands the 'so that's why' moment, adds a related fun fact, and offers one thing to show next."
 )
 
 

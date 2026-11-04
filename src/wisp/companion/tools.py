@@ -104,20 +104,37 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "Explain something that's on screen by writing on it: a note card beside the content whose points "
         "write themselves as you speak, each framing the exact paragraph, row or control it's about, plus "
         "freehand sketches over real content. Use it whenever they ask what's on screen, what something "
-        "says or means, or to explain a post, meme, chart, page or error. 2-6 short "
-        "points (max ~10 words each); make them vivid, and an 'aside' point can carry a joke. Each point frames its "
+        "says or means, or to explain a post, meme, chart, page or error. Be thorough: 4-6 points that "
+        "together really answer the question (what it is, the why, the catch, what it means for them), each "
+        "card text under 10 words; an 'aside' point can carry a joke. Each point frames its "
         "own specific thing (one cell, one line, one control): never reuse the same frame. Give `quote` (exact "
         "words from the OCR list) to mark words precisely, with mark 'underline' for a phrase and 'frame' for "
-        "a block; the card places itself where it hides nothing. In your `say`, put "
-        "[note:1], [note:2]... in or right after the sentence where each point should appear.",
+        "a block; the card places itself where it hides nothing. Give every point a `say`: the one sentence you "
+        "speak as it appears (its mark draws at that moment), explaining it in your voice, not reading the card. "
+        "Your separate `say` call is only the opener (the verdict and a hook, no [note:N] markers); Wisp then "
+        "talks through the points in order. Answer their actual question in the points (the why, the catch). "
+        "Finish with `closing`, so the explanation lands instead of stopping.",
         {
             "title": {"type": "string", "description": "2-4 words, e.g. 'Why this is funny'."},
+            "closing": {
+                "type": "string",
+                "description": "Said after the last point: one related surprising or funny fact (or the "
+                "'so that's why'), then ONE specific offer of what to show next, e.g. 'Want me to sketch how "
+                "the money burns, or a fun fact about what training one model costs?'",
+            },
             "items": {
                 "type": "array",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "text": {"type": "string"},
+                        "text": {
+                            "type": "string",
+                            "description": "The card's short version, under 10 words.",
+                        },
+                        "say": {
+                            "type": "string",
+                            "description": "One spoken sentence for this point, said as its mark draws.",
+                        },
                         "kind": {"type": "string", "enum": ["point", "step", "formula", "aside"]},
                         "quote": _QUOTE["quote"],
                         "element_id": {
@@ -134,7 +151,7 @@ COMPANION_TOOLS: list[ToolSpec] = [
                             "enum": ["frame", "underline", "circle", "none"],
                         },
                     },
-                    "required": ["text"],
+                    "required": ["text", "say"],
                 },
             },
             "sketches": {
@@ -164,7 +181,7 @@ COMPANION_TOOLS: list[ToolSpec] = [
                 },
             },
         },
-        ["title", "items"],
+        ["title", "items", "closing"],
     ),
     _tool(
         "guide",
