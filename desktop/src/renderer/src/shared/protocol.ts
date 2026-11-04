@@ -35,6 +35,7 @@ export interface NoteCard {
   items: NoteItem[];
   sketches: Sketch[];
   region: Rect | null;
+  place?: [number, number] | null;
 }
 
 export type Shape =

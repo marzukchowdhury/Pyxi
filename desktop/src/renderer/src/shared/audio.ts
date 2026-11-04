@@ -23,6 +23,8 @@ export class AudioQueue {
   private current: AudioBufferSourceNode | null = null;
   private analyser: AnalyserNode | null = null;
   private gen = 0;
+  /** Muted: nothing is heard, but clips still take their real time, so drawings stay in sync. */
+  muted = new URLSearchParams(location.search).get("mute") === "1";
 
   /** 0..1 loudness of whatever is playing right now (drives the buddy's mouth). */
   level(): number {
@@ -65,7 +67,8 @@ export class AudioQueue {
     const gen = this.gen;
     clip.onStart?.();
     try {
-      if (clip.b64) await this.playWav(clip.b64);
+      if (this.muted) await this.silent(clip);
+      else if (clip.b64) await this.playWav(clip.b64);
       else if (clip.text) await speakWithOs(clip.text);
     } catch (err) {
       console.warn("audio failed", err);
@@ -73,6 +76,18 @@ export class AudioQueue {
     if (gen !== this.gen) return;
     clip.onEnd?.();
     void this.next();
+  }
+
+  private async silent(clip: Clip): Promise<void> {
+    let seconds = clip.text.split(/\s+/).length * 0.33;
+    if (clip.b64) {
+      try {
+        seconds = (await audioCtx().decodeAudioData(b64ToBuffer(clip.b64))).duration;
+      } catch {
+        /* keep the estimate */
+      }
+    }
+    await new Promise((r) => setTimeout(r, Math.max(300, seconds * 1000)));
   }
 
   private async playWav(b64: string): Promise<void> {

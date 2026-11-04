@@ -25,6 +25,7 @@ export interface Bridge {
   focusOverlay(): void;
   onDismiss(fn: () => void): () => void;
   onPrivacyToggle(fn: () => void): () => void;
+  onMuteToggle(fn: (muted: boolean) => void): () => void;
   setInteractive(interactive: boolean): void;
   togglePanel(): void;
   ptt(): void;
@@ -96,6 +97,7 @@ function mockBridge(): Bridge {
     },
     onDismiss: noop,
     onPrivacyToggle: noop,
+    onMuteToggle: noop,
     setInteractive() {},
     togglePanel() {},
     ptt() {

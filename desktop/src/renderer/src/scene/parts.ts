@@ -183,9 +183,10 @@ export function makeMaterial(p: Part, style: string): THREE.MeshPhysicalMaterial
     side: p.shape === "plane" || p.shape === "extrude" ? THREE.DoubleSide : THREE.FrontSide,
   });
   if (preset.emissive) {
+    // Glow without clipping to yellow-white: a hot colour stays that colour.
+    m.color.multiplyScalar(0.35);
     m.emissive = color.clone();
-    m.emissiveIntensity = 2.4;
-    m.toneMapped = false;
+    m.emissiveIntensity = 1.15;
   }
   if (style === "blueprint") {
     m.color.set("#1d3557");

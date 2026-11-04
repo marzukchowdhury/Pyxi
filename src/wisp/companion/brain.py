@@ -22,6 +22,7 @@ import base64
 import io
 import json
 import logging
+import re
 import secrets
 import time
 from pathlib import Path
@@ -64,6 +65,8 @@ from wisp.voice.tts import FallbackTTS
 from wisp.walkthrough import build_walkthrough
 
 log = logging.getLogger(__name__)
+# A note marker trailing a sentence ('...test. [note:1] Then') belongs to that sentence.
+LEADING_NOTES = re.compile(r"^\s*(?:\[note:\d+\]\s*)+", re.IGNORECASE)
 State = Literal["idle", "listening", "transcribing", "looking", "thinking", "speaking"]
 
 
@@ -701,8 +704,14 @@ class Brain:
         for chunk in split_sentences(text):  # a marker alone belongs with the words before it
             if sentences and not split_markers(chunk)[0]:
                 sentences[-1] += " " + chunk
-            else:
-                sentences.append(chunk)
+                continue
+            # "...a failing test. [note:1] Then..." : a note marker trailing a sentence belongs
+            # to that sentence, so the point appears while it is being said.
+            lead = LEADING_NOTES.match(chunk)
+            if sentences and lead:
+                sentences[-1] += " " + lead.group(0).strip()
+                chunk = chunk[lead.end() :]
+            sentences.append(chunk)
         for i, sentence in enumerate(sentences):
             if gen != self._speech_gen:
                 return

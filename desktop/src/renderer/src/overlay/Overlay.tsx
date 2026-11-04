@@ -110,6 +110,10 @@ export function Overlay() {
     useOverlay.getState().dismissAll();
     brain.send({ type: "clear" });
   }), []);
+  useEffect(() => bridge.onMuteToggle((muted) => {
+    voice.muted = muted;
+    if (muted) voice.stop();
+  }), []);
   useEffect(() => bridge.onPrivacyToggle(() => brain.send({ type: "set", key: "privacy_paused", value: !useOverlay.getState().paused })), []);
 
   const micLevel = useCallback(() => (recorder.current.active ? recorder.current.level : 0), []);

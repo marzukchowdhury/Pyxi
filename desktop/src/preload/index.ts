@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld("wispBridge", {
   runAction: (kind: string, value: string) => ipcRenderer.send("action", kind, value),
   onDismiss: (fn: Listener<void>) => on("dismiss", fn),
   onPrivacyToggle: (fn: Listener<void>) => on("privacy-toggle", fn),
+  onMuteToggle: (fn: Listener<boolean>) => on("mute", fn),
   setInteractive: (interactive: boolean) => ipcRenderer.send("set-interactive", interactive),
   togglePanel: () => ipcRenderer.send("toggle-panel"),
   ptt: () => ipcRenderer.send("ptt"),

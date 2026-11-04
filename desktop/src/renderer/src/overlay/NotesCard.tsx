@@ -96,6 +96,11 @@ export function NotesCard() {
   const placed = useMemo(() => {
     if (!notes) return null;
     const region = notes.card.region ? rectToLocal(notes.card.region) : null;
+    if (notes.card.place) {
+      // The brain picked the emptiest spot on screen; just keep it on this display.
+      const [px, py] = toLocal(notes.card.place[0], notes.card.place[1]);
+      return { left: Math.min(Math.max(12, px), innerWidth - CARD_W - 12), top: Math.min(Math.max(12, py), innerHeight - 200), width: CARD_W };
+    }
     if (!region) return { left: innerWidth - CARD_W - 32, top: 90, width: CARD_W };
     // Beside the content, never on top of it: the side with more room, narrowed to fit if needed,
     // else below (or above) it.

@@ -66,8 +66,9 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "Explain something that's on screen by writing on it: a note card beside the content whose points "
         "write themselves as you speak, each framing the exact paragraph, row or control it's about, plus "
         "freehand sketches over real content. Great for 'explain this meme / chart / page / error'. 2-6 short "
-        "points (max ~10 words each); make them vivid, and an 'aside' point can carry a joke. In your `say`, put "
-        "[note:1], [note:2]... in the sentence where each point should appear.",
+        "points (max ~10 words each); make them vivid, and an 'aside' point can carry a joke. Each point frames its "
+        "own specific thing (one cell, one line, one control): never reuse the same frame. In your `say`, put "
+        "[note:1], [note:2]... in or right after the sentence where each point should appear.",
         {
             "title": {"type": "string", "description": "2-4 words, e.g. 'Why this is funny'."},
             "items": {

@@ -62,6 +62,7 @@ let tray: Tray | null = null;
 let brain: ChildProcess | null = null;
 let primaryId = 0;
 let holdToTalk = false;
+let muted = process.env.WISP_MUTE === "1";
 
 function rendererUrl(page: "overlay" | "panel", query: Record<string, string>): string | null {
   const dev = process.env.ELECTRON_RENDERER_URL;
@@ -108,7 +109,7 @@ function createOverlay(d: Display): void {
   // Hide the overlay from screenshots (including Wisp's own): it never sees its own drawings.
   if (process.env.WISP_SHOW_OVERLAY_IN_CAPTURE !== "1") win.setContentProtection(true);
   const info = displayInfo(d);
-  loadPage(win, "overlay", { display: JSON.stringify(info), backend: BACKEND });
+  loadPage(win, "overlay", { display: JSON.stringify(info), backend: BACKEND, mute: muted ? "1" : "0" });
   overlays.set(d.id, win);
 }
 
@@ -232,6 +233,15 @@ app.whenReady().then(async () => {
       { label: `Open panel  (${pretty(activeHotkeys.panel)})`, click: togglePanel },
       { label: `Talk  (${pretty(activeHotkeys.talk)})`, click: () => broadcast("ptt") },
       { label: `Dismiss drawings  (${pretty(activeHotkeys.dismiss)})`, click: () => broadcast("dismiss") },
+      {
+        label: "Mute Wisp's voice",
+        type: "checkbox",
+        checked: muted,
+        click: (item) => {
+          muted = item.checked;
+          broadcast("mute", muted);
+        },
+      },
       { type: "separator" },
       { label: "Quit Wisp", click: () => app.quit() },
     ]),
