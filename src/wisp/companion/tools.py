@@ -257,6 +257,28 @@ COMPANION_TOOLS: list[ToolSpec] = [
 
 COMPANION_TOOLS += [
     _tool(
+        "quick_action",
+        "Do a small thing for the user right now: open_url (a website), open_app (notepad, calculator, chrome, "
+        "word, excel, spotify, discord, settings, 'sound settings', 'microphone privacy'...), copy (exact text to "
+        "the clipboard), or insert (type a drafted message into the text field they're in, e.g. 'write a reply "
+        "to this'). Only when they asked for it.",
+        {
+            "action": {"type": "string", "enum": ["open_url", "open_app", "copy", "insert"]},
+            "value": {"type": "string", "description": "The URL, app name, or text."},
+        },
+        ["action", "value"],
+    ),
+    _tool(
+        "recall_memories",
+        "List what you remember about the user (for 'what do you know about me?'), optionally filtered.",
+        {"query": {"type": "string"}},
+    ),
+    _tool(
+        "forget",
+        "Forget something you remembered about the user (by its key), or everything if they ask.",
+        {"key": {"type": "string"}, "everything": {"type": "boolean"}},
+    ),
+    _tool(
         "get_activity",
         "Read the user's recent activity timeline (window switches, what they clicked or typed into, "
         "what they asked you). Use before causal_replay.",
@@ -321,6 +343,7 @@ COMPANION_TOOLS += [
 ]
 
 INFO_TOOLS = {
+    "recall_memories",
     "recall_screen",
     "look_closer",
     "get_activity",

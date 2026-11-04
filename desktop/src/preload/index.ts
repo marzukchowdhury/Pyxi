@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("wispBridge", {
   onQuickType: (fn: Listener<void>) => on("quick-type", fn),
   onGlobalClick: (fn: Listener<{ x: number; y: number }>) => on("global-click", fn),
   focusOverlay: () => ipcRenderer.send("focus-overlay"),
+  runAction: (kind: string, value: string) => ipcRenderer.send("action", kind, value),
   onDismiss: (fn: Listener<void>) => on("dismiss", fn),
   onPrivacyToggle: (fn: Listener<void>) => on("privacy-toggle", fn),
   setInteractive: (interactive: boolean) => ipcRenderer.send("set-interactive", interactive),

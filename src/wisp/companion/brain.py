@@ -36,6 +36,7 @@ from pydantic import ValidationError
 from wisp.agents import AgentProfile, AgentRegistry, Job, JobManager
 from wisp.agents.jobs import Handoff
 from wisp.companion import prompts
+from wisp.companion.actions import open_app, safe_url
 from wisp.companion.annotations import (
     Annotation,
     from_marker,
@@ -163,6 +164,36 @@ class Brain:
             await self.set_state("idle")
             return
         await self.turn(text)
+
+    async def _quick_action(self, action: str, value: str) -> str | None:
+        if not value.strip():
+            return f"{action}: nothing to do."
+        if action == "open_url":
+            url = safe_url(value)
+            if url is None:
+                return "open_url: that isn't a web address."
+            await self.hub.emit("action", kind="open_url", value=url)
+            return None
+        if action == "open_app":
+            note = await open_app(value)
+            return None if note.startswith("Opened") else note
+        if action == "copy":
+            await self.hub.emit("action", kind="copy", value=value)
+            return None
+        if action == "insert":
+            # Only type into the app they asked from; if they've switched away, don't guess.
+            asked_in = self._ctx.window.app if self._ctx else None
+            try:
+                now = await self.screen.capture(pixels=False)
+                current = now.window.app
+            except Exception:
+                current = asked_in
+            if asked_in and current and current != asked_in:
+                await self.hub.emit("action", kind="copy", value=value)
+                return f"insert: they switched from {asked_in} to {current}, so it was copied instead. Tell them to paste it."
+            await self.hub.emit("action", kind="insert", value=value)
+            return None
+        return f"Unknown quick action {action}."
 
     async def guide_clicked(self) -> None:
         """The user clicked the control Wisp was waiting on: look again and give the next step."""
@@ -535,6 +566,26 @@ class Brain:
         if name == "remember":
             self.memory.remember("agent:wisp", str(args["key"]), str(args["content"]))
             return None
+        if name == "recall_memories":
+            q = str(args.get("query") or "").strip()
+            found = (
+                self.memory.search("agent:wisp", q, 20) if q else self.memory.all("agent:wisp", 30)
+            )
+            return (
+                "You remember:\n" + "\n".join(f"- {m.key}: {m.content}" for m in found)
+                if found
+                else "You don't remember anything about them yet."
+            )
+        if name == "forget":
+            if args.get("everything"):
+                n = self.memory.forget("agent:wisp")
+            elif args.get("key"):
+                n = self.memory.forget("agent:wisp", str(args["key"]))
+            else:
+                return "forget: say which key, or everything=true."
+            return f"Forgot {n} memor{'y' if n == 1 else 'ies'}."
+        if name == "quick_action":
+            return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
         if name == "start_walkthrough":
             await self.start_walkthrough(args.get("job_id"))
             return None

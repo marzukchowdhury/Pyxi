@@ -110,6 +110,15 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
   }
 }
 
+/** Press Ctrl+V in whatever window has focus (used to drop a drafted message in). */
+export function pasteText(): void {
+  try {
+    uIOhook.keyTap(UiohookKey.V, [UiohookKey.Ctrl]);
+  } catch (err) {
+    console.warn("[wisp] couldn't paste:", err);
+  }
+}
+
 export function stopHoldToTalk(): void {
   try {
     uIOhook.stop();

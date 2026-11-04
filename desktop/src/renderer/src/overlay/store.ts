@@ -2,7 +2,7 @@
 // primary display's overlay plays audio and records the microphone, so nothing doubles up.
 import { create } from "zustand";
 import { AudioQueue } from "../shared/audio";
-import { currentDisplay, onThisDisplay } from "../shared/bridge";
+import { bridge, currentDisplay, onThisDisplay } from "../shared/bridge";
 import type { Annotation, BrainEvent, BrainState, Job, NoteCard, ObjectScene, Pin, SceneSpec, TimelineMoment, Walkthrough } from "../shared/protocol";
 import { brain } from "../shared/socket";
 
@@ -316,6 +316,9 @@ brain.on((e: BrainEvent) => {
     case "guide":
       useOverlay.setState({ guide: e.active ? { step: e.step ?? 1, goal: e.goal ?? "", label: e.label ?? "" } : null });
       if (!e.active) useOverlay.setState((s) => ({ annotations: s.annotations.filter((a) => !a.guide) }));
+      break;
+    case "action":
+      if (isPrimary) bridge.runAction(e.kind, e.value);
       break;
     case "pins":
       useOverlay.setState({ pins: e.pins.filter((p) => onThisDisplay(p.rect[0], p.rect[1])) });

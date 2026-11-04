@@ -10,10 +10,11 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
+import { pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
 import {
   app,
   BrowserWindow,
+  clipboard,
   type Display,
   globalShortcut,
   ipcMain,
@@ -252,6 +253,25 @@ ipcMain.on("open-external", (_e, url: string) => {
   if (/^https?:\/\//.test(url)) void shell.openExternal(url);
 });
 ipcMain.handle("displays", () => screen.getAllDisplays().map(displayInfo));
+// Quick actions. Inserting pastes into whatever field has focus, then puts your clipboard back.
+ipcMain.on("action", async (_e, kind: string, value: string) => {
+  if (typeof value !== "string" || !value) return;
+  if (kind === "open_url" && /^https?:\/\//i.test(value)) void shell.openExternal(value);
+  else if (kind === "copy") clipboard.writeText(value);
+  else if (kind === "insert") {
+    const focused = BrowserWindow.getFocusedWindow();
+    if (focused) {
+      // Typing went to Wisp's own window (the notch text box); hand focus back first.
+      focused.blur();
+      await new Promise((r) => setTimeout(r, 180));
+    }
+    const previous = await Promise.resolve(clipboard.readText()); // async in newer Electron
+    clipboard.writeText(value);
+    await new Promise((r) => setTimeout(r, 60));
+    pasteText();
+    setTimeout(() => clipboard.writeText(previous), 900);
+  }
+});
 ipcMain.handle("hotkeys", () => ({ ...activeHotkeys, hold: holdToTalk ? "Control+Alt" : null }));
 // The notch's text box needs keyboard focus, which a non-focusable overlay can't take on its own.
 ipcMain.on("focus-overlay", (e) => {

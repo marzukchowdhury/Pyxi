@@ -20,6 +20,8 @@ export interface Bridge {
   onQuickType(fn: () => void): () => void;
   /** Mouse clicks anywhere on the desktop, in physical screen px (only used for guides). */
   onGlobalClick(fn: (p: { x: number; y: number }) => void): () => void;
+  /** Quick actions from the brain: open a URL, copy text, or paste a draft into the focused field. */
+  runAction(kind: "open_url" | "copy" | "insert", value: string): void;
   focusOverlay(): void;
   onDismiss(fn: () => void): () => void;
   onPrivacyToggle(fn: () => void): () => void;
@@ -88,6 +90,10 @@ function mockBridge(): Bridge {
       return () => window.removeEventListener("keyup", h);
     },
     focusOverlay() {},
+    runAction(kind, value) {
+      if (kind === "open_url") window.open(value, "_blank");
+      else void navigator.clipboard?.writeText(value);
+    },
     onDismiss: noop,
     onPrivacyToggle: noop,
     setInteractive() {},

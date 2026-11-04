@@ -276,6 +276,7 @@ export type BrainEvent =
   | { type: "transcript"; text: string; seconds: number }
   | { type: "say"; agent: string; index: number; total: number; text: string; audio: string | null; duration_s: number; annotations: Annotation[]; notes?: number[] }
   | { type: "notes"; card: NoteCard }
+  | { type: "action"; kind: "open_url" | "copy" | "insert"; value: string }
   | { type: "guide"; active: boolean; step?: number; goal?: string; label?: string }
   | { type: "stop_audio" }
   | { type: "annotate"; annotations: Annotation[] }
