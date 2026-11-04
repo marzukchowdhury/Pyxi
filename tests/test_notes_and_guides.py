@@ -141,6 +141,9 @@ async def test_drawings_clear_when_the_user_switches_window(settings):
     await brain.turn("explain this")
     await asyncio.sleep(1.4)
     assert not rec.of("clear")  # still on the same window: the card stays
+    titles.append("(3) Settings - App")  # a notification counter is not a new page
+    await asyncio.sleep(1.4)
+    assert not rec.of("clear")
     titles.append("Facebook - Microsoft Edge")
     await asyncio.sleep(1.4)
     assert len(rec.of("clear")) == 1  # switched away: everything that points at pixels goes

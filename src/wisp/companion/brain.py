@@ -296,13 +296,15 @@ class Brain:
                         await self.hub.emit("clear")
                         self._placed.put("card", None, 0)
                     return
-                if now != drawn_on and now not in ("Wisp", "Wisp overlay", ""):
-                    await self.hub.emit("clear")
-                    self._placed.put("card", None, 0)
-                    if self._guide:
-                        self._guide = None
-                        await self.hub.emit("guide", active=False)
-                    return
+                if same_page(now, drawn_on) or now in ("Wisp", "Wisp overlay", ""):
+                    continue
+                log.info("clearing drawings: the window changed (%r -> %r)", drawn_on, now)
+                await self.hub.emit("clear")
+                self._placed.put("card", None, 0)
+                if self._guide:
+                    self._guide = None
+                    await self.hub.emit("guide", active=False)
+                return
 
         self._watcher = asyncio.ensure_future(watch())
 
@@ -1479,6 +1481,21 @@ _EDITS_3D = re.compile(
     r"\b(spin|rotate|turn it|zoom|casing|inside|bigger|smaller|again|replay|that part|the model)\b",
     re.IGNORECASE,
 )
+
+
+_COUNTER = re.compile(r"^\s*[\(\[]\d+\+?[\)\]]\s*|^\s*[•●]\s*|\s*[\(\[]\d+\+?[\)\]]\s*$")
+
+
+def same_page(a: str | None, b: str | None) -> bool:
+    """Is this still the page Wisp drew on? Tab titles flicker with notification counters
+    ("Facebook" -> "(1) Facebook", "Inbox (42,575)"), which isn't the user going anywhere."""
+
+    def norm(t: str | None) -> str:
+        t = _COUNTER.sub("", t or "")
+        t = re.sub(r"\(\d[\d,]*\)", "", t)  # counts inside the title: "Inbox (42,575) - Gmail"
+        return re.sub(r"\s+", " ", t).strip().lower()
+
+    return norm(a) == norm(b)
 
 
 def make_chat_llm(settings: WispSettings) -> LLMProvider:
