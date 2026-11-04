@@ -14,11 +14,35 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import re
 import time
 
 from wisp.config import VoiceConfig
 
 log = logging.getLogger(__name__)
+
+
+def decode_audio(data: bytes, rate: int = 16000):
+    """webm/opus (or any container FFmpeg reads) -> 16 kHz mono float32 samples.
+
+    Decoded here with PyAV's current API rather than inside faster-whisper, whose decoder
+    breaks on newer PyAV releases (they removed an argument it passes).
+    """
+    import av
+    import numpy as np
+
+    chunks = []
+    with av.open(io.BytesIO(data), mode="r") as container:
+        stream = next(s for s in container.streams if s.type == "audio")
+        resampler = av.AudioResampler(format="s16", layout="mono", rate=rate)
+        for frame in container.decode(stream):
+            for out in resampler.resample(frame):
+                chunks.append(out.to_ndarray().reshape(-1))
+        for out in resampler.resample(None):  # flush
+            chunks.append(out.to_ndarray().reshape(-1))
+    if not chunks:
+        return np.zeros(0, dtype=np.float32)
+    return np.concatenate(chunks).astype(np.float32) / 32768.0
 
 
 class Transcriber:
@@ -63,6 +87,34 @@ class Transcriber:
                 self._models[name] = await asyncio.to_thread(self._load, name)
         return self._models[name]
 
+    async def self_test(self, language: str = "en") -> None:
+        """Run half a second of silence through the model at startup, so a GPU that can't
+        actually run (missing CUDA libraries) is found now, not on the user's first question."""
+        import numpy as np
+
+        model = await self.warm_up(language)
+
+        def run() -> None:
+            segments, _ = model.transcribe(
+                np.zeros(8000, dtype=np.float32),
+                language="en" if self.model_for(language).endswith(".en") else None,
+                beam_size=1,
+            )
+            list(segments)
+
+        try:
+            await asyncio.to_thread(run)
+        except RuntimeError as exc:
+            if (
+                not re.search(r"cublas|cudnn|cuda", str(exc), re.I)
+                or self.config.stt_device == "cpu"
+            ):
+                raise
+            log.warning("Whisper on the GPU failed (%s); switching to the CPU.", exc)
+            self.config.stt_device = "cpu"
+            self._models.clear()
+            await self.warm_up(language)
+
     async def transcribe(self, audio: bytes, language: str = "en") -> tuple[str, float, str]:
         """Return (text, seconds taken, language spoken). ``language`` may be "auto"."""
         model = await self.warm_up(language)
@@ -70,12 +122,26 @@ class Transcriber:
         name = self.model_for(language)
 
         def run() -> tuple[str, str]:
+            nonlocal model
             lang = "en" if name.endswith(".en") else (None if language == "auto" else language)
             segments, info = model.transcribe(
-                io.BytesIO(audio), language=lang, vad_filter=True, beam_size=1
+                decode_audio(audio), language=lang, vad_filter=True, beam_size=1
             )
             text = " ".join(s.text.strip() for s in segments).strip()
             return text, lang or getattr(info, "language", "en") or "en"
 
-        text, spoken = await asyncio.to_thread(run)
+        try:
+            text, spoken = await asyncio.to_thread(run)
+        except RuntimeError as exc:
+            # A GPU without its CUDA libraries (cuBLAS/cuDNN) loads fine and fails on first use.
+            if (
+                not re.search(r"cublas|cudnn|cuda", str(exc), re.I)
+                or self.config.stt_device == "cpu"
+            ):
+                raise
+            log.warning("Whisper on the GPU failed (%s); switching to the CPU.", exc)
+            self.config.stt_device = "cpu"
+            self._models.clear()
+            model = await self.warm_up(language)
+            text, spoken = await asyncio.to_thread(run)
         return text, time.monotonic() - started, spoken

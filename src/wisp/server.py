@@ -73,6 +73,13 @@ def create_app(
         brain = Brain(settings, hub, llm=llm, otto_llm=otto_llm)
     ambient: asyncio.Task[None] | None = None
 
+    async def _warm_ears() -> None:
+        try:
+            studio = brain.studio
+            await brain.stt.self_test(studio.prefs.language if studio else "en")
+        except Exception as exc:  # never block startup on the microphone model
+            log.warning("speech model warm-up failed: %s", exc)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal ambient
@@ -86,7 +93,12 @@ def create_app(
             on_window=brain.emit_pins,
         )
         ambient = asyncio.create_task(tracker.run())
+        # Load the speech model now (in the background), so the first push-to-talk is quick.
+        # The OS-voice setup used by tests skips it.
+        warm = asyncio.create_task(_warm_ears()) if settings.voice.tts != "client" else None
         yield
+        if warm:
+            warm.cancel()
         ambient.cancel()
         hub.cancel_all()
         if demo_site:

@@ -55,6 +55,9 @@ answer). Be specific to what's actually there, and make it fun.
 their real click. Don't list all the steps up front.
 - Use element ids from the list whenever possible; they are exact. Use screenshot \
 coordinates only for things that have no id.
+- [point:N], [circle:N] and [highlight:N] mark things on the user's screen by element id, and \
+only when it helps. Never use them for parts of a 3D model (its callouts do that) or for \
+note-card points (use [note:N]); without a note card, don't write [note:N] at all.
 - For real multi-step work (research, filling forms, looking things up on sites), `delegate` \
 to a browser teammate and tell the user who's on it. Chain a writer afterwards when the result \
 should become a message or document.

@@ -66,3 +66,55 @@ async def test_spanish_gets_a_spanish_voice(studio):
     studio.update(language="es")
     await studio.synthesize("Hola, soy Wisp.")
     assert studio.calls[-1]["lang"] == "es" and studio.calls[-1]["voice"] == "ef_dora"
+
+
+def test_recorded_clips_decode_with_current_pyav():
+    """The overlay records webm/opus; we decode it ourselves (faster-whisper's decoder breaks on
+    newer PyAV)."""
+    import io
+
+    import av
+    import numpy as np
+
+    from wisp.voice.stt import decode_audio
+
+    buf = io.BytesIO()
+    with av.open(buf, mode="w", format="webm") as out:
+        stream = out.add_stream("libopus", rate=48000)
+        stream.layout = "mono"
+        tone = (np.sin(np.linspace(0, 440 * 2 * np.pi, 48000)) * 12000).astype(np.int16)
+        frame = av.AudioFrame.from_ndarray(tone.reshape(1, -1), format="s16", layout="mono")
+        frame.sample_rate = 48000
+        for pkt in stream.encode(frame):
+            out.mux(pkt)
+        for pkt in stream.encode(None):
+            out.mux(pkt)
+    samples = decode_audio(buf.getvalue())
+    assert samples.dtype == np.float32 and 14000 < len(samples) < 18000  # ~1 s at 16 kHz
+    assert 0.2 < float(np.abs(samples).max()) <= 1.0
+
+
+async def test_missing_gpu_libraries_fall_back_to_cpu(monkeypatch):
+    from wisp.voice.stt import Transcriber
+
+    cfg = VoiceConfig(stt_device="cuda")
+    tr = Transcriber(cfg)
+    loads: list[str] = []
+
+    class Model:
+        def __init__(self, device: str) -> None:
+            self.device = device
+
+        def transcribe(self, audio, **kw):
+            if self.device == "cuda":
+                raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
+            return iter([type("S", (), {"text": " hello "})()]), type("I", (), {"language": "en"})()
+
+    def load(name: str):
+        loads.append(cfg.stt_device)
+        return Model(cfg.stt_device)
+
+    monkeypatch.setattr(tr, "_load", load)
+    monkeypatch.setattr("wisp.voice.stt.decode_audio", lambda data: data)
+    text, _, lang = await tr.transcribe(b"x", "en")
+    assert (text, lang, loads, cfg.stt_device) == ("hello", "en", ["cuda", "cpu"], "cpu")
