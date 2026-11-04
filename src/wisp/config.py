@@ -111,6 +111,13 @@ class WispSettings(BaseSettings):
     job_model: str | None = Field(
         None, description="Model for agent jobs (defaults to the main model)."
     )
+    model_3d: str | None = Field(
+        "anthropic/claude-sonnet-5.5",
+        description="Model that builds 3D models (WISP_MODEL_3D). A stronger modeller makes far "
+        "better shapes (about 15 s and $0.04-0.05 a model with Sonnet 5.5 at low effort); "
+        "empty means the chat model builds them itself.",
+    )
+    effort_3d: Literal["low", "medium", "high", "xhigh", "max"] = "low"
 
     host: str = "127.0.0.1"
     port: int = 8766

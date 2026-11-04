@@ -54,6 +54,34 @@ SAY = _tool(
     ["text"],
 )
 
+# When a dedicated 3D builder is configured, the chat model only describes what to build (a few
+# lines) and a stronger modeller builds it: better shapes, and the conversation stays quick.
+BUILD_BRIEF = _tool(
+    "build_3d_model",
+    "Have a real-looking 3D model built and shown floating on screen, with sticky-note callouts and "
+    "narrated, animated beats (about 15 seconds to build). Use it for 'draw it in 3D', 'show me inside X', "
+    "'show me how to attach/assemble X', for any physical thing (a jet, a heart, a lock, a camera). "
+    "Describe exactly what to build; in the same reply, `say` one short line while it builds (the verdict "
+    "and a hook), and never describe the model's parts in speech: its own narration does that.",
+    {
+        "subject": {
+            "type": "string",
+            "description": "Exactly what it is, as on their screen: 'F-35B fighter jet', 'human heart'.",
+        },
+        "show": {
+            "type": "string",
+            "description": "What to reveal and explain: the parts that matter, what moves, what flows "
+            "where, inside or outside, any step-by-step action (e.g. 'lift the latch, slide the cable in').",
+        },
+        "beats": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "3-5 step ideas in order, a few words each.",
+        },
+    },
+    ["subject", "show"],
+)
+
 COMPANION_TOOLS: list[ToolSpec] = [
     SAY,
     _tool("point", "Fly over and point at something on screen.", {**_TARGET, **_LABEL}),

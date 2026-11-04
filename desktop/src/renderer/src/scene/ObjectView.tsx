@@ -328,6 +328,33 @@ function boundsOf(registry: Map<string, Registered>, ids: Set<string> | null, ou
   return out;
 }
 
+const SAMPLES = new WeakMap<THREE.BufferGeometry, Float32Array>();
+
+/** Up to ~60 points on each visible part's surface, in world space (for a tight camera fit). */
+function samplePoints(registry: Map<string, Registered>, ids: Set<string> | null): THREE.Vector3[] {
+  const out: THREE.Vector3[] = [];
+  for (const [id, r] of registry) {
+    if (ids && !ids.has(id)) continue;
+    if (!r.mesh.visible || r.mat.opacity < 0.05) continue;
+    const g = r.mesh.geometry;
+    let local = SAMPLES.get(g);
+    if (!local) {
+      const pos = g.getAttribute("position");
+      const n = Math.min(60, pos.count);
+      local = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const k = Math.floor((i * pos.count) / n);
+        local[i * 3] = pos.getX(k);
+        local[i * 3 + 1] = pos.getY(k);
+        local[i * 3 + 2] = pos.getZ(k);
+      }
+      SAMPLES.set(g, local);
+    }
+    for (let i = 0; i < local.length; i += 3) out.push(new THREE.Vector3(local[i], local[i + 1], local[i + 2]).applyMatrix4(r.mesh.matrixWorld));
+  }
+  return out;
+}
+
 /** Frames the beat's subject from the beat's angle and follows it; hands over when you drag. */
 function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObject<Map<string, Registered>>; beat: Beat; beatIndex: number; sceneId: string }) {
   const controls = useRef<OrbitControlsImpl>(null);
@@ -340,6 +367,7 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
   const seen = useMemo(() => new THREE.Box3(), []);
   const sphere = useMemo(() => new THREE.Sphere(), []);
   const goal = useMemo(() => ({ pos: new THREE.Vector3(), target: new THREE.Vector3() }), []);
+  const tmp = useMemo(() => new THREE.Vector3(), []);
 
   useEffect(() => {
     manual.current = false;
@@ -378,7 +406,7 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
     const persp = camera as THREE.PerspectiveCamera;
     const vfov = (persp.fov * Math.PI) / 180;
     const hfov = 2 * Math.atan(Math.tan(vfov / 2) * (size.width / size.height));
-    const margin = beat.camera === "close" ? 1.06 : beat.camera === "wide" ? 1.3 : 1.16;
+    const margin = beat.camera === "close" ? 1.06 : beat.camera === "wide" ? 1.25 : 1.1;
     // "side" means a profile view: look across the object's longest axis, not down it.
     const whole = boundsOf(registry.current, null, new THREE.Box3());
     const span = whole.isEmpty() ? new THREE.Vector3(1, 1, 1) : whole.getSize(new THREE.Vector3());
@@ -395,12 +423,47 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
     const up = new THREE.Vector3().crossVectors(dir, right).normalize();
     const tv = Math.tan(vfov / 2) / margin;
     const th = Math.tan(hfov / 2) / margin;
-    let dist = 0.5;
-    for (let i = 0; i < 8; i++) {
-      const corner = new THREE.Vector3(i & 1 ? framed.max.x : framed.min.x, i & 2 ? framed.max.y : framed.min.y, i & 4 ? framed.max.z : framed.min.z).sub(sphere.center);
-      const depth = corner.dot(dir); // toward the camera
-      dist = Math.max(dist, Math.abs(corner.dot(right)) / th + depth, Math.abs(corner.dot(up)) / tv + depth);
+    // Fit the real shape, not its bounding box: a jet's box is mostly empty air between the
+    // wingtips, and seen at an angle that box is far bigger than the jet. Points sampled from
+    // every part's surface give a tight, centred frame for any object.
+    const pts = samplePoints(registry.current, ids);
+    const allPts = ids ? samplePoints(registry.current, null) : pts;
+    const centre = sphere.center.clone();
+    const spread = (P: THREE.Vector3[]) => {
+      let [r0, r1, u0, u1] = [Infinity, -Infinity, Infinity, -Infinity];
+      for (const q of P) {
+        const d = tmp.copy(q).sub(centre);
+        const r = d.dot(right), u = d.dot(up);
+        r0 = Math.min(r0, r); r1 = Math.max(r1, r); u0 = Math.min(u0, u); u1 = Math.max(u1, u);
+      }
+      return [r0, r1, u0, u1];
+    };
+    if (pts.length) {
+      const [r0, r1, u0, u1] = spread(ids ? [...pts, ...allPts.filter((_, i) => i % 3 === 0)] : pts);
+      if (Number.isFinite(r0)) centre.addScaledVector(right, (r0 + r1) / 2).addScaledVector(up, (u0 + u1) / 2);
     }
+    const fit = (P: THREE.Vector3[]) => {
+      let d = 0.5;
+      for (const q of P) {
+        const c = tmp.copy(q).sub(centre);
+        const depth = c.dot(dir); // toward the camera
+        d = Math.max(d, Math.abs(c.dot(right)) / th + depth, Math.abs(c.dot(up)) / tv + depth);
+      }
+      return d;
+    };
+    let dist = 0.5;
+    if (pts.length) {
+      dist = fit(pts);
+      // A close-up keeps some of the whole object in frame, so you know where the part lives.
+      if (ids) dist = Math.max(dist, fit(allPts) * (beat.camera === "close" ? 0.5 : 0.74));
+    } else {
+      for (let i = 0; i < 8; i++) {
+        const corner = new THREE.Vector3(i & 1 ? framed.max.x : framed.min.x, i & 2 ? framed.max.y : framed.min.y, i & 4 ? framed.max.z : framed.min.z).sub(sphere.center);
+        const depth = corner.dot(dir);
+        dist = Math.max(dist, Math.abs(corner.dot(right)) / th + depth, Math.abs(corner.dot(up)) / tv + depth);
+      }
+    }
+    sphere.center.copy(centre);
     goal.target.copy(sphere.center);
     // Stay outside the whole model, so a close-up never puts the lens inside a part.
     if (!whole.isEmpty()) {

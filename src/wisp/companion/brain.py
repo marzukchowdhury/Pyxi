@@ -59,7 +59,7 @@ from wisp.companion.notes import (
     place_stage,
     target_rect,
 )
-from wisp.companion.tools import COMPANION_TOOLS, INFO_TOOLS
+from wisp.companion.tools import BUILD_BRIEF, COMPANION_TOOLS, INFO_TOOLS
 from wisp.companion.turns import TurnStore
 from wisp.config import WispSettings
 from wisp.connectors import Connectors, Outgoing
@@ -68,6 +68,7 @@ from wisp.memory import SpatialMemory
 from wisp.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
 from wisp.routines import RoutineStore
 from wisp.scenes import SceneSpec, build_exploded_scene, get_scene, parse_scene
+from wisp.scenes.builder import build_model
 from wisp.scenes.object_gallery import OBJECT_GALLERY
 from wisp.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summary
 from wisp.scenes.sketch import Sketchboard, steps_from_speech
@@ -155,6 +156,7 @@ class Brain:
         self._job_llm: LLMProvider | None = None
         self._user_text = ""  # the user's own words this turn (errands check addresses against it)
         self._visual_turn = False  # a 3D model or scene was shown this turn
+        self._talking_until = 0.0  # monotonic time the queued speech finishes playing
         self._round_say = ""  # this round's spoken reply
         self._say_in_board = False
         self._visual_retry = False
@@ -309,6 +311,68 @@ class Brain:
             except Exception:
                 tz = None
         return now_block(tz)
+
+    def _builder_on(self) -> bool:
+        return bool(self.settings.model_3d) and not self.settings.local_mode
+
+    def _companion_tools(self) -> list:
+        if not self._builder_on():
+            return list(COMPANION_TOOLS)
+        return [BUILD_BRIEF if t.name == "build_3d_model" else t for t in COMPANION_TOOLS]
+
+    def _builder_llm(self) -> LLMProvider:
+        if getattr(self, "_model_llm", None) is None:
+            from otto.llm import make_provider
+
+            from wisp.llm import otto_settings
+
+            self._model_llm = make_provider(
+                otto_settings(
+                    self.settings, model=self.settings.model_3d, effort=self.settings.effort_3d
+                )
+            )
+        return self._model_llm
+
+    async def _build_from_brief(self, args: dict[str, Any]) -> None:
+        """Build the model with the 3D builder, then show it; the notch says it's being made."""
+        subject = str(args.get("subject") or "the model")[:80]
+        brief = f"{subject}. {args.get('show', '')}".strip()
+        if args.get("beats"):
+            brief += "\nBeats: " + "; ".join(str(b) for b in args["beats"][:6])
+        ctx = self._ctx
+        context = ""
+        if ctx is not None:
+            context = f"{ctx.window.title}\n" + "\n".join(t.text for t in ctx.text[:40])
+        job = await self.jobs.track("Wisp", f"Building {subject} in 3D", role="model")
+        await self.hub.emit(
+            "job_event",
+            job_id=job.id,
+            agent="Wisp",
+            event="status",
+            data={"message": f"is building {subject} in 3D"},
+        )
+        try:
+            result = await build_model(self._builder_llm(), brief, context)
+        except Exception as exc:
+            log.exception("3D build failed")
+            await self.jobs.settle(job, ok=False, summary=str(exc)[:200])
+            await self.say_line("Hmm, that model wouldn't come together. Want me to try again?")
+            return
+        self.turns.add_spend("model_3d", result.cost_usd)
+        await self.jobs.settle(
+            job, ok=result.model is not None, summary=subject, cost=result.cost_usd
+        )
+        if result.model is None:
+            await self.say_line("Hmm, that model wouldn't come together. Want me to try again?")
+            return
+        # Let Wisp finish its opening line first: the model's narration must never talk over it
+        # (they can play from different screens).
+        if self._speech:
+            await asyncio.gather(self._speech, return_exceptions=True)
+        wait = self._talking_until - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(min(wait, 12.0))
+        await self.show_object(result.model, restart=True)
 
     def _errand_llm(self) -> LLMProvider:
         """Errands can use a stronger model than conversation (WISP_JOB_MODEL), if set."""
@@ -566,7 +630,7 @@ class Brain:
             response = await self.llm.complete(
                 system=system,
                 messages=[Message("user", parts)],
-                tools=[*COMPANION_TOOLS, *(t.spec for t in connector_tools)],
+                tools=[*self._companion_tools(), *(t.spec for t in connector_tools)],
                 max_tokens=9000,  # a detailed 3D model is a long tool call
             )
             self._usage = self._usage + response.usage
@@ -796,6 +860,11 @@ class Brain:
                 f"Drawing '{board.title}' ({len(board.shapes)} shapes, {len(board.steps)} steps)."
             )
             return f"{note} Repairs: {'; '.join(board.notes[:4])}" if board.notes else None
+        if name == "build_3d_model" and self._builder_on() and not args.get("parts"):
+            # A brief: the 3D builder makes the model in the background while Wisp talks.
+            self._visual_turn = True
+            self._spawn(self._build_from_brief(args))
+            return None
         if name == "build_3d_model":
             try:
                 model = ObjectScene.model_validate(args)
@@ -1066,6 +1135,9 @@ class Brain:
                 annotations=anns,
                 notes=notes,
             )
+            # Lines play one after another: remember when the last one will have finished.
+            now = time.monotonic()
+            self._talking_until = max(self._talking_until, now) + speech.duration_s
 
     # ================================================================== scenes & walkthroughs
     async def show_scene(self, scene: SceneSpec) -> None:

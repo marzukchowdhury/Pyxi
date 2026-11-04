@@ -1,5 +1,8 @@
-import asyncio, sys
+import asyncio
+
 from playwright.async_api import async_playwright
+
+
 async def main():
     async with async_playwright() as p:
         b = await p.chromium.launch()
@@ -12,4 +15,6 @@ async def main():
             await pg.wait_for_timeout(500)
             await pg.screenshot(path=f".wisp/shots/panel_{name}.png")
         await b.close()
+
+
 asyncio.run(main())
