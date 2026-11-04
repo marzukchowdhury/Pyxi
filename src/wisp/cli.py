@@ -94,6 +94,36 @@ def say(
 
 
 @app.command()
+def connect(service: str = typer.Argument(..., help="google, linkedin, or status")) -> None:
+    """Connect an account (opens the service's own sign-in in your browser)."""
+    _load_dotenv()
+    from wisp.connectors import Connectors
+
+    s = WispSettings()
+    hub = Connectors(s.data_dir, Path.home() / "Documents" / "Wisp")
+    if service == "status":
+        for st in hub.statuses():
+            mark = "[green]connected[/]" if st["connected"] else "[yellow]not connected[/]"
+            console.print(f"{st['name']}: {mark}  {st['detail']}")
+            if not st["connected"]:
+                for i, step in enumerate(st["setup"], 1):
+                    console.print(f"   {i}. {step}")
+        return
+    connector = {"google": hub.google, "linkedin": hub.linkedin}.get(service)
+    if connector is None:
+        console.print(
+            "Use: wisp connect google | linkedin | status (Discord uses DISCORD_BOT_TOKEN in .env)."
+        )
+        raise typer.Exit(1)
+    try:
+        who = connector.sign_in()
+    except Exception as exc:
+        console.print(f"[red]Couldn't connect:[/] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]Connected {connector.name} as {who}.[/]")
+
+
+@app.command()
 def look() -> None:
     """Print what Wisp sees right now (foreground window + accessibility tree)."""
     from wisp.screen import ScreenReader

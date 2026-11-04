@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { backendUrl } from "../shared/bridge";
-import type { Agent, BrainEvent, BrainState, Hello, Job, VoiceInfo, VoicePublic } from "../shared/protocol";
+import type { Agent, BrainEvent, BrainState, ConnectorStatus, Hello, Job, VoiceInfo, VoicePublic } from "../shared/protocol";
 import { brain } from "../shared/socket";
 
 export interface ChatLine {
@@ -33,6 +33,8 @@ interface PanelState {
   voice: VoicePublic | null;
   voiceCatalog: Record<string, VoiceInfo[]> | null;
   voicePreview: { audio: string | null; text: string; at: number } | null;
+  connectors: ConnectorStatus[] | null;
+  connectorMessage: string | null;
 }
 
 export const usePanel = create<PanelState>(() => ({
@@ -50,6 +52,8 @@ export const usePanel = create<PanelState>(() => ({
   voice: null,
   voiceCatalog: null,
   voicePreview: null,
+  connectors: null,
+  connectorMessage: null,
 }));
 
 let seq = 0;
@@ -107,6 +111,9 @@ brain.on((e: BrainEvent) => {
       break;
     case "ask":
       usePanel.setState((s) => ({ requests: [...s.requests, { request_id: e.request_id, kind: "ask", agent: e.agent, text: e.question }] }));
+      break;
+    case "connectors":
+      usePanel.setState((s) => ({ connectors: e.connectors, connectorMessage: e.message ?? s.connectorMessage }));
       break;
     case "voice_catalog":
       usePanel.setState({ voiceCatalog: e.catalog, voice: e.voice });

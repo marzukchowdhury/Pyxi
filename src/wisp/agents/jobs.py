@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from wisp.agents.registry import AgentProfile, AgentRegistry
 from wisp.config import WispSettings
+from wisp.docs import SUPPORTED, fix_document
 from wisp.hub import Hub
 from wisp.llm import otto_settings
 
@@ -52,6 +53,7 @@ class Job(BaseModel):
     task: str
     context: str = ""
     start_url: str | None = None
+    files: list[str] = Field(default_factory=list)  # documents to work on (writers fix them)
     status: JobStatus = "queued"
     summary: str = ""
     data: Any = None
@@ -106,6 +108,7 @@ class JobManager:
         start_url: str | None = None,
         then: Handoff | None = None,
         parent: str | None = None,
+        files: list[str] | None = None,
     ) -> Job:
         agent = self.registry.get(agent_ref)
         if agent is None:
@@ -121,6 +124,7 @@ class JobManager:
             start_url=start_url,
             then=then,
             parent=parent,
+            files=list(files or []),
         )
         self.jobs[job.id] = job
         await self._update(job)
@@ -253,6 +257,10 @@ class JobManager:
 
     async def _run_writer(self, job: Job, agent: AgentProfile) -> None:
         llm = self.llm_factory(agent)
+        docs = [Path(f) for f in job.files if Path(f).suffix.lower() in SUPPORTED]
+        if docs:
+            await self._fix_documents(job, docs, llm)
+            return
         memories = "\n".join(
             m.render() for m in self.memory.search(agent.memory_scope, job.task, 5)
         )
@@ -276,6 +284,29 @@ class JobManager:
         path.write_text(text, encoding="utf-8")
         job.summary, job.data, job.outputs = text, {"draft": text}, [str(path)]
         job.cost_usd, job.status = response.usage.cost_usd, "done"
+
+    async def _fix_documents(self, job: Job, docs: list[Path], llm: LLMProvider) -> None:
+        """Fix each document and save a copy beside it; the originals are never touched."""
+        lines, outputs, cost = [], [], 0.0
+        for doc in docs:
+            await self.hub.emit(
+                "job_event",
+                job_id=job.id,
+                agent=job.agent_name,
+                event="status",
+                data={"message": f"Editing {doc.name}"},
+            )
+            result = await fix_document(doc, job.task, llm)
+            cost += result.cost_usd
+            outputs.append(str(result.path))
+            notes = "; ".join(result.changes[:5])
+            lines.append(
+                f"{doc.name}: fixed {result.changed} of {result.total} paragraphs, saved as {result.path}"
+                + (f". Notable: {notes}" if notes else "")
+            )
+        job.summary = " ".join(lines)
+        job.data = {"fixed": outputs}
+        job.outputs, job.cost_usd, job.status = outputs, cost, "done"
 
     async def _run_explainer(self, job: Job, agent: AgentProfile) -> None:
         if self.scene_maker is None:

@@ -216,6 +216,12 @@ COMPANION_TOOLS: list[ToolSpec] = [
             "start_url": {"type": "string"},
             "then_agent": {"type": "string"},
             "then_task": {"type": "string"},
+            "files": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Paths of documents on this PC for a writer to fix (.docx, .txt, .md, .pdf); "
+                "the fixed copy is saved beside the original.",
+            },
         },
         ["agent", "task"],
     ),

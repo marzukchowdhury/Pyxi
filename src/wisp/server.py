@@ -146,6 +146,16 @@ def create_app(
             raise HTTPException(404)
         return FileResponse(target)
 
+    async def _connect(service: str) -> None:
+        """Run the service's browser sign-in (it opens on this PC) and report back."""
+        connector = getattr(brain.connectors, service)
+        try:
+            who = await asyncio.to_thread(connector.sign_in)
+            message = f"Connected {connector.name} as {who}."
+        except Exception as exc:
+            message = f"Couldn't connect {connector.name}: {exc}"
+        await hub.emit("connectors", connectors=brain.connectors.statuses(), message=message)
+
     async def _preview(msg: dict[str, Any]) -> None:
         """Speak a sample line in a voice without changing the setting (the voice picker)."""
         studio = brain.studio
@@ -199,6 +209,13 @@ def create_app(
                 await brain.show_object(OBJECT_GALLERY[name](), restart=True)
             else:
                 await brain.show_scene(get_scene(name))
+        elif kind == "connectors":
+            await hub.emit("connectors", connectors=brain.connectors.statuses())
+        elif kind == "connect" and msg.get("id") in ("google", "linkedin"):
+            brain._spawn(_connect(str(msg["id"])))
+        elif kind == "disconnect" and msg.get("id") in ("google", "linkedin"):
+            getattr(brain.connectors, str(msg["id"])).disconnect()
+            await hub.emit("connectors", connectors=brain.connectors.statuses())
         elif kind == "guide_clicked":
             brain._spawn(brain.guide_clicked())
         elif kind == "guide_cancel":

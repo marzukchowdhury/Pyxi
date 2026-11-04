@@ -4,6 +4,7 @@ import { Cube, Mark, Mic, Minus, Plus, Replay, Send, Thread } from "../shared/ic
 import type { Agent, Job } from "../shared/protocol";
 import { brain } from "../shared/socket";
 import { answer, getJson, usePanel } from "./store";
+import { Connections } from "./Connections";
 import { VoiceStudio } from "./VoiceStudio";
 
 type Tab = "chat" | "team" | "palace" | "gallery" | "voice" | "settings";
@@ -317,6 +318,8 @@ function Settings() {
       <div className="kv"><span>Spent today</span><b>${hello.spent_today.toFixed(3)} of ${hello.daily_budget.toFixed(2)}</b></div>
       <label><input type="checkbox" checked={hello.privacy_paused} onChange={(e) => set("privacy_paused", e.target.checked)} /> Pause screen sharing (Ctrl+Alt+P)</label>
       <label><input type="checkbox" defaultChecked onChange={(e) => set("jobs_headed", e.target.checked)} /> Show teammates' browser windows</label>
+      <h4>Connected accounts</h4>
+      <Connections />
       <h4>Hotkeys</h4>
       {keys.hold && <div className="kv"><span>Talk (hold, release to send)</span><kbd>{k("hold")}</kbd></div>}
       <div className="kv"><span>Type to Wisp</span><kbd>Ctrl, Ctrl</kbd></div>

@@ -24,6 +24,7 @@ import json
 import logging
 import secrets
 import time
+from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -48,6 +49,7 @@ from wisp.companion.notes import Guide, build_card
 from wisp.companion.tools import COMPANION_TOOLS, INFO_TOOLS
 from wisp.companion.turns import TurnStore
 from wisp.config import WispSettings
+from wisp.connectors import Connectors, Outgoing
 from wisp.hub import Hub
 from wisp.memory import SpatialMemory
 from wisp.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
@@ -132,6 +134,7 @@ class Brain:
         self._scene_retry = False
         self._object: ObjectScene | None = None  # the 3D model on screen, so follow-ups can edit it
         self._guide: Guide | None = None  # a click Wisp is waiting for
+        self.connectors = Connectors(settings.data_dir, Path.home() / "Documents" / "Wisp")
 
     # ================================================================== entry points
     async def set_state(self, state: State) -> None:
@@ -164,6 +167,27 @@ class Brain:
             await self.set_state("idle")
             return
         await self.turn(text)
+
+    async def _approve(self, out: Outgoing) -> None:
+        """Show exactly what would go out; act only on Allow."""
+        ok = await self.hub.request(
+            "confirm",
+            timeout=900,
+            job_id="",
+            agent=out.agent,
+            action=out.action,
+            reason=out.preview,
+        )
+        if not ok:
+            await self.say_line("Okay, I won't send it.")
+            return
+        try:
+            line = await out.run()
+        except Exception as exc:
+            log.exception("approved action failed")
+            await self.say_line(f"That didn't go through: {str(exc)[:120]}")
+            return
+        await self.say_line(line)
 
     async def _quick_action(self, action: str, value: str) -> str | None:
         if not value.strip():
@@ -337,10 +361,11 @@ class Brain:
             parts: list[TextPart | ImagePart] = [TextPart(text)] + [
                 ImagePart(img, "image/jpeg") for img in self._images
             ]
+            connector_tools = self.connectors.tools()
             response = await self.llm.complete(
                 system=system,
                 messages=[Message("user", parts)],
-                tools=COMPANION_TOOLS,
+                tools=[*COMPANION_TOOLS, *(t.spec for t in connector_tools)],
                 max_tokens=9000,  # a detailed 3D model is a long tool call
             )
             self._usage = self._usage + response.usage
@@ -362,8 +387,11 @@ class Brain:
                     note = f"{call.name} failed: {exc}"
                 if note:
                     notes.append(note)
-                if call.name in INFO_TOOLS or (
-                    note and note.startswith(("SCENE_INVALID", "MODEL_INVALID"))
+                is_info = any(t.info and t.spec.name == call.name for t in connector_tools)
+                if (
+                    is_info
+                    or call.name in INFO_TOOLS
+                    or (note and note.startswith(("SCENE_INVALID", "MODEL_INVALID")))
                 ):
                     needs_more = True
             return {
@@ -534,8 +562,13 @@ class Brain:
                 if args.get("then_agent")
                 else None
             )
+            files = [str(f) for f in args.get("files", []) or [] if Path(str(f)).is_file()]
             job = await self.jobs.start(
-                str(args["agent"]), str(args["task"]), start_url=args.get("start_url"), then=then
+                str(args["agent"]),
+                str(args["task"]),
+                start_url=args.get("start_url"),
+                then=then,
+                files=files,
             )
             return f"Started {job.id}: {job.agent_name} is on it."
         if name == "recall_screen":
@@ -584,6 +617,12 @@ class Brain:
             else:
                 return "forget: say which key, or everything=true."
             return f"Forgot {n} memor{'y' if n == 1 else 'ies'}."
+        if (connector_tool := self.connectors.find(name)) is not None:
+            result = await connector_tool.handler(args)
+            if isinstance(result, Outgoing):
+                self._spawn(self._approve(result))
+                return f"Waiting for the user to approve: {result.action}. Tell them it's ready to check; don't say it's done."
+            return result
         if name == "quick_action":
             return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
         if name == "start_walkthrough":
@@ -830,7 +869,11 @@ class Brain:
             return  # the next teammate takes it from here
         agent = self.registry.get(job.agent_id)
         first = " ".join(split_sentences(job.summary)[:2]) if job.summary else ""
-        if job.status == "done":
+        fixed = job.data.get("fixed") if isinstance(job.data, dict) else None
+        if job.status == "done" and fixed:
+            names = ", ".join(Path(f).name for f in fixed)
+            line = f"{job.agent_name} here. All fixed. The corrected copy is saved as {names}, right next to the original. Want me to send it back?"
+        elif job.status == "done":
             line = (
                 f"{job.agent_name} here. {first}"
                 if job.role != "writer"
@@ -840,7 +883,11 @@ class Brain:
                 line += " Want me to show you how I did it?"
         else:
             line = f"{job.agent_name} here. I couldn't finish that: {first or job.status}."
-        self.history = [*self.history[-11:], (f"(job {job.id} finished)", line)]
+        # The model gets the full result (file paths included) for follow-ups like "send it back".
+        self.history = [
+            *self.history[-11:],
+            (f"(job {job.id} finished: {job.summary[:600]})", line),
+        ]
         self._speak(line, agent=job.agent_name, voice=agent.voice if agent else None)
 
     # ================================================================== misc

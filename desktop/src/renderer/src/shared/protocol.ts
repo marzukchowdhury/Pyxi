@@ -250,6 +250,14 @@ export interface VoicePublic {
   error: string | null;
 }
 
+export interface ConnectorStatus {
+  id: string;
+  name: string;
+  connected: boolean;
+  detail: string;
+  setup: string[];
+}
+
 export interface Hello {
   state: BrainState;
   agents: Agent[];
@@ -298,6 +306,7 @@ export type BrainEvent =
   | { type: "pins"; app: string; pins: Pin[] }
   | { type: "turn_done"; turn_id: string; cost_usd: number; tokens: number; spent_today: number; daily_budget: number }
   | { type: "voice_catalog"; catalog: Record<string, VoiceInfo[]>; voice: VoicePublic }
+  | { type: "connectors"; connectors: ConnectorStatus[]; message?: string }
   | { type: "voice_preview"; engine: string; voice: string; text: string; audio: string | null; error: string | null }
   | { type: "error"; message: string };
 
@@ -320,5 +329,8 @@ export type ClientMessage =
   | { type: "notice"; message: string }
   | { type: "voice_catalog" }
   | { type: "guide_clicked" }
+  | { type: "connectors" }
+  | { type: "connect"; id: string }
+  | { type: "disconnect"; id: string }
   | { type: "guide_cancel" }
   | { type: "voice_preview"; engine: string; voice: string; speed?: number };
