@@ -27,6 +27,8 @@ import {
 } from "electron";
 
 const BACKEND = process.env.WISP_BACKEND ?? "http://127.0.0.1:8766";
+// Opt-in: inspect the live overlay and panel from a debugger (developers only).
+if (process.env.WISP_DEBUG_PORT) app.commandLine.appendSwitch("remote-debugging-port", process.env.WISP_DEBUG_PORT);
 const REPO = resolve(__dirname, "../../..");
 // Each action tries its shortcuts in order and keeps the first one Windows lets us have.
 // Other apps (Discord, overlays, launchers) often own a combination already; without a

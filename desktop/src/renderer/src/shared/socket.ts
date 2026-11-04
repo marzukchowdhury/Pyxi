@@ -59,4 +59,5 @@ class BrainSocket {
 
 export const brain = new BrainSocket();
 brain.connect();
-if (!window.wispBridge) (window as unknown as { __wisp: BrainSocket }).__wisp = brain;
+// Test hook: the browser preview and dev builds of the app can inject events (never in production).
+if (!window.wispBridge || import.meta.env.DEV) (window as unknown as { __wisp: BrainSocket }).__wisp = brain;

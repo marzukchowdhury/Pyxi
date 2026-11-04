@@ -257,7 +257,7 @@ class VoicePrefs(BaseModel):
     engine: Engine = "kokoro"
     voice: str = "af_heart"
     speed: float = Field(1.0, ge=0.5, le=1.6)
-    language: str = "auto"
+    language: str = "en"  # Automatic is opt-in: it downloads a bigger multilingual model
     captions: bool = True
 
 
