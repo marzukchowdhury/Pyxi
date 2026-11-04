@@ -298,6 +298,8 @@ cd desktop && npm test && npm run typecheck
 - [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) via [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx).
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper).
 - [React Three Fiber](https://github.com/pmndrs/react-three-fiber) and [drei](https://github.com/pmndrs/drei).
+- Discord and LinkedIn marks from [Font Awesome Free](https://fontawesome.com/license/free) (icons CC BY 4.0). Brand logos belong to their owners and are shown only to label each connection.
+- [Caveat](https://fonts.google.com/specimen/Caveat) (SIL Open Font License) for the handwritten notes.
 
 ## License
 

@@ -77,6 +77,8 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const [hintUntil, setHintUntil] = useState(0);
   const bornAt = useRef(performance.now());
   const leaveTimer = useRef<number>(0);
+  // After you close it, the pointer is still on it: don't reopen until it has left once.
+  const suppress = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   const inner = useRef<HTMLDivElement>(null);
   const lines = useRef<HTMLDivElement>(null);
@@ -98,7 +100,9 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   }, []);
 
   const running = Object.values(jobs).filter((j) => j.status === "running" || j.status === "queued");
-  const open = hover || pinned || focused;
+  // Open only while the pointer is on it, or while you're typing in it. Status states
+  // (Listening, Thinking, captions, notices) never catch the mouse.
+  const open = hover || pinned || (focused && text.trim() !== "");
   const mode: Mode = full ? "full"
     : open ? "open"
     : state === "listening" ? "listening"
@@ -137,7 +141,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   useEffect(() => bridge.onNotchToggle(() => (full ? setFull(false) : openFull())), [full]);
   useEffect(() => {
     if (!full) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setFull(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [full]);
@@ -154,15 +158,19 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
 
   const enter = () => {
     window.clearTimeout(leaveTimer.current);
+    if (suppress.current) return;
     setHover(true);
   };
   const leave = () => {
+    suppress.current = false;
     window.clearTimeout(leaveTimer.current);
     leaveTimer.current = window.setTimeout(() => setHover(false), 320);
   };
   const close = () => {
     setPinned(false);
     setHover(false);
+    setFull(false);
+    suppress.current = true; // fold all the way, even with the pointer still on it
     input.current?.blur();
   };
   const send = (e: FormEvent) => {
@@ -173,6 +181,8 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     brain.send({ type: "interrupt" });
     brain.send({ type: "text", text: t });
     setText("");
+    setPinned(false);
+    input.current?.blur(); // fold away and let the answer play in the notch
   };
 
   const level = mode === "listening" ? micLevel : () => voice.level();
@@ -180,7 +190,11 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const status = state === "looking" ? `Looking at ${seeing || "your screen"}` : state === "transcribing" ? "Got it" : "Thinking";
 
   return (
-    <Interactive className={`notch-zone ${open ? "is-open" : ""}`} onEnter={enter} onLeave={leave}>
+    <div className={`notch-zone ${open ? "is-open" : ""}`}>
+      {/* Folded, the only thing that reacts is a thin strip on the top edge, so the browser
+          tabs underneath stay clickable. */}
+      <Interactive className="notch-handle" onEnter={enter} onLeave={leave} />
+      <Interactive className="notch-hit" active={mode === "open" || mode === "full"} onEnter={enter} onLeave={leave}>
       <div
         className={`notch mode-${mode}`}
         style={{ width: mode === "speaking" && !captions ? 210 : WIDTH[mode], height }}
@@ -268,7 +282,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                 <span className={state === "idle" ? "" : "shimmer"}>
                   {state === "idle" ? (connected ? "Ready" : "Waiting for the brain") : state === "listening" ? "Listening" : state === "speaking" ? "Speaking" : status}
                 </span>
-                <button className="notch-btn" title="Fold away (Esc)" onClick={(e) => { e.stopPropagation(); setFull(false); }}><Close /></button>
+                <button className="notch-btn" title="Fold away (Esc)" onClick={(e) => { e.stopPropagation(); close(); }}><Close /></button>
               </div>
               <nav className="tabs notch-tabs">
                 {TABS.map(([id, label]) => (
@@ -324,7 +338,10 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                   onChange={(e) => setText(e.target.value)}
                   onMouseDown={() => bridge.focusOverlay()}
                   onFocus={() => setFocused(true)}
-                  onBlur={() => setFocused(false)}
+                  onBlur={() => {
+                    setFocused(false);
+                    setPinned(false);
+                  }}
                   onKeyDown={(e) => e.key === "Escape" && close()}
                 />
                 {text.trim() ? (
@@ -341,7 +358,8 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
           )}
         </div>
       </div>
-    </Interactive>
+      </Interactive>
+    </div>
   );
 }
 

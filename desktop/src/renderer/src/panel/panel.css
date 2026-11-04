@@ -245,3 +245,4 @@ html.web-preview { background: radial-gradient(120% 80% at 30% 0%, #1a1f2b, #070
 button.ghost { height: 30px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--hair); background: none; color: var(--ink-2); font-size: 12px; }
 button.ghost:hover { color: var(--ink); border-color: var(--hair-hi); }
 .g-routine { background: rgba(158,203,255,.16); color: var(--ice-hi); font-size: 10.5px; border: 1px solid rgba(158,203,255,.3); }
+.brand-logo { flex: none; display: grid; place-items: center; border-radius: 9px; box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 2px 8px rgba(0,0,0,.3); }

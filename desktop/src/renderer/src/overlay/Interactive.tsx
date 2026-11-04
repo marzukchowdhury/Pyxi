@@ -11,6 +11,7 @@ import { bridge, cursorToLocal } from "../shared/bridge";
 interface Entry {
   el: HTMLElement;
   always: boolean;
+  active: boolean; // false: purely visual, the mouse goes straight through
   inside: boolean;
   onEnter?: () => void;
   onLeave?: () => void;
@@ -21,7 +22,7 @@ let interactive = false;
 const PAD = 2;
 
 function sync(): void {
-  const want = [...entries].some((e) => e.always || e.inside);
+  const want = [...entries].some((e) => e.active && (e.always || e.inside));
   if (want !== interactive) {
     interactive = want;
     bridge.setInteractive(want);
@@ -31,7 +32,7 @@ function sync(): void {
 function hitTest(x: number, y: number): void {
   for (const e of entries) {
     const r = e.el.getBoundingClientRect();
-    const inside = r.width > 0 && x >= r.left - PAD && x <= r.right + PAD && y >= r.top - PAD && y <= r.bottom + PAD;
+    const inside = e.active && r.width > 0 && x >= r.left - PAD && x <= r.right + PAD && y >= r.top - PAD && y <= r.bottom + PAD;
     if (inside !== e.inside) {
       e.inside = inside;
       if (inside) e.onEnter?.();
@@ -53,15 +54,17 @@ function startFeed(): void {
 }
 
 interface Props {
-  children: ReactNode;
+  children?: ReactNode;
   className?: string;
   style?: CSSProperties;
   always?: boolean;
+  /** When false the element is drawn but never catches the mouse. */
+  active?: boolean;
   onEnter?: () => void;
   onLeave?: () => void;
 }
 
-export function Interactive({ children, className, style, always = false, onEnter, onLeave }: Props) {
+export function Interactive({ children, className, style, always = false, active = true, onEnter, onLeave }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const entry = useRef<Entry | null>(null);
   const handlers = useRef({ onEnter, onLeave });
@@ -74,6 +77,7 @@ export function Interactive({ children, className, style, always = false, onEnte
     const e: Entry = {
       el,
       always,
+      active,
       inside: false,
       onEnter: () => handlers.current.onEnter?.(),
       onLeave: () => handlers.current.onLeave?.(),
@@ -89,11 +93,16 @@ export function Interactive({ children, className, style, always = false, onEnte
   }, []);
 
   useEffect(() => {
-    if (entry.current) {
-      entry.current.always = always;
-      sync();
+    const e = entry.current;
+    if (!e) return;
+    e.always = always;
+    e.active = active;
+    if (!active && e.inside) {
+      e.inside = false;
+      e.onLeave?.();
     }
-  }, [always]);
+    sync();
+  }, [always, active]);
 
   return (
     <div ref={ref} className={className} style={style}>

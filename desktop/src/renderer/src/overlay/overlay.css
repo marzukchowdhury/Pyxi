@@ -171,8 +171,8 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .walk-target .bloom { position: absolute; inset: -2px; border-radius: 12px; border: 1px solid var(--ice); animation: bloom 1.6s .5s var(--ease) infinite; }
 .walk-target .bloom.late { animation-delay: 1.1s; }
 @keyframes bloom { from { inset: -2px; opacity: .9; } to { inset: -22px; border-radius: 22px; opacity: 0; } }
-.ghost { position: absolute; transform: translate(-30%, -10%) rotate(-28deg); transition: left .65s var(--spring), top .65s var(--spring); }
-.ghost path { fill: rgba(234,243,255,.9); stroke: #fff; stroke-width: .8; filter: drop-shadow(0 0 6px rgba(158,203,255,.95)); }
+.walk .ghost { position: absolute; transform: translate(-30%, -10%) rotate(-28deg); transition: left .65s var(--spring), top .65s var(--spring); }
+.walk .ghost path { fill: rgba(234,243,255,.9); stroke: #fff; stroke-width: .8; filter: drop-shadow(0 0 6px rgba(158,203,255,.95)); }
 
 /* ============================================================ team HUD */
 .hud { position: fixed; left: 26px; bottom: 26px; z-index: 20; display: flex; flex-direction: column; gap: 6px; padding: 10px 14px 10px 12px; border-radius: 18px; background: var(--glass); border: 1px solid var(--hair); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 20px 60px rgba(0,0,0,.3); backdrop-filter: blur(18px); animation: rise .35s var(--spring); }
@@ -266,7 +266,9 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .object-caption .kicker { margin-bottom: 4px; }
 
 /* ============================================================ notch */
-.notch-zone { position: fixed; left: 50%; top: 0; z-index: 70; transform: translateX(-50%); padding: 0 40px 22px; pointer-events: auto !important; display: flex; justify-content: center; }
+.notch-zone { position: fixed; left: 50%; top: 0; z-index: 70; transform: translateX(-50%); display: flex; justify-content: center; }
+.notch-handle { position: absolute; left: 50%; top: 0; width: 180px; height: 12px; transform: translateX(-50%); pointer-events: auto !important; z-index: 2; }
+.notch-hit { pointer-events: auto !important; }
 .notch { --nb: rgba(7, 8, 12, .94); position: relative; overflow: visible; cursor: default;
   background: var(--nb); border: 1px solid rgba(255,255,255,.07); border-top: 0; border-radius: 0 0 20px 20px;
   box-shadow: 0 1px 0 rgba(255,255,255,.05) inset, 0 18px 50px rgba(0,0,0,.38), 0 0 0 .5px rgba(0,0,0,.5);
@@ -274,7 +276,7 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .notch.mode-idle { border-radius: 0 0 9px 9px; box-shadow: 0 4px 14px rgba(0,0,0,.25); cursor: pointer; }
 /* On dark title bars the glass would vanish: active states get a faint ice hairline. */
 .notch:not(.mode-idle) { border-color: rgba(158,203,255,.16); box-shadow: 0 1px 0 rgba(255,255,255,.05) inset, 0 0 0 .5px rgba(158,203,255,.12), 0 18px 50px rgba(0,0,0,.38), 0 0 26px rgba(158,203,255,.08); }
-.notch-zone:hover .notch.mode-idle { box-shadow: 0 4px 18px rgba(0,0,0,.3), 0 0 14px rgba(158,203,255,.18); }
+
 .notch.mode-open { border-radius: 0 0 24px 24px; }
 /* Concave "ears" so the pill reads as part of the screen edge, like a hardware notch. */
 .ear { position: absolute; top: 0; width: 10px; height: 10px; pointer-events: none; }
