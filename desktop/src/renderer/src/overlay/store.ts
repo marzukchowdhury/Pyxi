@@ -255,7 +255,15 @@ brain.on((e: BrainEvent) => {
       addAnnotations(e.annotations);
       break;
     case "clear":
-      useOverlay.setState({ annotations: [], flyTo: null });
+      // The screen moved on (another window, or Wisp was asked to clear): drop everything that
+      // points at specific pixels.
+      useOverlay.setState({ annotations: [], flyTo: null, notes: null });
+      break;
+    case "capture_hide":
+      document.documentElement.classList.add("capturing");
+      break;
+    case "capture_show":
+      document.documentElement.classList.remove("capturing");
       break;
     case "capture":
       useOverlay.setState({ captureFlash: performance.now(), seeing: e.excluded ? "" : prettyApp(e.app) });

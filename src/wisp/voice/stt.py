@@ -125,7 +125,11 @@ class Transcriber:
             nonlocal model
             lang = "en" if name.endswith(".en") else (None if language == "auto" else language)
             segments, info = model.transcribe(
-                decode_audio(audio), language=lang, vad_filter=True, beam_size=1
+                decode_audio(audio),
+                language=lang,
+                vad_filter=True,
+                beam_size=1,
+                hotwords="Wisp",  # "Hi Wisp" was heard as "Hi Wes"
             )
             text = " ".join(s.text.strip() for s in segments).strip()
             return text, lang or getattr(info, "language", "en") or "en"

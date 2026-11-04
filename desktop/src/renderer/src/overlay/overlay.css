@@ -25,6 +25,8 @@
 html, body, #root { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; }
 button { font: inherit; color: inherit; cursor: pointer; }
 .overlay { position: fixed; inset: 0; pointer-events: none; color: var(--ink); }
+/* For the instant Wisp takes its own screenshot (only when the overlay is visible to captures). */
+html.capturing .overlay { opacity: 0 !important; transition: none !important; }
 .overlay > * { pointer-events: none; }
 code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; padding: 3px 6px; border-radius: 6px; background: rgba(255,255,255,.07); border: 1px solid var(--hair); }
 
@@ -214,6 +216,10 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .notes-card { position: fixed; z-index: 27; pointer-events: auto !important; padding: 18px 20px 14px; border-radius: 22px;
   background: radial-gradient(rgba(255,255,255,.07) 1px, transparent 1.2px) 0 0 / 16px 16px, linear-gradient(180deg, rgba(14,17,24,.93), rgba(9,11,16,.95));
   border: 1px solid var(--hair-hi); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 30px 80px rgba(0,0,0,.42); backdrop-filter: blur(20px) saturate(140%); animation: emerge .5s var(--spring); }
+.notes-card { overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.14) transparent; transition: opacity .7s var(--ease), transform .7s var(--ease); }
+.notes-card.leaving, .notes-ink.leaving { opacity: 0; }
+.notes-card.leaving { transform: translateY(6px); }
+.notes-ink { transition: opacity .7s var(--ease); }
 .notes-close { position: absolute; right: 10px; top: 10px; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; border: 0; background: none; color: var(--ink-3); opacity: 0; transition: opacity .2s, color .2s, background .2s; }
 .notes-card:hover .notes-close { opacity: 1; }
 .notes-close:hover { color: var(--ink); background: rgba(255,255,255,.06); }
@@ -302,6 +308,12 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .notch-marks i { width: 5px; height: 5px; border-radius: 1.5px; transform: rotate(45deg); background: var(--c); box-shadow: 0 0 7px var(--c); animation: breathe 1.4s ease-in-out infinite; }
 
 .notch-open { padding: 12px 0 12px; }
+/* The full notch hosts the panel's sections (chat, team, memory, 3D, voice, settings). */
+.notch.mode-full { --nb: rgb(10, 11, 15); border-radius: 0 0 26px 26px; }
+.notch-full { padding: 12px 0 14px; }
+.notch-tabs { margin: 12px 0 8px !important; }
+.notch-body { height: min(600px, calc(100vh - 170px)); overflow-y: auto; margin: 0 -16px; padding: 4px 16px 2px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.14) transparent; user-select: text; }
+.notch-body .chat { height: 100%; }
 .notch-head { display: flex; align-items: center; gap: 9px; font-size: 13px; }
 .notch-head b { font-weight: 600; }
 .notch-head span { flex: 1; color: var(--ink-3); font-size: 12px; }

@@ -111,7 +111,7 @@ def build_card(ctx: ScreenContext | None, args: dict[str, Any]) -> NoteCard:
         sketches=sketches,
         region=region,
     )
-    card.place = place_card(ctx, region, len(items))
+    card.place = place_card(ctx, region, [it.text for it in items], card.title)
     return card
 
 
@@ -131,14 +131,20 @@ def _overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
 
 
 def place_card(
-    ctx: ScreenContext | None, region: tuple[int, int, int, int] | None, n_items: int
+    ctx: ScreenContext | None,
+    region: tuple[int, int, int, int] | None,
+    texts: list[str],
+    title: str = "",
 ) -> tuple[int, int] | None:
     """Find where the card covers the least of what's on screen: beside, below or above what it
     explains, scored against every visible piece of text and control (not just the region)."""
     if ctx is None or region is None or ctx.screenshot is None:
         return None
     k = _dpi_scale()
-    w, h = int(300 * k), int((96 + 52 * n_items) * k)
+    # Handwriting at this width fits about 24 characters a line; titles about 18.
+    lines = sum(max(1, -(-len(t) // 24)) for t in texts)
+    title_lines = max(1, -(-len(title) // 18))
+    w, h = int(300 * k), int((58 + 34 * title_lines + 27 * lines + 9 * len(texts)) * k)
     x0, y0 = ctx.to_screen(0, 0)
     x1, y1 = ctx.to_screen(ctx.screenshot.width, ctx.screenshot.height)
     screen_area = (x1 - x0) * (y1 - y0)

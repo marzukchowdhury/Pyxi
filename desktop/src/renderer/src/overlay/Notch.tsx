@@ -5,7 +5,8 @@
  *   hold Ctrl + Alt   it opens into "Listening" with a live waveform of your voice
  *   let go            "Thinking" (or "Looking at your screen"), then Wisp's words stream in
  *   hover it          it unfolds into a small chat: recent lines, a text box, the mic
- *   click it          it stays open until you click it again or press Escape
+ *   click it          it unfolds into everything: chat, team, memory, 3D, voice, settings
+ *                     (also Ctrl+Alt+W or the tray icon); Escape or the close button folds it
  *   double-tap Ctrl   it opens with the text box ready to type
  *
  * Teammates at work show as small marks on the pill; errors (mic blocked, no key) surface here
@@ -13,12 +14,15 @@
  */
 import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { bridge, keysOf } from "../shared/bridge";
-import { Expand, Mic, Send } from "../shared/icons";
+import { installPanelStyles } from "./panelStyles";
+import { Chat, Gallery, Palace, Settings, type Tab, TABS, Team } from "../panel/Panel";
+import { VoiceStudio } from "../panel/VoiceStudio";
+import { Close, Expand, Mic, Send } from "../shared/icons";
 import { brain } from "../shared/socket";
 import { Interactive } from "./Interactive";
 import { useOverlay, voice } from "./store";
 
-type Mode = "idle" | "hint" | "working" | "paused" | "offline" | "notice" | "speaking" | "thinking" | "listening" | "open";
+type Mode = "idle" | "hint" | "working" | "paused" | "offline" | "notice" | "speaking" | "thinking" | "listening" | "open" | "full";
 
 const WIDTH: Record<Mode, number> = {
   idle: 136,
@@ -31,7 +35,10 @@ const WIDTH: Record<Mode, number> = {
   thinking: 240,
   listening: 268,
   open: 440,
+  full: 480,
 };
+
+installPanelStyles();
 
 const NOTICE_MS = 7000;
 const HINT_MS = 6500;
@@ -61,6 +68,8 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const hold = useHoldKeys();
 
   const [hover, setHover] = useState(false);
+  const [full, setFull] = useState(false);
+  const [tab, setTab] = useState<Tab>("chat");
   const [pinned, setPinned] = useState(false);
   const [focused, setFocused] = useState(false);
   const [text, setText] = useState("");
@@ -90,7 +99,8 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
 
   const running = Object.values(jobs).filter((j) => j.status === "running" || j.status === "queued");
   const open = hover || pinned || focused;
-  const mode: Mode = open ? "open"
+  const mode: Mode = full ? "full"
+    : open ? "open"
     : state === "listening" ? "listening"
     : state === "transcribing" || state === "thinking" || state === "looking" ? "thinking"
     : state === "speaking" && caption ? "speaking"
@@ -116,6 +126,21 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   useEffect(() => {
     if (mode === "open") lines.current?.scrollTo({ top: lines.current.scrollHeight });
   }, [mode, chat.length, chat[chat.length - 1]?.text]);
+
+  // The full notch: Ctrl+Alt+W / the tray icon toggle it; Escape folds it away.
+  const openFull = (t?: Tab) => {
+    if (t) setTab(t);
+    setFull(true);
+    setPinned(false);
+    bridge.focusOverlay(); // so its text boxes take typing
+  };
+  useEffect(() => bridge.onNotchToggle(() => (full ? setFull(false) : openFull())), [full]);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setFull(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
 
   // Double-tap Ctrl: open with the text box ready.
   useEffect(
@@ -159,7 +184,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
       <div
         className={`notch mode-${mode}`}
         style={{ width: mode === "speaking" && !captions ? 210 : WIDTH[mode], height }}
-        onClick={() => mode !== "open" && setPinned(true)}
+        onClick={() => mode !== "open" && mode !== "full" && openFull()}
       >
         <i className="ear left" />
         <i className="ear right" />
@@ -235,6 +260,32 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
             </div>
           )}
 
+          {mode === "full" && (
+            <div className="notch-full">
+              <div className="notch-head">
+                <Diamond live={state === "listening" || state === "speaking"} spin={state === "thinking" || state === "looking" || state === "transcribing"} />
+                <b>Wisp</b>
+                <span className={state === "idle" ? "" : "shimmer"}>
+                  {state === "idle" ? (connected ? "Ready" : "Waiting for the brain") : state === "listening" ? "Listening" : state === "speaking" ? "Speaking" : status}
+                </span>
+                <button className="notch-btn" title="Fold away (Esc)" onClick={(e) => { e.stopPropagation(); setFull(false); }}><Close /></button>
+              </div>
+              <nav className="tabs notch-tabs">
+                {TABS.map(([id, label]) => (
+                  <button key={id} className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{label}</button>
+                ))}
+              </nav>
+              <main className="body notch-body">
+                {tab === "chat" && <Chat />}
+                {tab === "team" && <Team />}
+                {tab === "palace" && <Palace />}
+                {tab === "gallery" && <Gallery />}
+                {tab === "voice" && <VoiceStudio />}
+                {tab === "settings" && <Settings />}
+              </main>
+            </div>
+          )}
+
           {mode === "open" && (
             <div className="notch-open">
               <div className="notch-head">
@@ -243,7 +294,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                 <span className={state === "idle" ? "" : "shimmer"}>
                   {state === "idle" ? (connected ? "Ready" : "Waiting for the brain") : state === "listening" ? "Listening" : state === "speaking" ? "Speaking" : status}
                 </span>
-                <button className="notch-btn" title="Open the full panel" onClick={() => bridge.togglePanel()}><Expand /></button>
+                <button className="notch-btn" title="Everything: team, memory, 3D, voice, settings" onClick={(e) => { e.stopPropagation(); openFull(); }}><Expand /></button>
               </div>
               {running.map((j) => (
                 <div key={j.id} className="notch-job">

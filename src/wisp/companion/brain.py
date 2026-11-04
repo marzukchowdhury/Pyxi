@@ -138,6 +138,10 @@ class Brain:
         self._calls: list[dict[str, Any]] = []
         self._scene_retry = False
         self._turn_card = None  # the note card drawn this turn, if any
+        self._watcher: asyncio.Future[None] | None = None
+        self.overlay_in_capture = (
+            False  # the desktop app says whether screen shares see the overlay
+        )
         self._object: ObjectScene | None = None  # the 3D model on screen, so follow-ups can edit it
         self._guide: Guide | None = None  # a click Wisp is waiting for
         self.connectors = Connectors(settings.data_dir, Path.home() / "Documents" / "Wisp")
@@ -151,7 +155,7 @@ class Brain:
     def begin_listening(self) -> None:
         """Push-to-talk pressed: capture the screen *now*, while the user starts speaking."""
         self.interrupt()
-        self._prefetch = asyncio.create_task(self.screen.capture())
+        self._prefetch = asyncio.create_task(self._capture())
         self._spawn(self.set_state("listening"))
 
     async def hear(self, audio: bytes) -> None:
@@ -225,6 +229,43 @@ class Brain:
             await self.hub.emit("action", kind="insert", value=value)
             return None
         return f"Unknown quick action {action}."
+
+    async def _capture(self) -> ScreenContext:
+        """Take Wisp's screenshot. If the overlay is visible to captures (so a Discord stream can
+        see it), blank it for that instant so Wisp never reads its own drawings."""
+        if not self.overlay_in_capture:
+            return await self.screen.capture()
+        await self.hub.emit("capture_hide")
+        await asyncio.sleep(0.09)  # one or two frames for the overlay to go clear
+        try:
+            return await self.screen.capture()
+        finally:
+            await self.hub.emit("capture_show")
+
+    def _watch_window(self) -> None:
+        """Drawings point at exact pixels; once the user switches window or tab they'd point at
+        the wrong things, so clear them when the foreground window changes."""
+        title_of = getattr(self.screen, "foreground_title", None)
+        if title_of is None or self._ctx is None:
+            return
+        if self._watcher and not self._watcher.done():
+            self._watcher.cancel()
+        drawn_on = self._ctx.window.title
+
+        async def watch() -> None:
+            for _ in range(600):  # up to ~6 minutes
+                await asyncio.sleep(0.6)
+                now = title_of()
+                if now is None:
+                    return
+                if now != drawn_on and now not in ("Wisp", "Wisp overlay", ""):
+                    await self.hub.emit("clear")
+                    if self._guide:
+                        self._guide = None
+                        await self.hub.emit("guide", active=False)
+                    return
+
+        self._watcher = asyncio.ensure_future(watch())
 
     async def run_due_routines(self, now: datetime | None = None) -> int:
         """Run routines that are due, one at a time, when Wisp isn't in the middle of something."""
@@ -326,7 +367,7 @@ class Brain:
     def _build_graph(self) -> Any:
         async def perceive(state: TurnState) -> TurnState:
             await self.set_state("looking")
-            ctx = await self._prefetch if self._prefetch else await self.screen.capture()
+            ctx = await self._prefetch if self._prefetch else await self._capture()
             self._prefetch = None
             self._ctx = ctx
             await self.hub.emit(
@@ -501,6 +542,7 @@ class Brain:
                 return "explain_on_screen: give at least one point with text."
             await self.hub.emit("notes", card=card.model_dump(mode="json"))
             self._turn_card = card
+            self._watch_window()
             missing = [it.n for it in card.items if it.mark != "none" and it.rect is None]
             return f"explain_on_screen: points {missing} had nothing to frame." if missing else None
         if name == "guide":
@@ -528,6 +570,7 @@ class Brain:
             ann = Annotation(kind="click", rect=rect, label=label, ttl_s=600, guide=True)
             await self.hub.emit("annotate", annotations=[ann.model_dump()])
             await self.hub.emit("guide", active=True, step=step, goal=self._guide.goal, label=label)
+            self._watch_window()
             return None
         if name == "explain_in_3d":
             try:

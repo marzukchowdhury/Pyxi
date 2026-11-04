@@ -199,6 +199,21 @@ def _font(size: int) -> ImageFont.ImageFont:
 class ScreenReader:
     """Captures ScreenContexts, honouring privacy settings and the pause switch."""
 
+    @staticmethod
+    def foreground_title() -> str | None:
+        """Title of the window in front right now (cheap; no capture)."""
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+            hwnd = user32.GetForegroundWindow()
+            n = user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(hwnd, buf, n + 1)
+            return buf.value
+        except Exception:
+            return None
+
     def __init__(self, config: ScreenConfig) -> None:
         self.config = config
         self.paused = False

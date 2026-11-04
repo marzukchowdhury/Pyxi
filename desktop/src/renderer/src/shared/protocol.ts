@@ -299,6 +299,8 @@ export type BrainEvent =
   | { type: "stop_audio" }
   | { type: "annotate"; annotations: Annotation[] }
   | { type: "clear" }
+  | { type: "capture_hide" }
+  | { type: "capture_show" }
   | { type: "capture"; app: string; window: string; excluded: string | null; elements: number }
   | { type: "scene"; scene: SceneSpec }
   | { type: "object"; scene: ObjectScene; audio_key: string; restart: boolean }

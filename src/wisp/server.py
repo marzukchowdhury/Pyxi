@@ -285,6 +285,8 @@ def create_app(
             elif key == "keep_screenshots":
                 settings.screen.keep_screenshots = bool(value)
                 brain.spatial.thumbs_dir = settings.palace_dir if value else None
+            elif key == "overlay_in_capture":
+                brain.overlay_in_capture = bool(value)
             elif key in VOICE_KEYS and brain.studio:
                 brain.studio.update(**{VOICE_KEYS[key]: value})
             elif key == "forget_screen":

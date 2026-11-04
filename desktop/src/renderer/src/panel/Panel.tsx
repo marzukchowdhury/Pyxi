@@ -7,8 +7,8 @@ import { answer, getJson, usePanel } from "./store";
 import { Connections, Routines } from "./Connections";
 import { VoiceStudio } from "./VoiceStudio";
 
-type Tab = "chat" | "team" | "palace" | "gallery" | "voice" | "settings";
-const TABS: [Tab, string][] = [["chat", "Chat"], ["team", "Team"], ["palace", "Memory"], ["gallery", "3D"], ["voice", "Voice"], ["settings", "Settings"]];
+export type Tab = "chat" | "team" | "palace" | "gallery" | "voice" | "settings";
+export const TABS: [Tab, string][] = [["chat", "Chat"], ["team", "Team"], ["palace", "Memory"], ["gallery", "3D"], ["voice", "Voice"], ["settings", "Settings"]];
 const STATE_LABEL: Record<string, string> = {
   idle: "Ready when you are", listening: "Listening…", transcribing: "Catching that…", looking: "Taking a look…",
   thinking: "Thinking…", speaking: "Talking",
@@ -73,7 +73,7 @@ function useTalkKeys(): { verb: string; keys: string[] } {
   return talk;
 }
 
-function Chat() {
+export function Chat() {
   const { chat, agents, state } = usePanel();
   const talk = useTalkKeys();
   const [text, setText] = useState("");
@@ -122,7 +122,7 @@ function Chat() {
 }
 
 // ---------------------------------------------------------------------------- team
-function Team() {
+export function Team() {
   const { agents, jobs, frames, jobLog } = usePanel();
   const [creating, setCreating] = useState(false);
   const list = Object.values(jobs).sort((a, b) => b.created_at - a.created_at);
@@ -209,7 +209,7 @@ function JobCard({ job, frame, log }: { job: Job; frame?: string; log: string[] 
 interface Moment { id: number; ts: number; app: string; title: string; element_count: number }
 interface Activity { id: number; ts: number; kind: string; app: string; headline: string }
 
-function Palace() {
+export function Palace() {
   const { hello } = usePanel();
   const [moments, setMoments] = useState<Moment[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
@@ -282,7 +282,7 @@ const BLURBS: Record<string, string> = {
   git: "Branches as lanes in time, merging back into main.",
 };
 
-function Gallery() {
+export function Gallery() {
   const { hello } = usePanel();
   return (
     <div className="gallery">
@@ -302,7 +302,21 @@ function Gallery() {
 }
 
 // ---------------------------------------------------------------------------- settings
-function Settings() {
+/** Discord, OBS and Meet can show Wisp (default), or never see it (privacy). */
+function ShareToggle() {
+  const [on, setOn] = useState(true);
+  useEffect(() => {
+    void bridge.shareVisible().then(setOn);
+    return bridge.onShareVisible(setOn);
+  }, []);
+  return (
+    <label>
+      <input type="checkbox" checked={on} onChange={(e) => { setOn(e.target.checked); bridge.setShareVisible(e.target.checked); }} /> Show Wisp in screen shares (Discord, OBS, Meet). Turn off to keep its drawings out of every capture.
+    </label>
+  );
+}
+
+export function Settings() {
   const { hello } = usePanel();
   const [keys, setKeys] = useState<Record<string, string | null>>({});
   useEffect(() => {
@@ -318,6 +332,7 @@ function Settings() {
       <div className="kv"><span>Spent today</span><b>${hello.spent_today.toFixed(3)} of ${hello.daily_budget.toFixed(2)}</b></div>
       <label><input type="checkbox" checked={hello.privacy_paused} onChange={(e) => set("privacy_paused", e.target.checked)} /> Pause screen sharing (Ctrl+Alt+P)</label>
       <label><input type="checkbox" defaultChecked onChange={(e) => set("jobs_headed", e.target.checked)} /> Show teammates' browser windows</label>
+      <ShareToggle />
       <h4>Connected accounts</h4>
       <Connections />
       <h4>Routines</h4>

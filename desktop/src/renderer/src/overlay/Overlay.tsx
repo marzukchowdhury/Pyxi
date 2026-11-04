@@ -110,6 +110,19 @@ export function Overlay() {
     useOverlay.getState().dismissAll();
     brain.send({ type: "clear" });
   }), []);
+  // Tell the brain whether the overlay is visible to captures, so it can blank it for its own.
+  useEffect(() => {
+    if (!isPrimary) return;
+    const tell = (value: boolean) => brain.send({ type: "set", key: "overlay_in_capture", value });
+    void bridge.shareVisible().then(tell);
+    const offStatus = brain.onStatus((up) => up && void bridge.shareVisible().then(tell));
+    const offChange = bridge.onShareVisible(tell);
+    return () => {
+      offStatus();
+      offChange();
+    };
+  }, []);
+
   useEffect(() => bridge.onMuteToggle((muted) => {
     voice.muted = muted;
     if (muted) voice.stop();

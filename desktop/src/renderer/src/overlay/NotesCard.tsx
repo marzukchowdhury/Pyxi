@@ -6,12 +6,12 @@
  */
 import "@fontsource/caveat/500.css";
 import "@fontsource/caveat/700.css";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { rectToLocal, toLocal } from "../shared/bridge";
 import { Close } from "../shared/icons";
 import type { NoteItem, Sketch } from "../shared/protocol";
 import { Interactive } from "./Interactive";
-import { useOverlay } from "./store";
+import { useOverlay, voice } from "./store";
 
 const CARD_W = 300;
 const MIN_W = 230;
@@ -92,6 +92,44 @@ export function NotesCard() {
   const close = useOverlay((s) => s.closeNotes);
   const rows = useRef(new Map<number, HTMLDivElement>());
   const [anchors, setAnchors] = useState<Record<number, Pt>>({});
+  const cardEl = useRef<HTMLDivElement>(null);
+  const [cardH, setCardH] = useState(0);
+  const [reading, setReading] = useState(false); // the pointer is on the card
+  const [leaving, setLeaving] = useState(false);
+  const idleSince = useRef(0);
+
+  // Once Wisp has finished explaining, the notes stay a little while to read, then fade.
+  // Hovering the card keeps it; anything that changes the screen clears it sooner.
+  useEffect(() => {
+    if (!notes) return;
+    setLeaving(false);
+    idleSince.current = 0;
+    const linger = Math.min(22000, 7000 + notes.card.items.length * 1800);
+    const id = window.setInterval(() => {
+      const s = useOverlay.getState();
+      if (reading || s.state !== "idle" || voice.busy) {
+        idleSince.current = 0;
+        setLeaving(false);
+        return;
+      }
+      if (!idleSince.current) idleSince.current = performance.now();
+      const idle = performance.now() - idleSince.current;
+      if (idle > linger) close();
+      else if (idle > linger - 700) setLeaving(true);
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [notes?.card.id, reading, close]);
+
+  // Measure the real card, so it is never pushed off the bottom of the screen.
+  useLayoutEffect(() => {
+    const el = cardEl.current;
+    if (!el) return;
+    const measure = () => setCardH((el.parentElement ?? el).offsetHeight); // the whole card, padding included
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, [notes?.card.id]);
 
   const placed = useMemo(() => {
     if (!notes) return null;
@@ -133,23 +171,30 @@ export function NotesCard() {
       next[n] = [r.left + 9, r.top + 15];
     }
     setAnchors(next);
-  }, [notes?.revealed.join(","), notes?.card.id]);
+  }, [notes?.revealed.join(","), notes?.card.id, cardH]);
 
   if (!notes || !placed) return null;
   const { card, revealed } = notes;
   const shown = card.items.filter((i) => revealed.includes(i.n));
   const sketches = card.sketches.filter((s) => s.after === 0 || revealed.includes(s.after));
   const cardRight = placed.left + placed.width;
+  const top = cardH ? Math.max(12, Math.min(placed.top, innerHeight - cardH - 14)) : placed.top;
 
   return (
     <>
-      <svg className="notes-ink" width="100%" height="100%">
+      <svg className={`notes-ink ${leaving ? "leaving" : ""}`} width="100%" height="100%">
         {shown.map((item) => item.rect && item.mark !== "none" && (
           <Mark key={`${card.id}-${item.n}`} item={item} seed={hash(card.id) + item.n} from={anchors[item.n]} cardLeft={placed.left} cardRight={cardRight} />
         ))}
         {sketches.map((s, i) => <SketchMark key={`${card.id}-s${i}`} sketch={s} seed={hash(card.id) + 97 * i} />)}
       </svg>
-      <Interactive className="notes-card" style={{ left: placed.left, top: placed.top, width: placed.width }}>
+      <Interactive
+        className={`notes-card ${leaving ? "leaving" : ""}`}
+        style={{ left: placed.left, top, width: placed.width, maxHeight: innerHeight - 24 }}
+        onEnter={() => setReading(true)}
+        onLeave={() => setReading(false)}
+      >
+        <div ref={cardEl} className="notes-measure">
         <button className="notes-close" onClick={close} aria-label="Close notes"><Close /></button>
         <div className="notes-title">{card.title}</div>
         <div className="notes-rule" />
@@ -168,6 +213,7 @@ export function NotesCard() {
             {item.rect && item.mark !== "none" && item.kind !== "step" && <span className="note-num">{item.n}</span>}
           </div>
         ))}
+        </div>
       </Interactive>
     </>
   );

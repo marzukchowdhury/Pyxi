@@ -119,3 +119,26 @@ async def test_a_card_without_speech_narrates_itself(settings):
     says = rec.of("say")
     assert says[0]["text"].startswith("Here's the gist")
     assert [n for s in says for n in s["notes"]] == [1, 2]
+
+
+async def test_drawings_clear_when_the_user_switches_window(settings):
+    import asyncio
+
+    llm = Scripted(
+        [
+            (
+                "explain_on_screen",
+                {"title": "Gist", "items": [{"text": "Dark mode", "element_id": 3}]},
+            ),
+            ("say", {"text": "This one [note:1] flips the theme."}),
+        ]
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    titles = ["Settings - App"]
+    brain.screen.foreground_title = lambda: titles[-1]  # type: ignore[attr-defined]
+    await brain.turn("explain this")
+    await asyncio.sleep(1.4)
+    assert not rec.of("clear")  # still on the same window: the card stays
+    titles.append("Facebook - Microsoft Edge")
+    await asyncio.sleep(1.4)
+    assert len(rec.of("clear")) == 1  # switched away: everything that points at pixels goes

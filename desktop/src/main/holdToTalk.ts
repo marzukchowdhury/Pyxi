@@ -42,7 +42,17 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
     timer = null;
   };
 
-  uIOhook.on("keydown", (e) => {
+  // An exception thrown inside a hook callback aborts the whole app (napi fatal error), so
+  // every handler is guarded.
+  const safe = <T,>(fn: (e: T) => void) => (e: T) => {
+    try {
+      fn(e);
+    } catch (err) {
+      console.warn("[wisp] keyboard hook handler failed:", err);
+    }
+  };
+
+  uIOhook.on("keydown", safe((e) => {
     if (CTRL.has(e.keycode)) {
       if (!ctrl) {
         ctrlDownAt = Date.now();
@@ -71,13 +81,17 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
         timer = null;
         if (ctrl && alt && !tainted) {
           holding = true;
-          events.down();
+          try {
+            events.down();
+          } catch (err) {
+            console.warn("[wisp] push-to-talk start failed:", err);
+          }
         }
       }, HOLD_MS);
     }
-  });
+  }));
 
-  uIOhook.on("keyup", (e) => {
+  uIOhook.on("keyup", safe((e) => {
     if (CTRL.has(e.keycode)) {
       ctrl = false;
       const now = Date.now();
@@ -95,11 +109,11 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
       events.up();
     }
     if (!ctrl && !alt) tainted = false;
-  });
+  }));
 
-  uIOhook.on("mousedown", (e) => {
+  uIOhook.on("mousedown", safe((e) => {
     if (e.button === 1) events.click?.(e.x, e.y);
-  });
+  }));
 
   try {
     uIOhook.start();

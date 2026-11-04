@@ -26,6 +26,12 @@ export interface Bridge {
   onDismiss(fn: () => void): () => void;
   onPrivacyToggle(fn: () => void): () => void;
   onMuteToggle(fn: (muted: boolean) => void): () => void;
+  /** Ctrl+Alt+W or the tray icon: unfold or fold the full notch. */
+  onNotchToggle(fn: () => void): () => void;
+  /** Whether screen sharing (Discord, OBS, Meet) shows Wisp's overlay. */
+  shareVisible(): Promise<boolean>;
+  setShareVisible(value: boolean): void;
+  onShareVisible(fn: (value: boolean) => void): () => void;
   setInteractive(interactive: boolean): void;
   togglePanel(): void;
   ptt(): void;
@@ -98,6 +104,16 @@ function mockBridge(): Bridge {
     onDismiss: noop,
     onPrivacyToggle: noop,
     onMuteToggle: noop,
+    async shareVisible() {
+      return true;
+    },
+    setShareVisible() {},
+    onShareVisible: noop,
+    onNotchToggle(fn) {
+      const h = (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.code === "KeyW" && fn();
+      window.addEventListener("keydown", h);
+      return () => window.removeEventListener("keydown", h);
+    },
     setInteractive() {},
     togglePanel() {},
     ptt() {

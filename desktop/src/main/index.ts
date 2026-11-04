@@ -8,7 +8,7 @@
  * - Global hotkeys, the cursor feed for the buddy, and the Python brain's lifecycle.
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
 import {
@@ -66,6 +66,20 @@ let primaryId = 0;
 let holdToTalk = false;
 let muted = process.env.WISP_MUTE === "1";
 
+// Screen sharing (Discord, OBS, Meet): visible by default so people watching see Wisp.
+// Turn it off for privacy and the overlay is hidden from every capture, Wisp's own included.
+const UI_PREFS = join(REPO, ".wisp", "ui.json");
+function loadShareVisible(): boolean {
+  if (process.env.WISP_SHOW_OVERLAY_IN_CAPTURE === "1") return true;
+  if (process.env.WISP_SHOW_OVERLAY_IN_CAPTURE === "0") return false;
+  try {
+    return JSON.parse(readFileSync(UI_PREFS, "utf-8")).shareVisible !== false;
+  } catch {
+    return true;
+  }
+}
+let shareVisible = loadShareVisible();
+
 function rendererUrl(page: "overlay" | "panel", query: Record<string, string>): string | null {
   const dev = process.env.ELECTRON_RENDERER_URL;
   const qs = new URLSearchParams(query).toString();
@@ -108,8 +122,9 @@ function createOverlay(d: Display): void {
   win.setAlwaysOnTop(true, "screen-saver");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setIgnoreMouseEvents(true, { forward: true });
-  // Hide the overlay from screenshots (including Wisp's own): it never sees its own drawings.
-  if (process.env.WISP_SHOW_OVERLAY_IN_CAPTURE !== "1") win.setContentProtection(true);
+  // Visible to screen sharing unless the user turned that off. When visible, the overlay blanks
+  // for a moment while Wisp takes its own screenshot, so it never reads its own drawings.
+  win.setContentProtection(!shareVisible);
   const info = displayInfo(d);
   loadPage(win, "overlay", { display: JSON.stringify(info), backend: BACKEND, mute: muted ? "1" : "0" });
   overlays.set(d.id, win);
@@ -141,6 +156,13 @@ function createPanel(): void {
   });
 }
 
+/** Everything lives in the notch now; Ctrl+Alt+W and the tray icon unfold it. */
+function toggleNotch(): void {
+  const win = overlays.get(primaryId);
+  if (win && !win.isDestroyed()) win.webContents.send("notch-toggle");
+}
+
+/** The old separate panel window, still available from the tray for people who like it. */
 function togglePanel(): void {
   if (!panel) return;
   if (panel.isVisible() && panel.isFocused()) panel.hide();
@@ -151,7 +173,9 @@ function togglePanel(): void {
 }
 
 function broadcast(channel: string, ...args: unknown[]): void {
-  for (const win of [...overlays.values(), panel]) win?.webContents.send(channel, ...args);
+  for (const win of [...overlays.values(), panel]) {
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(channel, ...args);
+  }
 }
 
 async function backendUp(): Promise<boolean> {
@@ -213,26 +237,30 @@ app.whenReady().then(async () => {
     doubleTap: () => {
       // The notch lives on the primary overlay; give it the keyboard, then open the text box.
       const win = overlays.get(primaryId);
-      if (!win) return;
+      if (!win || win.isDestroyed()) return;
       win.setFocusable(true);
       win.focus();
       win.webContents.send("quick-type");
     },
-    click: (x, y) => overlays.get(primaryId)?.webContents.send("global-click", { x, y }),
+    click: (x, y) => {
+      const win = overlays.get(primaryId);
+      if (win && !win.isDestroyed()) win.webContents.send("global-click", { x, y });
+    },
   });
   registerHotkeys({
     talk: () => broadcast("ptt"),
-    panel: togglePanel,
+    panel: toggleNotch,
     dismiss: () => broadcast("dismiss"),
     privacy: () => broadcast("privacy-toggle"),
   });
 
   tray = new Tray(trayIcon());
   tray.setToolTip("Wisp");
-  tray.on("click", togglePanel);
+  tray.on("click", toggleNotch);
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: `Open panel  (${pretty(activeHotkeys.panel)})`, click: togglePanel },
+      { label: `Open Wisp  (${pretty(activeHotkeys.panel)})`, click: toggleNotch },
+      { label: "Open as a separate window", click: togglePanel },
       { label: `Talk  (${pretty(activeHotkeys.talk)})`, click: () => broadcast("ptt") },
       { label: `Dismiss drawings  (${pretty(activeHotkeys.dismiss)})`, click: () => broadcast("dismiss") },
       {
@@ -248,7 +276,7 @@ app.whenReady().then(async () => {
       { label: "Quit Wisp", click: () => app.quit() },
     ]),
   );
-  setTimeout(() => panel?.show(), 600);
+  // No window pops up at launch: the notch on the top edge is the whole interface.
 });
 
 // Overlay asks to catch the mouse while you hover its interactive bits.
@@ -283,6 +311,18 @@ ipcMain.on("action", async (_e, kind: string, value: string) => {
     pasteText();
     setTimeout(() => clipboard.writeText(previous), 900);
   }
+});
+ipcMain.handle("share-visible", () => shareVisible);
+ipcMain.on("set-share-visible", (_e, value: boolean) => {
+  shareVisible = !!value;
+  for (const win of overlays.values()) if (!win.isDestroyed()) win.setContentProtection(!shareVisible);
+  try {
+    mkdirSync(join(REPO, ".wisp"), { recursive: true });
+    writeFileSync(UI_PREFS, JSON.stringify({ shareVisible }));
+  } catch (err) {
+    console.warn("[wisp] couldn't save the screen-share setting:", err);
+  }
+  broadcast("share-visible", shareVisible);
 });
 ipcMain.handle("hotkeys", () => ({ ...activeHotkeys, hold: holdToTalk ? "Control+Alt" : null }));
 // The notch's text box needs keyboard focus, which a non-focusable overlay can't take on its own.
