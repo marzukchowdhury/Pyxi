@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 from PIL import Image, ImageDraw, ImageFont
 
 from wisp.config import ScreenConfig
-from wisp.screen import uia
+from wisp.screen import ocr, uia
+from wisp.screen.ocr import TextLine
 
 _DPI_SET = False
 
@@ -81,10 +82,18 @@ class ScreenContext:
     origin: tuple[int, int] = (0, 0)  # monitor's top-left in virtual screen coords
     excluded: str | None = None  # reason, when the foreground app is private
     model_scale: float = 1.0  # model-image px * model_scale = screen px
+    text: list[TextLine] = field(default_factory=list)  # OCR lines, ids continue after elements
 
     # ------------------------------------------------------------------ lookups
     def element(self, element_id: int) -> UIElement | None:
-        return next((e for e in self.elements if e.id == element_id), None)
+        found = next((e for e in self.elements if e.id == element_id), None)
+        if found is None and (line := next((t for t in self.text if t.id == element_id), None)):
+            found = UIElement(line.id, line.text, "ScreenText", line.rect)
+        return found
+
+    def find_text(self, quote: str, within: tuple[int, int, int, int] | None = None):
+        """Where a phrase is on screen, word-exact (from OCR). None if it isn't there."""
+        return ocr.find_text(self.text, quote, within)
 
     def children(self, element_id: int) -> list[UIElement]:
         return [e for e in self.elements if e.parent == element_id]
@@ -123,6 +132,15 @@ class ScreenContext:
             )
         else:
             lines.append("(No accessibility tree available: rely on the screenshot.)")
+        if self.text:
+            lines.append(
+                "Text read from the pixels (OCR, top to bottom; includes text inside images, "
+                "so frame or underline these, or quote their exact words):"
+            )
+            lines.extend(
+                f'[{t.id}] "{t.text[:90]}" @({t.rect[0]},{t.rect[1]},{t.rect[2]}x{t.rect[3]})'
+                for t in self.text
+            )
         return "\n".join(lines)
 
     def model_image(self, width: int, *, marks: bool = True) -> bytes | None:
@@ -250,9 +268,39 @@ class ScreenReader:
 
         elements = self._number(raw)
         shot, origin = self._grab(window.rect) if pixels else (None, (0, 0))
+        text = self._read_text(shot, origin, elements) if shot is not None else []
         return ScreenContext(
-            captured_at=now, window=window, elements=elements, screenshot=shot, origin=origin
+            captured_at=now,
+            window=window,
+            elements=elements,
+            screenshot=shot,
+            origin=origin,
+            text=text,
         )
+
+    def _read_text(
+        self, shot: Image.Image, origin: tuple[int, int], elements: list[UIElement]
+    ) -> list[TextLine]:
+        if not self.config.ocr:
+            return []
+        masked = [e.rect for e in elements if e.is_password]
+        lines = [
+            ln
+            for ln in ocr.read_lines(shot, origin)
+            if not any(_contains(m, ln.rect) for m in masked)
+        ]
+        # Keep the lines nearest the middle of the screen when there are too many.
+        if len(lines) > self.config.max_text_lines:
+            cx, cy = origin[0] + shot.width / 2, origin[1] + shot.height / 2
+            keep = sorted(
+                lines,
+                key=lambda ln: abs(ln.rect[0] + ln.rect[2] / 2 - cx) + abs(ln.rect[1] - cy),
+            )[: self.config.max_text_lines]
+            lines = [ln for ln in lines if ln in keep]
+        for ln in lines:
+            ln.id = self._next_id
+            self._next_id += 1
+        return lines
 
     def _number(self, raw: list[uia.RawElement]) -> list[UIElement]:
         # Prefer interactive and named elements when trimming to the budget.
@@ -296,6 +344,11 @@ class ScreenReader:
                 mon["left"],
                 mon["top"],
             )
+
+
+def _contains(outer: tuple[int, int, int, int], r: tuple[int, int, int, int]) -> bool:
+    cx, cy = r[0] + r[2] / 2, r[1] + r[3] / 2
+    return outer[0] <= cx <= outer[0] + outer[2] and outer[1] <= cy <= outer[1] + outer[3]
 
 
 def pick_monitor(

@@ -175,7 +175,7 @@ function Model({ scene, clock, beat, cutaway, registry, onPick }: {
       const ghost = cutaway && p.casing;
       const f = (fade.current.get(p.id) ?? 1) + ((blocking.has(p.id) ? 0.08 : 1) - (fade.current.get(p.id) ?? 1)) * k;
       fade.current.set(p.id, f);
-      const shown = (ghost ? 0.07 : 1) * op * f * (reg.mat.userData.factor as number);
+      const shown = (ghost ? 0.16 : 1) * op * f * (reg.mat.userData.factor as number);
       reg.mat.opacity = shown;
       const transparent = shown < 0.995;
       if (reg.mat.transparent !== transparent) {

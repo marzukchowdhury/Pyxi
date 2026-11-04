@@ -15,6 +15,7 @@ import type { SceneNode } from "../shared/protocol";
 import { brain } from "../shared/socket";
 import { SceneView, type Viewport } from "../scene/SceneView";
 import { Interactive } from "./Interactive";
+import { useLinger } from "./linger";
 import { display, isPrimary, useOverlay, voice } from "./store";
 
 const PLATE = { w: 760, h: 560, rise: 70, text: 178 }; // canvas rises above the plate; text lives in the bottom band
@@ -26,6 +27,9 @@ export function ScenePanel() {
   const { setStep, setPlaying, closeScene, toggleHologram } = useOverlay.getState();
   const [hover, setHover] = useState<SceneNode | null>(null);
   const narrated = useRef("");
+  // The last step told and nothing left to play: go away by itself (a memory palace stays, it is explored).
+  const done = !!scene && !palace && !scene.playing && narrated.current === `${scene.spec.id}:${scene.spec.steps.length - 1}`;
+  const linger = useLinger(done, closeScene);
 
   // Narrate the current step, then advance (auto-play).
   useEffect(() => {
@@ -66,9 +70,11 @@ export function ScenePanel() {
   const anchor = spec.anchor?.rect ? rectToLocal(spec.anchor.rect) : null;
   const flatStart = hologram && spec.layout === "exploded" && step === 0;
 
-  // Plate placement: beside the anchor if there is one (right side preferred), else bottom right.
-  let left = innerWidth - PLATE.w - 40;
-  let top = innerHeight - PLATE.h - 48;
+  // Plate placement: beside the anchor if there is one (right side preferred), else the emptiest
+  // stretch of screen the brain found, else bottom right.
+  const place = scene.place ? rectToLocal(scene.place) : null;
+  let left = place ? Math.round(place.x) : innerWidth - PLATE.w - 40;
+  let top = place ? Math.round(Math.min(place.y + PLATE.rise, innerHeight - PLATE.h - 16)) : innerHeight - PLATE.h - 48;
   if (anchor) {
     const right = anchor.x + anchor.w + 36;
     left = right + PLATE.w < innerWidth - 16 ? right : Math.max(16, anchor.x - PLATE.w - 36);
@@ -118,7 +124,7 @@ export function ScenePanel() {
 
   if (hologram) {
     return (
-      <Interactive className={`holo ${flatStart ? "flat" : ""}`} always>
+      <Interactive className={`holo ${flatStart ? "flat" : ""}`} always onEnter={linger.onEnter} onLeave={linger.onLeave}>
         <div className="holo-canvas">
           <SceneView scene={spec} step={step} hologram viewport={screenViewport} cropsBase={backendUrl} onHover={setHover} />
         </div>
@@ -135,7 +141,7 @@ export function ScenePanel() {
   return (
     <>
       {anchor && <AnchorTether anchor={anchor} plate={{ left, top, w: PLATE.w, h: PLATE.h }} />}
-      <Interactive className="explain" style={style}>
+      <Interactive className="explain" style={style} onEnter={linger.onEnter} onLeave={linger.onLeave}>
         <div className="plate" />
         <div className="horizon" style={{ top: PLATE.h - PLATE.text - 34 }} />
         <div className="explain-canvas" style={{ top: -PLATE.rise, height: canvasH }}>

@@ -42,10 +42,10 @@ interface OverlayState {
   caption: { text: string; agent: string } | null;
   annotations: LiveAnnotation[];
   flyTo: { x: number; y: number; label: string | null; until: number } | null;
-  scene: { spec: SceneSpec; step: number; playing: boolean; hologram: boolean } | null;
+  scene: { spec: SceneSpec; step: number; playing: boolean; hologram: boolean; place: [number, number, number, number] | null } | null;
   palace: { snapshotId: number; timeline: TimelineMoment[] } | null;
   /** A model built from parts. `audioKey` changes when the narration does; `version` on every edit. */
-  object: { spec: ObjectScene; audioKey: string; version: number; restart: boolean } | null;
+  object: { spec: ObjectScene; audioKey: string; version: number; restart: boolean; place: [number, number, number, number] | null } | null;
   sceneAudio: Record<string, Record<number, Clip>>;
   walkthrough: { walk: Walkthrough; step: number; playing: boolean } | null;
   walkAudio: Record<number, Clip>;
@@ -275,13 +275,13 @@ brain.on((e: BrainEvent) => {
       break;
     case "scene":
       if (sceneOnThisDisplay(e.scene))
-        useOverlay.setState({ scene: { spec: e.scene, step: 0, playing: e.scene.auto_play, hologram: e.scene.mode === "hologram" }, palace: null, object: null });
+        useOverlay.setState({ scene: { spec: e.scene, step: 0, playing: e.scene.auto_play, hologram: e.scene.mode === "hologram", place: e.place ?? null }, palace: null, object: null });
       break;
     case "object":
       // Models open on the main screen; an edit keeps the same id so the view keeps its camera.
       if (isPrimary)
         useOverlay.setState((s) => ({
-          object: { spec: e.scene, audioKey: e.audio_key, restart: e.restart, version: (s.object?.spec.id === e.scene.id ? s.object.version : 0) + 1 },
+          object: { spec: e.scene, audioKey: e.audio_key, restart: e.restart, place: e.place ?? null, version: (s.object?.spec.id === e.scene.id ? s.object.version : 0) + 1 },
           scene: null,
           palace: null,
         }));
@@ -289,7 +289,7 @@ brain.on((e: BrainEvent) => {
     case "palace":
       if (isPrimary || sceneOnThisDisplay(e.scene))
         useOverlay.setState({
-          scene: { spec: e.scene, step: 0, playing: false, hologram: true },
+          scene: { spec: e.scene, step: 0, playing: false, hologram: true, place: null },
           palace: { snapshotId: e.snapshot_id, timeline: e.timeline },
         });
       break;

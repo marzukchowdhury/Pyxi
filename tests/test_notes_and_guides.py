@@ -27,7 +27,7 @@ def test_card_points_frame_the_exact_elements():
     assert [i.n for i in card.items] == [1, 2, 3]
     assert card.items[0].rect == (140, 170, 200, 30) and card.items[1].mark == "circle"
     assert card.items[2].mark == "none" and card.items[2].kind == "aside"
-    assert len(card.sketches) == 1 and card.sketches[0].points == [(240, 185)]
+    assert len(card.sketches) == 1 and card.sketches[0].points == [(367, 185)]  # just after it
     assert card.region == (140, 170, 680, 520)  # union of what it explains, to sit beside it
 
 

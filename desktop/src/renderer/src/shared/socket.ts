@@ -58,6 +58,8 @@ class BrainSocket {
 }
 
 export const brain = new BrainSocket();
-brain.connect();
+// The desktop app always connects. A plain browser preview only connects to a running brain
+// when asked (?live=1), so a forgotten preview tab can never talk over the real app.
+if (window.wispBridge || new URLSearchParams(location.search).get("live") === "1") brain.connect();
 // Test hook: the browser preview and dev builds of the app can inject events (never in production).
 if (!window.wispBridge || import.meta.env.DEV) (window as unknown as { __wisp: BrainSocket }).__wisp = brain;

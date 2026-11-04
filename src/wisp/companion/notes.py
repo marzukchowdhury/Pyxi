@@ -18,6 +18,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from wisp.companion.annotations import resolve_point, resolve_rect
+from wisp.companion.layout import Occupancy
 from wisp.screen import ScreenContext
 
 ItemKind = Literal["point", "step", "formula", "aside"]
@@ -60,13 +61,29 @@ def _union(rects: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int] 
     return x0, y0, x1 - x0, y1 - y0
 
 
-def build_card(ctx: ScreenContext | None, args: dict[str, Any]) -> NoteCard:
-    """Turn the model's tool call (element ids, screenshot px) into screen-exact geometry."""
+def target_rect(ctx: ScreenContext | None, raw: dict[str, Any]) -> tuple[int, int, int, int] | None:
+    """What a point is about. Quoted words win: OCR finds those exact words on screen (inside
+    the element, if one was given), so an underline sits under the words themselves."""
+    if ctx is None:
+        return None
+    elem = resolve_rect(ctx, raw.get("element_id"), None)
+    quote = str(raw.get("quote") or "").strip()
+    if quote and (hit := ctx.find_text(quote, elem)):
+        return hit
+    return elem or resolve_rect(ctx, None, raw.get("box"))
+
+
+def build_card(
+    ctx: ScreenContext | None,
+    args: dict[str, Any],
+    avoid: list[tuple[int, int, int, int]] | None = None,
+) -> NoteCard:
+    """Turn the model's tool call (quotes, element ids, screenshot px) into screen-exact geometry."""
     items: list[NoteItem] = []
     for i, raw in enumerate(args.get("items", [])[:7], start=1):
         if not isinstance(raw, dict) or not str(raw.get("text", "")).strip():
             continue
-        rect = resolve_rect(ctx, raw.get("element_id"), raw.get("box"))
+        rect = target_rect(ctx, raw)
         kind = (
             raw.get("kind") if raw.get("kind") in ("point", "step", "formula", "aside") else "point"
         )
@@ -89,9 +106,13 @@ def build_card(ctx: ScreenContext | None, args: dict[str, Any]) -> NoteCard:
         if not isinstance(raw, dict):
             continue
         pts = [p for p in (resolve_point(ctx, None, xy) for xy in raw.get("points", [])[:40]) if p]
-        if raw.get("element_id") is not None and (c := resolve_point(ctx, raw["element_id"], None)):
-            pts = pts or [c]
         kind = raw.get("kind", "path")
+        wants_target = raw.get("quote") or raw.get("element_id") is not None
+        if not pts and wants_target and (r := target_rect(ctx, raw)):
+            x, y, w, h = r
+            # Ticks and crosses go just after the words; labels and arrows at their middle.
+            after = kind in ("tick", "cross")
+            pts = [(x + w + int(h * 0.9), y + h // 2)] if after else [(x + w // 2, y + h // 2)]
         if kind not in ("path", "arrow", "label", "tick", "cross") or not pts:
             continue
         sketches.append(
@@ -111,7 +132,7 @@ def build_card(ctx: ScreenContext | None, args: dict[str, Any]) -> NoteCard:
         sketches=sketches,
         region=region,
     )
-    card.place = place_card(ctx, region, [it.text for it in items], card.title)
+    card.place = place_card(ctx, region, [it.text for it in items], card.title, avoid)
     return card
 
 
@@ -130,56 +151,85 @@ def _overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
     return max(0, w) * max(0, h)
 
 
+def card_size(texts: list[str], title: str = "") -> tuple[int, int]:
+    """The note card's size in screen px (handwriting fits ~24 characters a line, titles ~18)."""
+    k = _dpi_scale()
+    lines = sum(max(1, -(-len(t) // 24)) for t in texts)
+    title_lines = max(1, -(-len(title) // 18))
+    return int(300 * k), int((58 + 34 * title_lines + 27 * lines + 9 * len(texts)) * k)
+
+
 def place_card(
     ctx: ScreenContext | None,
     region: tuple[int, int, int, int] | None,
     texts: list[str],
     title: str = "",
+    avoid: list[tuple[int, int, int, int]] | None = None,
 ) -> tuple[int, int] | None:
-    """Find where the card covers the least of what's on screen: beside, below or above what it
-    explains, scored against every visible piece of text and control (not just the region)."""
+    """The spot near what's being explained that hides the least: no text (OCR'd too, so text
+    in images counts), no busy pixels, never the notch or Wisp's other things on screen."""
     if ctx is None or region is None or ctx.screenshot is None:
         return None
     k = _dpi_scale()
-    # Handwriting at this width fits about 24 characters a line; titles about 18.
-    lines = sum(max(1, -(-len(t) // 24)) for t in texts)
-    title_lines = max(1, -(-len(title) // 18))
-    w, h = int(300 * k), int((58 + 34 * title_lines + 27 * lines + 9 * len(texts)) * k)
-    x0, y0 = ctx.to_screen(0, 0)
-    x1, y1 = ctx.to_screen(ctx.screenshot.width, ctx.screenshot.height)
-    screen_area = (x1 - x0) * (y1 - y0)
-    content = [
-        e.rect
-        for e in ctx.elements
-        if e.name.strip() and 0 < e.rect[2] * e.rect[3] < screen_area * 0.15
-    ]
+    w, h = card_size(texts, title)
     rx, ry, rw, rh = region
     gap = int(26 * k)
-    step = int(36 * k)
-    # Try every spot on a grid near what's being explained; the best one covers the least text
-    # and controls while staying close (a long thread across the screen is hard to follow).
-    candidates = [
-        (x1 - w - 16, min(max(y0 + 16, ry), y1 - h - 16)),
-        (rx - gap - w, ry),
-        (rx + rw + gap, ry),
-    ]
-    for cy in range(max(y0 + 8, ry - h - 300), min(y1 - h - 8, ry + rh + 300), step):
-        for cx in range(max(x0 + 8, rx - w - 500), min(x1 - w - 8, rx + rw + 500), step):
+    occ = Occupancy(ctx, [*(avoid or []), (rx - gap // 2, ry - gap // 2, rw + gap, rh + gap)], k=k)
+    x0, y0, sw, sh = occ.bounds()
+    x1, y1 = x0 + sw, y0 + sh
+    step = int(24 * k)
+    candidates = [(rx - gap - w, ry), (rx + rw + gap, ry), (rx, ry + rh + gap), (rx, ry - gap - h)]
+    for cy in range(y0 + 8, y1 - h - 8, step):
+        for cx in range(x0 + 8, x1 - w - 8, step):
             candidates.append((cx, cy))
     best, best_score = None, None
     for cx, cy in candidates:
-        if cx < x0 + 4 or cy < y0 + 4 or cx + w > x1 - 4 or cy + h > y1 - 4:
+        covered = occ.cost((cx, cy, w, h))
+        if covered == float("inf"):
             continue
-        box = (cx, cy, w, h)
-        if _overlap(box, (rx - gap // 2, ry - gap // 2, rw + gap, rh + gap)) > 0:
-            continue
-        covered = sum(_overlap(box, r) for r in content)
         dx = max(0, rx - (cx + w), cx - (rx + rw))
         dy = max(0, ry - (cy + h), cy - (ry + rh))
-        score = covered * 4 + (dx + dy) * h * 0.2  # hiding words is worse than a longer thread
+        score = covered + (dx + dy) * h * 0.35  # hiding words is worse than a longer thread
         if best_score is None or score < best_score:
             best, best_score = (cx, cy), score
     return best
+
+
+STAGE_SIZES = ((780, 700), (660, 600), (560, 520), (460, 440), (380, 380))  # CSS px, biggest first
+PLATE_SIZE = ((760, 650),)  # an explain_in_3d plate: canvas, rise and step text
+
+
+def place_stage(
+    ctx: ScreenContext | None,
+    avoid: list[tuple[int, int, int, int]] | None = None,
+    sizes: tuple[tuple[int, int], ...] = STAGE_SIZES,
+) -> tuple[int, int, int, int] | None:
+    """Where a 3D model should float: the biggest spot that hides the least of what's on screen
+    (text, images, video, controls), clear of the notch and of any note card. Returns
+    [x, y, w, h] in screen px, caption included."""
+    if ctx is None or ctx.screenshot is None:
+        return None
+    k = _dpi_scale()
+    occ = Occupancy(ctx, avoid, k=k)
+    x0, y0, sw, sh = occ.bounds()
+    x1, y1 = x0 + sw, y0 + sh
+    screen_area = max(1, sw * sh)
+    best: tuple[float, tuple[int, int, int, int]] | None = None
+    for w_css, h_css in sizes:
+        w, h = int(w_css * k), int(h_css * k)
+        if w > sw - 16 or h > sh - 16:
+            continue
+        step = int(32 * k)
+        for cy in range(y0 + 8, y1 - h - 8 + 1, step):
+            for cx in range(x0 + 8, x1 - w - 8 + 1, step):
+                covered = occ.cost((cx, cy, w, h))
+                if covered == float("inf"):
+                    continue
+                # Mostly: hide as little as possible. A bigger stage wins near-ties.
+                score = covered / (w * h) - (w * h) / screen_area * 0.6
+                if best is None or score < best[0]:
+                    best = (score, (cx, cy, w, h))
+    return best[1] if best else None
 
 
 class Guide(BaseModel):

@@ -53,6 +53,11 @@ class ScreenConfig(BaseModel):
         default_factory=lambda: list(DEFAULT_EXCLUDED),
         description="Regexes on window title / process name. Matching windows are never captured.",
     )
+    ocr: bool = Field(
+        True,
+        description="Read text from the pixels too (Windows OCR, offline), so text inside images can be framed.",
+    )
+    max_text_lines: int = Field(120, description="Most OCR lines given to the model per look.")
     ambient_memory: bool = Field(
         False,
         description="Build the Memory Palace (opt-in): window, focus and UI metadata over time.",

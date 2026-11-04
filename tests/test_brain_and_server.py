@@ -47,7 +47,7 @@ async def test_question_becomes_a_3d_scene_with_narration(settings):
     assert (
         turn["user_text"] == "how does https work?"
         and turn["image_path"]
-        and turn["tool_calls"][1]["tool"] == "show_scene"
+        and turn["tool_calls"][0]["tool"] == "show_scene"  # shown first, then spoken
     )
 
 

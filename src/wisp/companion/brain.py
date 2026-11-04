@@ -49,7 +49,15 @@ from wisp.companion.annotations import (
     split_markers,
 )
 from wisp.companion.errands import run_errand
-from wisp.companion.notes import Guide, build_card
+from wisp.companion.layout import Placed
+from wisp.companion.notes import (
+    PLATE_SIZE,
+    Guide,
+    build_card,
+    card_size,
+    place_stage,
+    target_rect,
+)
 from wisp.companion.tools import COMPANION_TOOLS, INFO_TOOLS
 from wisp.companion.turns import TurnStore
 from wisp.config import WispSettings
@@ -144,6 +152,8 @@ class Brain:
         self._watcher: asyncio.Future[None] | None = None
         self._job_llm: LLMProvider | None = None
         self._user_text = ""  # the user's own words this turn (errands check addresses against it)
+        self._visual_turn = False  # a 3D model or scene was shown this turn
+        self._placed = Placed()  # what's on screen now (cards, stages), so new things keep clear
         self.overlay_in_capture = (
             False  # the desktop app says whether screen shares see the overlay
         )
@@ -265,6 +275,7 @@ class Brain:
                     return
                 if now != drawn_on and now not in ("Wisp", "Wisp overlay", ""):
                     await self.hub.emit("clear")
+                    self._placed.put("card", None, 0)
                     if self._guide:
                         self._guide = None
                         await self.hub.emit("guide", active=False)
@@ -412,6 +423,7 @@ class Brain:
             )
             self._scene_retry = False
             self._turn_card = None
+            self._visual_turn = False
             self._user_text = user_text
             turn_id = "turn_" + secrets.token_hex(4)
             started = time.monotonic()
@@ -545,7 +557,17 @@ class Brain:
                 return {"round": round_no, "needs_more": False}
             notes: list[str] = []
             needs_more = False
-            for call in response.tool_calls:
+            # Show first, then talk: when a 3D model or scene is on screen its own narration does
+            # the explaining, so the spoken reply is kept to one sentence.
+            visual = {
+                "build_3d_model",
+                "edit_3d_model",
+                "explain_in_3d",
+                "explode_view",
+                "show_scene",
+            }
+            calls = sorted(response.tool_calls, key=lambda c: c.name not in visual)
+            for call in calls:
                 self._calls.append(
                     {"round": round_no, "tool": call.name, "arguments": call.arguments}
                 )
@@ -606,7 +628,10 @@ class Brain:
     async def _act(self, name: str, args: dict[str, Any]) -> str | None:
         ctx = self._ctx
         if name == "say":
-            self._speak(str(args.get("text", "")))
+            text = str(args.get("text", ""))
+            if self._visual_turn:
+                text = (split_sentences(text) or [text])[0]
+            self._speak(text)
             return None
         if name in {"point", "circle", "highlight"}:
             if name == "point":
@@ -615,14 +640,20 @@ class Brain:
                     args.get("element_id"),
                     [args["x"], args["y"]] if "x" in args and "y" in args else None,
                 )
-                rect = resolve_rect(ctx, args.get("element_id"), None)
+                rect = (
+                    target_rect(ctx, args)
+                    if args.get("quote")
+                    else resolve_rect(ctx, args.get("element_id"), None)
+                )
+                if args.get("quote") and rect:
+                    at = (rect[0] + rect[2] // 2, rect[1] + rect[3] // 2)
                 ann = (
                     Annotation(kind="point", at=at, rect=rect, label=args.get("label"))
                     if at
                     else None
                 )
             else:
-                rect = resolve_rect(ctx, args.get("element_id"), args.get("box"))
+                rect = target_rect(ctx, args)
                 ann = Annotation(kind=name, rect=rect, label=args.get("label")) if rect else None
             if ann is None:
                 return f"{name}: couldn't find that on screen."
@@ -642,12 +673,17 @@ class Brain:
             return None
         if name == "clear_drawings":
             await self.hub.emit("clear")
+            self._placed.put("card", None, 0)
             return None
         if name == "explain_on_screen":
-            card = build_card(ctx, args)
+            card = build_card(ctx, args, self._placed.others("card"))
             if not card.items:
                 return "explain_on_screen: give at least one point with text."
             await self.hub.emit("notes", card=card.model_dump(mode="json"))
+            if card.place:
+                w, h = card_size([it.text for it in card.items], card.title)
+                linger = min(22.0, 7.0 + 1.8 * len(card.items)) + 8.0  # reading time, plus speech
+                self._placed.put("card", (*card.place, w, h), linger)
             self._turn_card = card
             self._watch_window()
             missing = [it.n for it in card.items if it.mark != "none" and it.rect is None]
@@ -967,13 +1003,27 @@ class Brain:
 
     # ================================================================== scenes & walkthroughs
     async def show_scene(self, scene: SceneSpec) -> None:
-        await self.hub.emit("scene", scene=scene.model_dump(by_alias=True, mode="json"))
+        self._visual_turn = True
+        place = (
+            None
+            if scene.anchor
+            else place_stage(self._ctx, self._placed.others("stage"), PLATE_SIZE)
+        )
+        self._placed.put("stage", place, 90.0)
+        await self.hub.emit(
+            "scene",
+            scene=scene.model_dump(by_alias=True, mode="json"),
+            place=list(place) if place else None,
+        )
         self._spawn(self._narrate(scene))
 
     async def show_object(self, model: ObjectScene, *, restart: bool) -> None:
         """Put a 3D model on screen. Edits keep the id (the view keeps its camera); new beats get
         a new audio key so old narration can't play over the new explanation."""
         self._object = model
+        self._visual_turn = True
+        place = place_stage(self._ctx, self._placed.others("stage"))
+        self._placed.put("stage", place, 90.0)
         audio_key = (
             f"{model.id}:{secrets.token_hex(3)}"
             if restart
@@ -981,7 +1031,11 @@ class Brain:
         )
         self._object_audio = audio_key
         await self.hub.emit(
-            "object", scene=model.model_dump(mode="json"), audio_key=audio_key, restart=restart
+            "object",
+            scene=model.model_dump(mode="json"),
+            audio_key=audio_key,
+            restart=restart,
+            place=list(place) if place else None,
         )
         if restart:
             self._spawn(self._narrate_beats(audio_key, [b.narration for b in model.beats]))

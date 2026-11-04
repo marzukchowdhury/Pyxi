@@ -24,7 +24,10 @@ export class AudioQueue {
   private analyser: AnalyserNode | null = null;
   private gen = 0;
   /** Muted: nothing is heard, but clips still take their real time, so drawings stay in sync. */
-  muted = new URLSearchParams(location.search).get("mute") === "1";
+  muted =
+    new URLSearchParams(location.search).get("mute") === "1" ||
+    // a browser preview is silent unless asked (?sound=1)
+    (!window.wispBridge && new URLSearchParams(location.search).get("sound") !== "1");
 
   /** 0..1 loudness of whatever is playing right now (drives the buddy's mouth). */
   level(): number {

@@ -8,6 +8,13 @@ from wisp.scenes import TITLES, tool_schema
 from wisp.scenes.object_gallery import OBJECT_TITLES
 from wisp.scenes.objects import build_tool_schema, edit_tool_schema
 
+_QUOTE = {
+    "quote": {
+        "type": "string",
+        "description": "The exact words on screen this is about, copied from the OCR text list (e.g. "
+        "'Iran War'). Wisp finds those words and marks them precisely; best for text in images.",
+    }
+}
 _TARGET = {
     "element_id": {
         "type": "integer",
@@ -15,6 +22,7 @@ _TARGET = {
     },
     "x": {"type": "number", "description": "Screenshot x in px, if there's no element id."},
     "y": {"type": "number", "description": "Screenshot y in px."},
+    **_QUOTE,
 }
 _BOX = {
     "element_id": _TARGET["element_id"],
@@ -23,6 +31,7 @@ _BOX = {
         "items": {"type": "number"},
         "description": "[x, y, w, h] in screenshot px, if no element id.",
     },
+    **_QUOTE,
 }
 _LABEL = {
     "label": {"type": "string", "description": "Short caption next to the drawing (max ~6 words)."}
@@ -39,7 +48,7 @@ SAY = _tool(
     "say",
     "Say something out loud to the user. Call exactly once per turn (twice only if you also look something up). "
     "Keep it short and conversational. You can sync drawings with speech by putting markers right where they "
-    "belong: [point:12], [circle:12] or [highlight:12] (element ids). Optional sound tags: [laugh], [chuckle], [sigh].",
+    "belong: [point:12], [circle:12] or [highlight:12] (UI element or OCR line ids). Optional sound tags: [laugh], [chuckle], [sigh].",
     {"text": {"type": "string"}},
     ["text"],
 )
@@ -65,9 +74,12 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "explain_on_screen",
         "Explain something that's on screen by writing on it: a note card beside the content whose points "
         "write themselves as you speak, each framing the exact paragraph, row or control it's about, plus "
-        "freehand sketches over real content. Great for 'explain this meme / chart / page / error'. 2-6 short "
+        "freehand sketches over real content. Use it whenever they ask what's on screen, what something "
+        "says or means, or to explain a post, meme, chart, page or error. 2-6 short "
         "points (max ~10 words each); make them vivid, and an 'aside' point can carry a joke. Each point frames its "
-        "own specific thing (one cell, one line, one control): never reuse the same frame. In your `say`, put "
+        "own specific thing (one cell, one line, one control): never reuse the same frame. Give `quote` (exact "
+        "words from the OCR list) to mark words precisely, with mark 'underline' for a phrase and 'frame' for "
+        "a block; the card places itself where it hides nothing. In your `say`, put "
         "[note:1], [note:2]... in or right after the sentence where each point should appear.",
         {
             "title": {"type": "string", "description": "2-4 words, e.g. 'Why this is funny'."},
@@ -78,9 +90,10 @@ COMPANION_TOOLS: list[ToolSpec] = [
                     "properties": {
                         "text": {"type": "string"},
                         "kind": {"type": "string", "enum": ["point", "step", "formula", "aside"]},
+                        "quote": _QUOTE["quote"],
                         "element_id": {
                             "type": "integer",
-                            "description": "What this point is about (preferred).",
+                            "description": "What this point is about: a UI element or OCR line id.",
                         },
                         "box": {
                             "type": "array",
@@ -112,6 +125,7 @@ COMPANION_TOOLS: list[ToolSpec] = [
                             "description": "Screenshot px [[x, y], ...].",
                         },
                         "element_id": {"type": "integer"},
+                        "quote": _QUOTE["quote"],
                         "text": {"type": "string"},
                         "after": {
                             "type": "integer",
@@ -161,7 +175,11 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "rotating cylinders. Group assemblies with `parent` so they move together. Label only the 4-8 parts that "
         "matter. Outer shells get casing=true so the cutaway can show the inside. Give 3-6 beats with rising `at` "
         "times; animate with keyframes on the story timeline (one-off events) and spin/oscillate/looped keys for "
-        "machinery. Camera 'front' looks from +z at the x-y plane.",
+        "machinery. Camera 'front' looks from +z at the x-y plane. Build shapes the way they really look: a "
+        "wing, fuselage outline, fin or blade is ONE extrude with its outline as `profile` (e.g. a flying wing: "
+        "axis y, profile [[0,2.5],[4,-0.5],[3.2,-1.2],[1.6,-0.6],[0,-1.4],[-1.6,-0.6],[-3.2,-1.2],[-4,-0.5]]), "
+        "not stacked boxes; long round parts are cylinders/capsules with axis set. Pick cameras that show the "
+        "subject (iso, front, side, top); use cutaway only when the inside is the point.",
         build_tool_schema(),
     ),
     ToolSpec(

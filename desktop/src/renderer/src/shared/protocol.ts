@@ -303,8 +303,8 @@ export type BrainEvent =
   | { type: "capture_hide" }
   | { type: "capture_show" }
   | { type: "capture"; app: string; window: string; excluded: string | null; elements: number }
-  | { type: "scene"; scene: SceneSpec }
-  | { type: "object"; scene: ObjectScene; audio_key: string; restart: boolean }
+  | { type: "scene"; scene: SceneSpec; place?: [number, number, number, number] | null }
+  | { type: "object"; scene: ObjectScene; audio_key: string; restart: boolean; place?: [number, number, number, number] | null }
   | { type: "scene_audio"; scene_id: string; step: number; text: string; audio: string | null; duration_s: number }
   | { type: "palace"; snapshot_id: number; timeline: TimelineMoment[]; scene: SceneSpec }
   | { type: "walkthrough"; walkthrough: Walkthrough }

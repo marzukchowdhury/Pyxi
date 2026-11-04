@@ -8,13 +8,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Close, Cube, Next, Pause, Play, Prev, Replay } from "../shared/icons";
 import type { Part } from "../shared/protocol";
+import { rectToLocal } from "../shared/bridge";
 import { brain } from "../shared/socket";
 import { type Clock, ObjectView } from "../scene/ObjectView";
 import { storyDuration } from "../scene/motion";
 import { Interactive } from "./Interactive";
+import { useLinger } from "./linger";
 import { useOverlay, voice } from "./store";
 
 const STAGE = { w: 780, h: 560 };
+const CAPTION = 140; // the caption bar under the canvas, in CSS px
 const AUDIO_WAIT_MS = 2500; // how long to wait for the brain's voice before using the OS voice
 
 export function ObjectPanel() {
@@ -25,6 +28,7 @@ export function ObjectPanel() {
   const [beat, setBeat] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [cutaway, setCutaway] = useState(false);
+  const [finished, setFinished] = useState(false); // last beat told and its animation run out
   const spoken = useRef(new Set<number>()); // beats whose narration has finished
   const started = useRef("");
   const spec = object?.spec;
@@ -39,6 +43,7 @@ export function ObjectPanel() {
       spoken.current = new Set();
       started.current = "";
       setBeat(0);
+      setFinished(false);
       setPlaying(object.spec.auto_play);
     }
     setCutaway(object.spec.cutaway);
@@ -79,6 +84,7 @@ export function ObjectPanel() {
       c.limit = next ? next.at : end;
       if (!playing) return;
       if (next && c.story >= next.at - 0.001 && spoken.current.has(beat)) setBeat(beat + 1);
+      else if (!next && c.story >= end - 0.001 && spoken.current.has(beat)) setFinished(true);
     }, 60);
     return () => window.clearInterval(id);
   }, [spec, beat, playing]);
@@ -88,6 +94,9 @@ export function ObjectPanel() {
     const b = spec?.beats[beat];
     if (b?.cutaway != null) setCutaway(b.cutaway);
   }, [spec, beat]);
+
+  // Done means gone: the model leaves on its own once the story ends (resting the pointer on it keeps it).
+  const linger = useLinger(finished && playing, closeObject);
 
   if (!object || !spec) return null;
   const current = spec.beats[Math.min(beat, spec.beats.length - 1)];
@@ -104,6 +113,7 @@ export function ObjectPanel() {
     spoken.current.delete(i2);
     started.current = "";
     setBeat(i2);
+    setFinished(false);
     setPlaying(true);
   };
   const toggle = () => {
@@ -116,11 +126,15 @@ export function ObjectPanel() {
     brain.send({ type: "text", text: `In the ${spec.title} model, tell me more about the ${name}.` });
   };
 
-  // Centred, a little left of middle: the right edge is where Wisp's panel usually sits.
-  const left = Math.max(16, Math.round((innerWidth - STAGE.w) / 2 - Math.min(160, innerWidth * 0.08)));
-  const top = Math.max(70, (innerHeight - STAGE.h - 120) / 2);
+  // Where the brain found the emptiest stretch of screen; failing that, centred a little left.
+  const place = object.place ? rectToLocal(object.place) : null;
+  const width = place ? Math.round(place.w) : STAGE.w;
+  const height = place ? Math.max(220, Math.round(place.h - CAPTION)) : STAGE.h;
+  const left = place ? Math.round(place.x) : Math.max(16, Math.round((innerWidth - STAGE.w) / 2 - Math.min(160, innerWidth * 0.08)));
+  // Never let the caption run off the bottom of the screen.
+  const top = place ? Math.max(8, Math.min(Math.round(place.y), innerHeight - height - CAPTION - 8)) : Math.max(70, (innerHeight - STAGE.h - 120) / 2);
   return (
-    <Interactive className="object-stage" style={{ left, top, width: STAGE.w }}>
+    <Interactive className="object-stage" style={{ left, top, width }} onEnter={linger.onEnter} onLeave={linger.onLeave}>
       <div className="object-tools">
         {hasCasing && (
           <button className={`icon ${cutaway ? "primary" : ""}`} onClick={() => setCutaway(!cutaway)} title={cutaway ? "Put the casing back" : "Show the inside"}><Cube /></button>
@@ -128,7 +142,7 @@ export function ObjectPanel() {
         <button className="icon" onClick={() => seek(0)} title="Replay"><Replay /></button>
         <button className="icon" onClick={closeObject} title="Close"><Close /></button>
       </div>
-      <ObjectView scene={spec} clock={clock} beat={current} beatIndex={beat} cutaway={cutaway} width={STAGE.w} height={STAGE.h} onPick={ask} />
+      <ObjectView scene={spec} clock={clock} beat={current} beatIndex={beat} cutaway={cutaway} width={width} height={height} onPick={ask} />
       <div className="object-caption">
         <div className="progress">
           {spec.beats.map((_, i) => (

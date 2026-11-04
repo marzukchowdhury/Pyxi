@@ -30,6 +30,14 @@ dependencies = [
     "pypdf>=4.0",
     # Time zones on Windows (zoneinfo needs the IANA database)
     "tzdata>=2024.1",
+    # Windows' built-in OCR: reads text inside images so Wisp can underline it
+    "winrt-runtime>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Media.Ocr>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Graphics.Imaging>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Storage.Streams>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Globalization>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Foundation>=3.0; sys_platform == 'win32'",
+    "winrt-Windows.Foundation.Collections>=3.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
