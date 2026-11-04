@@ -32,7 +32,7 @@ from typing import Any, Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 from otto.llm.base import ImagePart, LLMProvider, Message, TextPart
 from otto.storage import MemoryStore, TrajectoryStore
-from otto.types import Usage
+from otto.types import ToolCall, Usage
 from PIL import Image
 from pydantic import ValidationError
 
@@ -64,6 +64,7 @@ from wisp.companion.turns import TurnStore
 from wisp.config import WispSettings
 from wisp.connectors import Connectors, Outgoing
 from wisp.hub import Hub
+from wisp.llm import make_llm
 from wisp.memory import SpatialMemory
 from wisp.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
 from wisp.routines import RoutineStore
@@ -74,6 +75,7 @@ from wisp.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summ
 from wisp.scenes.sketch import Sketchboard, steps_from_speech
 from wisp.scenes.spec import SceneAnchor
 from wisp.screen import ScreenContext, ScreenReader
+from wisp.stream_llm import StreamingChat
 from wisp.timecontext import now_block
 from wisp.voice import Transcriber, make_tts, split_sentences
 from wisp.voice.studio import LANGUAGES, VoiceStudio
@@ -106,11 +108,10 @@ class Brain:
         tts: FallbackTTS | None = None,
         screen: ScreenReader | None = None,
     ) -> None:
-        from wisp.llm import make_llm
 
         self.settings = settings
         self.hub = hub
-        self.llm = llm or make_llm(settings)
+        self.llm = llm or make_chat_llm(settings)
         self.tts = tts or make_tts(
             settings.voice, settings.models_dir, settings.data_dir / "voice.json"
         )
@@ -316,9 +317,15 @@ class Brain:
         return bool(self.settings.model_3d) and not self.settings.local_mode
 
     def _companion_tools(self) -> list:
-        if not self._builder_on():
-            return list(COMPANION_TOOLS)
-        return [BUILD_BRIEF if t.name == "build_3d_model" else t for t in COMPANION_TOOLS]
+        """The tools for this turn. 3D is only on the table when they asked for it: a normal
+        "explain this" gets underlines, circles and cue cards on the real screen, which is what
+        they want and much faster (3D takes seconds to build, and its schemas are big)."""
+        tools = list(COMPANION_TOOLS)
+        if not wants_3d(self._user_text, has_model=self._object is not None):
+            tools = [t for t in tools if t.name not in THREE_D_TOOLS]
+        if self._builder_on():
+            tools = [BUILD_BRIEF if t.name == "build_3d_model" else t for t in tools]
+        return tools
 
     def _builder_llm(self) -> LLMProvider:
         if getattr(self, "_model_llm", None) is None:
@@ -627,11 +634,29 @@ class Brain:
                 ImagePart(img, "image/jpeg") for img in self._images
             ]
             connector_tools = self.connectors.tools()
+            early: set[str] = set()
+
+            async def speak_early(call: ToolCall) -> None:
+                # Streamed: start talking the moment the spoken line is complete, while the cue
+                # card and drawings are still arriving.
+                if call.name == "say" and not early:
+                    early.add(call.id)
+                    self._calls.append(
+                        {
+                            "round": state.get("round", 0) + 1,
+                            "tool": "say",
+                            "arguments": call.arguments,
+                        }
+                    )
+                    await self._act("say", dict(call.arguments))
+
+            extra = {"on_call": speak_early} if isinstance(self.llm, StreamingChat) else {}
             response = await self.llm.complete(
                 system=system,
                 messages=[Message("user", parts)],
                 tools=[*self._companion_tools(), *(t.spec for t in connector_tools)],
                 max_tokens=9000,  # a detailed 3D model is a long tool call
+                **extra,
             )
             self._usage = self._usage + response.usage
             round_no = state.get("round", 0) + 1
@@ -658,6 +683,8 @@ class Brain:
             )
             retrying, self._visual_retry = self._visual_retry, False
             for call in calls:
+                if call.id in early:
+                    continue  # already said, while the rest was still streaming in
                 if call.name == "say" and retrying and self._said:
                     continue  # a retried drawing mustn't make Wisp say its reply twice
                 self._calls.append(
@@ -1413,6 +1440,33 @@ _FILLER = re.compile(
     r"let me show you|let me draw (that|it)|here'?s how|watch this)\b[^.!?]*[.!?]?\s*$",
     re.IGNORECASE,
 )
+
+
+THREE_D_TOOLS = {"build_3d_model", "edit_3d_model", "explain_in_3d", "explode_view"}
+_ASKS_3D = re.compile(
+    r"\b(3d|3-d|three[- ]?d|in three dimensions|(build|make|show) (me )?(a |the )?model|render|build (it|this|me|one|a|an|the)|"
+    r"cut (it |this )?open|cutaway|cross[- ]section|inside of|show me (the )?inside|what'?s inside|"
+    r"take (it )?apart|exploded?|assembl\w*|how (do|to) (i )?(attach|connect|install|fit|plug))",
+    re.IGNORECASE,
+)
+_EDITS_3D = re.compile(
+    r"\b(spin|rotate|turn it|zoom|casing|inside|bigger|smaller|again|replay|that part|the model)\b",
+    re.IGNORECASE,
+)
+
+
+def make_chat_llm(settings: WispSettings) -> LLMProvider:
+    """The conversation model: streamed and prompt-cached on OpenRouter, else Otto's client."""
+    from otto.config import infer_provider
+
+    if not settings.local_mode and infer_provider(settings.model) == "openrouter":
+        return StreamingChat(settings.model)  # type: ignore[return-value]
+    return make_llm(settings)
+
+
+def wants_3d(user_text: str, *, has_model: bool = False) -> bool:
+    """Did they ask for something 3D? (Or, with a model on screen, ask to change it?)"""
+    return bool(_ASKS_3D.search(user_text)) or (has_model and bool(_EDITS_3D.search(user_text)))
 
 
 def visual_opener(text: str, limit: int = 200) -> str:

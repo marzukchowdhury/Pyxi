@@ -38,6 +38,9 @@ inside is the point, so the shell becomes a see-through ghost and the workings s
 scale; latches, pistons, triggers and slides move with keyframes; whatever travels (air, \
 blood, fuel, water, current, data) gets `arrow` parts along its route.
 - Labels: the 4-7 parts that matter, 1-3 words each, no notes.
+- Be brief in the JSON: leave out every field that is at its default (rotation [0,0,0], \
+opacity 1, hidden, casing false, plastic material, axis y, style studio, auto_play). The \
+model is drawn while the user waits, so every extra field is time they wait.
 - Beats: 3-5, rising `at` times (2-3 s apart), each focusing the parts it is about, with the \
 camera that shows them best (side for vehicles, iso for depth, front for faces, close for a \
 detail). Narration: one vivid spoken sentence each, a concrete fact or analogy, never a \

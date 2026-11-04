@@ -22,6 +22,7 @@ async def test_a_brief_is_built_in_the_background_and_shown(settings):
     )
     brain, rec = make_brain(settings, llm=chat)
     brain._model_llm = Script([("build_3d_model", HEART)])  # the modeller
+    brain._user_text = "show me in 3D how a heart beats"
     names = {t.name: t for t in brain._companion_tools()}
     assert "subject" in names["build_3d_model"].parameters["properties"]  # chat gets the brief form
     await brain.turn("show me in 3D how a heart beats")
@@ -39,9 +40,19 @@ async def test_a_brief_is_built_in_the_background_and_shown(settings):
 async def test_without_a_builder_the_chat_model_builds_it_itself(settings):
     settings.model_3d = None
     brain, rec = make_brain(settings, llm=Script([("build_3d_model", HEART)]))
+    brain._user_text = "show me a heart in 3D"
     assert (
         "parts"
         in {t.name: t for t in brain._companion_tools()}["build_3d_model"].parameters["properties"]
     )
-    await brain.turn("show me a heart")
+    await brain.turn("show me a heart in 3D")
     assert rec.of("object")
+
+
+def test_3d_tools_only_when_asked(settings):
+    brain, _ = make_brain(settings)
+    brain._user_text = "explain this heart diagram to me"
+    names = {t.name for t in brain._companion_tools()}
+    assert "explain_on_screen" in names and "build_3d_model" not in names
+    brain._user_text = "now show it to me in 3D"
+    assert "build_3d_model" in {t.name for t in brain._companion_tools()}

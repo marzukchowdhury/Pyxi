@@ -129,6 +129,29 @@ function createOverlay(d: Display): void {
   const info = displayInfo(d);
   loadPage(win, "overlay", { display: JSON.stringify(info), backend: BACKEND, mute: muted ? "1" : "0" });
   overlays.set(d.id, win);
+  // A crashed page reloads; a closed overlay comes back while its screen is still there, so
+  // Wisp never ends up talking to a window that's gone.
+  win.webContents.on("render-process-gone", () => {
+    if (!win.isDestroyed()) win.reload();
+  });
+  win.on("closed", () => {
+    if (overlays.get(d.id) === win) overlays.delete(d.id);
+    if ((app as unknown as { quitting?: boolean }).quitting) return;
+    setTimeout(() => {
+      const still = screen.getAllDisplays().find((x) => x.id === d.id);
+      if (still && !overlays.has(d.id)) createOverlay(still);
+    }, 600);
+  });
+}
+
+/** Overlay windows that are still alive (closed ones are dropped as they're found). */
+function liveOverlays(): BrowserWindow[] {
+  const out: BrowserWindow[] = [];
+  for (const [id, win] of overlays) {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) overlays.delete(id);
+    else out.push(win);
+  }
+  return out;
 }
 
 function createPanel(): void {
@@ -206,7 +229,7 @@ function startCursorFeed(): void {
     const p = screen.getCursorScreenPoint();
     if (p.x === last.x && p.y === last.y) return;
     last = p;
-    for (const win of overlays.values()) win.webContents.send("cursor", p);
+    for (const win of liveOverlays()) win.webContents.send("cursor", p);
   }, 16);
 }
 
@@ -338,7 +361,7 @@ ipcMain.on("notify", (_e, title: string, body: string, path?: string) => {
 ipcMain.handle("share-visible", () => shareVisible);
 ipcMain.on("set-share-visible", (_e, value: boolean) => {
   shareVisible = !!value;
-  for (const win of overlays.values()) if (!win.isDestroyed()) win.setContentProtection(!shareVisible);
+  for (const win of liveOverlays()) win.setContentProtection(!shareVisible);
   try {
     mkdirSync(join(REPO, ".wisp"), { recursive: true });
     writeFileSync(UI_PREFS, JSON.stringify({ shareVisible }));

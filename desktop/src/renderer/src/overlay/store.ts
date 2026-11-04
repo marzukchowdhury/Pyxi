@@ -173,9 +173,16 @@ export function prettyApp(app: string): string {
 }
 
 /** Write the next note point(s): the ones the sentence names, or (without markers) the next one. */
+// Wisp starts talking before the cue card has finished arriving: points named in a sentence
+// that's already playing are remembered and shown the moment the card lands.
+let earlyNotes: number[] = [];
+
 function reveal(numbers: number[] | undefined): void {
   const n = useOverlay.getState().notes;
-  if (!n) return;
+  if (!n) {
+    if (numbers?.length) earlyNotes = [...new Set([...earlyNotes, ...numbers])];
+    return;
+  }
   const markers = n.markers || !!numbers?.length;
   let next = numbers?.length ? numbers : [];
   if (!markers) {
@@ -246,6 +253,7 @@ brain.on((e: BrainEvent) => {
     case "user":
       replyOpen = false;
       voiceHere = isPrimary;
+      earlyNotes = [];
       pushLine({ who: "user", text: e.text });
       break;
     case "turn_done":
@@ -352,7 +360,9 @@ brain.on((e: BrainEvent) => {
     case "notes": {
       const r = e.card.region;
       const mine = r ? onThisDisplay(r[0] + r[2] / 2, r[1] + r[3] / 2) : isPrimary;
-      if (mine) useOverlay.setState({ notes: { card: e.card, revealed: [], markers: false, at: performance.now() } });
+      const early = earlyNotes.filter((x) => e.card.items.some((i: { n: number }) => i.n === x));
+      earlyNotes = [];
+      if (mine) useOverlay.setState({ notes: { card: e.card, revealed: early, markers: early.length > 0, at: performance.now() } });
       break;
     }
     case "guide":
