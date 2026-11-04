@@ -70,7 +70,7 @@ from wisp.routines import RoutineStore
 from wisp.scenes import SceneSpec, build_exploded_scene, get_scene, parse_scene
 from wisp.scenes.object_gallery import OBJECT_GALLERY
 from wisp.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summary
-from wisp.scenes.sketch import Sketchboard
+from wisp.scenes.sketch import Sketchboard, steps_from_speech
 from wisp.scenes.spec import SceneAnchor
 from wisp.screen import ScreenContext, ScreenReader
 from wisp.timecontext import now_block
@@ -155,6 +155,9 @@ class Brain:
         self._job_llm: LLMProvider | None = None
         self._user_text = ""  # the user's own words this turn (errands check addresses against it)
         self._visual_turn = False  # a 3D model or scene was shown this turn
+        self._round_say = ""  # this round's spoken reply
+        self._say_in_board = False
+        self._visual_retry = False
         self._placed = Placed()  # what's on screen now (cards, stages), so new things keep clear
         self.overlay_in_capture = (
             False  # the desktop app says whether screen shares see the overlay
@@ -439,6 +442,8 @@ class Brain:
             self._scene_retry = False
             self._turn_card = None
             self._visual_turn = False
+            self._say_in_board = False  # the reply became a drawing's narration
+            self._visual_retry = False
             self._user_text = user_text
             turn_id = "turn_" + secrets.token_hex(4)
             started = time.monotonic()
@@ -583,7 +588,14 @@ class Brain:
                 "show_scene",
             }
             calls = sorted(response.tool_calls, key=lambda c: c.name not in visual)
+            # The spoken reply of this round, in case a drawing arrives without its own steps.
+            self._round_say = " ".join(
+                str(c.arguments.get("text", "")) for c in calls if c.name == "say"
+            )
+            retrying, self._visual_retry = self._visual_retry, False
             for call in calls:
+                if call.name == "say" and retrying and self._said:
+                    continue  # a retried drawing mustn't make Wisp say its reply twice
                 self._calls.append(
                     {"round": round_no, "tool": call.name, "arguments": call.arguments}
                 )
@@ -598,9 +610,14 @@ class Brain:
                 if (
                     is_info
                     or call.name in INFO_TOOLS
-                    or (note and note.startswith(("SCENE_INVALID", "MODEL_INVALID")))
+                    or (
+                        note
+                        and note.startswith(("SCENE_INVALID", "MODEL_INVALID", "SKETCH_INVALID"))
+                    )
                 ):
                     needs_more = True
+                if note and note.startswith(("SCENE_INVALID", "MODEL_INVALID", "SKETCH_INVALID")):
+                    self._visual_retry = True
             return {
                 "round": round_no,
                 "notes": [*state.get("notes", []), *notes],
@@ -647,6 +664,8 @@ class Brain:
         ctx = self._ctx
         if name == "say":
             text = str(args.get("text", ""))
+            if self._say_in_board:
+                return None  # already being said, step by step, by the drawing
             if self._visual_turn:
                 text = visual_opener(text)
             self._speak(text)
@@ -749,6 +768,18 @@ class Brain:
             await self.show_scene(scene)
             return f"Showing 3D scene '{scene.title}' ({len(scene.nodes)} nodes, {len(scene.steps)} steps)."
         if name == "sketch_diagram":
+            spoken: list[str] = []
+            if not args.get("steps") and isinstance(args.get("shapes"), list):
+                # No steps: narrate with the spoken reply instead, so nothing is said twice.
+                # (Not if the reply was already said, on a retry: it would be heard twice.)
+                spoken = (
+                    split_sentences(split_markers(self._round_say)[0])
+                    if self._round_say and not self._said
+                    else []
+                )
+                args["steps"] = steps_from_speech(
+                    spoken, args["shapes"], str(args.get("title", ""))
+                )
             try:
                 board = Sketchboard.model_validate(args)
             except ValidationError as exc:
@@ -758,6 +789,8 @@ class Brain:
                 return (
                     f"SKETCH_INVALID: fix these and call sketch_diagram again: {exc.errors()[:6]}"
                 )
+            # Only once it's really on screen does the drawing take over the reply.
+            self._say_in_board = bool(spoken)
             await self.show_sketch(board)
             note = (
                 f"Drawing '{board.title}' ({len(board.shapes)} shapes, {len(board.steps)} steps)."

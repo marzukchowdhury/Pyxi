@@ -180,6 +180,27 @@ NARRATION = (
     "punchline, never a description of the picture ('Here is', 'This shows'). The last one lands the 'so that's why' moment."
 )
 
+
+def steps_from_speech(sentences: list[str], shapes: list[Any], title: str) -> list[dict[str, str]]:
+    """Steps for a board the model sent without any: its spoken reply, one sentence per step,
+    so the drawing still builds in time with the words (extra sentences join the last step)."""
+    n = 1
+    for s in shapes:
+        try:
+            n = max(n, int(s.get("step", 0)) + 1)
+        except (AttributeError, TypeError, ValueError):
+            continue
+    n = min(n, MAX_STEPS)
+    lines = [s.strip() for s in sentences if s.strip()]
+    if not lines:
+        return [{"narration": title}]
+    if len(lines) <= n:
+        return [{"narration": line} for line in lines]
+    return [{"narration": line} for line in lines[: n - 1]] + [
+        {"narration": " ".join(lines[n - 1 :])}
+    ]
+
+
 _POINT = {"type": "array", "items": {"type": "number"}, "description": "[x, y]"}
 
 SKETCH_TOOL_SCHEMA: dict[str, Any] = {

@@ -94,3 +94,37 @@ async def test_a_drawing_without_a_reply_narrates_itself_instead_of_a_canned_lin
     await brain.turn("can a jet hover?")
     await asyncio.sleep(0.05)
     assert rec.of("sketch") and not rec.of("say")
+
+
+async def test_a_board_without_steps_is_narrated_by_the_reply_not_dropped(settings):
+    # Haiku sometimes leaves out `steps`: the drawing must still appear, told by the reply.
+    board = {k: v for k, v in HOVER.items() if k != "steps"}
+    reply = "Yes, but only the B version. It has a lift fan. The nozzle points down. Lift equals weight."
+    brain, rec = make_brain(
+        settings, llm=Script([("say", {"text": reply}), ("sketch_diagram", board)])
+    )
+    await brain.turn("can this jet hover?")
+    for _ in range(100):
+        if len(rec.of("scene_audio")) >= 4:
+            break
+        await asyncio.sleep(0.02)
+    [ev] = rec.of("sketch")
+    assert [s["narration"] for s in ev["board"]["steps"]] == [
+        "Yes, but only the B version.",
+        "It has a lift fan.",
+        "The nozzle points down.",
+        "Lift equals weight.",
+    ]
+    assert not rec.of("say")  # said once, by the drawing, not twice
+
+
+async def test_a_rejected_board_is_retried_without_repeating_the_reply(settings):
+    llm = Script(
+        [("say", {"text": "Real. Watch this."}), ("sketch_diagram", {"title": "x", "shapes": []})],
+        [("say", {"text": "Real. Watch this."}), ("sketch_diagram", HOVER)],
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("can this jet hover?")
+    await asyncio.sleep(0.1)
+    assert rec.of("sketch")  # the second try drew it
+    assert " ".join(s["text"] for s in rec.of("say")) == "Real. Watch this."  # said once
