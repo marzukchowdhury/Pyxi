@@ -119,11 +119,15 @@ def doctor() -> None:
     rows = [
         ("Wisp", __version__),
         ("Brain", s.brain_model + (" (local)" if s.local_mode else "")),
-        (
-            "ANTHROPIC_API_KEY",
-            "set" if os.getenv("ANTHROPIC_API_KEY") else "missing (demo mode will be used)",
-        ),
     ]
+    from wisp.server import key_env
+
+    needed = key_env(s.model)
+    for env in ("ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"):
+        state = "set" if os.getenv(env) else "missing"
+        if env == needed and not os.getenv(env) and not s.local_mode:
+            state += " (needed for this model; demo mode will be used)"
+        rows.append((env, state))
     kokoro = (s.models_dir / "kokoro-v1.0.onnx").exists()
     rows.append(("Kokoro voice", "installed" if kokoro else "missing: run `wisp setup-voice`"))
     try:

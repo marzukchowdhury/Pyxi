@@ -27,11 +27,19 @@ log = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"^[a-f0-9]{12}\.png$")
 
 
+def key_env(model: str) -> str:
+    """Which environment variable holds the key for ``model``."""
+    from otto.config import infer_provider
+
+    return {"anthropic": "ANTHROPIC_API_KEY", "openrouter": "OPENROUTER_API_KEY"}.get(
+        infer_provider(model), "OPENAI_API_KEY"
+    )
+
+
 def has_key(settings: WispSettings) -> bool:
     if settings.local_mode:
         return True
-    env = "ANTHROPIC_API_KEY" if settings.model.startswith("claude") else "OPENAI_API_KEY"
-    return bool(os.getenv(env))
+    return bool(os.getenv(key_env(settings.model)))
 
 
 def create_app(

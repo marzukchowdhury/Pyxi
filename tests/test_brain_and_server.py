@@ -167,3 +167,14 @@ def test_server_websocket_round_trip(settings):
         assert any(e["type"] == "scene" and e["scene"]["title"] == "How Wisp works" for e in seen)
         assert client.get("/file", params={"path": "C:/Windows/win.ini"}).status_code == 404
         assert client.get("/crops/..%2F..%2Fsecret.png").status_code == 404
+
+
+def test_openrouter_models_need_the_openrouter_key(settings, monkeypatch):
+    from wisp.server import has_key, key_env
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    s = settings.model_copy(update={"model": "anthropic/claude-haiku-5.5"})
+    assert key_env(s.model) == "OPENROUTER_API_KEY" and not has_key(s)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    assert has_key(s)
+    assert key_env("claude-opus-5-5") == "ANTHROPIC_API_KEY"

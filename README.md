@@ -71,6 +71,16 @@ cd desktop && npm install && npm run dev
 
 **Best quality:** put `ANTHROPIC_API_KEY=...` in `.env` (Claude Opus 5.5 by default).
 
+**Through OpenRouter:** one key for Claude, Gemini, GPT and more, with exact per-request costs in the panel. In `.env`:
+
+```
+OPENROUTER_API_KEY=sk-or-...
+WISP_MODEL=anthropic/claude-haiku-5.5
+WISP_JOB_MODEL=anthropic/claude-sonnet-5.5
+```
+
+Set a credit limit on the key in OpenRouter's dashboard for a hard spending cap.
+
 **Fully local:** pull a vision model and start the brain in local mode.
 
 ```bash
@@ -243,7 +253,7 @@ tests/               brain, scenes, screen, voice, palace, agents, server (pytes
 pytest
 ```
 
-22 backend tests, all offline (a fake screen, the demo brain, the OS voice). One drives a real Chromium: Scout fills a three-page form, Quill writes it up from Scout's result, and the Ghost Walkthrough is built with exact click targets.
+23 backend tests, all offline (a fake screen, the demo brain, the OS voice). One drives a real Chromium: Scout fills a three-page form, Quill writes it up from Scout's result, and the Ghost Walkthrough is built with exact click targets.
 
 ```bash
 cd desktop && npm test && npm run typecheck
