@@ -83,6 +83,16 @@ class DemoLLM:
                 _call("say", text="Ooh, good one. Let me build it for you in 3D."),
                 _call("show_scene", name="https"),
             ]
+        if has("eject", "pilot", "fighter jet"):
+            return [
+                _call("say", text="Strap in. This one's got rockets."),
+                _call("show_scene", name="ejection_seat"),
+            ]
+        if has("engine", "piston", "four-stroke", "four stroke"):
+            return [
+                _call("say", text="Suck, squeeze, bang, blow. Watch the piston."),
+                _call("show_scene", name="engine"),
+            ]
         if has("how do you work", "how does wisp", "how you work", "who are you"):
             return [
                 _call("say", text="Here's a peek at my insides!"),

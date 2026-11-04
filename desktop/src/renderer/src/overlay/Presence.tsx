@@ -12,7 +12,7 @@
  */
 import { useEffect, useRef } from "react";
 import { bridge, cursorToLocal, toLocal } from "../shared/bridge";
-import { display, useOverlay, voice } from "./store";
+import { display, isPrimary, useOverlay, voice } from "./store";
 
 const OFFSET = { x: 18, y: 6 };
 
@@ -127,7 +127,8 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
           <path className="diamond" d="M6 2 10.6 22 6 42 1.4 22Z" />
           <path className="diamond-shimmer" d="M6 2 10.6 22 6 42 1.4 22Z" />
         </svg>
-        {caption && (
+        {/* The main screen speaks through the notch; other screens keep a caption by the cursor. */}
+        {caption && !isPrimary && (
           <div className="caption" key={caption.text}>
             {caption.agent !== "Wisp" && <span className="caption-agent">{caption.agent}</span>}
             {caption.text}

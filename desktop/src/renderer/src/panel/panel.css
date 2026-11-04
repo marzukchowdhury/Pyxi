@@ -182,3 +182,48 @@ input[type="checkbox"] { height: auto; accent-color: #9ecbff; margin-top: 2px; }
 html.web-preview { background: radial-gradient(120% 80% at 30% 0%, #1a1f2b, #07080b); }
 .palace-optin { margin-bottom: 12px; padding: 14px; border-radius: 12px; border: 1px solid rgba(158,203,255,.3); background: rgba(158,203,255,.05); }
 .palace-optin b { font-size: 13.5px; } .palace-optin p { margin: 6px 0 12px; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+
+/* voice studio */
+.studio { display: grid; gap: 12px; font-size: 13px; padding-bottom: 18px; }
+.studio h4 { margin: 8px 0 -2px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.now { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 16px; background: radial-gradient(120% 120% at 0% 0%, rgba(158,203,255,.1), transparent 60%), var(--surface); border: 1px solid var(--hair); box-shadow: 0 1px 0 var(--hair-hi) inset; }
+.now-text { flex: 1; min-width: 0; }
+.now-kicker { font-size: 10.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ice); }
+.now-name { margin-top: 3px; font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
+.now-name span { margin-left: 8px; font-size: 13px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
+.now-engine { margin-top: 2px; font-size: 12px; color: var(--ink-3); }
+.round { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(158,203,255,.4); background: rgba(158,203,255,.12); color: var(--ice-hi); transition: transform .25s var(--spring), background .2s; }
+.round:hover { background: rgba(158,203,255,.22); transform: scale(1.05); }
+.round.on { box-shadow: 0 0 22px rgba(158,203,255,.35); }
+.segmented { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--surface); border: 1px solid var(--hair); }
+.segmented button { position: relative; flex: 1; height: 30px; border: 0; border-radius: 8px; background: none; color: var(--ink-3); font-size: 12.5px; font-weight: 500; transition: color .18s, background .25s var(--spring); }
+.segmented button.on { color: var(--ink); background: rgba(255,255,255,.07); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 1px 3px rgba(0,0,0,.3); }
+.segmented button i { position: absolute; top: 7px; right: 8px; width: 5px; height: 5px; border-radius: 50%; background: #ffcf9e; box-shadow: 0 0 6px #ffcf9e; }
+.studio-blurb { margin: -4px 2px 0; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+.studio-note { padding: 9px 12px; border-radius: 11px; font-size: 12px; line-height: 1.45; }
+.studio-note.warn { color: #ffd9b8; background: rgba(255,179,138,.07); border: 1px solid rgba(255,179,138,.2); }
+.studio-setup { display: grid; gap: 8px; padding: 14px 16px; border-radius: 14px; border: 1px dashed var(--hair-hi); background: var(--surface); }
+.studio-setup b { font-size: 13.5px; }
+.studio-setup ol { margin: 0; padding-left: 18px; color: var(--ink-2); line-height: 1.7; font-size: 12.5px; }
+.studio-setup p { margin: 0; color: var(--ink-2); font-size: 12.5px; }
+.studio-setup button { justify-self: start; }
+.voice-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.voice-card { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 14px 6px 11px; border-radius: 14px; border: 1px solid var(--hair); background: var(--surface); text-align: center; transition: border-color .2s, background .2s, transform .25s var(--spring); }
+.voice-card:hover { border-color: rgba(158,203,255,.35); background: var(--surface-hi); transform: translateY(-1px); }
+.voice-card.on { border-color: rgba(158,203,255,.6); background: rgba(158,203,255,.08); box-shadow: 0 0 0 1px rgba(158,203,255,.25) inset, 0 0 20px rgba(158,203,255,.12); }
+.voice-card b { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+.voice-card span { font-size: 11px; color: var(--ink-3); }
+.signature { display: inline-flex; align-items: center; justify-content: center; gap: 2.5px; height: 24px; width: 40px; }
+.signature i { width: 2.5px; border-radius: 2px; background: hsl(var(--h) 85% 80%); box-shadow: 0 0 6px hsl(var(--h) 90% 70% / .55); transform-origin: center; transition: transform .2s var(--ease); }
+.signature.big { height: 44px; width: 64px; gap: 4px; }
+.signature.big i { width: 4px; }
+.voice-card.playing .signature i, .signature.active i { transition: none; }
+.chips-row { display: flex; gap: 6px; }
+.chips-row button { flex: 1; height: 32px; border-radius: 10px; border: 1px solid var(--hair); background: var(--surface); color: var(--ink-2); font-size: 12.5px; font-weight: 500; transition: all .18s var(--ease); }
+.chips-row button.on { color: var(--ice-hi); border-color: rgba(158,203,255,.5); background: rgba(158,203,255,.12); }
+.select-row, .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--hair); color: var(--ink-2); }
+.select-row select { height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--hair-hi); background: #14161c; color: var(--ink); outline: none; }
+.switch { appearance: none; flex: none; width: 36px; height: 21px; border-radius: 999px; background: rgba(255,255,255,.12); position: relative; cursor: pointer; transition: background .2s; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 15px; height: 15px; border-radius: 50%; background: #fff; transition: transform .25s var(--spring); }
+.switch:checked { background: rgba(158,203,255,.7); }
+.switch:checked::after { transform: translateX(15px); }

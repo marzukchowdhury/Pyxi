@@ -38,7 +38,11 @@ class VoiceConfig(BaseModel):
         "kokoro", description="kokoro (local CPU), chatterbox (local GPU), client (OS voice)."
     )
     voice: str = Field("af_heart", description="Default Kokoro voice; each agent can pick its own.")
-    speed: float = 1.05
+    stt_multilingual_model: str = Field(
+        "small",
+        description="faster-whisper model used when the language is Automatic or not English.",
+    )
+    speed: float = 1.0
     chatterbox_reference: Path | None = Field(
         None, description="Reference clip for Chatterbox voice cloning."
     )

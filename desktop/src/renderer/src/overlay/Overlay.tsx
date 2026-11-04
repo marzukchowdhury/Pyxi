@@ -3,6 +3,9 @@ import { Recorder } from "../shared/audio";
 import { bridge } from "../shared/bridge";
 import { brain } from "../shared/socket";
 import { Annotations } from "./Annotations";
+import { NotesCard } from "./NotesCard";
+import { Notch } from "./Notch";
+import { ObjectPanel } from "./ObjectPanel";
 import { Presence } from "./Presence";
 import { Requests } from "./Requests";
 import { ScenePanel } from "./ScenePanel";
@@ -14,8 +17,8 @@ const backdrop = new URLSearchParams(location.search).get("backdrop");
 
 export function Overlay() {
   const recorder = useRef(new Recorder());
+  const discard = useRef(false);
   const connected = useOverlay((s) => s.connected);
-  const paused = useOverlay((s) => s.paused);
 
   // Push-to-talk: the hotkey toggles recording; silence after speech also ends it.
   useEffect(() => {
@@ -39,9 +42,69 @@ export function Overlay() {
         console.warn("microphone unavailable", err);
         useOverlay.setState({ listening: false });
         brain.send({ type: "ptt_cancel" });
+        const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+        const hint = /NotAllowed|Permission/i.test(reason)
+          ? "Windows blocked the microphone. Turn on Settings > Privacy & security > Microphone > Let desktop apps access your microphone."
+          : /NotFound|Overconstrained/i.test(reason)
+            ? "No microphone was found. Plug one in or pick a default input in Windows Sound settings."
+            : "The microphone couldn't start.";
+        brain.send({ type: "notice", message: `${hint} (${reason})` });
       }
     });
   }, []);
+
+  // Hold Ctrl + Alt: start on press, send on release, discard if another key interrupts.
+  useEffect(() => {
+    if (!isPrimary) return;
+    const rec = recorder.current;
+    const offDown = bridge.onPttDown(async () => {
+      if (rec.active) return;
+      voice.stop();
+      brain.send({ type: "interrupt" });
+      brain.send({ type: "ptt_start" });
+      useOverlay.setState({ listening: true, state: "listening" });
+      try {
+        await rec.start((data, mime) => {
+          useOverlay.setState({ listening: false });
+          if (discard.current) {
+            discard.current = false;
+            brain.send({ type: "ptt_cancel" });
+          } else brain.send({ type: "audio", data, mime });
+        }, false);
+      } catch (err) {
+        useOverlay.setState({ listening: false });
+        brain.send({ type: "ptt_cancel" });
+        const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+        brain.send({ type: "notice", message: `The microphone couldn't start. Check Settings > Privacy & security > Microphone. (${reason})` });
+      }
+    });
+    const offUp = bridge.onPttUp(() => rec.stop());
+    const offCancel = bridge.onPttCancel(() => {
+      discard.current = true;
+      rec.stop();
+    });
+    return () => {
+      offDown();
+      offUp();
+      offCancel();
+    };
+  }, []);
+
+  // Guides: when you click the control Wisp marked, tell the brain so it can look again.
+  useEffect(
+    () =>
+      bridge.onGlobalClick(({ x, y }) => {
+        const target = useOverlay.getState().annotations.find((a) => a.guide && a.rect);
+        if (!target?.rect) return;
+        const [rx, ry, rw, rh] = target.rect;
+        const pad = 6;
+        if (x >= rx - pad && y >= ry - pad && x <= rx + rw + pad && y <= ry + rh + pad) {
+          useOverlay.setState((s) => ({ annotations: s.annotations.filter((a) => !a.guide) }));
+          brain.send({ type: "guide_clicked" });
+        }
+      }),
+    [],
+  );
 
   useEffect(() => bridge.onDismiss(() => {
     useOverlay.getState().dismissAll();
@@ -55,13 +118,16 @@ export function Overlay() {
     <div className={`overlay ${backdrop ? "with-backdrop" : ""}`}>
       {backdrop && <FakeDesktop />}
       <Annotations />
+      <NotesCard />
       <ScenePanel />
+      <ObjectPanel />
       <Walkthrough />
       <Team />
       <Requests />
       <Presence micLevel={micLevel} />
-      {isPrimary && !connected && <div className="notice">Waiting for Wisp's brain <code>wisp serve</code></div>}
-      {isPrimary && paused && <div className="notice muted">Screen paused<kbd>Ctrl Alt P</kbd></div>}
+      {isPrimary && <Notch micLevel={micLevel} />}
+      {/* The main screen shows connection and privacy state in the notch. */}
+      {!isPrimary && !connected && <div className="notice">Waiting for Wisp's brain <code>wisp serve</code></div>}
     </div>
   );
 }

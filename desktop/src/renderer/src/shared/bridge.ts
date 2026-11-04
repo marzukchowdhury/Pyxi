@@ -14,6 +14,13 @@ export interface Bridge {
   electron: boolean;
   onCursor(fn: (p: { x: number; y: number }) => void): () => void;
   onPtt(fn: () => void): () => void;
+  onPttDown(fn: () => void): () => void;
+  onPttUp(fn: () => void): () => void;
+  onPttCancel(fn: () => void): () => void;
+  onQuickType(fn: () => void): () => void;
+  /** Mouse clicks anywhere on the desktop, in physical screen px (only used for guides). */
+  onGlobalClick(fn: (p: { x: number; y: number }) => void): () => void;
+  focusOverlay(): void;
   onDismiss(fn: () => void): () => void;
   onPrivacyToggle(fn: () => void): () => void;
   setInteractive(interactive: boolean): void;
@@ -21,6 +28,7 @@ export interface Bridge {
   ptt(): void;
   openExternal(url: string): void;
   displays(): Promise<DisplayInfo[]>;
+  hotkeys(): Promise<Record<"talk" | "panel" | "dismiss" | "privacy" | "hold", string | null>>;
 }
 
 declare global {
@@ -48,6 +56,38 @@ function mockBridge(): Bridge {
         window.removeEventListener("keydown", key);
       };
     },
+    // Browser preview: hold Ctrl + Alt works while the page has focus.
+    onPttDown(fn) {
+      const h = (e: KeyboardEvent) => e.ctrlKey && e.altKey && (e.key === "Control" || e.key === "Alt") && !e.repeat && fn();
+      window.addEventListener("keydown", h);
+      return () => window.removeEventListener("keydown", h);
+    },
+    onPttUp(fn) {
+      const h = (e: KeyboardEvent) => (e.key === "Control" || e.key === "Alt") && fn();
+      window.addEventListener("keyup", h);
+      return () => window.removeEventListener("keyup", h);
+    },
+    onPttCancel: noop,
+    onGlobalClick(fn) {
+      const h = (e: MouseEvent) => fn({ x: e.clientX, y: e.clientY });
+      window.addEventListener("mousedown", h);
+      return () => window.removeEventListener("mousedown", h);
+    },
+    // Browser preview: double-tap Ctrl while the page has focus.
+    onQuickType(fn) {
+      let last = 0;
+      const h = (e: KeyboardEvent) => {
+        if (e.key !== "Control" || e.repeat) return;
+        const now = performance.now();
+        if (now - last < 360) {
+          last = 0;
+          fn();
+        } else last = now;
+      };
+      window.addEventListener("keyup", h);
+      return () => window.removeEventListener("keyup", h);
+    },
+    focusOverlay() {},
     onDismiss: noop,
     onPrivacyToggle: noop,
     setInteractive() {},
@@ -60,6 +100,9 @@ function mockBridge(): Bridge {
     },
     async displays() {
       return [currentDisplay()];
+    },
+    async hotkeys() {
+      return { talk: "Control+Alt+Space", panel: "Control+Alt+W", dismiss: "Control+Alt+Backspace", privacy: "Control+Alt+P", hold: "Control+Alt" };
     },
   };
 }
@@ -83,6 +126,11 @@ export function currentDisplay(): DisplayInfo {
 }
 
 export const backendUrl = params.get("backend") ?? "http://127.0.0.1:8766";
+
+/** "Control+Alt+Space" -> ["Ctrl", "Alt", "Space"] for display. */
+export function keysOf(accelerator: string | null | undefined): string[] {
+  return accelerator ? accelerator.split("+").map((k) => (k === "Control" ? "Ctrl" : k)) : [];
+}
 
 /** Physical screen px (what the brain sends) -> CSS px inside this overlay window. */
 export function toLocal(x: number, y: number, d: DisplayInfo = currentDisplay()): [number, number] {

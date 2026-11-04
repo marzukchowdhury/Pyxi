@@ -22,9 +22,20 @@ from wisp.config import WispSettings
 from wisp.hub import Hub
 from wisp.palace.tracker import PalaceTracker
 from wisp.scenes import TITLES, get_scene
+from wisp.scenes.object_gallery import OBJECT_GALLERY, OBJECT_TITLES
 
 log = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"^[a-f0-9]{12}\.png$")
+
+
+# Panel setting keys -> VoicePrefs fields.
+VOICE_KEYS = {
+    "voice_engine": "engine",
+    "voice": "voice",
+    "voice_speed": "speed",
+    "voice_language": "language",
+    "captions": "captions",
+}
 
 
 def key_env(model: str) -> str:
@@ -85,7 +96,12 @@ def create_app(
     app.state.brain, app.state.hub = brain, hub
 
     def hello() -> dict[str, Any]:
-        return {**brain.public_state(), "version": __version__, "demo": demo, "gallery": TITLES}
+        return {
+            **brain.public_state(),
+            "version": __version__,
+            "demo": demo,
+            "gallery": {**TITLES, **OBJECT_TITLES},
+        }
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -130,6 +146,22 @@ def create_app(
             raise HTTPException(404)
         return FileResponse(target)
 
+    async def _preview(msg: dict[str, Any]) -> None:
+        """Speak a sample line in a voice without changing the setting (the voice picker)."""
+        studio = brain.studio
+        if studio is None:
+            return
+        engine, voice = str(msg.get("engine", "kokoro")), str(msg.get("voice", ""))
+        speech = await studio.preview(engine, voice, msg.get("speed"))
+        await hub.emit(
+            "voice_preview",
+            engine=engine,
+            voice=voice,
+            text=speech.text,
+            audio=base64.b64encode(speech.wav).decode() if speech.wav else None,
+            error=studio.last_error,
+        )
+
     @app.websocket("/ws")
     async def ws(socket: WebSocket) -> None:
         await socket.accept()
@@ -162,7 +194,21 @@ def create_app(
         elif kind == "job_control":
             brain.jobs.control(msg.get("job_id", ""), msg.get("action", ""), msg.get("text", ""))
         elif kind == "show_scene":
-            await brain.show_scene(get_scene(msg.get("name", "wisp")))
+            name = msg.get("name", "wisp")
+            if name in OBJECT_GALLERY:
+                await brain.show_object(OBJECT_GALLERY[name](), restart=True)
+            else:
+                await brain.show_scene(get_scene(name))
+        elif kind == "guide_clicked":
+            brain._spawn(brain.guide_clicked())
+        elif kind == "guide_cancel":
+            brain._guide = None
+        elif kind == "voice_catalog" and brain.studio:
+            await hub.emit(
+                "voice_catalog", catalog=await brain.studio.catalog(), voice=brain.studio.public()
+            )
+        elif kind == "voice_preview" and brain.studio:
+            brain._spawn(_preview(msg))
         elif kind == "palace_seek" and msg.get("snapshot_id"):
             brain._spawn(brain.time_travel("", snapshot_id=int(msg["snapshot_id"])))
         elif kind == "time_travel":
@@ -171,6 +217,8 @@ def create_app(
             brain._spawn(brain.start_walkthrough(msg.get("job_id")))
         elif kind == "clear":
             await hub.emit("clear")
+        elif kind == "notice" and msg.get("message"):
+            await hub.emit("error", message=str(msg["message"])[:400])
         elif kind == "agent_create":
             brain.registry.create(
                 msg["name"],
@@ -193,6 +241,8 @@ def create_app(
             elif key == "keep_screenshots":
                 settings.screen.keep_screenshots = bool(value)
                 brain.spatial.thumbs_dir = settings.palace_dir if value else None
+            elif key in VOICE_KEYS and brain.studio:
+                brain.studio.update(**{VOICE_KEYS[key]: value})
             elif key == "forget_screen":
                 brain.spatial.forget_all()
                 brain.activity.forget_all()

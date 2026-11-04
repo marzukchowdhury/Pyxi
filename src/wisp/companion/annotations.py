@@ -10,8 +10,9 @@ from pydantic import BaseModel, Field
 
 from wisp.screen import ScreenContext
 
-Kind = Literal["point", "circle", "highlight", "arrow"]
-MARKER = re.compile(r"\[(point|circle|highlight):(\d+)\]", re.IGNORECASE)
+Kind = Literal["point", "circle", "highlight", "arrow", "click"]
+# [point:12] etc. draw on element 12; [note:2] reveals point 2 of the note card on that sentence.
+MARKER = re.compile(r"\[(point|circle|highlight|note):(\d+)\]", re.IGNORECASE)
 
 
 class Annotation(BaseModel):
@@ -24,6 +25,7 @@ class Annotation(BaseModel):
     to: tuple[int, int] | None = None
     label: str | None = None
     ttl_s: float = 9.0
+    guide: bool = False  # a click target Wisp is waiting for you to click
 
 
 def resolve_rect(
@@ -52,6 +54,8 @@ def resolve_point(
 
 
 def from_marker(ctx: ScreenContext | None, kind: str, element_id: int) -> Annotation | None:
+    if kind.lower() == "note":
+        return None
     e = ctx.element(element_id) if ctx else None
     if e is None:
         return None

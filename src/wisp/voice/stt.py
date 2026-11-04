@@ -3,6 +3,10 @@
 The overlay records with MediaRecorder (webm/opus) and sends the clip; faster-whisper
 decodes it with its bundled PyAV/FFmpeg, so no system FFmpeg install is needed. The model
 loads lazily on first use and stays warm afterwards.
+
+English uses the small, fast English-only model. Any other language, or "Automatic", uses a
+multilingual model (downloaded once, on first use) that also reports which language you spoke,
+so Wisp can answer in it.
 """
 
 from __future__ import annotations
@@ -20,10 +24,10 @@ log = logging.getLogger(__name__)
 class Transcriber:
     def __init__(self, config: VoiceConfig) -> None:
         self.config = config
-        self._model = None
+        self._models: dict[str, object] = {}
         self._lock = asyncio.Lock()
 
-    def _load(self):
+    def _load(self, name: str):
         from faster_whisper import WhisperModel
 
         device = self.config.stt_device
@@ -36,29 +40,42 @@ class Transcriber:
                 device = "cpu"
         try:
             return WhisperModel(
-                self.config.stt_model,
+                name,
                 device=device,
                 compute_type="float16" if device == "cuda" else "int8",
             )
         except Exception as exc:  # CUDA libs missing etc: CPU always works
             log.warning("Whisper on %s failed (%s); using CPU.", device, exc)
-            return WhisperModel(self.config.stt_model, device="cpu", compute_type="int8")
+            return WhisperModel(name, device="cpu", compute_type="int8")
 
-    async def warm_up(self) -> None:
+    def model_for(self, language: str) -> str:
+        english_only = self.config.stt_model.endswith(".en")
+        return (
+            self.config.stt_model
+            if language == "en" or not english_only
+            else self.config.stt_multilingual_model
+        )
+
+    async def warm_up(self, language: str = "en"):
+        name = self.model_for(language)
         async with self._lock:
-            if self._model is None:
-                self._model = await asyncio.to_thread(self._load)
+            if name not in self._models:
+                self._models[name] = await asyncio.to_thread(self._load, name)
+        return self._models[name]
 
-    async def transcribe(self, audio: bytes) -> tuple[str, float]:
-        """Return (text, seconds taken)."""
-        await self.warm_up()
+    async def transcribe(self, audio: bytes, language: str = "en") -> tuple[str, float, str]:
+        """Return (text, seconds taken, language spoken). ``language`` may be "auto"."""
+        model = await self.warm_up(language)
         started = time.monotonic()
+        name = self.model_for(language)
 
-        def run() -> str:
-            segments, _ = self._model.transcribe(
-                io.BytesIO(audio), language="en", vad_filter=True, beam_size=1
+        def run() -> tuple[str, str]:
+            lang = "en" if name.endswith(".en") else (None if language == "auto" else language)
+            segments, info = model.transcribe(
+                io.BytesIO(audio), language=lang, vad_filter=True, beam_size=1
             )
-            return " ".join(s.text.strip() for s in segments).strip()
+            text = " ".join(s.text.strip() for s in segments).strip()
+            return text, lang or getattr(info, "language", "en") or "en"
 
-        text = await asyncio.to_thread(run)
-        return text, time.monotonic() - started
+        text, spoken = await asyncio.to_thread(run)
+        return text, time.monotonic() - started, spoken

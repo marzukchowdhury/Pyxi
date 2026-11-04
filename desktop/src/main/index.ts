@@ -10,6 +10,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
 import {
   app,
   BrowserWindow,
@@ -26,18 +27,40 @@ import {
 
 const BACKEND = process.env.WISP_BACKEND ?? "http://127.0.0.1:8766";
 const REPO = resolve(__dirname, "../../..");
-const HOTKEYS = {
-  talk: "Control+Alt+Space",
-  panel: "Control+Alt+W",
-  dismiss: "Control+Alt+Backspace",
-  privacy: "Control+Alt+P",
-};
+// Each action tries its shortcuts in order and keeps the first one Windows lets us have.
+// Other apps (Discord, overlays, launchers) often own a combination already; without a
+// fallback the shortcut would silently do nothing.
+const HOTKEY_CHOICES = {
+  talk: ["Control+Alt+Space", "Control+Shift+Space", "Alt+Shift+Space", "Control+Alt+T", "F8"],
+  panel: ["Control+Alt+W", "Control+Shift+W", "Alt+Shift+W"],
+  dismiss: ["Control+Alt+Backspace", "Control+Shift+Backspace"],
+  privacy: ["Control+Alt+P", "Control+Shift+P"],
+} as const;
+type HotkeyName = keyof typeof HOTKEY_CHOICES;
+const activeHotkeys: Record<HotkeyName, string | null> = { talk: null, panel: null, dismiss: null, privacy: null };
+
+function registerHotkeys(handlers: Record<HotkeyName, () => void>): void {
+  for (const name of Object.keys(HOTKEY_CHOICES) as HotkeyName[]) {
+    for (const accelerator of HOTKEY_CHOICES[name]) {
+      if (globalShortcut.register(accelerator, handlers[name])) {
+        activeHotkeys[name] = accelerator;
+        break;
+      }
+      console.warn(`[wisp] ${accelerator} is taken by another app; trying the next option for "${name}".`);
+    }
+    if (!activeHotkeys[name]) console.warn(`[wisp] no free shortcut for "${name}"; use the panel instead.`);
+  }
+  console.log("[wisp] hotkeys:", JSON.stringify(activeHotkeys));
+}
+
+const pretty = (accelerator: string | null) => (accelerator ?? "unavailable").replace("Control", "Ctrl");
 
 const overlays = new Map<number, BrowserWindow>();
 let panel: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let brain: ChildProcess | null = null;
 let primaryId = 0;
+let holdToTalk = false;
 
 function rendererUrl(page: "overlay" | "panel", query: Record<string, string>): string | null {
   const dev = process.env.ELECTRON_RENDERER_URL;
@@ -177,19 +200,37 @@ app.whenReady().then(async () => {
     overlays.delete(d.id);
   });
 
-  globalShortcut.register(HOTKEYS.talk, () => broadcast("ptt"));
-  globalShortcut.register(HOTKEYS.panel, togglePanel);
-  globalShortcut.register(HOTKEYS.dismiss, () => broadcast("dismiss"));
-  globalShortcut.register(HOTKEYS.privacy, () => broadcast("privacy-toggle"));
+  // Hold Ctrl + left Alt to talk (the main way to use Wisp). The shortcut below stays as a
+  // press-to-toggle fallback, and also covers keyboards where the hook can't start.
+  holdToTalk = startHoldToTalk({
+    down: () => broadcast("ptt-down"),
+    up: () => broadcast("ptt-up"),
+    cancel: () => broadcast("ptt-cancel"),
+    doubleTap: () => {
+      // The notch lives on the primary overlay; give it the keyboard, then open the text box.
+      const win = overlays.get(primaryId);
+      if (!win) return;
+      win.setFocusable(true);
+      win.focus();
+      win.webContents.send("quick-type");
+    },
+    click: (x, y) => overlays.get(primaryId)?.webContents.send("global-click", { x, y }),
+  });
+  registerHotkeys({
+    talk: () => broadcast("ptt"),
+    panel: togglePanel,
+    dismiss: () => broadcast("dismiss"),
+    privacy: () => broadcast("privacy-toggle"),
+  });
 
   tray = new Tray(trayIcon());
   tray.setToolTip("Wisp");
   tray.on("click", togglePanel);
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "Open panel  (Ctrl+Alt+W)", click: togglePanel },
-      { label: "Talk  (Ctrl+Alt+Space)", click: () => broadcast("ptt") },
-      { label: "Dismiss drawings  (Ctrl+Alt+Backspace)", click: () => broadcast("dismiss") },
+      { label: `Open panel  (${pretty(activeHotkeys.panel)})`, click: togglePanel },
+      { label: `Talk  (${pretty(activeHotkeys.talk)})`, click: () => broadcast("ptt") },
+      { label: `Dismiss drawings  (${pretty(activeHotkeys.dismiss)})`, click: () => broadcast("dismiss") },
       { type: "separator" },
       { label: "Quit Wisp", click: () => app.quit() },
     ]),
@@ -202,7 +243,8 @@ ipcMain.on("set-interactive", (e, interactive: boolean) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   win?.setIgnoreMouseEvents(!interactive, { forward: true });
   if (win && interactive) win.setFocusable(true);
-  if (win && !interactive) win.setFocusable(false);
+  // Keep the keyboard while the notch's text box is in use, even after the mouse leaves it.
+  if (win && !interactive && !win.isFocused()) win.setFocusable(false);
 });
 ipcMain.on("toggle-panel", togglePanel);
 ipcMain.on("ptt", () => broadcast("ptt"));
@@ -210,8 +252,17 @@ ipcMain.on("open-external", (_e, url: string) => {
   if (/^https?:\/\//.test(url)) void shell.openExternal(url);
 });
 ipcMain.handle("displays", () => screen.getAllDisplays().map(displayInfo));
+ipcMain.handle("hotkeys", () => ({ ...activeHotkeys, hold: holdToTalk ? "Control+Alt" : null }));
+// The notch's text box needs keyboard focus, which a non-focusable overlay can't take on its own.
+ipcMain.on("focus-overlay", (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win) return;
+  win.setFocusable(true);
+  win.focus();
+});
 
 app.on("before-quit", () => {
+  stopHoldToTalk();
   (app as unknown as { quitting?: boolean }).quitting = true;
   globalShortcut.unregisterAll();
   brain?.kill();

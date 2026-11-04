@@ -5,6 +5,8 @@ from __future__ import annotations
 from otto.llm.base import ToolSpec
 
 from wisp.scenes import TITLES, tool_schema
+from wisp.scenes.object_gallery import OBJECT_TITLES
+from wisp.scenes.objects import build_tool_schema, edit_tool_schema
 
 _TARGET = {
     "element_id": {
@@ -59,6 +61,87 @@ COMPANION_TOOLS: list[ToolSpec] = [
         },
     ),
     _tool("clear_drawings", "Remove all drawings from the screen.", {}),
+    _tool(
+        "explain_on_screen",
+        "Explain something that's on screen by writing on it: a note card beside the content whose points "
+        "write themselves as you speak, each framing the exact paragraph, row or control it's about, plus "
+        "freehand sketches over real content. Great for 'explain this meme / chart / page / error'. 2-6 short "
+        "points (max ~10 words each); make them vivid, and an 'aside' point can carry a joke. In your `say`, put "
+        "[note:1], [note:2]... in the sentence where each point should appear.",
+        {
+            "title": {"type": "string", "description": "2-4 words, e.g. 'Why this is funny'."},
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "kind": {"type": "string", "enum": ["point", "step", "formula", "aside"]},
+                        "element_id": {
+                            "type": "integer",
+                            "description": "What this point is about (preferred).",
+                        },
+                        "box": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "[x, y, w, h] screenshot px if no id.",
+                        },
+                        "mark": {
+                            "type": "string",
+                            "enum": ["frame", "underline", "circle", "none"],
+                        },
+                    },
+                    "required": ["text"],
+                },
+            },
+            "sketches": {
+                "type": "array",
+                "description": "Freehand marks: path (a stroke through points, e.g. a chart's rise), arrow (first to last point), "
+                "label (handwritten text at a point), tick, cross.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "kind": {
+                            "type": "string",
+                            "enum": ["path", "arrow", "label", "tick", "cross"],
+                        },
+                        "points": {
+                            "type": "array",
+                            "items": {"type": "array", "items": {"type": "number"}},
+                            "description": "Screenshot px [[x, y], ...].",
+                        },
+                        "element_id": {"type": "integer"},
+                        "text": {"type": "string"},
+                        "after": {
+                            "type": "integer",
+                            "description": "Appear with note point N (0 = immediately).",
+                        },
+                    },
+                },
+            },
+        },
+        ["title", "items"],
+    ),
+    _tool(
+        "guide",
+        "Walk the user through doing something themselves, one click at a time: mark the single control to click "
+        "next and say what to do. Wisp waits for their real click on it, then you see the new screen and give the "
+        "next step (call guide again), or say they're done (done=true).",
+        {
+            "element_id": {"type": "integer"},
+            "box": {"type": "array", "items": {"type": "number"}},
+            "label": {"type": "string", "description": "What to click, 1-4 words, e.g. 'Export'."},
+            "goal": {
+                "type": "string",
+                "description": "The overall goal, e.g. 'turn on dark mode'.",
+            },
+            "done": {
+                "type": "boolean",
+                "description": "True when the goal is reached (no new target).",
+            },
+        },
+        ["goal"],
+    ),
     ToolSpec(
         "explain_in_3d",
         "Build an interactive 3D explanation that floats over the screen. Use it when the user is confused, asks how "
@@ -67,6 +150,25 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "(hierarchies), orbit (a core with parts), stack (layers), grid (matrices, networks), timeline (sequences). "
         "Anchor it to the element it explains.",
         tool_schema(),
+    ),
+    ToolSpec(
+        "build_3d_model",
+        "Build a real-looking 3D model of a physical thing (machine, vehicle, device, organ, building) from parts, "
+        "with callouts and narrated, animated beats that play like a short video. Use it for 'how does X work', "
+        "'show me inside X', 'what happens when...' about physical things; use explain_in_3d for ideas and flows. "
+        "Units: y is up, the whole model about 2-12 units across, centred near the origin. Set `axis` instead of "
+        "rotating cylinders. Group assemblies with `parent` so they move together. Label only the 4-8 parts that "
+        "matter. Outer shells get casing=true so the cutaway can show the inside. Give 3-6 beats with rising `at` "
+        "times; animate with keyframes on the story timeline (one-off events) and spin/oscillate/looped keys for "
+        "machinery. Camera 'front' looks from +z at the x-y plane.",
+        build_tool_schema(),
+    ),
+    ToolSpec(
+        "edit_3d_model",
+        "Change the 3D model already on screen: 'show the inside' (cutaway), 'remove the casing' (hide), "
+        "'make that part move' (add_motions), recolour or resize parts, add parts, or replace the beats with a new "
+        "explanation. Refer to parts by id.",
+        edit_tool_schema(),
     ),
     _tool(
         "explode_view",
@@ -95,8 +197,10 @@ COMPANION_TOOLS: list[ToolSpec] = [
         {
             "name": {
                 "type": "string",
-                "enum": list(TITLES),
-                "description": "; ".join(f"{k}: {v}" for k, v in TITLES.items()),
+                "enum": [*TITLES, *OBJECT_TITLES],
+                "description": "; ".join(
+                    f"{k}: {v}" for k, v in {**TITLES, **OBJECT_TITLES}.items()
+                ),
             }
         },
         ["name"],

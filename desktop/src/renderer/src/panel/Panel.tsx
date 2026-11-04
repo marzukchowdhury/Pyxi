@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { bridge } from "../shared/bridge";
+import { bridge, keysOf } from "../shared/bridge";
 import { Cube, Mark, Mic, Minus, Plus, Replay, Send, Thread } from "../shared/icons";
 import type { Agent, Job } from "../shared/protocol";
 import { brain } from "../shared/socket";
 import { answer, getJson, usePanel } from "./store";
+import { VoiceStudio } from "./VoiceStudio";
 
-type Tab = "chat" | "team" | "palace" | "gallery" | "settings";
-const TABS: [Tab, string][] = [["chat", "Chat"], ["team", "Team"], ["palace", "Memory"], ["gallery", "3D Gallery"], ["settings", "Settings"]];
+type Tab = "chat" | "team" | "palace" | "gallery" | "voice" | "settings";
+const TABS: [Tab, string][] = [["chat", "Chat"], ["team", "Team"], ["palace", "Memory"], ["gallery", "3D"], ["voice", "Voice"], ["settings", "Settings"]];
 const STATE_LABEL: Record<string, string> = {
   idle: "Ready when you are", listening: "Listening…", transcribing: "Catching that…", looking: "Taking a look…",
   thinking: "Thinking…", speaking: "Talking",
@@ -32,7 +33,7 @@ export function Panel() {
         )}
         <button className="win" onClick={() => bridge.togglePanel()} title="Hide (Ctrl+Alt+W)"><Minus /></button>
       </header>
-      {hello?.demo && <div className="demo-banner">Demo mode: no API key found, so Wisp uses a scripted brain. Add ANTHROPIC_API_KEY or run <code>wisp serve --local</code>.</div>}
+      {hello?.demo && <div className="demo-banner">Demo mode: no API key found, so Wisp uses a scripted brain. Add OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) to wisp/.env, or run <code>wisp serve --local</code>.</div>}
       {requests.map((r) => (
         <div key={r.request_id} className="approval">
           <b>{r.agent}</b> {r.kind === "confirm" ? "wants to" : "asks"}: {r.text}
@@ -52,6 +53,7 @@ export function Panel() {
         {tab === "team" && <Team />}
         {tab === "palace" && <Palace />}
         {tab === "gallery" && <Gallery />}
+        {tab === "voice" && <VoiceStudio />}
         {tab === "settings" && <Settings />}
       </main>
     </div>
@@ -61,8 +63,18 @@ export function Panel() {
 // ---------------------------------------------------------------------------- chat
 const SUGGESTIONS = ["How does HTTPS work?", "Explode this panel", "How did I get here?", "Have Scout fill in the demo form", "Show me how you did it"];
 
+/** The talk gesture: hold Ctrl + Alt when the keyboard hook is running, else the shortcut. */
+function useTalkKeys(): { verb: string; keys: string[] } {
+  const [talk, setTalk] = useState({ verb: "Hold", keys: ["Ctrl", "Alt"] });
+  useEffect(() => {
+    void bridge.hotkeys().then((h) => setTalk(h.hold ? { verb: "Hold", keys: keysOf(h.hold) } : { verb: "Press", keys: keysOf(h.talk) }));
+  }, []);
+  return talk;
+}
+
 function Chat() {
   const { chat, agents, state } = usePanel();
+  const talk = useTalkKeys();
   const [text, setText] = useState("");
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -81,7 +93,9 @@ function Chat() {
           <div className="hello">
             <div className="big-mark"><Mark size={46} /></div>
             <h2>Hi, I'm Wisp.</h2>
-            <p>Hold <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> and ask about anything on your screen, or type below. I'll point, draw, explain in 3D, or send a teammate to do it.</p>
+            <p>
+              {talk.keys.length ? <>{talk.verb} {talk.keys.map((k, i) => <span key={k}>{i > 0 && "+"}<kbd>{k}</kbd></span>)} and ask</> : "Click the mic below and ask"} about anything on your screen, or type below. I'll point, draw, explain in 3D, or send a teammate to do it.
+            </p>
             <div className="chips">{SUGGESTIONS.map((s) => <button key={s} onClick={() => send(s)}>{s}</button>)}</div>
           </div>
         )}
@@ -98,7 +112,7 @@ function Chat() {
         <div ref={end} />
       </div>
       <form className="composer" onSubmit={(e) => { e.preventDefault(); send(text); }}>
-        <button type="button" className={`mic ${state === "listening" ? "live" : ""}`} onClick={() => bridge.ptt()} title="Talk (Ctrl+Alt+Space)"><Mic /></button>
+        <button type="button" className={`mic ${state === "listening" ? "live" : ""}`} onClick={() => bridge.ptt()} title={`Talk (${talk.keys.join("+") || "click"})`}><Mic /></button>
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask Wisp anything" />
         <button type="submit" className="send" disabled={!text.trim()} aria-label="Send"><Send /></button>
       </form>
@@ -289,6 +303,11 @@ function Gallery() {
 // ---------------------------------------------------------------------------- settings
 function Settings() {
   const { hello } = usePanel();
+  const [keys, setKeys] = useState<Record<string, string | null>>({});
+  useEffect(() => {
+    void bridge.hotkeys().then(setKeys);
+  }, []);
+  const k = (name: string) => keysOf(keys[name]).join("+") || "unavailable";
   if (!hello) return <p className="muted">Waiting for Wisp's brain…</p>;
   const set = (key: string, value: unknown) => brain.send({ type: "set", key, value });
   return (
@@ -299,10 +318,12 @@ function Settings() {
       <label><input type="checkbox" checked={hello.privacy_paused} onChange={(e) => set("privacy_paused", e.target.checked)} /> Pause screen sharing (Ctrl+Alt+P)</label>
       <label><input type="checkbox" defaultChecked onChange={(e) => set("jobs_headed", e.target.checked)} /> Show teammates' browser windows</label>
       <h4>Hotkeys</h4>
-      <div className="kv"><span>Talk (push-to-talk toggle)</span><kbd>Ctrl+Alt+Space</kbd></div>
-      <div className="kv"><span>Show or hide this panel</span><kbd>Ctrl+Alt+W</kbd></div>
-      <div className="kv"><span>Dismiss drawings and scenes</span><kbd>Ctrl+Alt+Backspace</kbd></div>
-      <div className="kv"><span>Pause screen sharing</span><kbd>Ctrl+Alt+P</kbd></div>
+      {keys.hold && <div className="kv"><span>Talk (hold, release to send)</span><kbd>{k("hold")}</kbd></div>}
+      <div className="kv"><span>Type to Wisp</span><kbd>Ctrl, Ctrl</kbd></div>
+      <div className="kv"><span>Talk (press to start or stop)</span><kbd>{k("talk")}</kbd></div>
+      <div className="kv"><span>Show or hide this panel</span><kbd>{k("panel")}</kbd></div>
+      <div className="kv"><span>Dismiss drawings and scenes</span><kbd>{k("dismiss")}</kbd></div>
+      <div className="kv"><span>Pause screen sharing</span><kbd>{k("privacy")}</kbd></div>
       <h4>Privacy</h4>
       <p className="muted">Wisp only looks at your screen when you talk to it, plus lightweight UI metadata for the Memory Palace. Password managers, banking and password fields are never captured. Everything is stored locally in <code>.wisp/</code>. Wisp v{hello.version}.</p>
     </div>

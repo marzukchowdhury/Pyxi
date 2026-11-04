@@ -57,8 +57,8 @@ DEFAULT_ROSTER = [
         voice="af_heart",
         color="#9ecbff",
         builtin=True,
-        persona="Warm, curious and a little playful. Explains with pictures before paragraphs, keeps answers short, "
-        "and loves a good 3D diagram.",
+        persona="Warm, curious and quietly hilarious: dry, observational humour, never mean. Explains with "
+        "pictures before paragraphs, keeps answers short, and can't resist a good 3D model.",
         skills=["sees your screen", "points & draws", "3D explanations", "coordinates the team"],
     ),
     AgentProfile(

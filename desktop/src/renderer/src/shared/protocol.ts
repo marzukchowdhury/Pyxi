@@ -5,12 +5,36 @@ export type BrainState = "idle" | "listening" | "transcribing" | "looking" | "th
 
 export interface Annotation {
   id: string;
-  kind: "point" | "circle" | "highlight" | "arrow";
+  kind: "point" | "circle" | "highlight" | "arrow" | "click";
   rect: Rect | null;
   at: [number, number] | null;
   to: [number, number] | null;
   label: string | null;
   ttl_s: number;
+  guide?: boolean;
+}
+
+export interface NoteItem {
+  n: number;
+  text: string;
+  kind: "point" | "step" | "formula" | "aside";
+  mark: "frame" | "underline" | "circle" | "none";
+  rect: Rect | null;
+}
+
+export interface Sketch {
+  kind: "path" | "arrow" | "label" | "tick" | "cross";
+  points: [number, number][];
+  text: string | null;
+  after: number;
+}
+
+export interface NoteCard {
+  id: string;
+  title: string;
+  items: NoteItem[];
+  sketches: Sketch[];
+  region: Rect | null;
 }
 
 export type Shape =
@@ -62,6 +86,84 @@ export interface SceneSpec {
   nodes: SceneNode[];
   edges: SceneEdge[];
   steps: SceneStep[];
+  auto_play: boolean;
+}
+
+// ---- object scenes (src/wisp/scenes/objects.py): models built from parts, animated on a timeline
+export type Vec3 = [number, number, number];
+export type PartShape =
+  | "box" | "rounded_box" | "sphere" | "cylinder" | "cone" | "capsule" | "torus" | "ring" | "wedge"
+  | "tube" | "extrude" | "gear" | "spring" | "plane";
+export type Material =
+  | "metal" | "brushed_metal" | "dark_metal" | "gold" | "plastic" | "rubber" | "glass" | "painted"
+  | "fabric" | "wood" | "ceramic" | "skin" | "emissive";
+export type Axis = "x" | "y" | "z";
+
+export interface Part {
+  id: string;
+  shape: PartShape;
+  size: Vec3;
+  axis: Axis;
+  position: Vec3;
+  rotation: Vec3;
+  parent: string | null;
+  material: Material;
+  color: string | null;
+  opacity: number;
+  label: string | null;
+  note: string | null;
+  casing: boolean;
+  hidden: boolean;
+  taper: number | null;
+  path: Vec3[] | null;
+  radius: number | null;
+  profile: [number, number][] | null;
+  teeth: number | null;
+  turns: number | null;
+}
+
+export interface Key {
+  t: number;
+  position: Vec3 | null;
+  rotation: Vec3 | null;
+  scale: Vec3 | null;
+  opacity: number | null;
+}
+
+export interface Motion {
+  part: string;
+  kind: "keyframes" | "spin" | "oscillate" | "pulse";
+  keys: Key[];
+  axis: Axis;
+  prop: "position" | "rotation" | "scale";
+  amount: number;
+  speed: number;
+  period: number;
+  phase: number;
+  loop: boolean;
+  start: number;
+  end: number | null;
+  ease: "linear" | "in" | "out" | "in_out" | "spring";
+}
+
+export interface Beat {
+  title: string;
+  narration: string;
+  at: number;
+  focus: string[];
+  camera: "iso" | "front" | "back" | "side" | "left" | "top" | "below" | "close" | "wide";
+  cutaway: boolean | null;
+}
+
+export interface ObjectScene {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  style: "studio" | "sticker" | "blueprint" | "xray";
+  parts: Part[];
+  motions: Motion[];
+  beats: Beat[];
+  cutaway: boolean;
   auto_play: boolean;
 }
 
@@ -126,6 +228,28 @@ export interface Pin {
   rect: Rect;
 }
 
+export interface VoiceInfo {
+  id: string;
+  name: string;
+  vibe: string;
+  engine: "kokoro" | "elevenlabs" | "gemini";
+  accent: string;
+  lang: string;
+  gender: string;
+  sample: string;
+}
+
+export interface VoicePublic {
+  engine: "kokoro" | "elevenlabs" | "gemini";
+  voice: string;
+  speed: number;
+  language: string;
+  captions: boolean;
+  available: Record<"kokoro" | "elevenlabs" | "gemini", boolean>;
+  languages: Record<string, string>;
+  error: string | null;
+}
+
 export interface Hello {
   state: BrainState;
   agents: Agent[];
@@ -135,6 +259,7 @@ export interface Hello {
   model: string;
   local_mode: boolean;
   tts: string;
+  voice: VoicePublic | null;
   privacy_paused: boolean;
   ambient_memory: boolean;
   keep_screenshots: boolean;
@@ -149,12 +274,15 @@ export type BrainEvent =
   | { type: "state"; state: BrainState }
   | { type: "user"; text: string; turn_id: string }
   | { type: "transcript"; text: string; seconds: number }
-  | { type: "say"; agent: string; index: number; total: number; text: string; audio: string | null; duration_s: number; annotations: Annotation[] }
+  | { type: "say"; agent: string; index: number; total: number; text: string; audio: string | null; duration_s: number; annotations: Annotation[]; notes?: number[] }
+  | { type: "notes"; card: NoteCard }
+  | { type: "guide"; active: boolean; step?: number; goal?: string; label?: string }
   | { type: "stop_audio" }
   | { type: "annotate"; annotations: Annotation[] }
   | { type: "clear" }
   | { type: "capture"; app: string; window: string; excluded: string | null; elements: number }
   | { type: "scene"; scene: SceneSpec }
+  | { type: "object"; scene: ObjectScene; audio_key: string; restart: boolean }
   | { type: "scene_audio"; scene_id: string; step: number; text: string; audio: string | null; duration_s: number }
   | { type: "palace"; snapshot_id: number; timeline: TimelineMoment[]; scene: SceneSpec }
   | { type: "walkthrough"; walkthrough: Walkthrough }
@@ -168,6 +296,8 @@ export type BrainEvent =
   | { type: "agents"; agents: Agent[] }
   | { type: "pins"; app: string; pins: Pin[] }
   | { type: "turn_done"; turn_id: string; cost_usd: number; tokens: number; spent_today: number; daily_budget: number }
+  | { type: "voice_catalog"; catalog: Record<string, VoiceInfo[]>; voice: VoicePublic }
+  | { type: "voice_preview"; engine: string; voice: string; text: string; audio: string | null; error: string | null }
   | { type: "error"; message: string };
 
 export type ClientMessage =
@@ -185,4 +315,9 @@ export type ClientMessage =
   | { type: "clear" }
   | { type: "agent_create"; name: string; role: string; persona: string; voice?: string }
   | { type: "agent_delete"; id: string }
-  | { type: "set"; key: string; value: unknown };
+  | { type: "set"; key: string; value: unknown }
+  | { type: "notice"; message: string }
+  | { type: "voice_catalog" }
+  | { type: "guide_clicked" }
+  | { type: "guide_cancel" }
+  | { type: "voice_preview"; engine: string; voice: string; speed?: number };

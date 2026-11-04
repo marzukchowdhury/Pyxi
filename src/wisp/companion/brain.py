@@ -43,6 +43,7 @@ from wisp.companion.annotations import (
     resolve_rect,
     split_markers,
 )
+from wisp.companion.notes import Guide, build_card
 from wisp.companion.tools import COMPANION_TOOLS, INFO_TOOLS
 from wisp.companion.turns import TurnStore
 from wisp.config import WispSettings
@@ -50,9 +51,12 @@ from wisp.hub import Hub
 from wisp.memory import SpatialMemory
 from wisp.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
 from wisp.scenes import SceneSpec, build_exploded_scene, get_scene, parse_scene
+from wisp.scenes.object_gallery import OBJECT_GALLERY
+from wisp.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summary
 from wisp.scenes.spec import SceneAnchor
 from wisp.screen import ScreenContext, ScreenReader
 from wisp.voice import Transcriber, make_tts, split_sentences
+from wisp.voice.studio import LANGUAGES, VoiceStudio
 from wisp.voice.tts import FallbackTTS
 from wisp.walkthrough import build_walkthrough
 
@@ -85,7 +89,9 @@ class Brain:
         self.settings = settings
         self.hub = hub
         self.llm = llm or make_llm(settings)
-        self.tts = tts or make_tts(settings.voice, settings.models_dir)
+        self.tts = tts or make_tts(
+            settings.voice, settings.models_dir, settings.data_dir / "voice.json"
+        )
         self.stt = Transcriber(settings.voice)
         self.screen = screen or ScreenReader(settings.screen)
         db = settings.db_path
@@ -123,6 +129,8 @@ class Brain:
         self._said: list[str] = []
         self._calls: list[dict[str, Any]] = []
         self._scene_retry = False
+        self._object: ObjectScene | None = None  # the 3D model on screen, so follow-ups can edit it
+        self._guide: Guide | None = None  # a click Wisp is waiting for
 
     # ================================================================== entry points
     async def set_state(self, state: State) -> None:
@@ -138,7 +146,12 @@ class Brain:
     async def hear(self, audio: bytes) -> None:
         await self.set_state("transcribing")
         try:
-            text, took = await self.stt.transcribe(audio)
+            studio = self.studio
+            text, took, spoken = await self.stt.transcribe(
+                audio, studio.prefs.language if studio else "en"
+            )
+            if studio:
+                studio.detected_language = spoken
         except Exception as exc:
             log.exception("transcription failed")
             await self.hub.emit("error", message=f"I couldn't hear that: {exc}")
@@ -151,11 +164,23 @@ class Brain:
             return
         await self.turn(text)
 
+    async def guide_clicked(self) -> None:
+        """The user clicked the control Wisp was waiting on: look again and give the next step."""
+        guide = self._guide
+        if guide is None or self._lock.locked():
+            return
+        await asyncio.sleep(0.7)  # let the app react to the click before looking
+        await self.turn(
+            f"(I clicked '{guide.label}', step {guide.step}. Look at the screen now and guide me to the next "
+            f"step toward: {guide.goal}. If that's done, tell me and call guide with done=true.)",
+            shown=f"Clicked {guide.label}",
+        )
+
     def interrupt(self) -> None:
         self._speech_gen += 1
         self._spawn(self.hub.emit("stop_audio"))
 
-    async def turn(self, user_text: str) -> None:
+    async def turn(self, user_text: str, *, shown: str | None = None) -> None:
         async with self._lock:
             self._ctx, self._images, self._usage, self._said, self._calls = (
                 None,
@@ -167,7 +192,7 @@ class Brain:
             self._scene_retry = False
             turn_id = "turn_" + secrets.token_hex(4)
             started = time.monotonic()
-            await self.hub.emit("user", text=user_text, turn_id=turn_id)
+            await self.hub.emit("user", text=shown or user_text, turn_id=turn_id)
             error = None
             try:
                 await self._graph.ainvoke(
@@ -274,13 +299,18 @@ class Brain:
                 jobs=jobs,
                 memories=memories,
                 notes=state.get("notes", []),
+                on_screen=object_summary(self._object) if self._object else "",
+                language=self._reply_language(),
                 budget_line=f"spent today ${self.turns.spent_today():.3f} of ${budget.daily_cost_usd:.2f}; this turn ${self._usage.cost_usd:.3f} of ${budget.max_cost_usd:.2f}",
             )
             parts: list[TextPart | ImagePart] = [TextPart(text)] + [
                 ImagePart(img, "image/jpeg") for img in self._images
             ]
             response = await self.llm.complete(
-                system=system, messages=[Message("user", parts)], tools=COMPANION_TOOLS
+                system=system,
+                messages=[Message("user", parts)],
+                tools=COMPANION_TOOLS,
+                max_tokens=9000,  # a detailed 3D model is a long tool call
             )
             self._usage = self._usage + response.usage
             round_no = state.get("round", 0) + 1
@@ -301,7 +331,9 @@ class Brain:
                     note = f"{call.name} failed: {exc}"
                 if note:
                     notes.append(note)
-                if call.name in INFO_TOOLS or (note and note.startswith("SCENE_INVALID")):
+                if call.name in INFO_TOOLS or (
+                    note and note.startswith(("SCENE_INVALID", "MODEL_INVALID"))
+                ):
                     needs_more = True
             return {
                 "round": round_no,
@@ -375,6 +407,39 @@ class Brain:
         if name == "clear_drawings":
             await self.hub.emit("clear")
             return None
+        if name == "explain_on_screen":
+            card = build_card(ctx, args)
+            if not card.items:
+                return "explain_on_screen: give at least one point with text."
+            await self.hub.emit("notes", card=card.model_dump(mode="json"))
+            missing = [it.n for it in card.items if it.mark != "none" and it.rect is None]
+            return f"explain_on_screen: points {missing} had nothing to frame." if missing else None
+        if name == "guide":
+            if args.get("done"):
+                self._guide = None
+                await self.hub.emit("guide", active=False)
+                return None
+            rect = resolve_rect(ctx, args.get("element_id"), args.get("box"))
+            if rect is None:
+                return "guide: couldn't find that on screen; point at it instead."
+            label = str(
+                args.get("label")
+                or (
+                    ctx.element(int(args["element_id"])).name
+                    if ctx
+                    and args.get("element_id") is not None
+                    and ctx.element(int(args["element_id"]))
+                    else "here"
+                )
+            )[:40]
+            step = (
+                self._guide.step + 1 if self._guide and self._guide.goal == args.get("goal") else 1
+            )
+            self._guide = Guide(goal=str(args["goal"])[:200], label=label, rect=rect, step=step)
+            ann = Annotation(kind="click", rect=rect, label=label, ttl_s=600, guide=True)
+            await self.hub.emit("annotate", annotations=[ann.model_dump()])
+            await self.hub.emit("guide", active=True, step=step, goal=self._guide.goal, label=label)
+            return None
         if name == "explain_in_3d":
             try:
                 scene = parse_scene(args)
@@ -390,6 +455,29 @@ class Brain:
                 )
             await self.show_scene(scene)
             return f"Showing 3D scene '{scene.title}' ({len(scene.nodes)} nodes, {len(scene.steps)} steps)."
+        if name == "build_3d_model":
+            try:
+                model = ObjectScene.model_validate(args)
+            except ValidationError as exc:
+                if self._scene_retry:
+                    return "build_3d_model failed twice; explain in words instead."
+                self._scene_retry = True
+                return f"MODEL_INVALID: fix these and call build_3d_model again: {exc.errors()[:6]}"
+            await self.show_object(model, restart=True)
+            note = f"Showing 3D model '{model.title}' ({len(model.parts)} parts, {len(model.beats)} beats)."
+            return f"{note} Repairs: {'; '.join(model.notes[:6])}" if model.notes else None
+        if name == "edit_3d_model":
+            if self._object is None:
+                return (
+                    "edit_3d_model: there's no 3D model on screen; build one with build_3d_model."
+                )
+            try:
+                edit = ObjectEdit.model_validate(args)
+                model = apply_edit(self._object, edit)
+            except ValidationError as exc:
+                return f"MODEL_INVALID: fix these and call edit_3d_model again: {exc.errors()[:6]}"
+            await self.show_object(model, restart=edit.beats is not None)
+            return None
         if name == "explode_view":
             if ctx is None or ctx.screenshot is None:
                 return "explode_view: I don't have a screenshot."
@@ -403,7 +491,11 @@ class Brain:
             await self.show_scene(scene)
             return f"Exploded view of [{args['element_id']}] with {len(scene.nodes)} pieces."
         if name == "show_scene":
-            await self.show_scene(get_scene(str(args["name"])))
+            key = str(args["name"])
+            if key in OBJECT_GALLERY:
+                await self.show_object(OBJECT_GALLERY[key](), restart=True)
+            else:
+                await self.show_scene(get_scene(key))
             return None
         if name == "delegate":
             then = (
@@ -526,7 +618,8 @@ class Brain:
                 return
             clean, markers = split_markers(sentence)
             anns = [a.model_dump() for kind, eid in markers if (a := from_marker(ctx, kind, eid))]
-            if not clean and not anns:
+            notes = [eid for kind, eid in markers if kind.lower() == "note"]
+            if not clean and not anns and not notes:
                 continue
             speech = await self.tts.synthesize(clean, voice)
             if gen != self._speech_gen:
@@ -542,12 +635,43 @@ class Brain:
                 audio=base64.b64encode(speech.wav).decode() if speech.wav else None,
                 duration_s=round(speech.duration_s, 2),
                 annotations=anns,
+                notes=notes,
             )
 
     # ================================================================== scenes & walkthroughs
     async def show_scene(self, scene: SceneSpec) -> None:
         await self.hub.emit("scene", scene=scene.model_dump(by_alias=True, mode="json"))
         self._spawn(self._narrate(scene))
+
+    async def show_object(self, model: ObjectScene, *, restart: bool) -> None:
+        """Put a 3D model on screen. Edits keep the id (the view keeps its camera); new beats get
+        a new audio key so old narration can't play over the new explanation."""
+        self._object = model
+        audio_key = (
+            f"{model.id}:{secrets.token_hex(3)}"
+            if restart
+            else getattr(self, "_object_audio", model.id)
+        )
+        self._object_audio = audio_key
+        await self.hub.emit(
+            "object", scene=model.model_dump(mode="json"), audio_key=audio_key, restart=restart
+        )
+        if restart:
+            self._spawn(self._narrate_beats(audio_key, [b.narration for b in model.beats]))
+
+    async def _narrate_beats(self, key: str, lines: list[str]) -> None:
+        for i, line in enumerate(lines):
+            if not line:
+                continue
+            speech = await self.tts.synthesize(line)
+            await self.hub.emit(
+                "scene_audio",
+                scene_id=key,
+                step=i,
+                text=speech.text,
+                audio=base64.b64encode(speech.wav).decode() if speech.wav else None,
+                duration_s=round(speech.duration_s, 2),
+            )
 
     async def _narrate(self, scene: SceneSpec) -> None:
         for i, step in enumerate(scene.steps):
@@ -680,6 +804,20 @@ class Brain:
 
         task.add_done_callback(done)
 
+    def _reply_language(self) -> str:
+        studio = self.studio
+        if not studio:
+            return ""
+        code = (
+            studio.prefs.language if studio.prefs.language != "auto" else studio.detected_language
+        )
+        return "" if code == "en" else LANGUAGES.get(code, code)
+
+    @property
+    def studio(self) -> VoiceStudio | None:
+        primary = getattr(self.tts, "primary", self.tts)
+        return primary if isinstance(primary, VoiceStudio) else None
+
     def public_state(self) -> dict[str, Any]:
         return {
             "state": self.state,
@@ -689,7 +827,8 @@ class Brain:
             "daily_budget": self.settings.budget.daily_cost_usd,
             "model": self.settings.brain_model,
             "local_mode": self.settings.local_mode,
-            "tts": self.tts.name,
+            "tts": self.studio.engine_name if self.studio else self.tts.name,
+            "voice": self.studio.public() if self.studio else None,
             "privacy_paused": self.screen.paused,
             "ambient_memory": self.settings.screen.ambient_memory,
             "keep_screenshots": self.settings.screen.keep_screenshots,

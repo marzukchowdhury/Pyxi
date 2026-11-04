@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { backendUrl } from "../shared/bridge";
-import type { Agent, BrainEvent, BrainState, Hello, Job } from "../shared/protocol";
+import type { Agent, BrainEvent, BrainState, Hello, Job, VoiceInfo, VoicePublic } from "../shared/protocol";
 import { brain } from "../shared/socket";
 
 export interface ChatLine {
@@ -30,6 +30,9 @@ interface PanelState {
   requests: Request[];
   spentToday: number;
   lastTurnCost: number;
+  voice: VoicePublic | null;
+  voiceCatalog: Record<string, VoiceInfo[]> | null;
+  voicePreview: { audio: string | null; text: string; at: number } | null;
 }
 
 export const usePanel = create<PanelState>(() => ({
@@ -44,6 +47,9 @@ export const usePanel = create<PanelState>(() => ({
   requests: [],
   spentToday: 0,
   lastTurnCost: 0,
+  voice: null,
+  voiceCatalog: null,
+  voicePreview: null,
 }));
 
 let seq = 0;
@@ -63,7 +69,7 @@ brain.on((e: BrainEvent) => {
   switch (e.type) {
     case "hello":
     case "settings":
-      usePanel.setState({ hello: e, state: e.state, agents: e.agents, spentToday: e.spent_today,
+      usePanel.setState({ hello: e, state: e.state, agents: e.agents, spentToday: e.spent_today, voice: e.voice,
         jobs: { ...usePanel.getState().jobs, ...Object.fromEntries(e.jobs.map((j) => [j.id, j])) } });
       break;
     case "state":
@@ -101,6 +107,13 @@ brain.on((e: BrainEvent) => {
       break;
     case "ask":
       usePanel.setState((s) => ({ requests: [...s.requests, { request_id: e.request_id, kind: "ask", agent: e.agent, text: e.question }] }));
+      break;
+    case "voice_catalog":
+      usePanel.setState({ voiceCatalog: e.catalog, voice: e.voice });
+      break;
+    case "voice_preview":
+      usePanel.setState({ voicePreview: { audio: e.audio, text: e.text, at: Date.now() } });
+      if (e.error) usePanel.setState((s) => ({ voice: s.voice ? { ...s.voice, error: e.error } : s.voice }));
       break;
     case "turn_done":
       usePanel.setState({ spentToday: e.spent_today, lastTurnCost: e.cost_usd });

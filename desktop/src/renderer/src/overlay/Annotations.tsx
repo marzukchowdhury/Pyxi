@@ -77,6 +77,19 @@ function Shape({ a }: { a: LiveAnnotation }) {
       </g>
     );
   }
+  if (a.kind === "click" && a.rect) {
+    // A click target: a steady frame you can't miss, a ring that keeps inviting, and a cursor tip.
+    const r = rectToLocal(a.rect);
+    const pad = 5;
+    const x = r.x - pad, y = r.y - pad, w = r.w + pad * 2, h = r.h + pad * 2;
+    return (
+      <g className="click-target">
+        <rect x={x} y={y} width={w} height={h} rx="10" className="click-frame" />
+        <rect x={x} y={y} width={w} height={h} rx="10" className="click-pulse" style={{ transformOrigin: `${x + w / 2}px ${y + h / 2}px` }} />
+        <path className="click-cursor" transform={`translate(${x + w - 6} ${y + h - 4})`} d="M0 0 L0 15 L4 11 L7 18 L10 16.6 L7 10 L12.5 10 Z" />
+      </g>
+    );
+  }
   if (a.kind === "arrow" && a.at && a.to) {
     const [x1, y1] = toLocal(a.at[0], a.at[1]);
     const [x2, y2] = toLocal(a.to[0], a.to[1]);
@@ -130,6 +143,14 @@ function Label({ a }: { a: LiveAnnotation }) {
   } else if (a.at) {
     [x, y] = toLocal(a.at[0], a.at[1]);
     y += 22;
+  }
+  if (a.kind === "click") {
+    const step = useOverlay.getState().guide?.step;
+    return (
+      <div className="ann-label click-label" style={{ left: x, top: y + 6 }}>
+        {step ? <span className="click-step">{step}</span> : <i />}Click {a.label}
+      </div>
+    );
   }
   return <div className={`ann-label ${side ? "side" : ""}`} style={{ left: x, top: y }}><i />{a.label}</div>;
 }

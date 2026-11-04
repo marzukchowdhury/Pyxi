@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 TAG = re.compile(
     r"\[(laugh|chuckle|sigh|gasp|cough|clear throat|sniff|groan|shush)\]", re.IGNORECASE
 )
-_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(\[])")
+_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(\[{])")
 
 KOKORO_MODEL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
 KOKORO_VOICES = (
@@ -53,8 +53,12 @@ class TTS(Protocol):
     async def synthesize(self, text: str, voice: str | None = None) -> Speech: ...
 
 
+TONE = re.compile(r"\{(neutral|playful|warm|excited|calm|dry|whisper)\}\s*", re.IGNORECASE)
+
+
 def strip_tags(text: str) -> str:
-    return re.sub(r"\s{2,}", " ", TAG.sub("", text)).strip()
+    """Remove performance tags ([laugh], {playful}) so they are never read out literally."""
+    return re.sub(r"\s{2,}", " ", TONE.sub("", TAG.sub("", text))).strip()
 
 
 def split_sentences(text: str, max_chars: int = 220) -> list[str]:
@@ -70,6 +74,42 @@ def split_sentences(text: str, max_chars: int = 220) -> list[str]:
         if sentence:
             out.append(sentence)
     return out
+
+
+_SPOKEN = [
+    (re.compile(r"\be\.g\.", re.I), "for example"),
+    (re.compile(r"\bi\.e\.", re.I), "that is"),
+    (re.compile(r"\betc\.", re.I), "and so on"),
+    (re.compile(r"\bvs\.?(?=\s)", re.I), "versus"),
+    (re.compile(r"(\d)\s*%"), r"\1 percent"),
+    (re.compile(r"\s*&\s*"), " and "),
+    (re.compile(r"\s*->\s*"), ", then "),
+    (re.compile(r"[*_`#]+"), ""),
+]
+
+
+def speakable(text: str) -> str:
+    """Written shorthand reads badly aloud ('e.g.' -> 'for example', '->' -> ', then')."""
+    for pattern, repl in _SPOKEN:
+        text = pattern.sub(repl, text)
+    return text
+
+
+def _breathe(samples: np.ndarray, rate: int) -> np.ndarray:
+    """Trim dead air at the ends, then leave a short natural pause after the sentence, so
+    sentences join like speech instead of clipped clips."""
+    level = np.abs(samples)
+    loud = np.flatnonzero(level > 0.008)
+    if loud.size:
+        start = max(0, loud[0] - int(0.02 * rate))
+        end = min(len(samples), loud[-1] + int(0.06 * rate))
+        samples = samples[start:end]
+    fade = min(len(samples), int(0.012 * rate))
+    if fade:
+        samples = samples.copy()
+        samples[:fade] *= np.linspace(0, 1, fade)
+        samples[-fade:] *= np.linspace(1, 0, fade)
+    return np.concatenate([samples, np.zeros(int(0.16 * rate), dtype=samples.dtype)])
 
 
 def _wav_bytes(samples: np.ndarray, sample_rate: int) -> bytes:
@@ -117,12 +157,17 @@ class KokoroTTS:
         return self._engine
 
     async def synthesize(self, text: str, voice: str | None = None) -> Speech:
+        voice = voice or self.config.voice
+        lang = "en-gb" if voice.startswith("b") else "en-us"
+        return await self.synthesize_with(text, voice=voice, speed=self.config.speed, lang=lang)
+
+    async def synthesize_with(self, text: str, *, voice: str, speed: float, lang: str) -> Speech:
         engine = await self._ensure()
         clean = strip_tags(text)
-        voice = voice or self.config.voice
         samples, rate = await asyncio.to_thread(
-            engine.create, clean, voice=voice, speed=self.config.speed, lang="en-us"
+            engine.create, speakable(clean), voice=voice, speed=speed, lang=lang
         )
+        samples = _breathe(samples, rate)
         return Speech(text=clean, wav=_wav_bytes(samples, rate), duration_s=len(samples) / rate)
 
 
@@ -192,9 +237,13 @@ class FallbackTTS:
         return await self.client.synthesize(text, voice)
 
 
-def make_tts(config: VoiceConfig, models_dir: Path) -> FallbackTTS:
+def make_tts(config: VoiceConfig, models_dir: Path, prefs_path: Path | None = None) -> FallbackTTS:
     primary: TTS
-    if config.tts == "kokoro":
+    if config.tts == "kokoro" and prefs_path is not None:
+        from wisp.voice.studio import VoiceStudio
+
+        primary = VoiceStudio(config, models_dir, prefs_path)
+    elif config.tts == "kokoro":
         primary = KokoroTTS(config, models_dir)
     elif config.tts == "chatterbox":
         primary = ChatterboxTTS(config)

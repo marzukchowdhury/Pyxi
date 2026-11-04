@@ -13,6 +13,12 @@ contextBridge.exposeInMainWorld("wispBridge", {
   electron: true,
   onCursor: (fn: Listener<{ x: number; y: number }>) => on("cursor", fn),
   onPtt: (fn: Listener<void>) => on("ptt", fn),
+  onPttDown: (fn: Listener<void>) => on("ptt-down", fn),
+  onPttUp: (fn: Listener<void>) => on("ptt-up", fn),
+  onPttCancel: (fn: Listener<void>) => on("ptt-cancel", fn),
+  onQuickType: (fn: Listener<void>) => on("quick-type", fn),
+  onGlobalClick: (fn: Listener<{ x: number; y: number }>) => on("global-click", fn),
+  focusOverlay: () => ipcRenderer.send("focus-overlay"),
   onDismiss: (fn: Listener<void>) => on("dismiss", fn),
   onPrivacyToggle: (fn: Listener<void>) => on("privacy-toggle", fn),
   setInteractive: (interactive: boolean) => ipcRenderer.send("set-interactive", interactive),
@@ -20,4 +26,5 @@ contextBridge.exposeInMainWorld("wispBridge", {
   ptt: () => ipcRenderer.send("ptt"),
   openExternal: (url: string) => ipcRenderer.send("open-external", url),
   displays: () => ipcRenderer.invoke("displays"),
+  hotkeys: () => ipcRenderer.invoke("hotkeys"),
 });

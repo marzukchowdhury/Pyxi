@@ -114,7 +114,8 @@ export class Recorder {
     return this.rec?.state === "recording";
   }
 
-  async start(onDone: (b64: string, mime: string) => void): Promise<void> {
+  /** ``autoStop``: end on ~1.2 s of silence after speech (toggle mode). Hold mode passes false. */
+  async start(onDone: (b64: string, mime: string) => void, autoStop = true): Promise<void> {
     if (this.active) return;
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
@@ -131,14 +132,14 @@ export class Recorder {
       onDone(btoa(bin), mime);
     };
     this.rec.start(250);
-    this.watchSilence();
+    this.watchSilence(autoStop);
   }
 
   stop(): void {
     if (this.active) this.rec?.stop();
   }
 
-  private watchSilence(): void {
+  private watchSilence(autoStop: boolean): void {
     const ac = audioCtx();
     const src = ac.createMediaStreamSource(this.stream!);
     const an = ac.createAnalyser();
@@ -159,7 +160,7 @@ export class Recorder {
         spoke = true;
         quietSince = now;
       }
-      if ((spoke && now - quietSince > 1200) || now - started > 20000) this.stop();
+      if ((autoStop && spoke && now - quietSince > 1200) || now - started > 60000) this.stop();
       else this.raf = requestAnimationFrame(tick);
     };
     this.raf = requestAnimationFrame(tick);
