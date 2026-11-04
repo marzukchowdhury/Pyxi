@@ -135,6 +135,7 @@ class Brain:
         self._said: list[str] = []
         self._calls: list[dict[str, Any]] = []
         self._scene_retry = False
+        self._turn_card = None  # the note card drawn this turn, if any
         self._object: ObjectScene | None = None  # the 3D model on screen, so follow-ups can edit it
         self._guide: Guide | None = None  # a click Wisp is waiting for
         self.connectors = Connectors(settings.data_dir, Path.home() / "Documents" / "Wisp")
@@ -248,6 +249,7 @@ class Brain:
                 [],
             )
             self._scene_retry = False
+            self._turn_card = None
             turn_id = "turn_" + secrets.token_hex(4)
             started = time.monotonic()
             await self.hub.emit("user", text=shown or user_text, turn_id=turn_id)
@@ -415,7 +417,15 @@ class Brain:
 
         async def finish(state: TurnState) -> TurnState:
             if not self._said and not state.get("stop"):
-                self._speak("Done!" if self._calls else "Hmm, I'm not sure what to say to that.")
+                card = self._turn_card
+                if card is not None:
+                    # Drew a note card but forgot to speak: narrate its own points, in sync.
+                    points = " ".join(f"[note:{it.n}] {it.text.rstrip('.')}." for it in card.items)
+                    self._speak(f"Here's the gist. {points}")
+                elif self._calls:
+                    self._speak("There you go.")
+                else:
+                    self._speak("Hmm, I'm not sure what to say to that.")
             return {}
 
         g = StateGraph(TurnState)
@@ -474,6 +484,7 @@ class Brain:
             if not card.items:
                 return "explain_on_screen: give at least one point with text."
             await self.hub.emit("notes", card=card.model_dump(mode="json"))
+            self._turn_card = card
             missing = [it.n for it in card.items if it.mark != "none" and it.rect is None]
             return f"explain_on_screen: points {missing} had nothing to frame." if missing else None
         if name == "guide":

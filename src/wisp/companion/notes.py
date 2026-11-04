@@ -170,7 +170,7 @@ def place_card(
         covered = sum(_overlap(box, r) for r in content)
         dx = max(0, rx - (cx + w), cx - (rx + rw))
         dy = max(0, ry - (cy + h), cy - (ry + rh))
-        score = covered + (dx + dy) * h * 0.35
+        score = covered * 4 + (dx + dy) * h * 0.2  # hiding words is worse than a longer thread
         if best_score is None or score < best_score:
             best, best_score = (cx, cy), score
     return best

@@ -97,3 +97,25 @@ async def test_guides_wait_for_the_real_click_then_continue(settings):
     assert rec.of("user")[-1]["text"] == "Clicked Export"  # what the chat shows
     assert "I clicked 'Export'" in llm.prompts[-1]  # what the model is told
     assert rec.of("guide")[-1]["active"] is False and brain._guide is None
+
+
+async def test_a_card_without_speech_narrates_itself(settings):
+    llm = Scripted(
+        [
+            (
+                "explain_on_screen",
+                {
+                    "title": "Gist",
+                    "items": [
+                        {"text": "Dark mode flips it", "element_id": 3},
+                        {"text": "Export saves", "element_id": 4},
+                    ],
+                },
+            )
+        ]
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("explain this")
+    says = rec.of("say")
+    assert says[0]["text"].startswith("Here's the gist")
+    assert [n for s in says for n in s["notes"]] == [1, 2]

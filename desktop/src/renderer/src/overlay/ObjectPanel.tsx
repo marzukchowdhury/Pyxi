@@ -116,7 +116,8 @@ export function ObjectPanel() {
     brain.send({ type: "text", text: `In the ${spec.title} model, tell me more about the ${name}.` });
   };
 
-  const left = Math.max(16, innerWidth - STAGE.w - 48);
+  // Centred, a little left of middle: the right edge is where Wisp's panel usually sits.
+  const left = Math.max(16, Math.round((innerWidth - STAGE.w) / 2 - Math.min(160, innerWidth * 0.08)));
   const top = Math.max(70, (innerHeight - STAGE.h - 120) / 2);
   return (
     <Interactive className="object-stage" style={{ left, top, width: STAGE.w }}>
