@@ -177,6 +177,25 @@ export function prettyApp(app: string): string {
 // that's already playing are remembered and shown the moment the card lands.
 let earlyNotes: number[] = [];
 
+/** Clear the spoken caption once Wisp has really finished talking (not at a fixed moment, which
+ * left it stuck on screen whenever audio was still playing then). */
+let captionTimer: number | undefined;
+function clearCaptionWhenQuiet(): void {
+  window.clearTimeout(captionTimer);
+  const check = () => {
+    const { state } = useOverlay.getState();
+    if (voice.busy || (state !== "idle" && state !== "listening")) captionTimer = window.setTimeout(check, 600);
+    else {
+      const shown = useOverlay.getState().caption;
+      captionTimer = window.setTimeout(() => {
+        // Only the caption we were waiting on: a new line may have started meanwhile.
+        if (!voice.busy && useOverlay.getState().caption === shown) useOverlay.setState({ caption: null });
+      }, 2500);
+    }
+  };
+  check();
+}
+
 function reveal(numbers: number[] | undefined): void {
   const n = useOverlay.getState().notes;
   if (!n) {
@@ -248,7 +267,7 @@ brain.on((e: BrainEvent) => {
       break;
     case "state":
       useOverlay.setState({ state: e.state });
-      if (e.state === "idle") setTimeout(() => !voice.busy && useOverlay.setState({ caption: null }), 2500);
+      if (e.state === "idle") clearCaptionWhenQuiet();
       break;
     case "user":
       replyOpen = false;

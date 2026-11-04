@@ -387,11 +387,11 @@ class GoogleConnector(Connector):
         event: dict[str, Any] = {
             "summary": str(args.get("title") or "Meeting"),
             "start": {
-                "dateTime": start.replace(tzinfo=None).isoformat(timespec="minutes"),
+                "dateTime": start.replace(tzinfo=None).isoformat(timespec="seconds"),
                 "timeZone": tz_name or str(start.tzinfo),
             },
             "end": {
-                "dateTime": end.replace(tzinfo=None).isoformat(timespec="minutes"),
+                "dateTime": end.replace(tzinfo=None).isoformat(timespec="seconds"),
                 "timeZone": tz_name or str(end.tzinfo),
             },
         }

@@ -85,7 +85,7 @@ class ScreenConfig(BaseModel):
 
 
 class TurnBudget(BaseModel):
-    max_tool_rounds: int = Field(4, ge=1, description="Think/act rounds per user turn.")
+    max_tool_rounds: int = Field(6, ge=1, description="Think/act rounds per user turn.")
     max_cost_usd: float = Field(
         0.25, gt=0, description="Per user turn (agent jobs have their own Otto budgets)."
     )

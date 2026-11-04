@@ -38,8 +38,8 @@ class FakeCalendar:
             ev = self.created[-1]
             return {
                 "summary": ev["summary"],
-                "start": {"dateTime": ev["start"]["dateTime"] + ":00-07:00"},
-                "end": {"dateTime": ev["end"]["dateTime"] + ":00-07:00"},
+                "start": {"dateTime": ev["start"]["dateTime"] + "-07:00"},
+                "end": {"dateTime": ev["end"]["dateTime"] + "-07:00"},
                 "attendees": ev.get("attendees", []),
                 "hangoutLink": "https://meet.google.com/abc-defg-hij",
                 "htmlLink": "https://calendar.google.com/event?eid=e1",
@@ -119,7 +119,8 @@ async def test_meeting_errand_is_quiet_checked_and_lands_in_the_notch(settings):
     ]  # and nothing else
     assert not rec.of("confirm")  # the user named this address: no approval card needed
     [made] = cal.created
-    assert made["start"] == {"dateTime": start.strftime("%Y-%m-%dT%H:%M"), "timeZone": TZ}
+    # Google wants full RFC 3339 times, seconds included (without them it answers 400).
+    assert made["start"] == {"dateTime": start.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": TZ}
     assert made["attendees"] == [{"email": "nabihatr21@gmail.com"}]
     assert "conferenceData" in made and cal.params[-1]["conferenceDataVersion"] == 1
     [ready] = rec.of("job_ready")
@@ -182,3 +183,37 @@ async def test_calendar_rejects_the_past_and_bad_addresses(settings):
         }
     )
     assert "aren't valid email addresses" in out
+
+
+async def test_the_conversation_can_read_accounts_but_actions_are_errands(settings):
+    class Seeing(Script):
+        async def complete(self, *, system, messages, tools=None, **kw):
+            self.offered = {t.name for t in tools or []}
+            return await super().complete(system=system, messages=messages, tools=tools, **kw)
+
+    llm = Seeing([("say", {"text": "On it."})])
+    brain, _ = make_brain(settings, llm=llm)
+    connect(brain)
+    await brain.turn("what's on my calendar?")
+    # Reading happens in the conversation; anything that books, sends or creates is an errand.
+    assert {"calendar_list", "gmail_search", "errand"} <= llm.offered
+    assert not {"calendar_add", "gmail_send", "docs_create"} & llm.offered
+
+
+async def test_lookups_dont_chatter_and_errors_are_human(settings):
+    from wisp.companion.brain import friendly_error, strip_filler
+
+    llm = Script(
+        [("say", {"text": "Let me check your calendar."}), ("calendar_list", {"days": 2})],
+        [("say", {"text": "Still checking."}), ("calendar_list", {"days": 7})],
+        [("say", {"text": "Nothing on Saturday yet."})],
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    connect(brain)
+    await brain.turn("is my Saturday meeting saved?")
+    await asyncio.sleep(0.1)
+    said = " ".join(s["text"] for s in rec.of("say"))
+    assert "Still checking" not in said and "Nothing on Saturday yet." in said
+    raw = 'Google said 400: { "error": { "message": "Bad Request" } }'
+    assert friendly_error(Exception(raw)) == "Google rejected the request: Bad Request."
+    assert strip_filler("There you go, I have done this. It's saved.") == "It's saved."

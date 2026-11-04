@@ -221,9 +221,9 @@ class Brain:
             line = await out.run()
         except Exception as exc:
             log.exception("approved action failed")
-            await self.say_line(f"That didn't go through: {str(exc)[:120]}")
+            await self.say_line(f"That didn't go through. {friendly_error(exc)}")
             return
-        await self.say_line(line)
+        await self.say_line(line if not line.startswith(("CREATED", "SENT")) else "Done.")
 
     async def _quick_action(self, action: str, value: str) -> str | None:
         if not value.strip():
@@ -674,11 +674,18 @@ class Brain:
                     )
                     await self._act("say", dict(call.arguments))
 
-            extra = {"on_call": speak_early} if isinstance(self.llm, StreamingChat) else {}
+            first_round = state.get("round", 0) == 0
+            extra = (
+                {"on_call": speak_early}
+                if isinstance(self.llm, StreamingChat) and first_round
+                else {}
+            )
             response = await self.llm.complete(
                 system=system,
                 messages=[Message("user", parts)],
-                tools=[*self._companion_tools(), *(t.spec for t in connector_tools)],
+                # Reading accounts happens here; anything that sends, books or creates is an
+                # errand: background, checked, approved, and reported in the notch.
+                tools=[*self._companion_tools(), *(t.spec for t in connector_tools if t.info)],
                 max_tokens=9000,  # a detailed 3D model is a long tool call
                 **extra,
             )
@@ -706,9 +713,16 @@ class Brain:
                 str(c.arguments.get("text", "")) for c in calls if c.name == "say"
             )
             retrying, self._visual_retry = self._visual_retry, False
+            looks_up = any(
+                c.name in INFO_TOOLS
+                or any(t.info and t.spec.name == c.name for t in connector_tools)
+                for c in calls
+            )
             for call in calls:
                 if call.id in early:
                     continue  # already said, while the rest was still streaming in
+                if call.name == "say" and looks_up and self._said:
+                    continue  # mid-lookup chatter ("my first search came up empty"): say it once, at the end
                 if call.name == "say" and retrying and self._said:
                     continue  # a retried drawing mustn't make Wisp say its reply twice
                 self._calls.append(
@@ -779,7 +793,7 @@ class Brain:
     async def _act(self, name: str, args: dict[str, Any]) -> str | None:
         ctx = self._ctx
         if name == "say":
-            text = str(args.get("text", ""))
+            text = strip_filler(str(args.get("text", "")))
             self._noted |= {
                 int(m.group(2)) for m in MARKER.finditer(text) if m.group(1).lower() == "note"
             }
@@ -1484,6 +1498,34 @@ _EDITS_3D = re.compile(
 
 
 _COUNTER = re.compile(r"^\s*[\(\[]\d+\+?[\)\]]\s*|^\s*[•●]\s*|\s*[\(\[]\d+\+?[\)\]]\s*$")
+
+
+def friendly_error(exc: BaseException) -> str:
+    """'Google said 400: {"error": ...}' becomes 'Google said the request was invalid.'"""
+    text = str(exc)
+    m = re.search(r'"message":\s*"([^"]{3,140})"', text)
+    detail = m.group(1) if m else ""
+    service = "Google" if "Google" in text else "The service"
+    if re.search(r"\b40[13]\b", text):
+        return f"{service} says I'm not allowed to do that; reconnecting the account may fix it."
+    if re.search(r"\b400\b", text):
+        return f"{service} rejected the request{f': {detail}' if detail else ''}."
+    if re.search(r"\b5\d\d\b|timed? ?out|Timeout", text):
+        return f"{service} didn't answer in time. Want me to try again?"
+    return (detail or re.sub(r"[{}\[\]\"]", "", text))[:140]
+
+
+_FILLER_LEAD = re.compile(
+    r"^\s*(there you go|here you go|sure thing|sure|okay so|alright)\b[,.!]?\s*"
+    r"(i(?:'ve| have) done (this|that|it)[.!]?\s*)?",
+    re.IGNORECASE,
+)
+
+
+def strip_filler(text: str) -> str:
+    """Drop stock openers ("There you go, I have done this.") when there's a real sentence after."""
+    rest = _FILLER_LEAD.sub("", text, count=1)
+    return rest[0].upper() + rest[1:] if rest.strip() and rest != text else text
 
 
 def same_page(a: str | None, b: str | None) -> bool:
