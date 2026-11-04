@@ -137,7 +137,10 @@ async def test_scout_then_quill_handoff_and_ghost_walkthrough(settings):
     assert jobs["quill"]["status"] == "done" and jobs["quill"]["parent"] == jobs["scout"]["id"]
     assert "All set!" in jobs["quill"]["context"], "Quill receives Scout's result"
     assert rec.of("handoff")[0]["target"] == "quill" and rec.of("job_frame")
-    assert any(s["agent"] == "Quill" for s in rec.of("say"))
+    # Background work is quiet: teammates don't speak, the user gets a notification instead.
+    assert not any(s["agent"] in ("Scout", "Quill") for s in rec.of("say"))
+    ready = rec.of("job_ready")[-1]
+    assert ready["agent"] == "Quill" and ready["ok"] and ready["title"] == "Your draft is ready"
 
     await brain.start_walkthrough()
     walk = rec.of("walkthrough")[0]["walkthrough"]

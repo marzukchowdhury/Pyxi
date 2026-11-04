@@ -137,6 +137,7 @@ async def test_the_recommendation_letter_errand(settings, tmp_path):
             ("say", {"text": "Found it. Quill's on it."}),
         ],
         EDITS,  # Quill's edit pass
+        '{"edits": [], "notes": ["The closing sentence appears twice."]}',  # the review pass
         [
             (
                 "gmail_send",
@@ -165,8 +166,12 @@ async def test_the_recommendation_letter_errand(settings, tmp_path):
     await brain.jobs.wait_all()
     assert fixed.exists()
     assert Document(str(fixed)).paragraphs[3].text == "I recommend her without reservation."
-    quill = [s for s in rec.of("say") if s["agent"] == "Quill"]
-    assert "saved as LOR (fixed by Wisp).docx" in " ".join(s["text"] for s in quill)
+    assert not [s for s in rec.of("say") if s["agent"] == "Quill"]  # quiet: no voice
+    [ready] = rec.of("job_ready")
+    assert ready["title"] == "Your document is fixed" and ready["files"] == [str(fixed)]
+    assert ready["changes"] == ["'have' -> 'has'", "'recomend' -> 'recommend'"]
+    assert ready["notes"] == ["The closing sentence appears twice."]
+    assert "send_back" in ready["actions"]
 
     await brain.turn("yes, send it back to him")
     await asyncio.sleep(0.05)

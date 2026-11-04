@@ -4,6 +4,7 @@ import { bridge } from "../shared/bridge";
 import { brain } from "../shared/socket";
 import { Annotations } from "./Annotations";
 import { NotesCard } from "./NotesCard";
+import { JobToasts } from "./JobToasts";
 import { Notch } from "./Notch";
 import { ObjectPanel } from "./ObjectPanel";
 import { Presence } from "./Presence";
@@ -143,6 +144,7 @@ export function Overlay() {
       <Requests />
       <Presence micLevel={micLevel} />
       {isPrimary && <Notch micLevel={micLevel} />}
+      {isPrimary && <JobToasts />}
       {/* The main screen shows connection and privacy state in the notch. */}
       {!isPrimary && !connected && <div className="notice">Waiting for Wisp's brain <code>wisp serve</code></div>}
     </div>

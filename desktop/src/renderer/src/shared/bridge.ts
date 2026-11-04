@@ -22,6 +22,11 @@ export interface Bridge {
   onGlobalClick(fn: (p: { x: number; y: number }) => void): () => void;
   /** Quick actions from the brain: open a URL, copy text, or paste a draft into the focused field. */
   runAction(kind: "open_url" | "copy" | "insert", value: string): void;
+  /** Open a file Wisp made, or show it in Explorer (only files in Wisp's own folders). */
+  openFile(path: string): void;
+  showInFolder(path: string): void;
+  /** A quiet Windows notification; clicking it opens the file. */
+  notify(title: string, body: string, file?: string): void;
   focusOverlay(): void;
   onDismiss(fn: () => void): () => void;
   onPrivacyToggle(fn: () => void): () => void;
@@ -97,6 +102,13 @@ function mockBridge(): Bridge {
       return () => window.removeEventListener("keyup", h);
     },
     focusOverlay() {},
+    openFile(path) {
+      console.info("open", path);
+    },
+    showInFolder(path) {
+      console.info("show in folder", path);
+    },
+    notify() {},
     runAction(kind, value) {
       if (kind === "open_url") window.open(value, "_blank");
       else void navigator.clipboard?.writeText(value);

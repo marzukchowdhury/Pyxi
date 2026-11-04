@@ -66,6 +66,9 @@ interface OverlayState {
   /** The note card on screen; `revealed` holds the point numbers written so far. */
   notes: { card: NoteCard; revealed: number[]; markers: boolean; at: number } | null;
   guide: { step: number; goal: string; label: string } | null;
+  /** Finished background jobs, shown quietly as cards (newest first). */
+  toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; files: string[]; changes: string[]; notes: string[]; actions: string[] }[];
+  dismissToast(id: string): void;
   closeNotes(): void;
   setStep(step: number): void;
   setPlaying(p: boolean): void;
@@ -104,6 +107,8 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   captions: true,
   notes: null,
   guide: null,
+  toasts: [],
+  dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.job_id !== id) }),
   closeNotes: () => set({ notes: null }),
   setStep: (step) => {
     const s = get().scene;
@@ -324,6 +329,13 @@ brain.on((e: BrainEvent) => {
     case "guide":
       useOverlay.setState({ guide: e.active ? { step: e.step ?? 1, goal: e.goal ?? "", label: e.label ?? "" } : null });
       if (!e.active) useOverlay.setState((s) => ({ annotations: s.annotations.filter((a) => !a.guide) }));
+      break;
+    case "job_ready":
+      if (isPrimary) {
+        const { type: _type, ...toast } = e;
+        useOverlay.setState((s) => ({ toasts: [toast, ...s.toasts.filter((t) => t.job_id !== e.job_id)].slice(0, 3) }));
+        bridge.notify(e.title, e.body, e.files[0]);
+      }
       break;
     case "action":
       if (isPrimary) bridge.runAction(e.kind, e.value);

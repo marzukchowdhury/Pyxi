@@ -41,6 +41,7 @@ from wisp.agents.jobs import Handoff
 from wisp.companion import prompts
 from wisp.companion.actions import open_app, safe_url
 from wisp.companion.annotations import (
+    MARKER,
     Annotation,
     from_marker,
     resolve_point,
@@ -797,7 +798,8 @@ class Brain:
         self, text: str, *, agent: str, voice: str | None, gen: int, ctx: ScreenContext | None
     ) -> None:
         sentences: list[str] = []
-        for chunk in split_sentences(text):  # a marker alone belongs with the words before it
+        chunks = split_sentences(text)
+        for chunk in chunks:  # a marker alone belongs with the words before it
             if sentences and not split_markers(chunk)[0]:
                 sentences[-1] += " " + chunk
                 continue
@@ -808,6 +810,22 @@ class Brain:
                 sentences[-1] += " " + lead.group(0).strip()
                 chunk = chunk[lead.end() :]
             sentences.append(chunk)
+        # Smoother speech: the first sentence goes alone (so Wisp starts talking fast), then
+        # sentences without drawing markers are voiced together, so the voice flows instead of
+        # resetting at every full stop.
+        merged: list[str] = []
+        for sentence in sentences:
+            joinable = (
+                len(merged) >= 2  # never into the first sentence
+                and not MARKER.search(sentence)
+                and not MARKER.search(merged[-1])
+                and len(merged[-1]) + len(sentence) < 260
+            )
+            if joinable:
+                merged[-1] += " " + sentence
+            else:
+                merged.append(sentence)
+        sentences = merged
         for i, sentence in enumerate(sentences):
             if gen != self._speech_gen:
                 return
@@ -972,28 +990,49 @@ class Brain:
         )
         if job.then and job.status == "done":
             return  # the next teammate takes it from here
-        agent = self.registry.get(job.agent_id)
-        first = " ".join(split_sentences(job.summary)[:2]) if job.summary else ""
-        fixed = job.data.get("fixed") if isinstance(job.data, dict) else None
+        # Background work is quiet: no voice, just a notification with the result and the files.
+        # (You asked Wisp to go off and do it; it shouldn't start talking over you when it's done.)
+        data = job.data if isinstance(job.data, dict) else {}
+        fixed = data.get("fixed") or []
+        files = [str(f) for f in (fixed or job.outputs)]
         if job.status == "done" and fixed:
             names = ", ".join(Path(f).name for f in fixed)
-            line = f"{job.agent_name} here. All fixed. The corrected copy is saved as {names}, right next to the original. Want me to send it back?"
+            n = len(data.get("changes") or [])
+            title = "Your document is fixed"
+            body = f"{n} fix{'es' if n != 1 else ''} in {names}. The original is untouched."
+            actions = ["open", "folder", "send_back"]
         elif job.status == "done":
-            line = (
-                f"{job.agent_name} here. {first}"
-                if job.role != "writer"
-                else f"{job.agent_name} here. I wrote a draft for you; it's in the panel."
+            title = f"{job.agent_name} finished"
+            body = " ".join(split_sentences(job.summary)[:2]) if job.summary else "Done."
+            if job.role == "writer":
+                title, body = "Your draft is ready", (job.summary or "")[:220]
+            actions = (["open"] if files else []) + (
+                ["walkthrough"] if job.role == "browser" else []
             )
-            if job.role == "browser":
-                line += " Want me to show you how I did it?"
         else:
-            line = f"{job.agent_name} here. I couldn't finish that: {first or job.status}."
-        # The model gets the full result (file paths included) for follow-ups like "send it back".
+            title = f"{job.agent_name} couldn't finish"
+            body = (job.summary or job.status)[:220]
+            actions = []
+        await self.hub.emit(
+            "job_ready",
+            job_id=job.id,
+            agent=job.agent_name,
+            ok=job.status == "done",
+            title=title,
+            body=body,
+            files=files,
+            changes=(data.get("changes") or [])[:8],
+            notes=(data.get("notes") or [])[:3],
+            actions=actions,
+        )
+        # The model still gets the full result (file paths included) for "send it back".
         self.history = [
             *self.history[-11:],
-            (f"(job {job.id} finished: {job.summary[:600]})", line),
+            (
+                f"(job {job.id} finished: {job.summary[:600]})",
+                f"(notified the user: {title}. {body})",
+            ),
         ]
-        self._speak(line, agent=job.agent_name, voice=agent.voice if agent else None)
 
     # ================================================================== misc
     def _spawn(self, coro: Any) -> None:

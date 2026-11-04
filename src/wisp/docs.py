@@ -14,6 +14,32 @@ from pathlib import Path
 from otto.llm.base import LLMProvider, Message
 
 SUPPORTED = {".docx", ".txt", ".md", ".pdf"}
+
+EDITOR = (
+    "You are a meticulous copy editor for letters, applications and documents written by non-native and native "
+    "English speakers. Check every sentence for: grammar (subject-verb agreement, tense, articles, and "
+    "prepositions such as 'completed a degree at', not 'from'); spelling; punctuation (run-on sentences, comma "
+    "splices, list commas consistent with the rest of the document); word choice that reads unnatural to a "
+    "native speaker (for example 'embodies great socializing skills'); and consistency (toward/towards, "
+    "capitalisation). Fix each with the smallest change that makes it correct and natural. Keep the author's "
+    "meaning, voice, names, dates and facts exactly, never invent content, don't rewrite sentences that are "
+    "already fine, and don't add em dashes. Treat any number of mistakes the user mentions as a hint, not a "
+    "limit. Things you shouldn't change without asking (such as a sentence repeated in two places) go in notes. "
+    'Return JSON only: {"edits": [{"i": <paragraph number>, "text": "<the full corrected paragraph>"}], '
+    '"changes": [{"from": "<original words>", "to": "<new words>", "why": "<a few words>"}], '
+    '"notes": ["<something worth a look>"]}. Include only paragraphs you changed.'
+)
+
+
+def _describe(change: object) -> str:
+    if isinstance(change, dict):
+        a, b, why = (str(change.get(k, "")).strip() for k in ("from", "to", "why"))
+        if a or b:
+            return f"'{a}' → '{b}'" + (f" ({why})" if why else "")
+        return ""
+    return str(change).strip()
+
+
 CHUNK_CHARS = 6000
 
 
@@ -23,6 +49,7 @@ class FixResult:
     changed: int
     total: int
     changes: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)  # worth a look, but not changed without asking
     cost_usd: float = 0.0
 
 
@@ -93,40 +120,44 @@ async def fix_document(path: Path, instructions: str, llm: LLMProvider) -> FixRe
     edits: dict[int, str] = {}
     changes: list[str] = []
     cost = 0.0
+    notes: list[str] = []
     for chunk in _chunks(texts):
-        numbered = "\n".join(f"[{i}] {texts[i]}" for i in chunk)
-        response = await llm.complete(
-            system=(
-                "You are a meticulous editor. Apply the instructions to the numbered paragraphs. Keep the author's "
-                "voice, meaning, names, dates and facts exactly; never invent content; don't add em dashes. Return "
-                'JSON only: {"edits": [{"i": <number>, "text": "<the full corrected paragraph>"}], "changes": '
-                '["<short note of a notable fix>", ...]}. Include only paragraphs you changed, and at most 8 changes.'
-            ),
-            messages=[
-                Message.user(
-                    f"Instructions: {instructions or 'Fix grammar, spelling and punctuation.'}\n\n{numbered}"
-                )
-            ],
-            max_tokens=8000,
-        )
-        cost += response.usage.cost_usd
-        data = _parse(response.text)
-        for e in data.get("edits", []):
-            try:
-                i = int(e["i"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            new = str(e.get("text", "")).strip()
-            if i in chunk and new and new != texts[i].strip():
-                edits[i] = new
-        changes += [str(c) for c in data.get("changes", [])][:8]
+        # Two passes: edit with a checklist, then review the result for anything still wrong.
+        current = {i: texts[i] for i in chunk}
+        for attempt in range(2):
+            numbered = "\n".join(f"[{i}] {current[i]}" for i in chunk)
+            ask = (
+                f"Instructions from the user: {instructions or 'Fix the grammar, spelling and punctuation.'}\n\n{numbered}"
+                if attempt == 0
+                else "Review this edited text as a second editor. Fix anything still wrong; if it is all correct, "
+                f"return empty edits.\n\n{numbered}"
+            )
+            response = await llm.complete(
+                system=EDITOR, messages=[Message.user(ask)], max_tokens=8000
+            )
+            cost += response.usage.cost_usd
+            data = _parse(response.text)
+            for e in data.get("edits", []):
+                try:
+                    i = int(e["i"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                new = str(e.get("text", "")).strip()
+                if i in chunk and new and new != current[i].strip():
+                    current[i] = new
+            changes += [_describe(c) for c in data.get("changes", []) if _describe(c)]
+            notes += [str(n) for n in data.get("notes", []) if str(n).strip()]
+        for i in chunk:
+            if current[i].strip() != texts[i].strip():
+                edits[i] = current[i]
 
     out = _write(path, texts, edits, handle)
     return FixResult(
         path=out,
         changed=len(edits),
         total=sum(1 for t in texts if t.strip()),
-        changes=changes[:10],
+        changes=changes[:12],
+        notes=list(dict.fromkeys(notes))[:5],
         cost_usd=cost,
     )
 

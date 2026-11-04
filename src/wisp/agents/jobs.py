@@ -288,6 +288,8 @@ class JobManager:
     async def _fix_documents(self, job: Job, docs: list[Path], llm: LLMProvider) -> None:
         """Fix each document and save a copy beside it; the originals are never touched."""
         lines, outputs, cost = [], [], 0.0
+        all_changes: list[str] = []
+        all_notes: list[str] = []
         for doc in docs:
             await self.hub.emit(
                 "job_event",
@@ -299,13 +301,15 @@ class JobManager:
             result = await fix_document(doc, job.task, llm)
             cost += result.cost_usd
             outputs.append(str(result.path))
+            all_changes += result.changes
+            all_notes += result.notes
             notes = "; ".join(result.changes[:5])
             lines.append(
                 f"{doc.name}: fixed {result.changed} of {result.total} paragraphs, saved as {result.path}"
                 + (f". Notable: {notes}" if notes else "")
             )
         job.summary = " ".join(lines)
-        job.data = {"fixed": outputs}
+        job.data = {"fixed": outputs, "changes": all_changes[:12], "notes": all_notes[:5]}
         job.outputs, job.cost_usd, job.status = outputs, cost, "done"
 
     async def _run_explainer(self, job: Job, agent: AgentProfile) -> None:

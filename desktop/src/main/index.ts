@@ -15,6 +15,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  Notification,
   type Display,
   globalShortcut,
   ipcMain,
@@ -311,6 +312,28 @@ ipcMain.on("action", async (_e, kind: string, value: string) => {
     pasteText();
     setTimeout(() => clipboard.writeText(previous), 900);
   }
+});
+// Files Wisp made: open them or show them in Explorer, but only inside Wisp's own folders.
+function wispFile(path: unknown): string | null {
+  if (typeof path !== "string" || !path) return null;
+  const full = resolve(path);
+  const allowed = [join(app.getPath("documents"), "Wisp"), join(REPO, ".wisp", "outputs")].map((d) => resolve(d).toLowerCase());
+  return allowed.some((d) => full.toLowerCase().startsWith(d + "\\") || full.toLowerCase().startsWith(d + "/")) && existsSync(full) ? full : null;
+}
+ipcMain.on("open-file", (_e, path: unknown) => {
+  const file = wispFile(path);
+  if (file) void shell.openPath(file);
+});
+ipcMain.on("show-in-folder", (_e, path: unknown) => {
+  const file = wispFile(path);
+  if (file) shell.showItemInFolder(file);
+});
+ipcMain.on("notify", (_e, title: string, body: string, path?: string) => {
+  if (!Notification.isSupported()) return;
+  const note = new Notification({ title: String(title).slice(0, 80), body: String(body).slice(0, 200), silent: true });
+  const file = wispFile(path);
+  if (file) note.on("click", () => void shell.openPath(file));
+  note.show();
 });
 ipcMain.handle("share-visible", () => shareVisible);
 ipcMain.on("set-share-visible", (_e, value: boolean) => {
