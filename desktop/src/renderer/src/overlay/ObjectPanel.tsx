@@ -18,7 +18,7 @@ import { useOverlay, voice } from "./store";
 
 const STAGE = { w: 780, h: 560 };
 const CAPTION = 140; // the caption bar under the canvas, in CSS px
-const AUDIO_WAIT_MS = 2500; // how long to wait for the brain's voice before using the OS voice
+const AUDIO_WAIT_MS = 9000; // Wisp's own voice for this step; after that the words show silently
 
 export function ObjectPanel() {
   const object = useOverlay((s) => s.object);

@@ -9,6 +9,10 @@ import { brain } from "../shared/socket";
 export const display = currentDisplay();
 export const isPrimary = display.primary;
 export const voice = new AudioQueue();
+// One voice: every overlay window has its own audio queue, so only one window speaks. That's
+// the main screen, unless this turn's 3D model, scene or drawing opened on another screen; then
+// that screen speaks the reply too, one line after another.
+let voiceHere = isPrimary;
 
 export interface LiveAnnotation extends Annotation {
   bornAt: number;
@@ -241,6 +245,7 @@ brain.on((e: BrainEvent) => {
       break;
     case "user":
       replyOpen = false;
+      voiceHere = isPrimary;
       pushLine({ who: "user", text: e.text });
       break;
     case "turn_done":
@@ -253,7 +258,7 @@ brain.on((e: BrainEvent) => {
       break;
     case "say":
       if (e.text) pushLine({ who: "agent", agent: e.agent, text: e.text });
-      if (isPrimary) {
+      if (voiceHere) {
         voice.enqueue({
           b64: e.audio,
           text: e.text,
@@ -264,7 +269,7 @@ brain.on((e: BrainEvent) => {
           },
         });
       } else addAnnotations(e.annotations);
-      if (!isPrimary) useOverlay.setState({ caption: { text: e.text, agent: e.agent } });
+      if (!voiceHere) useOverlay.setState({ caption: { text: e.text, agent: e.agent } });
       break;
     case "stop_audio":
       if (isPrimary) voice.stop();
@@ -287,13 +292,15 @@ brain.on((e: BrainEvent) => {
       useOverlay.setState({ captureFlash: performance.now(), seeing: e.excluded ? "" : prettyApp(e.app) });
       break;
     case "scene":
-      if (sceneOnThisDisplay(e.scene, e.place))
+      voiceHere = sceneOnThisDisplay(e.scene, e.place);
+      if (voiceHere)
         useOverlay.setState({ scene: { spec: e.scene, step: 0, playing: e.scene.auto_play, hologram: e.scene.mode === "hologram", place: e.place ?? null }, palace: null, object: null });
       break;
     case "object":
       // Models open on the screen the brain placed them on (the one you're looking at); an edit
       // keeps the same id so the view keeps its camera.
-      if (placedHere(e.place))
+      voiceHere = placedHere(e.place);
+      if (voiceHere)
         useOverlay.setState((s) => ({
           object: { spec: e.scene, audioKey: e.audio_key, restart: e.restart, place: e.place ?? null, version: (s.object?.spec.id === e.scene.id ? s.object.version : 0) + 1 },
           scene: null,
@@ -309,7 +316,8 @@ brain.on((e: BrainEvent) => {
       break;
     case "sketch":
       // A new drawing replaces the old one, on the screen you're looking at.
-      if (placedHere(e.place)) {
+      voiceHere = placedHere(e.place);
+      if (voiceHere) {
         voice.stop();
         useOverlay.setState({ sketch: { board: e.board, audioKey: e.audio_key, place: e.place ?? null } });
       }

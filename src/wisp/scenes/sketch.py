@@ -175,6 +175,11 @@ class Sketchboard(BaseModel):
         return self
 
 
+NARRATION = (
+    "One spoken sentence, under 20 words, in your voice: a concrete fact, a vivid analogy or a "
+    "punchline, never a description of the picture ('Here is', 'This shows'). The last one lands the 'so that's why' moment."
+)
+
 _POINT = {"type": "array", "items": {"type": "number"}, "description": "[x, y]"}
 
 SKETCH_TOOL_SCHEMA: dict[str, Any] = {
@@ -195,7 +200,10 @@ SKETCH_TOOL_SCHEMA: dict[str, Any] = {
             "description": "2-5 steps. Each draws its shapes while Wisp says the narration.",
             "items": {
                 "type": "object",
-                "properties": {"narration": {"type": "string"}, "title": {"type": "string"}},
+                "properties": {
+                    "narration": {"type": "string", "description": NARRATION},
+                    "title": {"type": "string"},
+                },
                 "required": ["narration"],
             },
         },

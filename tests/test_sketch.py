@@ -69,7 +69,8 @@ async def test_a_sketch_draws_first_speaks_once_and_stays_off_what_it_explains(s
     [ev] = rec.of("sketch")
     names = [e["type"] for e in rec.events if e["type"] in ("sketch", "say")]
     assert names[0] == "sketch"  # the drawing goes up before Wisp starts talking
-    assert [s["text"] for s in rec.of("say")] == ["Yep, it really can."]  # one sentence, one voice
+    # The verdict and the hook are said; the rest is left to the drawing.
+    assert " ".join(s["text"] for s in rec.of("say")) == "Yep, it really can. Here's the trick."
     anchor = ev["board"]["anchor"]["rect"]
     assert anchor == [100, 100, 800, 600]  # the thread knows what it points at
     x, y, w, h = ev["place"]
@@ -77,3 +78,19 @@ async def test_a_sketch_draws_first_speaks_once_and_stays_off_what_it_explains(s
     assert x >= ax + aw or x + w <= ax or y >= ay + ah or y + h <= ay  # never covers it
     assert [a["step"] for a in rec.of("scene_audio")] == [0, 1, 2, 3]
     assert all(a["scene_id"] == ev["audio_key"] for a in rec.of("scene_audio"))
+
+
+def test_the_opener_keeps_the_verdict_and_drops_filler():
+    from wisp.companion.brain import visual_opener
+
+    assert visual_opener("There you go. Real. Only the B can do it. More, more, more.") == (
+        "Real. Only the B can do it."
+    )
+    assert visual_opener("Sure!") == "Sure!"  # nothing else to say: better than silence
+
+
+async def test_a_drawing_without_a_reply_narrates_itself_instead_of_a_canned_line(settings):
+    brain, rec = make_brain(settings, llm=Script([("sketch_diagram", HOVER)]))
+    await brain.turn("can a jet hover?")
+    await asyncio.sleep(0.05)
+    assert rec.of("sketch") and not rec.of("say")

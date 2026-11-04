@@ -54,7 +54,7 @@ export function ScenePanel() {
       if (narrated.current === key) return;
       narrated.current = key;
       voice.enqueue({ b64: null, text: step.narration, onEnd: advance });
-    }, 3000);
+    }, 9000); // Wisp's own voice; after that the words show silently
     return () => clearTimeout(t);
   }, [scene, audio, setStep, setPlaying]);
 

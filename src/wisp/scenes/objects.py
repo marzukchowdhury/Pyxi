@@ -259,7 +259,10 @@ class Beat(BaseModel):
         return _clamp_fields(data, {"at": (0, 600)})
 
     title: str
-    narration: str = Field(description="One or two short sentences spoken during this beat.")
+    narration: str = Field(
+        description="One or two short spoken sentences in your voice: what is happening and why it matters, "
+        "with a concrete fact or vivid analogy, never a description of the picture."
+    )
     at: float = Field(0, ge=0, le=600, description="Timeline second this beat starts.")
     focus: list[str] = Field(
         default_factory=list, description="Part ids to spotlight (others dim)."

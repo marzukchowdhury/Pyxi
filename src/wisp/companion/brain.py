@@ -624,8 +624,10 @@ class Brain:
                     # Drew a note card but forgot to speak: narrate its own points, in sync.
                     points = " ".join(f"[note:{it.n}] {it.text.rstrip('.')}." for it in card.items)
                     self._speak(f"Here's the gist. {points}")
+                elif self._visual_turn:
+                    pass  # the drawing or model narrates itself; a canned line would only interrupt
                 elif self._calls:
-                    self._speak("There you go.")
+                    self._speak("Done.")
                 else:
                     self._speak("Hmm, I'm not sure what to say to that.")
             return {}
@@ -646,7 +648,7 @@ class Brain:
         if name == "say":
             text = str(args.get("text", ""))
             if self._visual_turn:
-                text = (split_sentences(text) or [text])[0]
+                text = visual_opener(text)
             self._speak(text)
             return None
         if name in {"point", "circle", "highlight"}:
@@ -1299,3 +1301,22 @@ class Brain:
 
 def dumps(obj: Any) -> str:
     return json.dumps(obj, default=str)
+
+
+_FILLER = re.compile(
+    r"^(sure|okay|ok|alright|great question|good question|there you go|here you go|"
+    r"let me show you|let me draw (that|it)|here'?s how|watch this)\b[^.!?]*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def visual_opener(text: str, limit: int = 200) -> str:
+    """What Wisp says before a drawing or model takes over: the verdict and a hook (two short
+    sentences at most), minus empty openers like "There you go." that say nothing."""
+    sentences = [s for s in split_sentences(text) if not _FILLER.match(s.strip())]
+    out = ""
+    for s in sentences[:2]:
+        if out and len(out) + 1 + len(s) > limit:
+            break
+        out = f"{out} {s}".strip()
+    return out or (split_sentences(text) or [text])[0]

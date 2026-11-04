@@ -16,7 +16,7 @@ import { Interactive } from "./Interactive";
 import { useLinger } from "./linger";
 import { useOverlay, voice } from "./store";
 
-const AUDIO_WAIT_MS = 2500; // how long to wait for Wisp's voice before using the OS voice
+const AUDIO_WAIT_MS = 9000; // Wisp's own voice for this step; after that the words show silently
 const CHROME = 112; // header and footer around the drawing, CSS px
 const WEIGHT = { thin: 1.3, normal: 2.1, bold: 3.1 };
 

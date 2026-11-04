@@ -70,9 +70,10 @@ export class AudioQueue {
     const gen = this.gen;
     clip.onStart?.();
     try {
-      if (this.muted) await this.silent(clip);
-      else if (clip.b64) await this.playWav(clip.b64);
-      else if (clip.text) await speakWithOs(clip.text);
+      // Wisp has one voice. With no audio (muted, or the voice failed) the words still take
+      // their time on screen, but no other voice ever stands in.
+      if (this.muted || !clip.b64) await this.silent(clip);
+      else await this.playWav(clip.b64);
     } catch (err) {
       console.warn("audio failed", err);
     }
@@ -108,17 +109,6 @@ export class AudioQueue {
       src.start();
     });
   }
-}
-
-function speakWithOs(text: string): Promise<void> {
-  return new Promise((resolve) => {
-    if (!("speechSynthesis" in window)) return resolve();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.05;
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
-    speechSynthesis.speak(u);
-  });
 }
 
 /** Push-to-talk: records until toggled off, or until ~1.2 s of silence after speech. */
