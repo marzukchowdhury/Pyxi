@@ -131,6 +131,31 @@ class JobManager:
         self._tasks[job.id] = asyncio.create_task(self._run(job, agent))
         return job
 
+    async def track(self, agent_name: str, task: str, role: str = "errand") -> Job:
+        """A job record for work the brain runs itself (errands), so it shows up like any other."""
+        job = Job(
+            agent_id=agent_name.lower(),
+            agent_name=agent_name,
+            role=role,
+            task=task,
+            status="running",
+        )
+        self.jobs[job.id] = job
+        await self._update(job)
+        return job
+
+    async def settle(
+        self, job: Job, *, ok: bool, summary: str, data: Any = None, cost: float = 0.0
+    ) -> None:
+        job.status, job.summary, job.data, job.cost_usd = (
+            ("done" if ok else "failed"),
+            summary,
+            data,
+            cost,
+        )
+        job.ended_at = time.time()
+        await self._update(job)
+
     def active(self) -> list[Job]:
         return [j for j in self.jobs.values() if j.status in {"queued", "running"}]
 

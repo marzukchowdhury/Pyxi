@@ -17,6 +17,7 @@ import logging
 import mimetypes
 import os
 import re
+import uuid
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from email.utils import parseaddr
@@ -26,6 +27,14 @@ from typing import Any
 import httpx
 
 from wisp.connectors import Connector, Outgoing, Result, Status, Tool, tool
+from wisp.timecontext import zone
+
+EMAIL = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def _clock(t: datetime) -> str:
+    return t.strftime("%I:%M %p").lstrip("0")
+
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +80,7 @@ class GoogleConnector(Connector):
         self.downloads = downloads
         self._creds = None
         self.email: str | None = None
+        self._tz: str | None = None
 
     # ------------------------------------------------------------------ auth
     def client_config(self) -> dict[str, Any] | None:
@@ -307,7 +317,7 @@ class GoogleConnector(Connector):
     # ------------------------------------------------------------------ calendar
     async def calendar_list(self, args: dict[str, Any]) -> Result:
         days = float(args.get("days", 7) or 7)
-        now = datetime.now().astimezone()
+        now = datetime.now(zone(await self.time_zone()))
         params = {
             "timeMin": now.isoformat(),
             "timeMax": (now + timedelta(days=days)).isoformat(),
@@ -331,49 +341,113 @@ class GoogleConnector(Connector):
             )
         return "Upcoming:\n" + "\n".join(lines)
 
+    async def time_zone(self) -> str | None:
+        """The calendar's own time zone (what "3pm" means to the user)."""
+        if self._tz is None:
+            try:
+                data = await self._api(
+                    "GET", "https://www.googleapis.com/calendar/v3/users/me/settings/timezone"
+                )
+                self._tz = str(data.get("value") or "")
+            except Exception:
+                self._tz = ""
+        return self._tz or None
+
     async def calendar_add(self, args: dict[str, Any]) -> Result:
-        start = datetime.fromisoformat(str(args["start"]))
-        if start.tzinfo is None:
-            start = start.astimezone()
-        end = (
-            datetime.fromisoformat(str(args["end"]))
-            if args.get("end")
-            else start + timedelta(minutes=int(args.get("minutes", 30) or 30))
-        )
-        if end.tzinfo is None:
-            end = end.astimezone()
-        guests = [g.strip() for g in args.get("attendees", []) or [] if "@" in str(g)]
-        event = {
-            "summary": str(args.get("title", "Event")),
-            "start": {"dateTime": start.isoformat()},
-            "end": {"dateTime": end.isoformat()},
+        """Add an event, checked before and read back after, so mistakes are caught."""
+        tz_name = await self.time_zone()
+        tz = zone(tz_name)
+        now = datetime.now(tz)
+        try:
+            start = datetime.fromisoformat(str(args["start"]))
+        except (KeyError, ValueError):
+            return "calendar_add: start must be a local date and time like 2026-11-06T15:00."
+        start = start.replace(tzinfo=tz) if start.tzinfo is None else start.astimezone(tz)
+        if args.get("end"):
+            try:
+                end = datetime.fromisoformat(str(args["end"]))
+            except ValueError:
+                return "calendar_add: end must look like 2026-11-06T15:30."
+            end = end.replace(tzinfo=tz) if end.tzinfo is None else end.astimezone(tz)
+        else:
+            end = start + timedelta(minutes=int(args.get("minutes", 30) or 30))
+        if start < now - timedelta(minutes=5):
+            return (
+                f"calendar_add: {start:%a %d %b %Y %H:%M} is in the past (it's now {now:%a %d %b %Y %H:%M}). "
+                "Check the date before trying again."
+            )
+        if end <= start:
+            return "calendar_add: the end must be after the start."
+        raw_guests = [str(g).strip() for g in args.get("attendees", []) or []]
+        bad = [g for g in raw_guests if not EMAIL.fullmatch(g)]
+        if bad:
+            return f"calendar_add: {bad} aren't valid email addresses. Use the exact address the user gave."
+        guests = sorted(set(raw_guests), key=raw_guests.index)
+        meet = bool(args.get("meet", bool(guests)))
+        event: dict[str, Any] = {
+            "summary": str(args.get("title") or "Meeting"),
+            "start": {
+                "dateTime": start.replace(tzinfo=None).isoformat(timespec="minutes"),
+                "timeZone": tz_name or str(start.tzinfo),
+            },
+            "end": {
+                "dateTime": end.replace(tzinfo=None).isoformat(timespec="minutes"),
+                "timeZone": tz_name or str(end.tzinfo),
+            },
         }
         if args.get("location"):
             event["location"] = str(args["location"])
         if args.get("description"):
             event["description"] = str(args["description"])
-        when = start.strftime("%a %d %b, %H:%M")
+        if guests:
+            event["attendees"] = [{"email": g} for g in guests]
+        if meet:
+            event["conferenceData"] = {
+                "createRequest": {
+                    "requestId": uuid.uuid4().hex,
+                    "conferenceSolutionKey": {"type": "hangoutsMeet"},
+                }
+            }
+        when = f"{start:%A} {start.day} {start:%B %Y}, {_clock(start)} to {_clock(end)}"
 
         async def create() -> str:
-            body = {**event, **({"attendees": [{"email": g} for g in guests]} if guests else {})}
             made = await self._api(
                 "POST",
                 f"{CAL}/events",
-                params={"sendUpdates": "all" if guests else "none"},
-                json=body,
+                params={
+                    "sendUpdates": "all" if guests else "none",
+                    "conferenceDataVersion": 1 if meet else 0,
+                },
+                json=event,
+            )
+            # Read it back from Google, so the summary reports what's really on the calendar.
+            got = await self._api("GET", f"{CAL}/events/{made['id']}") if made.get("id") else made
+            s0 = datetime.fromisoformat(got["start"]["dateTime"]).astimezone(tz)
+            e0 = datetime.fromisoformat(got["end"]["dateTime"]).astimezone(tz)
+            invited = [a.get("email") for a in got.get("attendees", []) if not a.get("self")]
+            meet_link = got.get("hangoutLink") or next(
+                (
+                    ep.get("uri")
+                    for ep in (got.get("conferenceData") or {}).get("entryPoints", [])
+                    if ep.get("entryPointType") == "video"
+                ),
+                "",
             )
             return (
-                f"Added '{event['summary']}' on {when}."
-                + (" Invites sent." if guests else "")
-                + (f" {made.get('htmlLink', '')}" if made else "")
+                f"CREATED '{got.get('summary')}' | when: {s0:%A} {s0.day} {s0:%B %Y}, {_clock(s0)} to {_clock(e0)} ({tz_name or 'local time'})"
+                + (f" | invited: {', '.join(invited)}" if invited else "")
+                + (f" | meet: {meet_link}" if meet_link else "")
+                + f" | link: {got.get('htmlLink', '')}"
             )
 
-        if not guests:  # your own calendar only: nothing leaves, no approval needed
+        if not guests:  # only your own calendar: nothing leaves, no approval needed
             return await create()
         return Outgoing(
             action=f"Invite {', '.join(guests)} to '{event['summary']}'",
-            preview=f"{when}, {int((end - start).total_seconds() // 60)} minutes",
+            preview=f"{when}" + (" with a Google Meet link" if meet else ""),
             run=create,
+            kind="invite",
+            recipients=guests,
         )
 
     # ------------------------------------------------------------------ docs
@@ -470,15 +544,25 @@ class GoogleConnector(Connector):
             Tool(
                 tool(
                     "calendar_add",
-                    "Add an event to the user's Google Calendar. start/end as local ISO datetimes. Inviting attendees needs their approval.",
+                    "Add an event to the user's Google Calendar. start/end are local times like 2026-11-06T15:00 in the "
+                    "user's time zone (see Now). Attendees get an invite; a Google Meet link is added when there are "
+                    "attendees (meet=false to skip). The result reads the event back from Google: check it.",
                     {
                         "title": {"type": "string"},
                         "start": {"type": "string"},
                         "end": {"type": "string"},
                         "minutes": {"type": "integer"},
-                        "attendees": {"type": "array", "items": {"type": "string"}},
+                        "attendees": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Exact email addresses the user gave.",
+                        },
                         "location": {"type": "string"},
                         "description": {"type": "string"},
+                        "meet": {
+                            "type": "boolean",
+                            "description": "Add a Google Meet link (default: yes when there are attendees).",
+                        },
                     },
                     ["title", "start"],
                 ),

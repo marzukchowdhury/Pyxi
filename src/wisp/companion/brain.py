@@ -48,6 +48,7 @@ from wisp.companion.annotations import (
     resolve_rect,
     split_markers,
 )
+from wisp.companion.errands import run_errand
 from wisp.companion.notes import Guide, build_card
 from wisp.companion.tools import COMPANION_TOOLS, INFO_TOOLS
 from wisp.companion.turns import TurnStore
@@ -62,6 +63,7 @@ from wisp.scenes.object_gallery import OBJECT_GALLERY
 from wisp.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summary
 from wisp.scenes.spec import SceneAnchor
 from wisp.screen import ScreenContext, ScreenReader
+from wisp.timecontext import now_block
 from wisp.voice import Transcriber, make_tts, split_sentences
 from wisp.voice.studio import LANGUAGES, VoiceStudio
 from wisp.voice.tts import FallbackTTS
@@ -140,6 +142,8 @@ class Brain:
         self._scene_retry = False
         self._turn_card = None  # the note card drawn this turn, if any
         self._watcher: asyncio.Future[None] | None = None
+        self._job_llm: LLMProvider | None = None
+        self._user_text = ""  # the user's own words this turn (errands check addresses against it)
         self.overlay_in_capture = (
             False  # the desktop app says whether screen shares see the overlay
         )
@@ -268,6 +272,106 @@ class Brain:
 
         self._watcher = asyncio.ensure_future(watch())
 
+    async def _now(self) -> str:
+        tz = None
+        if self.connectors.google.connected():
+            try:
+                tz = await self.connectors.google.time_zone()
+            except Exception:
+                tz = None
+        return now_block(tz)
+
+    def _errand_llm(self) -> LLMProvider:
+        """Errands can use a stronger model than conversation (WISP_JOB_MODEL), if set."""
+        if self.settings.job_model and self.settings.job_model != self.settings.brain_model:
+            if self._job_llm is None:
+                from wisp.llm import make_llm
+
+                self._job_llm = make_llm(self.settings, model=self.settings.job_model)
+            return self._job_llm
+        return self.llm
+
+    async def _run_errand(self, task: str, user_text: str) -> None:
+        """Do it quietly, then tell the user once, in the notch."""
+        job = await self.jobs.track("Wisp", task)
+
+        async def progress(line: str) -> None:
+            await self.hub.emit(
+                "job_event", job_id=job.id, agent="Wisp", event="status", data={"message": line}
+            )
+
+        async def approve(out: Outgoing) -> bool:
+            ok = await self.hub.request(
+                "confirm",
+                timeout=900,
+                job_id=job.id,
+                agent="Wisp",
+                action=out.action,
+                reason=out.preview,
+            )
+            return bool(ok)
+
+        try:
+            result = await run_errand(
+                task=task,
+                user_text=user_text,
+                now=await self._now(),
+                llm=self._errand_llm(),
+                tools=self.connectors.tools(),
+                approve=approve,
+                progress=progress,
+            )
+        except Exception as exc:
+            log.exception("errand failed")
+            await self.jobs.settle(job, ok=False, summary=str(exc)[:200])
+            await self._notify(job.id, ok=False, title="Couldn't finish that", body=str(exc)[:200])
+            return
+        self.turns.add_spend("errand", result.cost_usd)
+        await self.jobs.settle(
+            job,
+            ok=result.ok,
+            summary=result.summary,
+            data={"links": result.links},
+            cost=result.cost_usd,
+        )
+        self.history = [
+            *self.history[-11:],
+            (
+                f"(errand finished: {task[:200]})",
+                f"(notified the user: {result.title}. {result.summary} {result.link or ''})",
+            ),
+        ]
+        await self._notify(
+            job.id, ok=result.ok, title=result.title, body=result.summary, link=result.link
+        )
+
+    async def _notify(
+        self,
+        job_id: str,
+        *,
+        ok: bool,
+        title: str,
+        body: str,
+        link: str | None = None,
+        files: list[str] | None = None,
+        changes: list[str] | None = None,
+        notes: list[str] | None = None,
+        actions: list[str] | None = None,
+    ) -> None:
+        await self.hub.emit(
+            "job_ready",
+            job_id=job_id,
+            agent="Wisp",
+            ok=ok,
+            title=title,
+            body=body,
+            link=link,
+            files=files or [],
+            changes=changes or [],
+            notes=notes or [],
+            actions=actions or (["link"] if link else []),
+        )
+
     async def run_due_routines(self, now: datetime | None = None) -> int:
         """Run routines that are due, one at a time, when Wisp isn't in the middle of something."""
         ran = 0
@@ -308,6 +412,7 @@ class Brain:
             )
             self._scene_retry = False
             self._turn_card = None
+            self._user_text = user_text
             turn_id = "turn_" + secrets.token_hex(4)
             started = time.monotonic()
             await self.hub.emit("user", text=shown or user_text, turn_id=turn_id)
@@ -418,6 +523,7 @@ class Brain:
                 memories=memories,
                 notes=state.get("notes", []),
                 on_screen=object_summary(self._object) if self._object else "",
+                now=await self._now(),
                 language=self._reply_language(),
                 budget_line=f"spent today ${self.turns.spent_today():.3f} of ${budget.daily_cost_usd:.2f}; this turn ${self._usage.cost_usd:.3f} of ${budget.max_cost_usd:.2f}",
             )
@@ -723,6 +829,14 @@ class Brain:
                 if gone
                 else "cancel_routine: no routine like that."
             )
+        if name == "errand":
+            task = str(args.get("task", "")).strip()
+            if not task:
+                return "errand: say what to do."
+            if not self.connectors.tools():
+                return "errand: no accounts are connected yet; tell the user to connect one in Settings."
+            self._spawn(self._run_errand(task, self._user_text))
+            return None
         if name == "quick_action":
             return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
         if name == "start_walkthrough":

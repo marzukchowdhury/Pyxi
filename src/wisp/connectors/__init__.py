@@ -26,6 +26,8 @@ class Outgoing:
     preview: str  # what exactly goes out
     run: Callable[[], Awaitable[str]]  # does it, returns a short result line
     agent: str = "Wisp"
+    kind: str = "message"  # "invite" (a calendar invite) or "message" (email, post, chat)
+    recipients: list[str] = field(default_factory=list)
 
 
 Result = str | Outgoing

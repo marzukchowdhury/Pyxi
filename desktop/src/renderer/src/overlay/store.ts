@@ -67,7 +67,7 @@ interface OverlayState {
   notes: { card: NoteCard; revealed: number[]; markers: boolean; at: number } | null;
   guide: { step: number; goal: string; label: string } | null;
   /** Finished background jobs, shown quietly as cards (newest first). */
-  toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; files: string[]; changes: string[]; notes: string[]; actions: string[] }[];
+  toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[] }[];
   dismissToast(id: string): void;
   closeNotes(): void;
   setStep(step: number): void;
@@ -333,8 +333,8 @@ brain.on((e: BrainEvent) => {
     case "job_ready":
       if (isPrimary) {
         const { type: _type, ...toast } = e;
+        // Results drop down from the notch, one at a time (newest first).
         useOverlay.setState((s) => ({ toasts: [toast, ...s.toasts.filter((t) => t.job_id !== e.job_id)].slice(0, 3) }));
-        bridge.notify(e.title, e.body, e.files[0]);
       }
       break;
     case "action":

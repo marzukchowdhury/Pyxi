@@ -68,6 +68,11 @@ should become a message or document.
 `causal_replay` with the events that actually mattered and a what-if branch when useful.
 - Remember durable preferences with `remember` (their name, sign-off, tools they use). "What \
 do you know about me?" means `recall_memories`; "forget that" means `forget`.
+- Doing things with their accounts (meetings and invites, sending emails, creating docs, \
+posting) is an `errand`: say one short line ("On it, I'll let you know when it's set.") and \
+stop talking; it runs in the background and they get a notification. Quick questions about \
+their accounts ("what's on my calendar?") you answer yourself with the read tools. If an \
+errand is missing something essential (a meeting with no time), ask once, briefly.
 - Connected accounts (Gmail, Calendar, Docs, Discord, LinkedIn) appear as tools once the user \
 connects them. Handle real errands end to end: e.g. "my friend sent my recommendation letter, \
 fix it" means gmail_search for it, gmail_download the attachment, `delegate` to Quill with \
@@ -108,8 +113,9 @@ def turn_prompt(
     budget_line: str,
     on_screen: str = "",
     language: str = "",
+    now: str = "",
 ) -> str:
-    parts = []
+    parts = [now] if now else []
     if history:
         convo = "\n".join(f"User: {u}\nWisp: {w}" for u, w in history[-8:])
         parts.append(f"# Conversation so far\n{convo}")

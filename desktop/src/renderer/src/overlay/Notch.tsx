@@ -22,7 +22,7 @@ import { brain } from "../shared/socket";
 import { Interactive } from "./Interactive";
 import { useOverlay, voice } from "./store";
 
-type Mode = "idle" | "hint" | "working" | "paused" | "offline" | "notice" | "speaking" | "thinking" | "listening" | "open" | "full";
+type Mode = "idle" | "hint" | "working" | "paused" | "offline" | "notice" | "speaking" | "thinking" | "listening" | "open" | "full" | "result";
 
 const WIDTH: Record<Mode, number> = {
   idle: 136,
@@ -36,7 +36,10 @@ const WIDTH: Record<Mode, number> = {
   listening: 268,
   open: 440,
   full: 480,
+  result: 460,
 };
+
+const RESULT_MS = 10000; // how long a finished errand stays up (hovering pauses it)
 
 installPanelStyles();
 
@@ -65,6 +68,10 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const chat = useOverlay((s) => s.chat);
   const jobs = useOverlay((s) => s.jobs);
   const jobStatus = useOverlay((s) => s.jobStatus);
+  const toasts = useOverlay((s) => s.toasts);
+  const dismissToast = useOverlay((s) => s.dismissToast);
+  const result = toasts[0];
+  const [left, setLeft] = useState(1); // share of the result's 10 seconds still to go
   const hold = useHoldKeys();
 
   const [hover, setHover] = useState(false);
@@ -104,6 +111,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   // (Listening, Thinking, captions, notices) never catch the mouse.
   const open = hover || pinned || (focused && text.trim() !== "");
   const mode: Mode = full ? "full"
+    : result ? "result"
     : open ? "open"
     : state === "listening" ? "listening"
     : state === "transcribing" || state === "thinking" || state === "looking" ? "thinking"
@@ -130,6 +138,22 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   useEffect(() => {
     if (mode === "open") lines.current?.scrollTo({ top: lines.current.scrollHeight });
   }, [mode, chat.length, chat[chat.length - 1]?.text]);
+
+  // A finished errand shows for 10 seconds, paused while the pointer is on it.
+  useEffect(() => {
+    if (!result) return;
+    let shown = 0;
+    let last = performance.now();
+    setLeft(1);
+    const id = window.setInterval(() => {
+      const t = performance.now();
+      if (!over.current.handle && !over.current.body) shown += t - last;
+      last = t;
+      setLeft(Math.max(0, 1 - shown / RESULT_MS));
+      if (shown >= RESULT_MS) dismissToast(result.job_id);
+    }, 80);
+    return () => window.clearInterval(id);
+  }, [result?.job_id, dismissToast]);
 
   // The full notch: Ctrl+Alt+W / the tray icon toggle it; Escape folds it away.
   const openFull = (t?: Tab) => {
@@ -203,7 +227,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
       <Interactive className="notch-handle" onEnter={() => enter("handle")} onLeave={() => leave("handle")} />
       <Interactive
         className="notch-hit"
-        active={mode === "open" || mode === "full"}
+        active={mode === "open" || mode === "full" || mode === "result"}
         // Where the notch is growing to, plus a forgiving margin: while it animates wider, a
         // pointer heading for its far corner must not count as having left.
         hitRect={() => {
@@ -289,6 +313,35 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
               <span className="notch-text">
                 <b>{running[0].agent_name}</b> {jobStatus[running[0].id] ?? "is on it"}
               </span>
+            </div>
+          )}
+
+          {mode === "result" && result && (
+            <div className={`notch-result ${result.ok ? "" : "failed"}`}>
+              <div className="notch-head">
+                <i className="result-mark" />
+                <b>{result.title}</b>
+                <span />
+                <button className="notch-btn" title="Close" onClick={(e) => { e.stopPropagation(); dismissToast(result.job_id); }}><Close /></button>
+              </div>
+              <p className="result-body">{result.body}</p>
+              {result.changes.length > 0 && (
+                <ul className="result-changes">{result.changes.slice(0, 3).map((c) => <li key={c}>{c}</li>)}</ul>
+              )}
+              <div className="result-actions">
+                {result.link && (
+                  <button className="primary" onClick={() => bridge.openExternal(result.link!)}>
+                    {result.link.includes("meet.google.com") ? "Join Google Meet" : "Open"}
+                  </button>
+                )}
+                {result.link?.includes("meet.google.com") && <span className="result-link">{result.link.replace("https://", "")}</span>}
+                {result.files[0] && <button className="primary" onClick={() => bridge.openFile(result.files[0])}>Open file</button>}
+                {result.actions.includes("folder") && result.files[0] && <button onClick={() => bridge.showInFolder(result.files[0])}>Show in folder</button>}
+                {result.actions.includes("send_back") && (
+                  <button onClick={() => { brain.send({ type: "text", text: "Send the fixed file back to the person who emailed me the original, as a reply." }); dismissToast(result.job_id); }}>Send it back</button>
+                )}
+              </div>
+              <i className="result-timer" style={{ transform: `scaleX(${left})` }} />
             </div>
           )}
 
