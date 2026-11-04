@@ -423,3 +423,34 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .corner-tools .icon { background: var(--glass-strong); border-color: var(--hair-hi); backdrop-filter: blur(12px); box-shadow: 0 6px 18px rgba(0,0,0,.25); }
 .ann-label.side { transform: translate(0, -50%); }
 .node-label.small { padding: 3px 7px 4px; border-radius: 7px; font-size: 11px; }
+
+/* ---------------------------------------------------------------- sketchboards */
+:root { --sk-ink: #eef3fa; --sk-ice: #7fbaff; --sk-amber: #ffc93c; --sk-rose: #ff7d93; --sk-mint: #5fe3b0; --sk-violet: #b9a2ff; --sk-muted: rgba(232,238,248,.5); }
+.sketch-board { position: fixed; z-index: 28; pointer-events: auto !important; border-radius: 22px; overflow: hidden;
+  background: radial-gradient(rgba(255,255,255,.065) 1px, transparent 1.2px) 0 0 / 18px 18px, linear-gradient(180deg, rgba(14,17,24,.94), rgba(9,11,16,.96));
+  border: 1px solid var(--hair-hi); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 30px 80px rgba(0,0,0,.45); backdrop-filter: blur(20px) saturate(140%); animation: emerge .5s var(--spring); }
+.sketch-head { position: relative; padding: 14px 20px 2px; }
+.sketch-title { font: 700 31px/1.05 "Caveat", cursive; color: var(--ink); padding-right: 110px; animation: sk-wipe .7s var(--ease) both; }
+.sketch-sub { font: 500 19px/1.1 "Caveat", cursive; color: var(--ink-3); margin-top: 2px; animation: fade .5s .3s both; }
+.sketch-tools { position: absolute; right: 12px; top: 12px; display: flex; gap: 6px; opacity: 0; transition: opacity .25s var(--ease); }
+.sketch-board:hover .sketch-tools { opacity: 1; }
+.sketch-art { display: block; overflow: visible; }
+.sketch-foot { display: flex; align-items: center; gap: 12px; padding: 4px 20px 14px; min-height: 34px; }
+.sketch-dots { display: flex; gap: 5px; flex: none; }
+.sketch-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.16); transition: background .3s, transform .3s var(--spring); }
+.sketch-dots i.on { background: var(--sk-ice); transform: scale(1.35); }
+.sketch-dots i.done { background: rgba(127,186,255,.55); }
+.sketch-caption { font-size: 12.5px; line-height: 1.35; color: var(--ink-2); animation: fade .4s both; }
+.sk-line { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: ink-draw .8s cubic-bezier(.45,.05,.3,1) both; filter: drop-shadow(0 0 3px rgba(127,186,255,.18)); }
+.sk-line.dashed { stroke-dasharray: .035 .03; stroke-dashoffset: 0; animation: fade .6s both; }
+.sk-fill { fill-opacity: .13; stroke: none; animation: fade .7s both; }
+.sk-flow { fill: none; stroke-linecap: round; opacity: .9; animation: fade .4s both, sk-flow 1.1s linear infinite; filter: drop-shadow(0 0 5px currentColor); }
+@keyframes sk-flow { to { stroke-dashoffset: calc(var(--period, 24px) * -1); } }
+.sk-text text { font-family: "Caveat", cursive; font-weight: 700; paint-order: stroke; stroke: rgba(10,12,17,.9); stroke-width: 4px; stroke-linejoin: round; clip-path: inset(-20% 100% -20% 0); animation: sk-wipe .6s var(--ease) both; }
+.sk-text.ask { cursor: pointer; }
+.sk-text.ask:hover text { filter: drop-shadow(0 0 6px rgba(127,186,255,.8)); }
+.sk-swash { fill: none; stroke: var(--sk-amber); stroke-opacity: .2; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: ink-draw .7s var(--ease) both; }
+@keyframes sk-wipe { from { clip-path: inset(-20% 100% -20% 0); } to { clip-path: inset(-20% -5% -20% 0); } }
+.sketch-thread { position: fixed; inset: 0; z-index: 27; pointer-events: none; overflow: visible; }
+.sk-anchor { fill: none; stroke: var(--sk-ice); stroke-width: 1.6; stroke-dasharray: 7 6; opacity: .85; filter: drop-shadow(0 0 6px rgba(127,186,255,.5)); animation: fade .6s .2s both; }
+.sk-thread-line { fill: none; stroke: rgba(127,186,255,.75); stroke-width: 1.4; stroke-dasharray: 1; stroke-dashoffset: 1; filter: drop-shadow(0 0 4px rgba(158,203,255,.6)); animation: ink-draw .7s .4s var(--ease) forwards; }

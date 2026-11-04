@@ -51,6 +51,7 @@ from wisp.companion.annotations import (
 from wisp.companion.errands import run_errand
 from wisp.companion.layout import Placed
 from wisp.companion.notes import (
+    BOARD_SIZES,
     PLATE_SIZE,
     Guide,
     build_card,
@@ -69,6 +70,7 @@ from wisp.routines import RoutineStore
 from wisp.scenes import SceneSpec, build_exploded_scene, get_scene, parse_scene
 from wisp.scenes.object_gallery import OBJECT_GALLERY
 from wisp.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summary
+from wisp.scenes.sketch import Sketchboard
 from wisp.scenes.spec import SceneAnchor
 from wisp.screen import ScreenContext, ScreenReader
 from wisp.timecontext import now_block
@@ -564,6 +566,7 @@ class Brain:
                 "edit_3d_model",
                 "explain_in_3d",
                 "explode_view",
+                "sketch_diagram",
                 "show_scene",
             }
             calls = sorted(response.tool_calls, key=lambda c: c.name not in visual)
@@ -730,6 +733,21 @@ class Brain:
                 )
             await self.show_scene(scene)
             return f"Showing 3D scene '{scene.title}' ({len(scene.nodes)} nodes, {len(scene.steps)} steps)."
+        if name == "sketch_diagram":
+            try:
+                board = Sketchboard.model_validate(args)
+            except ValidationError as exc:
+                if self._scene_retry:
+                    return "sketch_diagram failed twice; explain in words instead."
+                self._scene_retry = True
+                return (
+                    f"SKETCH_INVALID: fix these and call sketch_diagram again: {exc.errors()[:6]}"
+                )
+            await self.show_sketch(board)
+            note = (
+                f"Drawing '{board.title}' ({len(board.shapes)} shapes, {len(board.steps)} steps)."
+            )
+            return f"{note} Repairs: {'; '.join(board.notes[:4])}" if board.notes else None
         if name == "build_3d_model":
             try:
                 model = ObjectScene.model_validate(args)
@@ -1016,6 +1034,27 @@ class Brain:
             place=list(place) if place else None,
         )
         self._spawn(self._narrate(scene))
+
+    async def show_sketch(self, board: Sketchboard) -> None:
+        """Put a self-drawing diagram on screen, in empty space, threaded to what it explains."""
+        self._visual_turn = True
+        ctx = self._ctx
+        if board.anchor and ctx is not None:
+            rect = target_rect(ctx, board.anchor.model_dump())
+            board.anchor.rect = list(rect) if rect else None
+        avoid = self._placed.others("stage")
+        if board.anchor and board.anchor.rect:
+            avoid = [*avoid, tuple(board.anchor.rect)]  # never cover the thing it explains
+        place = place_stage(ctx, avoid, BOARD_SIZES)
+        self._placed.put("stage", place, 60.0)
+        audio_key = f"{board.id}:{secrets.token_hex(3)}"
+        await self.hub.emit(
+            "sketch",
+            board=board.model_dump(mode="json"),
+            audio_key=audio_key,
+            place=list(place) if place else None,
+        )
+        self._spawn(self._narrate_beats(audio_key, [s.narration for s in board.steps]))
 
     async def show_object(self, model: ObjectScene, *, restart: bool) -> None:
         """Put a 3D model on screen. Edits keep the id (the view keeps its camera); new beats get

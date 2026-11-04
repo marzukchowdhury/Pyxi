@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { AudioQueue } from "../shared/audio";
 import { bridge, currentDisplay, onThisDisplay } from "../shared/bridge";
-import type { Annotation, BrainEvent, BrainState, Job, NoteCard, ObjectScene, Pin, SceneSpec, TimelineMoment, Walkthrough } from "../shared/protocol";
+import type { Annotation, BrainEvent, BrainState, Job, NoteCard, ObjectScene, Pin, SceneSpec, Sketchboard, TimelineMoment, Walkthrough } from "../shared/protocol";
 import { brain } from "../shared/socket";
 
 export const display = currentDisplay();
@@ -45,6 +45,7 @@ interface OverlayState {
   scene: { spec: SceneSpec; step: number; playing: boolean; hologram: boolean; place: [number, number, number, number] | null } | null;
   palace: { snapshotId: number; timeline: TimelineMoment[] } | null;
   /** A model built from parts. `audioKey` changes when the narration does; `version` on every edit. */
+  sketch: { board: Sketchboard; audioKey: string; place: [number, number, number, number] | null } | null;
   object: { spec: ObjectScene; audioKey: string; version: number; restart: boolean; place: [number, number, number, number] | null } | null;
   sceneAudio: Record<string, Record<number, Clip>>;
   walkthrough: { walk: Walkthrough; step: number; playing: boolean } | null;
@@ -74,6 +75,7 @@ interface OverlayState {
   setPlaying(p: boolean): void;
   closeScene(): void;
   closeObject(): void;
+  closeSketch(): void;
   toggleHologram(): void;
   setWalkStep(step: number): void;
   closeWalkthrough(): void;
@@ -91,6 +93,7 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   scene: null,
   palace: null,
   object: null,
+  sketch: null,
   sceneAudio: {},
   walkthrough: null,
   walkAudio: {},
@@ -124,6 +127,10 @@ export const useOverlay = create<OverlayState>((set, get) => ({
     voice.stop();
     set({ scene: null, palace: null });
   },
+  closeSketch: () => {
+    voice.stop();
+    set({ sketch: null });
+  },
   closeObject: () => {
     voice.stop();
     set({ object: null });
@@ -148,7 +155,7 @@ export const useOverlay = create<OverlayState>((set, get) => ({
     voice.stop();
     brain.send({ type: "interrupt" });
     if (get().guide) brain.send({ type: "guide_cancel" });
-    set({ annotations: [], scene: null, palace: null, object: null, notes: null, guide: null, walkthrough: null, caption: null, flyTo: null, pins: [] });
+    set({ annotations: [], scene: null, palace: null, object: null, sketch: null, notes: null, guide: null, walkthrough: null, caption: null, flyTo: null, pins: [] });
   },
 }));
 
@@ -262,7 +269,7 @@ brain.on((e: BrainEvent) => {
     case "clear":
       // The screen moved on (another window, or Wisp was asked to clear): drop everything that
       // points at specific pixels.
-      useOverlay.setState({ annotations: [], flyTo: null, notes: null });
+      useOverlay.setState({ annotations: [], flyTo: null, notes: null, sketch: null });
       break;
     case "capture_hide":
       document.documentElement.classList.add("capturing");
@@ -292,6 +299,13 @@ brain.on((e: BrainEvent) => {
           scene: { spec: e.scene, step: 0, playing: false, hologram: true, place: null },
           palace: { snapshotId: e.snapshot_id, timeline: e.timeline },
         });
+      break;
+    case "sketch":
+      // A new drawing replaces the old one; it opens on the main screen like 3D models.
+      if (isPrimary) {
+        voice.stop();
+        useOverlay.setState({ sketch: { board: e.board, audioKey: e.audio_key, place: e.place ?? null } });
+      }
       break;
     case "scene_audio":
       useOverlay.setState((s) => ({

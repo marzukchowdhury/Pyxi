@@ -156,6 +156,30 @@ export interface Beat {
   cutaway: boolean | null;
 }
 
+export type SketchInk = "ink" | "ice" | "amber" | "rose" | "mint" | "violet" | "muted";
+export interface SketchShape {
+  kind: "line" | "polyline" | "polygon" | "curve" | "arrow" | "rect" | "ellipse" | "text" | "equation";
+  points: [number, number][];
+  at: [number, number] | null;
+  size: [number, number] | null;
+  text: string | null;
+  color: SketchInk;
+  fill: boolean;
+  weight: "thin" | "normal" | "bold";
+  dashed: boolean;
+  flow: boolean;
+  step: number;
+  ask: string | null;
+}
+export interface Sketchboard {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  shapes: SketchShape[];
+  steps: { narration: string; title: string | null }[];
+  anchor: { element_id: number | null; quote: string | null; rect: [number, number, number, number] | null } | null;
+}
+
 export interface ObjectScene {
   id: string;
   title: string;
@@ -304,6 +328,7 @@ export type BrainEvent =
   | { type: "capture_show" }
   | { type: "capture"; app: string; window: string; excluded: string | null; elements: number }
   | { type: "scene"; scene: SceneSpec; place?: [number, number, number, number] | null }
+  | { type: "sketch"; board: Sketchboard; audio_key: string; place?: [number, number, number, number] | null }
   | { type: "object"; scene: ObjectScene; audio_key: string; restart: boolean; place?: [number, number, number, number] | null }
   | { type: "scene_audio"; scene_id: string; step: number; text: string; audio: string | null; duration_s: number }
   | { type: "palace"; snapshot_id: number; timeline: TimelineMoment[]; scene: SceneSpec }

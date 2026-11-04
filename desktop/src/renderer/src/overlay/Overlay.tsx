@@ -6,6 +6,7 @@ import { Annotations } from "./Annotations";
 import { NotesCard } from "./NotesCard";
 import { Notch } from "./Notch";
 import { ObjectPanel } from "./ObjectPanel";
+import { SketchBoard } from "./SketchBoard";
 import { Presence } from "./Presence";
 import { Requests } from "./Requests";
 import { ScenePanel } from "./ScenePanel";
@@ -138,6 +139,7 @@ export function Overlay() {
       <NotesCard />
       <ScenePanel />
       <ObjectPanel />
+      <SketchBoard />
       <Walkthrough />
       <Team />
       <Requests />

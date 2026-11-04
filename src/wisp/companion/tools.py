@@ -7,6 +7,7 @@ from otto.llm.base import ToolSpec
 from wisp.scenes import TITLES, tool_schema
 from wisp.scenes.object_gallery import OBJECT_TITLES
 from wisp.scenes.objects import build_tool_schema, edit_tool_schema
+from wisp.scenes.sketch import SKETCH_TOOL_SCHEMA
 
 _QUOTE = {
     "quote": {
@@ -165,6 +166,25 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "(hierarchies), orbit (a core with parts), stack (layers), grid (matrices, networks), timeline (sequences). "
         "Anchor it to the element it explains.",
         tool_schema(),
+    ),
+    ToolSpec(
+        "sketch_diagram",
+        "Draw a hand-made diagram that inks itself in while you talk: the fastest, clearest way to explain a "
+        "mechanism, force, flow, process or comparison ('is this real?', 'how does it hover?', 'why does it "
+        "float?', 'how does the signal get there?'). Grid is 100 wide x 64 tall, y down. Draw the subject simply "
+        "(a side view outline as one polygon or curve, its key parts as rects/ellipses), then what acts on it "
+        "(arrows; flow=true when something moves: air, water, current, data), then short labels (text) next to "
+        "what they name, and finish with the takeaway as an `equation` or rule ('Lift = weight'). Each shape has "
+        "a `step`; give 2-5 steps, each one short spoken sentence, so the drawing builds with the words. Colours: "
+        "ink (outlines), ice (the subject's key part), amber (the main force/result), rose (problem/heat), mint "
+        "(good/flow), violet, muted (secondary). Labels 1-3 words; never let text overlap a shape. Set `anchor` to "
+        "the thing on screen it explains (video, photo) so a thread joins them. Example, a hovering jet: polygon "
+        "[[8,34],[22,29],[66,29],[80,20],[86,20],[84,31],[92,34],[84,38],[22,38]] ink fill step 0; rect at "
+        "[34,30] size [8,7] ice step 0; text 'Lift fan' at [30,25] step 0; arrow [[38,40],[38,56]] ice flow step "
+        "1; text 'Air down' at [26,61] step 1; arrow [[38,20],[38,6]] amber bold step 2; text 'Lift' at [41,10] "
+        "step 2; arrow [[58,40],[58,52]] muted step 2; text 'Weight' at [61,50] step 2; equation 'Lift = weight' "
+        "at [58,12] step 3.",
+        SKETCH_TOOL_SCHEMA,
     ),
     ToolSpec(
         "build_3d_model",
