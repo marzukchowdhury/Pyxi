@@ -44,6 +44,7 @@ class WindowInfo:
     title: str = ""
     process: str = ""
     rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    hwnd: int = 0
 
     @property
     def app(self) -> str:
@@ -259,7 +260,7 @@ class ScreenReader:
             budget_s=self.config.uia_budget_s, max_elements=self.config.max_elements * 3
         )
         window = (
-            WindowInfo(raw_window.title, raw_window.process, raw_window.rect)
+            WindowInfo(raw_window.title, raw_window.process, raw_window.rect, raw_window.hwnd)
             if raw_window
             else WindowInfo()
         )
@@ -333,12 +334,18 @@ class ScreenReader:
         return out
 
     @staticmethod
+    def window_title(hwnd: int) -> str | None:
+        return uia.window_title(hwnd)
+
+    @staticmethod
     def _grab(window_rect: tuple[int, int, int, int]) -> tuple[Image.Image | None, tuple[int, int]]:
-        """Capture the monitor that contains the centre of the foreground window."""
+        """Capture the monitor the user is on: the one under the mouse, else the one holding
+        the window being read."""
         import mss
 
+        pos = uia.cursor_pos()
         with (getattr(mss, "MSS", None) or mss.mss)() as sct:
-            mon = pick_monitor(sct.monitors[1:], window_rect)
+            mon = pick_monitor(sct.monitors[1:], (*pos, 1, 1) if pos else window_rect)
             raw = sct.grab(mon)
             return Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX"), (
                 mon["left"],

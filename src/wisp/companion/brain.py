@@ -262,8 +262,18 @@ class Brain:
     def _watch_window(self) -> None:
         """Drawings point at exact pixels; once the user switches window or tab they'd point at
         the wrong things, so clear them when the foreground window changes."""
-        title_of = getattr(self.screen, "foreground_title", None)
-        if title_of is None or self._ctx is None:
+        if self._ctx is None:
+            return
+        hwnd = self._ctx.window.hwnd
+        by_handle = getattr(self.screen, "window_title", None)
+        # Watch the window the drawings are on (it may not be the focused one), else focus.
+        if hwnd and by_handle:
+
+            def title_of() -> str | None:
+                return by_handle(hwnd)
+        else:
+            title_of = getattr(self.screen, "foreground_title", None)
+        if title_of is None:
             return
         if self._watcher and not self._watcher.done():
             self._watcher.cancel()
@@ -274,6 +284,9 @@ class Brain:
                 await asyncio.sleep(0.6)
                 now = title_of()
                 if now is None:
+                    if hwnd and by_handle:  # the window closed: its drawings go too
+                        await self.hub.emit("clear")
+                        self._placed.put("card", None, 0)
                     return
                 if now != drawn_on and now not in ("Wisp", "Wisp overlay", ""):
                     await self.hub.emit("clear")

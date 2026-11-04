@@ -11,6 +11,7 @@ On other platforms (or if UIA fails) Wisp falls back to vision only.
 from __future__ import annotations
 
 import ctypes
+import ctypes.wintypes
 import logging
 import sys
 import time
@@ -75,6 +76,68 @@ def available() -> bool:
     return sys.platform == "win32"
 
 
+def cursor_pos() -> tuple[int, int] | None:
+    """Where the mouse is, in physical screen px (the process is DPI aware)."""
+    if sys.platform != "win32":
+        return None
+    pt = ctypes.wintypes.POINT()
+    if not ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+        return None
+    return pt.x, pt.y
+
+
+def window_title(hwnd: int) -> str | None:
+    """A window's title right now; None if it no longer exists."""
+    if sys.platform != "win32":
+        return None
+    user32 = ctypes.windll.user32
+    if not user32.IsWindow(hwnd):
+        return None
+    n = user32.GetWindowTextLengthW(hwnd)
+    buf = ctypes.create_unicode_buffer(n + 1)
+    user32.GetWindowTextW(hwnd, buf, n + 1)
+    return buf.value
+
+
+def window_at(x: int, y: int) -> int | None:
+    """The top-level window the user sees at a point: the first visible, real window in
+    z-order whose frame contains it. Wisp's own (click-through) windows don't count."""
+    if sys.platform != "win32":
+        return None
+    import ctypes.wintypes as wt
+
+    user32 = ctypes.windll.user32
+    dwm = ctypes.windll.dwmapi
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+    def visit(hwnd, _):
+        if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+            return True
+        # Click-through overlays (NVIDIA's, Discord's, Wisp's own) and tool palettes sit on
+        # top of everything but aren't what anyone is looking at.
+        ex = user32.GetWindowLongW(hwnd, -20) & 0xFFFFFFFF
+        if ex & (0x20 | 0x80 | 0x08000000):  # TRANSPARENT, TOOLWINDOW, NOACTIVATE
+            return True
+        cloaked = ctypes.c_int(0)
+        dwm.DwmGetWindowAttribute(hwnd, 14, ctypes.byref(cloaked), ctypes.sizeof(cloaked))
+        if cloaked.value:  # on another virtual desktop, or a hidden UWP shell
+            return True
+        r = wt.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(r)):
+            return True
+        if not (r.left <= x < r.right and r.top <= y < r.bottom):
+            return True
+        title = window_title(hwnd) or ""
+        if not title.strip() or title.startswith("Wisp"):
+            return True
+        found.append(hwnd)
+        return False  # the topmost match is the one they see
+
+    user32.EnumWindows(visit, 0)
+    return found[0] if found else None
+
+
 def process_name(pid: int) -> str:
     if sys.platform != "win32":
         return ""
@@ -114,10 +177,21 @@ def read_foreground(
 def _walk(
     auto, budget_s: float, max_elements: int, max_depth: int
 ) -> tuple[RawWindow | None, list[RawElement]]:
-    fg = auto.GetForegroundControl()
-    if fg is None:
-        return None, []
-    top = fg.GetTopLevelControl() or fg
+    # The window the user is looking at: the one under the mouse (on a second monitor the
+    # foreground window is often somewhere else entirely), else the foreground window.
+    top = None
+    pos = cursor_pos()
+    hwnd = window_at(*pos) if pos else None
+    if hwnd:
+        try:
+            top = auto.ControlFromHandle(hwnd)
+        except Exception:
+            top = None
+    if top is None:
+        fg = auto.GetForegroundControl()
+        if fg is None:
+            return None, []
+        top = fg.GetTopLevelControl() or fg
     r = top.BoundingRectangle
     window = RawWindow(
         title=top.Name or "",

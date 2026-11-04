@@ -200,7 +200,13 @@ function addAnnotations(list: Annotation[]): void {
   }));
 }
 
-function sceneOnThisDisplay(spec: SceneSpec): boolean {
+/** Is a brain-placed rect on this overlay's display? Unplaced things go to the main screen. */
+function placedHere(place: [number, number, number, number] | null | undefined): boolean {
+  return place ? onThisDisplay(place[0] + place[2] / 2, place[1] + place[3] / 2) : isPrimary;
+}
+
+function sceneOnThisDisplay(spec: SceneSpec, place?: [number, number, number, number] | null): boolean {
+  if (place) return placedHere(place);
   const r = spec.anchor?.rect;
   if (r) return onThisDisplay(r[0] + r[2] / 2, r[1] + r[3] / 2);
   const rects = spec.nodes.map((n) => n.screen_rect).filter(Boolean) as number[][];
@@ -281,12 +287,13 @@ brain.on((e: BrainEvent) => {
       useOverlay.setState({ captureFlash: performance.now(), seeing: e.excluded ? "" : prettyApp(e.app) });
       break;
     case "scene":
-      if (sceneOnThisDisplay(e.scene))
+      if (sceneOnThisDisplay(e.scene, e.place))
         useOverlay.setState({ scene: { spec: e.scene, step: 0, playing: e.scene.auto_play, hologram: e.scene.mode === "hologram", place: e.place ?? null }, palace: null, object: null });
       break;
     case "object":
-      // Models open on the main screen; an edit keeps the same id so the view keeps its camera.
-      if (isPrimary)
+      // Models open on the screen the brain placed them on (the one you're looking at); an edit
+      // keeps the same id so the view keeps its camera.
+      if (placedHere(e.place))
         useOverlay.setState((s) => ({
           object: { spec: e.scene, audioKey: e.audio_key, restart: e.restart, place: e.place ?? null, version: (s.object?.spec.id === e.scene.id ? s.object.version : 0) + 1 },
           scene: null,
@@ -301,8 +308,8 @@ brain.on((e: BrainEvent) => {
         });
       break;
     case "sketch":
-      // A new drawing replaces the old one; it opens on the main screen like 3D models.
-      if (isPrimary) {
+      // A new drawing replaces the old one, on the screen you're looking at.
+      if (placedHere(e.place)) {
         voice.stop();
         useOverlay.setState({ sketch: { board: e.board, audioKey: e.audio_key, place: e.place ?? null } });
       }
