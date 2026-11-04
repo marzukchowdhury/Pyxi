@@ -73,6 +73,19 @@ class Job(BaseModel):
         )
 
 
+# How Wisp's browser teammates work. The user is waiting for a notification, so quick and
+# right beats exhaustive: a found answer from a good source is a success, said plainly.
+BROWSER_RULES = """How to work:
+- Be quick: most jobs take 3-10 steps, and the user is waiting.
+- One good search, open the best result, read or extract the answer, finish.
+- Never repeat a search with small rewordings. After two searches that don't turn up anything
+  better, finish with the best answer you have.
+- A reputable source (the maker's own site, Wikipedia, a major newspaper or reference site)
+  counts as reliable unless the user asked for something stricter. Name it in your summary.
+- Finish with success=true whenever you found the answer, adding a short caveat if it
+  matters. Use success=false only when you really could not find or do it."""
+
+
 class JobManager:
     def __init__(
         self,
@@ -227,7 +240,7 @@ class JobManager:
             self.settings,
             model=self.settings.job_model,
             headless=not self.headed,
-            budget={"max_steps": 30, "max_cost_usd": agent.max_cost_usd},
+            budget={"max_steps": 18, "max_cost_usd": agent.max_cost_usd},
             safety=safety,
             memory={"scope": agent.memory_scope},
         )
@@ -262,7 +275,7 @@ class JobManager:
 
         controls.subscribe(relay)
         self._controls[job.id] = controls
-        task = f"{job.task}\n\nYou are {agent.name}: {agent.persona}"
+        task = f"{job.task}\n\nYou are {agent.name}: {agent.persona}\n\n{BROWSER_RULES}"
         if job.context:
             task += f"\n\nContext from your teammates:\n{job.context}"
         otto = Otto(s, llm=self.otto_llm, controls=controls)

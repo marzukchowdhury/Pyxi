@@ -201,7 +201,12 @@ def place_card(
 
 STAGE_SIZES = ((1040, 700), (900, 620), (780, 560), (660, 500), (540, 440))  # CSS px, biggest first
 PLATE_SIZE = ((760, 650),)  # an explain_in_3d plate: canvas, rise and step text
-BOARD_SIZES = ((620, 505), (540, 455), (470, 410), (410, 370))  # sketchboards, biggest first
+BOARD_SIZES = (
+    (620, 560),
+    (540, 505),
+    (470, 460),
+    (410, 420),
+)  # sketchboards incl. title and caption
 
 
 def place_stage(

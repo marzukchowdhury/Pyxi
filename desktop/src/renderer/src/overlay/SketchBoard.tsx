@@ -6,7 +6,7 @@
  */
 import "@fontsource/caveat/500.css";
 import "@fontsource/caveat/700.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { rectToLocal } from "../shared/bridge";
 import { Close, Cube, Replay } from "../shared/icons";
 import type { SketchShape, Sketchboard } from "../shared/protocol";
@@ -17,7 +17,8 @@ import { useLinger } from "./linger";
 import { useOverlay, voice } from "./store";
 
 const AUDIO_WAIT_MS = 9000; // Wisp's own voice for this step; after that the words show silently
-const CHROME = 112; // header and footer around the drawing, CSS px
+const CHROME = 160; // first guess at the title and caption around the drawing; then measured
+const EDGE = 10; // the board never comes closer than this to a screen edge
 const WEIGHT = { thin: 1.3, normal: 2.1, bold: 3.1 };
 
 export function SketchBoard() {
@@ -42,13 +43,36 @@ export function SketchBoard() {
     setDone(false);
   }, [key]);
 
-  // Size: the brain's empty spot, keeping the drawing's 100 x 64 shape.
+  // Size and place: fill the brain's empty spot, keep the drawing's 100 x 64 shape, and make
+  // sure all of it is on screen. The title and caption can wrap, so their height is measured
+  // (not guessed) and the drawing shrinks to make room.
+  const inner = useRef<HTMLDivElement>(null);
+  const [chrome, setChrome] = useState(CHROME);
   const place = sketch?.place ? rectToLocal(sketch.place) : null;
-  const width = Math.round(place ? Math.min(place.w, ((place.h - CHROME) * GRID.w) / GRID.h) : Math.min(560, innerWidth - 32));
+  const room = {
+    w: Math.min(place ? place.w : 560, innerWidth - 2 * EDGE),
+    h: Math.min(place ? place.h : innerHeight * 0.7, innerHeight - 2 * EDGE),
+  };
+  const width = Math.max(260, Math.round(Math.min(room.w, ((room.h - chrome) * GRID.w) / GRID.h)));
   const scale = width / GRID.w;
   const height = Math.round(GRID.h * scale);
-  const left = place ? Math.round(place.x + (place.w - width) / 2) : Math.round(innerWidth - width - 40);
-  const top = place ? Math.round(Math.max(8, Math.min(place.y, innerHeight - height - CHROME - 8))) : 90;
+  const total = height + chrome;
+  const clampX = (x: number) => Math.round(Math.max(EDGE, Math.min(x, innerWidth - width - EDGE)));
+  const clampY = (y: number) => Math.round(Math.max(EDGE, Math.min(y, innerHeight - total - EDGE)));
+  const left = clampX(place ? place.x + (place.w - width) / 2 : innerWidth - width - 40);
+  const top = clampY(place ? place.y + Math.max(0, (place.h - total) / 2) : 90);
+  useLayoutEffect(() => {
+    const el = inner.current;
+    if (!el) return;
+    const measure = () => {
+      const c = el.offsetHeight - height;
+      if (c > 0 && Math.abs(c - chrome) > 2) setChrome(c);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [height, chrome, key]);
 
   const timing = useMemo(
     () => (board ? board.steps.map((_, i) => timeline(board.shapes, i, scale)) : []),
@@ -107,8 +131,9 @@ export function SketchBoard() {
 
   return (
     <>
-      <Thread board={board} box={{ x: left, y: top, w: width, h: height + CHROME }} />
+      <Thread board={board} box={{ x: left, y: top, w: width, h: total }} />
       <Interactive className="sketch-board" style={{ left, top, width }} onEnter={linger.onEnter} onLeave={linger.onLeave}>
+        <div ref={inner}>
         <div className="sketch-head">
           <div className="sketch-title">{board.title}</div>
           {board.subtitle && <div className="sketch-sub">{board.subtitle}</div>}
@@ -130,6 +155,7 @@ export function SketchBoard() {
             {board.steps.map((_, i) => <i key={i} className={i < step || done ? "done" : i === step ? "on" : ""} />)}
           </div>
           <div className="sketch-caption" key={`${key}-${step}`}>{current.narration}</div>
+        </div>
         </div>
       </Interactive>
     </>
