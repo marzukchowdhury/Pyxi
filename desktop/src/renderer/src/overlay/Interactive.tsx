@@ -12,12 +12,16 @@ interface Entry {
   el: HTMLElement;
   always: boolean;
   active: boolean; // false: purely visual, the mouse goes straight through
+  rect?: () => Box; // where it will be, for things that animate their size
   inside: boolean;
   onEnter?: () => void;
   onLeave?: () => void;
 }
 
+type Box = { left: number; top: number; right: number; bottom: number };
+
 const entries = new Set<Entry>();
+if (import.meta.env.DEV) (window as unknown as { __wispHits: Set<Entry> }).__wispHits = entries; // for debugging hover
 let interactive = false;
 const PAD = 2;
 
@@ -31,8 +35,8 @@ function sync(): void {
 
 function hitTest(x: number, y: number): void {
   for (const e of entries) {
-    const r = e.el.getBoundingClientRect();
-    const inside = e.active && r.width > 0 && x >= r.left - PAD && x <= r.right + PAD && y >= r.top - PAD && y <= r.bottom + PAD;
+    const r = e.rect?.() ?? e.el.getBoundingClientRect();
+    const inside = e.active && r.right > r.left && x >= r.left - PAD && x <= r.right + PAD && y >= r.top - PAD && y <= r.bottom + PAD;
     if (inside !== e.inside) {
       e.inside = inside;
       if (inside) e.onEnter?.();
@@ -60,15 +64,17 @@ interface Props {
   always?: boolean;
   /** When false the element is drawn but never catches the mouse. */
   active?: boolean;
+  /** Hit-test this box instead of the element's current one (for growing, animating things). */
+  hitRect?: () => Box;
   onEnter?: () => void;
   onLeave?: () => void;
 }
 
-export function Interactive({ children, className, style, always = false, active = true, onEnter, onLeave }: Props) {
+export function Interactive({ children, className, style, always = false, active = true, hitRect, onEnter, onLeave }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const entry = useRef<Entry | null>(null);
-  const handlers = useRef({ onEnter, onLeave });
-  handlers.current = { onEnter, onLeave };
+  const handlers = useRef({ onEnter, onLeave, hitRect });
+  handlers.current = { onEnter, onLeave, hitRect };
 
   useEffect(() => {
     startFeed();
@@ -78,6 +84,7 @@ export function Interactive({ children, className, style, always = false, active
       el,
       always,
       active,
+      rect: () => (handlers.current.hitRect ?? (() => el.getBoundingClientRect()))(),
       inside: false,
       onEnter: () => handlers.current.onEnter?.(),
       onLeave: () => handlers.current.onLeave?.(),

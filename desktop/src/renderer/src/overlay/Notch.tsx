@@ -156,15 +156,22 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     [],
   );
 
-  const enter = () => {
+  // Two areas take the pointer: the thin strip on the top edge and the open notch itself.
+  // It folds only once the pointer has left both (leaving the strip while moving down into
+  // the notch must not count).
+  const over = useRef({ handle: false, body: false });
+  const enter = (where: "handle" | "body") => {
+    over.current[where] = true;
     window.clearTimeout(leaveTimer.current);
     if (suppress.current) return;
     setHover(true);
   };
-  const leave = () => {
+  const leave = (where: "handle" | "body") => {
+    over.current[where] = false;
+    if (over.current.handle || over.current.body) return;
     suppress.current = false;
     window.clearTimeout(leaveTimer.current);
-    leaveTimer.current = window.setTimeout(() => setHover(false), 320);
+    leaveTimer.current = window.setTimeout(() => setHover(false), 450);
   };
   const close = () => {
     setPinned(false);
@@ -193,8 +200,19 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     <div className={`notch-zone ${open ? "is-open" : ""}`}>
       {/* Folded, the only thing that reacts is a thin strip on the top edge, so the browser
           tabs underneath stay clickable. */}
-      <Interactive className="notch-handle" onEnter={enter} onLeave={leave} />
-      <Interactive className="notch-hit" active={mode === "open" || mode === "full"} onEnter={enter} onLeave={leave}>
+      <Interactive className="notch-handle" onEnter={() => enter("handle")} onLeave={() => leave("handle")} />
+      <Interactive
+        className="notch-hit"
+        active={mode === "open" || mode === "full"}
+        // Where the notch is growing to, plus a forgiving margin: while it animates wider, a
+        // pointer heading for its far corner must not count as having left.
+        hitRect={() => {
+          const w = WIDTH[mode] + 24;
+          return { left: innerWidth / 2 - w / 2, right: innerWidth / 2 + w / 2, top: 0, bottom: height + 14 };
+        }}
+        onEnter={() => enter("body")}
+        onLeave={() => leave("body")}
+      >
       <div
         className={`notch mode-${mode}`}
         style={{ width: mode === "speaking" && !captions ? 210 : WIDTH[mode], height }}
