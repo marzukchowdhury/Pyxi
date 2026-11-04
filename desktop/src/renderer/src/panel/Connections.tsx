@@ -4,6 +4,7 @@
  * password. Nothing is ever sent or posted without an approval card.
  */
 import { useEffect, useState } from "react";
+import { Clock } from "../shared/icons";
 import { brain } from "../shared/socket";
 import { usePanel } from "./store";
 
@@ -45,6 +46,31 @@ export function Connections() {
       ))}
       {message && <p className="muted">{message}</p>}
       <p className="muted">Reading is instant. Sending, posting and invites always show you an approval card first.</p>
+    </div>
+  );
+}
+
+/** Routines Wisp runs on a schedule while it's open. Ask for one in plain words. */
+export function Routines() {
+  const list = usePanel((s) => s.routines);
+  useEffect(() => brain.send({ type: "routines" }), []);
+  if (!list) return null;
+  if (!list.length)
+    return <p className="muted">None yet. Try: "Every weekday at 9, check my email for anything from my professor and tell me."</p>;
+  return (
+    <div className="connections">
+      {list.map((r) => (
+        <div key={r.id} className="conn">
+          <div className="conn-row">
+            <span className="conn-glyph g-routine"><Clock /></span>
+            <div className="conn-text">
+              <b>{r.task}</b>
+              <span>{r.when}, next {new Date(r.next_run * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}</span>
+            </div>
+            <button className="ghost" onClick={() => brain.send({ type: "routine_delete", id: r.id })}>Delete</button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

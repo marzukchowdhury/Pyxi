@@ -73,6 +73,14 @@ def create_app(
         brain = Brain(settings, hub, llm=llm, otto_llm=otto_llm)
     ambient: asyncio.Task[None] | None = None
 
+    async def _routine_clock() -> None:
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await brain.run_due_routines()
+            except Exception:
+                log.exception("routine failed")
+
     async def _warm_ears() -> None:
         try:
             studio = brain.studio
@@ -93,6 +101,7 @@ def create_app(
             on_window=brain.emit_pins,
         )
         ambient = asyncio.create_task(tracker.run())
+        routines = asyncio.create_task(_routine_clock())
         # Load the speech model now (in the background), so the first push-to-talk is quick.
         # The OS-voice setup used by tests skips it.
         warm = asyncio.create_task(_warm_ears()) if settings.voice.tts != "client" else None
@@ -100,6 +109,7 @@ def create_app(
         if warm:
             warm.cancel()
         ambient.cancel()
+        routines.cancel()
         hub.cancel_all()
         if demo_site:
             demo_site.stop()
@@ -221,6 +231,11 @@ def create_app(
                 await brain.show_object(OBJECT_GALLERY[name](), restart=True)
             else:
                 await brain.show_scene(get_scene(name))
+        elif kind == "routines":
+            await hub.emit("routines", routines=brain.routines.public())
+        elif kind == "routine_delete" and msg.get("id"):
+            brain.routines.remove(str(msg["id"]))
+            await hub.emit("routines", routines=brain.routines.public())
         elif kind == "connectors":
             await hub.emit("connectors", connectors=brain.connectors.statuses())
         elif kind == "connect" and msg.get("id") in ("google", "linkedin"):

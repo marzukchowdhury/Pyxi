@@ -276,6 +276,45 @@ COMPANION_TOOLS += [
         ["action", "value"],
     ),
     _tool(
+        "schedule_routine",
+        "Set up something Wisp does on a schedule while it's running, e.g. 'every weekday at 9 check my email for "
+        "anything from my professor and tell me'. Write `task` as the instruction you'll get at that time.",
+        {
+            "task": {"type": "string"},
+            "days": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": [
+                        "every day",
+                        "weekdays",
+                        "weekends",
+                        "mon",
+                        "tue",
+                        "wed",
+                        "thu",
+                        "fri",
+                        "sat",
+                        "sun",
+                    ],
+                },
+            },
+            "time": {"type": "string", "description": "Local time like '09:00' or '6pm'."},
+            "every_minutes": {
+                "type": "integer",
+                "description": "Instead of a time: repeat every N minutes (15 or more).",
+            },
+        },
+        ["task"],
+    ),
+    _tool("list_routines", "List the user's routines.", {}),
+    _tool(
+        "cancel_routine",
+        "Delete a routine by id or by a word from its task.",
+        {"routine": {"type": "string"}},
+        ["routine"],
+    ),
+    _tool(
         "recall_memories",
         "List what you remember about the user (for 'what do you know about me?'), optionally filtered.",
         {"query": {"type": "string"}},
@@ -350,6 +389,7 @@ COMPANION_TOOLS += [
 ]
 
 INFO_TOOLS = {
+    "list_routines",
     "recall_memories",
     "recall_screen",
     "look_closer",

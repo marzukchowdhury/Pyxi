@@ -244,3 +244,4 @@ html.web-preview { background: radial-gradient(120% 80% at 30% 0%, #1a1f2b, #070
 .conn-steps { margin: 10px 0 2px; padding-left: 20px; font-size: 12px; line-height: 1.6; color: var(--ink-2); user-select: text; }
 button.ghost { height: 30px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--hair); background: none; color: var(--ink-2); font-size: 12px; }
 button.ghost:hover { color: var(--ink); border-color: var(--hair-hi); }
+.g-routine { background: rgba(158,203,255,.16); color: var(--ice-hi); font-size: 10.5px; border: 1px solid rgba(158,203,255,.3); }

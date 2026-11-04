@@ -25,6 +25,7 @@ import logging
 import re
 import secrets
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -54,6 +55,7 @@ from wisp.connectors import Connectors, Outgoing
 from wisp.hub import Hub
 from wisp.memory import SpatialMemory
 from wisp.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
+from wisp.routines import RoutineStore
 from wisp.scenes import SceneSpec, build_exploded_scene, get_scene, parse_scene
 from wisp.scenes.object_gallery import OBJECT_GALLERY
 from wisp.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summary
@@ -139,6 +141,7 @@ class Brain:
         self._object: ObjectScene | None = None  # the 3D model on screen, so follow-ups can edit it
         self._guide: Guide | None = None  # a click Wisp is waiting for
         self.connectors = Connectors(settings.data_dir, Path.home() / "Documents" / "Wisp")
+        self.routines = RoutineStore(settings.data_dir / "routines.json")
 
     # ================================================================== entry points
     async def set_state(self, state: State) -> None:
@@ -222,6 +225,19 @@ class Brain:
             await self.hub.emit("action", kind="insert", value=value)
             return None
         return f"Unknown quick action {action}."
+
+    async def run_due_routines(self, now: datetime | None = None) -> int:
+        """Run routines that are due, one at a time, when Wisp isn't in the middle of something."""
+        ran = 0
+        for r in self.routines.due(now):
+            if self._lock.locked() or self.state != "idle":
+                break
+            self.routines.mark_ran(r, now)
+            await self.turn(f"(Routine: {r.task})", shown=f"Routine: {r.task[:80]}")
+            ran += 1
+        if ran:
+            await self.hub.emit("routines", routines=self.routines.public())
+        return ran
 
     async def guide_clicked(self) -> None:
         """The user clicked the control Wisp was waiting on: look again and give the next step."""
@@ -637,6 +653,32 @@ class Brain:
                 self._spawn(self._approve(result))
                 return f"Waiting for the user to approve: {result.action}. Tell them it's ready to check; don't say it's done."
             return result
+        if name == "schedule_routine":
+            days = [str(d) for d in args.get("days", []) or []] or None
+            r = self.routines.add(
+                str(args["task"]),
+                days=days,
+                time=args.get("time"),
+                every_minutes=args.get("every_minutes"),
+            )
+            await self.hub.emit("routines", routines=self.routines.public())
+            when = datetime.fromtimestamp(r.next_run).strftime("%a %H:%M")
+            return f"Routine saved ({r.describe()}); first run {when}. It runs while Wisp is open."
+        if name == "list_routines":
+            items = self.routines.public()
+            if not items:
+                return "No routines yet."
+            return "Routines:\n" + "\n".join(
+                f"- {i['id']}: {i['when']}: {i['task']}" for i in items
+            )
+        if name == "cancel_routine":
+            gone = self.routines.remove(str(args["routine"]))
+            await self.hub.emit("routines", routines=self.routines.public())
+            return (
+                f"Deleted the routine '{gone.task[:60]}'."
+                if gone
+                else "cancel_routine: no routine like that."
+            )
         if name == "quick_action":
             return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
         if name == "start_walkthrough":

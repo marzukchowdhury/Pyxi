@@ -33,6 +33,7 @@ For real work, Wisp delegates to named teammates. Scout drives a real browser, Q
 | **A voice studio** | Pick who Wisp sounds like: free on-device Kokoro voices, or ElevenLabs and Gemini voices with your own key. Each voice has a drawn signature and an in-character preview; speed, language and captions are one tap away. Sentences can carry a tone that premium voices perform. |
 | **Connected accounts** | Gmail, Google Calendar, Google Docs, Discord and LinkedIn. "Sam emailed my recommendation letter, fix it" finds the email, saves the attachment, has Quill fix it into a copy beside the original, and offers to reply with it. Anything that reaches other people waits for an approval card. See [docs/CONNECT.md](docs/CONNECT.md). |
 | **Quick actions** | Opens sites and apps, copies exact text, or drops a drafted reply straight into the box you're typing in. |
+| **Routines** | "Every weekday at 9, check my email for anything from my professor and tell me." Routines run while Wisp is open, as ordinary turns inside your daily budget, and you can see or delete them in Settings. |
 | **Local-first** | Whisper and Kokoro run on your machine. Local mode uses Ollama, so nothing leaves the computer and it costs $0. |
 
 <p>
@@ -270,7 +271,7 @@ tests/               brain, scenes, screen, voice, palace, agents, server (pytes
 pytest
 ```
 
-48 backend tests, all offline (a fake screen, scripted brains, the OS voice). One drives a real Chromium: Scout fills a three-page form, Quill writes it up from Scout's result, and the Ghost Walkthrough is built with exact click targets. Another plays the whole recommendation-letter errand against fake Google APIs: find the email, save the attachment, fix the Word file with its styles intact, draft a threaded reply, and send only after Allow.
+50 backend tests, all offline (a fake screen, scripted brains, the OS voice). One drives a real Chromium: Scout fills a three-page form, Quill writes it up from Scout's result, and the Ghost Walkthrough is built with exact click targets. Another plays the whole recommendation-letter errand against fake Google APIs: find the email, save the attachment, fix the Word file with its styles intact, draft a threaded reply, and send only after Allow.
 
 ```bash
 cd desktop && npm test && npm run typecheck
@@ -289,7 +290,7 @@ cd desktop && npm test && npm run typecheck
 - **Verified live** on Claude Haiku 5.5 through OpenRouter (about $0.002 to $0.004 per turn): field notes on a meme and a chart, two 3D models built from scratch plus a follow-up edit, a full click-by-click guide, inserting a reply, memory, and push-to-talk. **Not yet verified live:** the connectors against real accounts (they're tested end to end against fake Google APIs), ElevenLabs and Gemini voices (no keys here), a local Ollama vision model, and Chatterbox on a GPU.
 - **3D models are explanations, not engineering drawings.** A small model builds recognisable objects from primitives; bigger models build richer ones.
 - **LinkedIn** only allows apps to post; reading your feed or messages goes through a browser agent you can watch.
-- **Next:** streaming speech-to-text, recurring background jobs, and macOS.
+- **Next:** streaming speech-to-text and macOS.
 
 ## Credits
 

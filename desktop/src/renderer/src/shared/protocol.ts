@@ -251,6 +251,15 @@ export interface VoicePublic {
   error: string | null;
 }
 
+export interface RoutineInfo {
+  id: string;
+  task: string;
+  when: string;
+  next_run: number;
+  last_run: number | null;
+  enabled: boolean;
+}
+
 export interface ConnectorStatus {
   id: string;
   name: string;
@@ -308,6 +317,7 @@ export type BrainEvent =
   | { type: "turn_done"; turn_id: string; cost_usd: number; tokens: number; spent_today: number; daily_budget: number }
   | { type: "voice_catalog"; catalog: Record<string, VoiceInfo[]>; voice: VoicePublic }
   | { type: "connectors"; connectors: ConnectorStatus[]; message?: string }
+  | { type: "routines"; routines: RoutineInfo[] }
   | { type: "voice_preview"; engine: string; voice: string; text: string; audio: string | null; error: string | null }
   | { type: "error"; message: string };
 
@@ -331,6 +341,8 @@ export type ClientMessage =
   | { type: "voice_catalog" }
   | { type: "guide_clicked" }
   | { type: "connectors" }
+  | { type: "routines" }
+  | { type: "routine_delete"; id: string }
   | { type: "connect"; id: string }
   | { type: "disconnect"; id: string }
   | { type: "guide_cancel" }
