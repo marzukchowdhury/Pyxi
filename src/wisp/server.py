@@ -1,0 +1,193 @@
+"""Wisp's backend: a FastAPI app the desktop shell talks to over one WebSocket."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import logging
+import os
+import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+
+from wisp import __version__
+from wisp.companion.brain import Brain
+from wisp.config import WispSettings
+from wisp.hub import Hub
+from wisp.palace.tracker import PalaceTracker
+from wisp.scenes import TITLES, get_scene
+
+log = logging.getLogger(__name__)
+_SAFE_NAME = re.compile(r"^[a-f0-9]{12}\.png$")
+
+
+def has_key(settings: WispSettings) -> bool:
+    if settings.local_mode:
+        return True
+    env = "ANTHROPIC_API_KEY" if settings.model.startswith("claude") else "OPENAI_API_KEY"
+    return bool(os.getenv(env))
+
+
+def create_app(
+    settings: WispSettings | None = None, *, demo: bool | None = None, brain: Brain | None = None
+) -> FastAPI:
+    settings = settings or WispSettings()
+    hub = brain.hub if brain is not None else Hub()
+    demo = (not has_key(settings)) if demo is None else demo
+    demo_site = None
+    if brain is None:
+        llm = otto_llm = None
+        if demo:
+            from otto.demo_site import DemoSite
+            from otto.demo_site.scripted_demo import demo_provider
+
+            from wisp.demo import DemoLLM
+
+            demo_site = DemoSite().start()
+            llm, otto_llm = DemoLLM(demo_site.url + "/apply"), demo_provider()
+        brain = Brain(settings, hub, llm=llm, otto_llm=otto_llm)
+    ambient: asyncio.Task[None] | None = None
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        nonlocal ambient
+        brain.spatial.prune()
+        tracker = PalaceTracker(
+            settings.screen,
+            brain.screen,
+            brain.spatial,
+            brain.activity,
+            is_busy=lambda: brain.state != "idle",
+            on_window=brain.emit_pins,
+        )
+        ambient = asyncio.create_task(tracker.run())
+        yield
+        ambient.cancel()
+        hub.cancel_all()
+        if demo_site:
+            demo_site.stop()
+
+    app = FastAPI(title="Wisp", version=__version__, lifespan=lifespan)
+    app.state.brain, app.state.hub = brain, hub
+
+    def hello() -> dict[str, Any]:
+        return {**brain.public_state(), "version": __version__, "demo": demo, "gallery": TITLES}
+
+    @app.get("/api/health")
+    async def health() -> dict[str, Any]:
+        return {"ok": True, "version": __version__}
+
+    @app.get("/api/state")
+    async def state() -> dict[str, Any]:
+        return hello()
+
+    @app.get("/api/turns")
+    async def turns(limit: int = 30) -> list[dict[str, Any]]:
+        return brain.turns.recent(limit)
+
+    @app.get("/api/timeline")
+    async def timeline(limit: int = 40) -> list[dict[str, Any]]:
+        return brain.spatial.timeline(limit)
+
+    @app.get("/api/activity")
+    async def activity(minutes: float = 120) -> list[dict[str, Any]]:
+        return [
+            {**e.__dict__, "headline": e.headline()} for e in brain.activity.recent(minutes, 200)
+        ]
+
+    @app.get("/api/scene/{name}")
+    async def scene(name: str) -> dict[str, Any]:
+        try:
+            return get_scene(name).model_dump(by_alias=True, mode="json")
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/crops/{name}")
+    async def crop(name: str) -> FileResponse:
+        path = settings.crops_dir / name
+        if not _SAFE_NAME.match(name) or not path.is_file():
+            raise HTTPException(404)
+        return FileResponse(path)
+
+    @app.get("/file")
+    async def file(path: str) -> FileResponse:
+        target = Path(path).resolve()
+        if not target.is_relative_to(settings.data_dir.resolve()) or not target.is_file():
+            raise HTTPException(404)
+        return FileResponse(target)
+
+    @app.websocket("/ws")
+    async def ws(socket: WebSocket) -> None:
+        await socket.accept()
+        cid = hub.connect(socket.send_text)
+        await socket.send_text(json.dumps({"type": "hello", **hello()}, default=str))
+        try:
+            while True:
+                msg = json.loads(await socket.receive_text())
+                await handle(msg)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            hub.disconnect(cid)
+
+    async def handle(msg: dict[str, Any]) -> None:
+        kind = msg.get("type")
+        if kind == "text" and msg.get("text", "").strip():
+            brain._spawn(brain.turn(msg["text"].strip()))
+        elif kind == "ptt_start":
+            brain.begin_listening()
+        elif kind == "audio" and msg.get("data"):
+            brain._spawn(brain.hear(base64.b64decode(msg["data"])))
+        elif kind == "ptt_cancel":
+            brain._prefetch = None
+            await brain.set_state("idle")
+        elif kind == "interrupt":
+            brain.interrupt()
+        elif kind == "answer":
+            hub.resolve(msg.get("request_id", ""), msg.get("value"))
+        elif kind == "job_control":
+            brain.jobs.control(msg.get("job_id", ""), msg.get("action", ""), msg.get("text", ""))
+        elif kind == "show_scene":
+            await brain.show_scene(get_scene(msg.get("name", "wisp")))
+        elif kind == "palace_seek" and msg.get("snapshot_id"):
+            brain._spawn(brain.time_travel("", snapshot_id=int(msg["snapshot_id"])))
+        elif kind == "time_travel":
+            brain._spawn(brain.time_travel(msg.get("query", ""), msg.get("when", "")))
+        elif kind == "walkthrough":
+            brain._spawn(brain.start_walkthrough(msg.get("job_id")))
+        elif kind == "clear":
+            await hub.emit("clear")
+        elif kind == "agent_create":
+            brain.registry.create(
+                msg["name"],
+                msg.get("role", "browser"),
+                msg.get("persona", ""),
+                **({"voice": msg["voice"]} if msg.get("voice") else {}),
+            )
+            await hub.emit("agents", agents=[a.model_dump() for a in brain.registry.all()])
+        elif kind == "agent_delete":
+            brain.registry.delete(msg.get("id", ""))
+            await hub.emit("agents", agents=[a.model_dump() for a in brain.registry.all()])
+        elif kind == "set":
+            key, value = msg.get("key"), msg.get("value")
+            if key == "privacy_paused":
+                brain.screen.paused = bool(value)
+            elif key == "ambient_memory":
+                settings.screen.ambient_memory = bool(value)
+            elif key == "jobs_headed":
+                brain.jobs.headed = bool(value)
+            elif key == "keep_screenshots":
+                settings.screen.keep_screenshots = bool(value)
+                brain.spatial.thumbs_dir = settings.palace_dir if value else None
+            elif key == "forget_screen":
+                brain.spatial.forget_all()
+                brain.activity.forget_all()
+            await hub.emit("settings", **brain.public_state())
+
+    return app

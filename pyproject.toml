@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wisp-buddy"
+version = "0.1.0"
+description = "Wisp: a playful desktop AI buddy that sees your screen, talks, points, sends agents to do real browser work, and explains things in 3D."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Marzuk Haider Chowdhury" }]
+keywords = ["agents", "computer-use", "voice", "three.js", "electron", "langgraph", "playwright"]
+dependencies = [
+    # Otto is the browser-agent engine: https://github.com/marzukchowdhury/otto
+    "otto-browser-buddy @ git+https://github.com/marzukchowdhury/otto.git",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "mss>=9.0",
+    "pillow>=10.0",
+    "numpy>=1.26",
+    "uiautomation>=2.0; sys_platform == 'win32'",
+    "kokoro-onnx>=0.4",
+    "soundfile>=0.12",
+    "faster-whisper>=1.0",
+]
+
+[project.optional-dependencies]
+# Local GPU voice with cloning and emotion tags (pulls PyTorch, several GB).
+chatterbox = ["chatterbox-tts>=0.1"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.6", "httpx>=0.27"]
+
+[project.scripts]
+wisp = "wisp.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wisp"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = ["browser: tests that launch a real Chromium instance"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501", "RUF001", "RUF012", "SIM105"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/wisp/cli.py" = ["B008"]

@@ -1,0 +1,297 @@
+"""ScreenContext: one moment of what's on screen, ready for the model and the overlay.
+
+Coordinates: everything Wisp stores is in *physical* screen pixels of the primary monitor
+(the process is made DPI-aware so UIA, mss and the overlay agree). The overlay converts to
+CSS pixels with the display's scale factor. The model sees a downscaled screenshot; the
+``to_screen`` helper maps its coordinates back.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import ctypes
+import io
+import re
+import sys
+import time
+from dataclasses import dataclass, field
+
+from PIL import Image, ImageDraw, ImageFont
+
+from wisp.config import ScreenConfig
+from wisp.screen import uia
+
+_DPI_SET = False
+
+
+def enable_dpi_awareness() -> None:
+    global _DPI_SET
+    if _DPI_SET or sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # per-monitor aware
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+    _DPI_SET = True
+
+
+@dataclass
+class WindowInfo:
+    title: str = ""
+    process: str = ""
+    rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+
+    @property
+    def app(self) -> str:
+        return self.process.removesuffix(".exe") or self.title.split(" - ")[-1]
+
+
+@dataclass
+class UIElement:
+    id: int
+    name: str
+    role: str
+    rect: tuple[int, int, int, int]
+    depth: int = 0
+    parent: int | None = None
+    is_password: bool = False
+
+    @property
+    def center(self) -> tuple[int, int]:
+        x, y, w, h = self.rect
+        return x + w // 2, y + h // 2
+
+    def describe(self) -> str:
+        x, y, w, h = self.rect
+        name = (
+            "(password field)" if self.is_password else f'"{self.name[:70]}"' if self.name else ""
+        )
+        return f"[{self.id}] {self.role} {name} @({x},{y},{w}x{h})".replace("  ", " ")
+
+
+@dataclass
+class ScreenContext:
+    captured_at: float
+    window: WindowInfo
+    elements: list[UIElement] = field(default_factory=list)
+    screenshot: Image.Image | None = None
+    origin: tuple[int, int] = (0, 0)  # monitor's top-left in virtual screen coords
+    excluded: str | None = None  # reason, when the foreground app is private
+    model_scale: float = 1.0  # model-image px * model_scale = screen px
+
+    # ------------------------------------------------------------------ lookups
+    def element(self, element_id: int) -> UIElement | None:
+        return next((e for e in self.elements if e.id == element_id), None)
+
+    def children(self, element_id: int) -> list[UIElement]:
+        return [e for e in self.elements if e.parent == element_id]
+
+    def subtree(self, element_id: int, max_depth: int = 3) -> list[UIElement]:
+        root = self.element(element_id)
+        if root is None:
+            return []
+        out, frontier = [root], [root.id]
+        for _ in range(max_depth):
+            nxt = [c for pid in frontier for c in self.children(pid)]
+            out.extend(nxt)
+            frontier = [c.id for c in nxt]
+        return out
+
+    def to_screen(self, x: float, y: float) -> tuple[int, int]:
+        """Model-image coordinates -> physical screen coordinates."""
+        return int(x * self.model_scale) + self.origin[0], int(y * self.model_scale) + self.origin[
+            1
+        ]
+
+    # ------------------------------------------------------------------ rendering
+    def render(self, max_elements: int = 120) -> str:
+        if self.excluded:
+            return f"The user is in a private app ({self.excluded}). You cannot see it, and you must not ask what is in it."
+        w = self.window
+        lines = [f"Foreground app: {w.app} | window: {w.title[:120]!r}"]
+        if self.screenshot is not None:
+            lines.append(f"Screen: {self.screenshot.width}x{self.screenshot.height} physical px")
+        if self.elements:
+            lines.append(
+                f"UI elements ({min(len(self.elements), max_elements)} of {len(self.elements)}, from the accessibility tree):"
+            )
+            lines.extend(
+                "  " * min(e.depth, 6) + e.describe() for e in self.elements[:max_elements]
+            )
+        else:
+            lines.append("(No accessibility tree available: rely on the screenshot.)")
+        return "\n".join(lines)
+
+    def model_image(self, width: int, *, marks: bool = True) -> bytes | None:
+        """Downscaled JPEG with element ids drawn on (set-of-marks) and passwords masked."""
+        if self.screenshot is None:
+            return None
+        img = self.screenshot.copy()
+        draw = ImageDraw.Draw(img)
+        for e in self.elements:
+            if e.is_password:
+                x, y, w, h = self._local(e.rect)
+                draw.rectangle([x, y, x + w, y + h], fill=(20, 20, 20))
+        scale = min(1.0, width / img.width)
+        if scale < 1.0:
+            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.LANCZOS)
+        self.model_scale = 1 / scale
+        if marks and self.elements:
+            draw = ImageDraw.Draw(img)
+            font = _font(13)
+            for e in self.elements:
+                if e.role not in _MARKED_ROLES:
+                    continue
+                x, y, w, h = (v * scale for v in self._local(e.rect))
+                color = _PALETTE[e.id % len(_PALETTE)]
+                draw.rectangle([x, y, x + w, y + h], outline=color, width=2)
+                tag = str(e.id)
+                tw = draw.textlength(tag, font=font)
+                draw.rectangle([x, max(0, y - 15), x + tw + 6, max(15, y)], fill=color)
+                draw.text((x + 3, max(0, y - 15)), tag, fill="white", font=font)
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, format="JPEG", quality=72)
+        return buf.getvalue()
+
+    def crop(self, rect: tuple[int, int, int, int], pad: int = 0) -> Image.Image | None:
+        if self.screenshot is None:
+            return None
+        x, y, w, h = self._local(rect)
+        box = (
+            max(0, x - pad),
+            max(0, y - pad),
+            min(self.screenshot.width, x + w + pad),
+            min(self.screenshot.height, y + h + pad),
+        )
+        if box[2] <= box[0] or box[3] <= box[1]:
+            return None
+        return self.screenshot.crop(box)
+
+    def _local(self, rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        x, y, w, h = rect
+        return x - self.origin[0], y - self.origin[1], w, h
+
+
+_MARKED_ROLES = {r.removesuffix("Control") for r in uia.INTERACTIVE} | {
+    "Group",
+    "Pane",
+    "Tab",
+    "List",
+    "ToolBar",
+    "Text",
+    "Image",
+}
+_PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"]
+
+
+def _font(size: int) -> ImageFont.ImageFont:
+    for name in ("segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf"):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+class ScreenReader:
+    """Captures ScreenContexts, honouring privacy settings and the pause switch."""
+
+    def __init__(self, config: ScreenConfig) -> None:
+        self.config = config
+        self.paused = False
+        self._excluded = [re.compile(p, re.IGNORECASE) for p in config.excluded_windows]
+        self._next_id = 1
+        enable_dpi_awareness()
+
+    def is_excluded(self, window: WindowInfo) -> str | None:
+        haystack = f"{window.title} {window.process}"
+        for pattern in self._excluded:
+            if pattern.search(haystack):
+                return window.app or "private window"
+        return None
+
+    async def capture(self, *, pixels: bool = True) -> ScreenContext:
+        return await asyncio.to_thread(self._capture_sync, pixels)
+
+    def _capture_sync(self, pixels: bool) -> ScreenContext:
+        now = time.time()
+        if self.paused:
+            return ScreenContext(
+                captured_at=now, window=WindowInfo(), excluded="screen sharing is paused"
+            )
+        raw_window, raw = uia.read_foreground(
+            budget_s=self.config.uia_budget_s, max_elements=self.config.max_elements * 3
+        )
+        window = (
+            WindowInfo(raw_window.title, raw_window.process, raw_window.rect)
+            if raw_window
+            else WindowInfo()
+        )
+        if reason := self.is_excluded(window):
+            return ScreenContext(captured_at=now, window=window, excluded=reason)
+
+        elements = self._number(raw)
+        shot, origin = self._grab(window.rect) if pixels else (None, (0, 0))
+        return ScreenContext(
+            captured_at=now, window=window, elements=elements, screenshot=shot, origin=origin
+        )
+
+    def _number(self, raw: list[uia.RawElement]) -> list[UIElement]:
+        # Prefer interactive and named elements when trimming to the budget.
+        ranked = sorted(
+            range(len(raw)),
+            key=lambda i: (raw[i].role + "Control" not in uia.INTERACTIVE, not raw[i].name, i),
+        )
+        keep = sorted(ranked[: self.config.max_elements])
+        index_to_id: dict[int, int] = {}
+        out: list[UIElement] = []
+        for i in keep:
+            r = raw[i]
+            eid = self._next_id
+            self._next_id += 1
+            index_to_id[i] = eid
+            parent = r.parent
+            while parent is not None and parent not in index_to_id:
+                parent = raw[parent].parent
+            out.append(
+                UIElement(
+                    eid,
+                    r.name,
+                    r.role,
+                    r.rect,
+                    r.depth,
+                    index_to_id.get(parent) if parent is not None else None,
+                    r.is_password,
+                )
+            )
+        return out
+
+    @staticmethod
+    def _grab(window_rect: tuple[int, int, int, int]) -> tuple[Image.Image | None, tuple[int, int]]:
+        """Capture the monitor that contains the centre of the foreground window."""
+        import mss
+
+        with (getattr(mss, "MSS", None) or mss.mss)() as sct:
+            mon = pick_monitor(sct.monitors[1:], window_rect)
+            raw = sct.grab(mon)
+            return Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX"), (
+                mon["left"],
+                mon["top"],
+            )
+
+
+def pick_monitor(
+    monitors: list[dict[str, int]], window_rect: tuple[int, int, int, int]
+) -> dict[str, int]:
+    x, y, w, h = window_rect
+    cx, cy = x + w // 2, y + h // 2
+    for mon in monitors:
+        if (
+            mon["left"] <= cx < mon["left"] + mon["width"]
+            and mon["top"] <= cy < mon["top"] + mon["height"]
+        ):
+            return mon
+    return monitors[0]
