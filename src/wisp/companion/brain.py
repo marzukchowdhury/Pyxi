@@ -36,11 +36,11 @@ from otto.types import ToolCall, Usage
 from PIL import Image
 from pydantic import ValidationError
 
-from wisp import web
+from wisp import web, windows
 from wisp.agents import AgentProfile, AgentRegistry, Job, JobManager
 from wisp.agents.jobs import Handoff
 from wisp.companion import prompts
-from wisp.companion.actions import open_app, safe_url
+from wisp.companion.actions import app_target, open_app, safe_url
 from wisp.companion.annotations import (
     MARKER,
     Annotation,
@@ -233,6 +233,40 @@ class Brain:
             await self.say_line(f"That didn't go through. {friendly_error(exc)}")
             return
         await self.say_line(line if not line.startswith(("CREATED", "SENT")) else "Done.")
+
+    async def _arrange_windows(self, args: dict[str, Any]) -> str | None:
+        """Split the screen, snap, maximize, minimize or restore the window they're in."""
+        if not windows.available():
+            return "arrange_windows: this only works on Windows."
+        ctx = self._ctx
+        hwnd = ctx.window.hwnd if ctx and ctx.window.hwnd else ctypes_foreground()
+        if not hwnd:
+            return "arrange_windows: I couldn't tell which window you mean."
+        layout = str(args.get("layout") or "split")
+        if layout != "split":
+            windows.snap(hwnd, layout)
+            return None
+        side = "right" if args.get("current_side") == "right" else "left"
+        other = "left" if side == "right" else "right"
+        target = str(args.get("open") or "").strip()
+        if not target:
+            return "arrange_windows: say what should go on the other half."
+        windows.snap(hwnd, side)
+        url, app = safe_url(target), app_target(target)
+        if url:
+            new = await windows.open_new_window(url, like=hwnd, is_url=True)
+        elif app:
+            new = await windows.open_new_window(app, is_url=False)
+        else:
+            return f"arrange_windows: I can open a website or a known app, not {target!r}."
+        if new is None:
+            return "arrange_windows: it opened, but its window didn't show up for me to place."
+        windows.snap(new, other)
+        await asyncio.sleep(0.8)
+        windows.snap(
+            new, other
+        )  # browsers sometimes resize their new window a moment after opening
+        return None
 
     async def _quick_action(self, action: str, value: str) -> str | None:
         if not value.strip():
@@ -1256,6 +1290,8 @@ class Brain:
             words = "" if getattr(self, "_synthetic", False) else self._user_text
             self._spawn(self._run_errand(task, words))
             return None
+        if name == "arrange_windows":
+            return await self._arrange_windows(args)
         if name == "quick_action":
             return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
         if name == "start_walkthrough":
@@ -1739,6 +1775,15 @@ def strip_filler(text: str) -> str:
     """Drop stock openers ("There you go, I have done this.") when there's a real sentence after."""
     rest = _FILLER_LEAD.sub("", text, count=1)
     return rest[0].upper() + rest[1:] if rest.strip() and rest != text else text
+
+
+def ctypes_foreground() -> int:
+    try:
+        import ctypes
+
+        return int(ctypes.windll.user32.GetForegroundWindow())  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        return 0
 
 
 def same_page(a: str | None, b: str | None) -> bool:

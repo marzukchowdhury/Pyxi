@@ -396,6 +396,38 @@ COMPANION_TOOLS += [
         ["action", "value"],
     ),
     _tool(
+        "arrange_windows",
+        "Arrange their windows, right now: split the screen (the window they're in on one half, a site or app "
+        "in a new window on the other), snap the window they're in left, right, top or bottom, or maximize, "
+        "minimize or restore it. Just do it when asked; never tell them to do it themselves.",
+        {
+            "layout": {
+                "type": "string",
+                "enum": [
+                    "split",
+                    "left",
+                    "right",
+                    "top",
+                    "bottom",
+                    "maximize",
+                    "minimize",
+                    "restore",
+                ],
+            },
+            "open": {
+                "type": "string",
+                "description": "For split: the website (e.g. https://sheets.google.com) or app (excel, notepad) "
+                "for the other half.",
+            },
+            "current_side": {
+                "type": "string",
+                "enum": ["left", "right"],
+                "description": "For split: where the window they're in goes (default left).",
+            },
+        },
+        ["layout"],
+    ),
+    _tool(
         "schedule_routine",
         "Set up something Wisp does on a schedule while it's running, e.g. 'every weekday at 9 check my email for "
         "anything from my professor and tell me'. Write `task` as the instruction you'll get at that time.",
