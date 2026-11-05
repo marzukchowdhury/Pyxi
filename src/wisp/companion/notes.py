@@ -156,11 +156,12 @@ def _overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
 
 
 def card_size(texts: list[str], title: str = "") -> tuple[int, int]:
-    """The note card's size in screen px (handwriting fits ~24 characters a line, titles ~18)."""
+    """The note card's size in screen px (15 px Inter fits ~34 characters a line; the 22 px serif
+    title ~22)."""
     k = _dpi_scale()
-    lines = sum(max(1, -(-len(t) // 24)) for t in texts)
-    title_lines = max(1, -(-len(title) // 18))
-    return int(300 * k), int((58 + 34 * title_lines + 27 * lines + 9 * len(texts)) * k)
+    lines = sum(max(1, -(-len(t) // 34)) for t in texts)
+    title_lines = max(1, -(-len(title) // 22))
+    return int(300 * k), int((58 + 28 * title_lines + 22 * lines + 10 * len(texts)) * k)
 
 
 def place_card(

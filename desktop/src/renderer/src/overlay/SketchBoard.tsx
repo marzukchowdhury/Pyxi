@@ -4,8 +4,6 @@
  * then leaves on its own (resting the pointer on it keeps it). A thread ties it to the real
  * thing on screen it's about. Labels can be clicked to ask about them; the cube makes it 3D.
  */
-import "@fontsource/caveat/500.css";
-import "@fontsource/caveat/700.css";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { rectToLocal } from "../shared/bridge";
 import { Close, Cube, Replay } from "../shared/icons";

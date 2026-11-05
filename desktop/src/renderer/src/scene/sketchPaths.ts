@@ -6,8 +6,8 @@ import type { SketchShape } from "../shared/protocol";
 
 export type Pt = [number, number];
 export const GRID = { w: 100, h: 64 };
-const TEXT_GRID = 3.9; // label size in grid units
-const EQ_GRID = 5.4; // equation size in grid units
+const TEXT_GRID = 3.2; // label size in grid units
+const EQ_GRID = 4.6; // equation size in grid units
 
 export function rng(seed: number) {
   let t = seed >>> 0 || 1;
@@ -132,7 +132,7 @@ export function drawShape(shape: SketchShape, scale: number, seed: number): Draw
 export function placeText(shape: SketchShape, scale: number): { x: number; y: number; size: number; width: number } | null {
   if (!shape.at || !shape.text) return null;
   const grid = shape.kind === "equation" ? EQ_GRID : TEXT_GRID;
-  const width = shape.text.length * grid * 0.47; // Caveat is narrow
+  const width = shape.text.length * grid * (shape.kind === "equation" ? 0.5 : 0.56); // Inter / Fraunces italic
   const x = Math.max(1.5, Math.min(shape.at[0], GRID.w - 1.5 - width));
   const y = Math.max(grid + 0.5, Math.min(shape.at[1], GRID.h - 1));
   return { x: x * scale, y: y * scale, size: grid * scale, width: width * scale };

@@ -4,8 +4,6 @@
  * outline numbered to match, and a thread of light ties the two together, so you never have to
  * guess which paragraph a point means. Sketches draw straight onto the real content.
  */
-import "@fontsource/caveat/500.css";
-import "@fontsource/caveat/700.css";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { rectToLocal, toLocal } from "../shared/bridge";
 import { Close } from "../shared/icons";
