@@ -1,4 +1,4 @@
-"""Sketchboards: diagrams that draw themselves while Wisp talks."""
+"""Sketchboards: diagrams that draw themselves while Blip talks."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import asyncio
 
 from test_brain_and_server import make_brain
 from test_connectors_and_docs import Script
-from wisp.scenes.sketch import Sketchboard
+from blip.scenes.sketch import Sketchboard
 
 HOVER = {
     "title": "Push air down, lift up",
@@ -68,7 +68,7 @@ async def test_a_sketch_draws_first_speaks_once_and_stays_off_what_it_explains(s
         await asyncio.sleep(0.02)
     [ev] = rec.of("sketch")
     names = [e["type"] for e in rec.events if e["type"] in ("sketch", "say")]
-    assert names[0] == "sketch"  # the drawing goes up before Wisp starts talking
+    assert names[0] == "sketch"  # the drawing goes up before Blip starts talking
     # The verdict and the hook are said; the rest is left to the drawing.
     assert " ".join(s["text"] for s in rec.of("say")) == "Yep, it really can. Here's the trick."
     anchor = ev["board"]["anchor"]["rect"]
@@ -81,7 +81,7 @@ async def test_a_sketch_draws_first_speaks_once_and_stays_off_what_it_explains(s
 
 
 def test_the_opener_keeps_the_verdict_and_drops_filler():
-    from wisp.companion.brain import visual_opener
+    from blip.companion.brain import visual_opener
 
     assert visual_opener("There you go. Real. Only the B can do it. More, more, more.") == (
         "Real. Only the B can do it."

@@ -5,7 +5,7 @@
  *   story  advances with the narrated beats and waits while a sentence is still being spoken.
  *          Drives one-off keyframes (the canopy flying off) and anything with a start/end.
  *   free   always runs while playing. Drives open-ended spins, oscillations, pulses and looped
- *          keyframes, so an engine never freezes while Wisp finishes a sentence.
+ *          keyframes, so an engine never freezes while Blip finishes a sentence.
  */
 import type { Axis, Key, Motion, ObjectScene, Part, Vec3 } from "../shared/protocol";
 

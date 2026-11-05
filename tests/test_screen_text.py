@@ -8,11 +8,11 @@ import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 from conftest import fake_context
-from wisp.companion.layout import Occupancy, Placed
-from wisp.companion.notes import build_card, place_card, place_stage
-from wisp.screen import ScreenContext, ocr
-from wisp.screen.context import WindowInfo
-from wisp.screen.ocr import TextLine, find_text
+from blip.companion.layout import Occupancy, Placed
+from blip.companion.notes import build_card, place_card, place_stage
+from blip.screen import ScreenContext, ocr
+from blip.screen.context import WindowInfo
+from blip.screen.ocr import TextLine, find_text
 
 
 def line(text: str, x: int, y: int, word_w: int = 60, h: int = 20, id: int = 0) -> TextLine:

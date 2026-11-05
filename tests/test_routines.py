@@ -6,7 +6,7 @@ from datetime import datetime
 
 from test_brain_and_server import make_brain
 from test_notes_and_guides import Scripted
-from wisp.routines import RoutineStore, parse_time
+from blip.routines import RoutineStore, parse_time
 
 
 def test_times_and_next_runs(tmp_path):

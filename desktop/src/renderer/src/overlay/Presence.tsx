@@ -1,13 +1,14 @@
 /**
- * Wisp's presence: a thin, softly glowing elongated diamond that lives beside the cursor.
- * Not a character; a quiet sign that something intelligent is paying attention.
+ * Blip's presence: a little firefly that lives beside the cursor.
+ * A warm core, a soft halo and two faint wings; it hovers when you're still and leaves a
+ * short trail of light when you move.
  *
- *   idle       barely there, breathing very slowly
- *   listening  a gentle pulse that follows your voice
- *   thinking   a shimmer of light travelling through it
- *   acting     a precise ring that expands around it (speaking, teammates at work)
+ *   idle       hovering, glowing slowly on and off
+ *   listening  the glow swells with your voice
+ *   thinking   a quick flicker, with a mote of light circling it
+ *   acting     wings buzzing and a dotted ring turning (speaking, teammates at work)
  *
- * When Wisp targets something, a thin luminous thread runs from the presence to the target,
+ * When Blip targets something, a thin thread of light runs from the firefly to the target,
  * recomputed every frame so it stays attached while you move the mouse.
  */
 import { useEffect, useRef } from "react";
@@ -15,12 +16,18 @@ import { bridge, cursorToLocal, toLocal } from "../shared/bridge";
 import { display, isPrimary, useOverlay, voice } from "./store";
 
 const OFFSET = { x: 18, y: 6 };
+/** Where the firefly's core sits inside the presence box. */
+const CORE = { x: 6, y: 16 };
+const TRAIL = 12;
 
 export function Presence({ micLevel }: { micLevel: () => number }) {
   const root = useRef<HTMLDivElement>(null);
   const thread = useRef<SVGPathElement>(null);
   const spark = useRef<SVGCircleElement>(null);
   const ring = useRef<SVGCircleElement>(null);
+  const halo = useRef<SVGCircleElement>(null);
+  const trail = useRef<(SVGCircleElement | null)[]>([]);
+  const history = useRef<{ x: number; y: number }[]>([]);
   const goal = useRef({ x: innerWidth - 80, y: innerHeight - 120 });
   const pos = useRef({ ...goal.current, vx: 0, vy: 0 });
   const onScreen = useRef(display.primary);
@@ -43,33 +50,52 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
 
   useEffect(() => {
     let raf = 0;
-    const tick = () => {
+    const tick = (time: number) => {
       const p = pos.current;
       // A stiff, well-damped spring: it keeps up with the cursor and settles without wobble.
       p.vx = (p.vx + (goal.current.x - p.x) * 0.22) * 0.62;
       p.vy = (p.vy + (goal.current.y - p.y) * 0.22) * 0.62;
       p.x += p.vx;
       p.y += p.vy;
+      // Hovering: a slow, lazy figure of eight, the way a firefly hangs in the air.
+      const hx = p.x + Math.sin(time / 820) * 2.2;
+      const hy = p.y + Math.sin(time / 1270) * 2.8;
       const level = Math.max(voice.level(), micLevel());
       const el = root.current;
       if (el) {
-        el.style.transform = `translate3d(${p.x}px, ${p.y}px, 0)`;
+        el.style.transform = `translate3d(${hx}px, ${hy}px, 0)`;
         el.style.setProperty("--level", level.toFixed(3));
         el.style.opacity = onScreen.current ? "" : "0";
-        // Near an edge, labels by the diamond flip to the side with room.
+        // Near an edge, labels by the firefly flip to the side with room.
         el.classList.toggle("near-right", p.x > innerWidth - 240);
         el.classList.toggle("near-bottom", p.y > innerHeight - 90);
       }
-      if (ring.current) ring.current.setAttribute("r", (15 + level * 9).toFixed(2));
-      // The thread: presence -> target, a gentle curve, alive only while the target is fresh.
+      if (ring.current) ring.current.setAttribute("r", (13 + level * 9).toFixed(2));
+      if (halo.current) halo.current.setAttribute("r", (10 + level * 8).toFixed(2));
+      // The trail: where the core has just been, fading out behind it. Still means no trail.
+      const core = { x: hx + CORE.x, y: hy + CORE.y };
+      const h = history.current;
+      h.unshift(core);
+      if (h.length > TRAIL) h.length = TRAIL;
+      const speed = Math.hypot(p.vx, p.vy);
+      trail.current.forEach((dot, i) => {
+        const at = h[Math.min(h.length - 1, i + 1)];
+        if (!dot || !at) return;
+        dot.setAttribute("cx", at.x.toFixed(1));
+        dot.setAttribute("cy", at.y.toFixed(1));
+        const fade = 1 - i / TRAIL;
+        dot.setAttribute("r", (0.6 + 2.2 * fade).toFixed(2));
+        dot.style.opacity = onScreen.current ? (Math.min(1, speed / 6) * fade * 0.7).toFixed(3) : "0";
+      });
+      // The thread: firefly -> target, a gentle curve, alive only while the target is fresh.
       const t = useOverlay.getState().flyTo;
       const path = thread.current;
       if (path) {
         const now = performance.now();
         if (t && now < t.until) {
           const [tx, ty] = toLocal(t.x, t.y);
-          const sx = p.x + 6;
-          const sy = p.y + 14;
+          const sx = core.x;
+          const sy = core.y;
           const mx = (sx + tx) / 2 + (ty - sy) * 0.18;
           const my = (sy + ty) / 2 - (tx - sx) * 0.18;
           path.setAttribute("d", `M ${sx} ${sy} Q ${mx} ${my} ${tx} ${ty}`);
@@ -94,43 +120,55 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
   const mode = paused ? "paused" : state === "listening" ? "listening"
     : state === "thinking" || state === "looking" || state === "transcribing" ? "thinking"
     : state === "speaking" || working ? "acting" : "idle";
-  // While Wisp has the mouse, the diamond rides with it and says what it's doing.
+  // While Blip has the mouse, the firefly rides with it and says what it's doing.
 
   return (
     <>
       <svg className="tether" width="100%" height="100%">
         <defs>
           <linearGradient id="thread-g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#eaf3ff" stopOpacity="0.85" />
-            <stop offset="1" stopColor="#9ecbff" stopOpacity="0.9" />
+            <stop offset="0" stopColor="#fff3cf" stopOpacity="0.9" />
+            <stop offset="1" stopColor="#ffc861" stopOpacity="0.9" />
           </linearGradient>
           <filter id="soft-glow" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="2.4" result="b" />
             <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
           </filter>
         </defs>
+        <g className={`ff-trail ${paused ? "off" : ""}`}>
+          {Array.from({ length: TRAIL - 1 }, (_, i) => (
+            <circle key={i} ref={(el) => { trail.current[i] = el; }} r="1" style={{ opacity: 0 }} />
+          ))}
+        </g>
         <path ref={thread} className="thread-line" filter="url(#soft-glow)" style={{ opacity: 0 }} />
         {target && <circle ref={spark} r="2.6" className="thread-spark" filter="url(#soft-glow)" />}
       </svg>
       <div ref={root} className={`presence mode-${driving ? "driving" : mode}`}>
-        <svg className="presence-svg" width="40" height="56" viewBox="-14 -6 40 56">
+        <svg className="presence-svg" width="60" height="60" viewBox="-24 -24 48 48">
           <defs>
-            <linearGradient id="diamond-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#f2f7ff" stopOpacity="0.85" />
-              <stop offset="0.55" stopColor="#9ecbff" stopOpacity="0.28" />
-              <stop offset="1" stopColor="#9ecbff" stopOpacity="0.04" />
-            </linearGradient>
-            <linearGradient id="shimmer" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#ffffff" stopOpacity="0" />
-              <stop offset="0.5" stopColor="#ffffff" stopOpacity="0.95" />
-              <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
-              <animate attributeName="y1" values="-1;1" dur="1.15s" repeatCount="indefinite" />
-              <animate attributeName="y2" values="0;2" dur="1.15s" repeatCount="indefinite" />
-            </linearGradient>
+            <radialGradient id="ff-tail" cx="0.45" cy="0.4" r="0.65">
+              <stop offset="0" stopColor="#fffbea" />
+              <stop offset="0.55" stopColor="#ffe08a" />
+              <stop offset="1" stopColor="#ffb02e" />
+            </radialGradient>
+            <radialGradient id="ff-halo">
+              <stop offset="0" stopColor="#ffe08a" stopOpacity="0.55" />
+              <stop offset="0.45" stopColor="#ffc861" stopOpacity="0.2" />
+              <stop offset="1" stopColor="#ffc861" stopOpacity="0" />
+            </radialGradient>
           </defs>
-          <circle ref={ring} className="presence-ring" cx="6" cy="22" r="15" />
-          <path className="diamond" d="M6 2 10.6 22 6 42 1.4 22Z" />
-          <path className="diamond-shimmer" d="M6 2 10.6 22 6 42 1.4 22Z" />
+          <circle ref={ring} className="presence-ring" r="13" />
+          <circle ref={halo} className="ff-halo" r="10" fill="url(#ff-halo)" />
+          {/* A real firefly's trick: a dark little body (it reads on white pages) and a glowing tail (it reads on dark ones). */}
+          <g className="ff-bug" transform="rotate(-30)">
+            <path className="ff-feeler" d="M-0.7 -9.2 Q-1.6 -11.6 -3.4 -12.6 M0.7 -9.2 Q1.6 -11.6 3.4 -12.6" />
+            <g transform="rotate(-38 -2.4 -5)"><ellipse className="ff-wing" cx="-2.4" cy="-5" rx="3.8" ry="1.7" /></g>
+            <g transform="rotate(38 2.4 -5)"><ellipse className="ff-wing" cx="2.4" cy="-5" rx="3.8" ry="1.7" /></g>
+            <ellipse className="ff-body" cx="0" cy="-5" rx="2.3" ry="2.6" />
+            <circle className="ff-body" cx="0" cy="-8.3" r="1.6" />
+            <ellipse className="ff-core" cx="0" cy="0" rx="3" ry="3.7" />
+          </g>
+          <g className="ff-orbit"><circle r="10" fill="none" /><circle className="mote" cx="8.5" cy="0" r="1.2" /></g>
         </svg>
         {driving && (
           <div className="driving-tag" key={driving}>
@@ -141,7 +179,7 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
         {/* The main screen speaks through the notch; other screens keep a caption by the cursor. */}
         {caption && !isPrimary && (
           <div className="caption" key={caption.text}>
-            {caption.agent !== "Wisp" && <span className="caption-agent">{caption.agent}</span>}
+            {caption.agent !== "Blip" && <span className="caption-agent">{caption.agent}</span>}
             {caption.text}
           </div>
         )}

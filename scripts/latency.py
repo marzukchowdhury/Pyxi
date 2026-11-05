@@ -1,6 +1,6 @@
 """Where does the time go in a voice turn? Measures each stage, end to end, for real.
 
-A spoken question (made with Wisp's own voice engine) goes through the real pipeline:
+A spoken question (made with Blip's own voice engine) goes through the real pipeline:
 speech-to-text, the screen (a recorded one, for repeatable runs), the chat model (streamed),
 and the voice. Prints when each stage finished, counted from the moment the user let go of
 the talk key. usage: python scripts/latency.py [runs]
@@ -20,13 +20,13 @@ from otto.config import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent))
 from scenarios import Replay, screen_from
 
-from wisp.companion.brain import Brain
-from wisp.config import WispSettings
-from wisp.hub import Hub
+from blip.companion.brain import Brain
+from blip.config import BlipSettings
+from blip.hub import Hub
 
 QUESTIONS_ALL = [
     ("explain post", "turn_ac9f763c", "Can you explain what this post is about?"),
-    ("small talk", "turn_ac9f763c", "Hey Wisp, how is your day going?"),
+    ("small talk", "turn_ac9f763c", "Hey Blip, how is your day going?"),
 ]
 _args = [a for a in sys.argv[1:] if not a.startswith("--")]
 QUESTIONS = [q for q in QUESTIONS_ALL if len(_args) < 2 or q[0].startswith(_args[1])]
@@ -41,13 +41,13 @@ async def spoken(brain: Brain, text: str) -> bytes:
 
 
 async def run(name: str, turn_id: str, question: str, tmp: Path) -> dict[str, float]:
-    class Settings(WispSettings):
+    class Settings(BlipSettings):
         @property
-        def models_dir(self) -> Path:  # Wisp's real voice models; everything else stays temporary
-            return Path(".wisp/models").resolve()
+        def models_dir(self) -> Path:  # Blip's real voice models; everything else stays temporary
+            return Path(".blip/models").resolve()
 
     settings = Settings(data_dir=tmp / name.replace(" ", "_"))
-    settings.voice.voice = "am_puck"  # a different voice from Wisp's, like a real user
+    settings.voice.voice = "am_puck"  # a different voice from Blip's, like a real user
     hub = Hub()
     marks: dict[str, float] = {}
     t0 = 0.0
@@ -95,7 +95,7 @@ async def run(name: str, turn_id: str, question: str, tmp: Path) -> dict[str, fl
 async def main() -> None:
     load_dotenv()
     runs = int(_args[0]) if _args else 2
-    tmp = Path(tempfile.mkdtemp(prefix="wisp_lat_"))
+    tmp = Path(tempfile.mkdtemp(prefix="blip_lat_"))
     for name, turn_id, q in QUESTIONS:
         for r in range(runs):
             m = await asyncio.wait_for(run(f"{name} {r}", turn_id, q, tmp), 120)

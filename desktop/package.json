@@ -1,8 +1,8 @@
 {
-  "name": "wisp-desktop",
+  "name": "blip-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Wisp desktop shell: transparent overlay, 3D explanation layer and control panel.",
+  "description": "Blip desktop shell: transparent overlay, 3D explanation layer and control panel.",
   "main": "out/main/index.js",
   "author": "Marzuk Haider Chowdhury",
   "license": "MIT",

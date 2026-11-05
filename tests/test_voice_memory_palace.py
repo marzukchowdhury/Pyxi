@@ -6,18 +6,18 @@ from datetime import datetime
 import pytest
 
 from conftest import fake_context
-from wisp.agents import AgentRegistry
-from wisp.companion.annotations import split_markers
-from wisp.memory import SpatialMemory
-from wisp.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
-from wisp.voice import split_sentences, strip_tags
-from wisp.voice.tts import FallbackTTS, Speech
+from blip.agents import AgentRegistry
+from blip.companion.annotations import split_markers
+from blip.memory import SpatialMemory
+from blip.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
+from blip.voice import split_sentences, strip_tags
+from blip.voice.tts import FallbackTTS, Speech
 
 
 # ---------------------------------------------------------------- voice
 def test_sentence_splitting_and_tags():
     text = (
-        "Hi there! I'm Wisp [laugh]. This is a really long sentence, with lots of clauses, "
+        "Hi there! I'm Blip [laugh]. This is a really long sentence, with lots of clauses, "
         + "and more words, " * 20
         + "done."
     )
@@ -128,7 +128,7 @@ def test_activity_log_and_causal_scene(tmp_path):
 
 def test_agent_registry(tmp_path):
     reg = AgentRegistry(tmp_path / "w.db")
-    assert {a.id for a in reg.all()} >= {"wisp", "scout", "quill", "sketch"}
+    assert {a.id for a in reg.all()} >= {"blip", "scout", "quill", "sketch"}
     pixel = reg.create("Pixel", "explainer", "Loves diagrams.")
     again = reg.create("Pixel", "writer", "Another one.")
     assert pixel.id == "pixel" and again.id == "pixel-2"
@@ -136,14 +136,14 @@ def test_agent_registry(tmp_path):
 
 
 @pytest.mark.skipif(
-    not __import__("pathlib").Path(".wisp/models/kokoro-v1.0.onnx").exists(),
+    not __import__("pathlib").Path(".blip/models/kokoro-v1.0.onnx").exists(),
     reason="Kokoro not downloaded",
 )
 async def test_kokoro_speaks():
     from pathlib import Path
 
-    from wisp.config import VoiceConfig
-    from wisp.voice.tts import KokoroTTS
+    from blip.config import VoiceConfig
+    from blip.voice.tts import KokoroTTS
 
-    speech = await KokoroTTS(VoiceConfig(), Path(".wisp/models")).synthesize("Hello from Wisp.")
+    speech = await KokoroTTS(VoiceConfig(), Path(".blip/models")).synthesize("Hello from Blip.")
     assert speech.wav[:4] == b"RIFF" and 0.5 < speech.duration_s < 4

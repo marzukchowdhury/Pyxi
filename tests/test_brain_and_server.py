@@ -11,11 +11,11 @@ from otto.llm.base import TextPart
 from otto.types import LLMResponse, ToolCall, Usage
 
 from conftest import FakeScreen, Recorder
-from wisp.companion.brain import Brain
-from wisp.demo import DemoLLM
-from wisp.hub import Hub
-from wisp.server import create_app
-from wisp.voice import make_tts
+from blip.companion.brain import Brain
+from blip.demo import DemoLLM
+from blip.hub import Hub
+from blip.server import create_app
+from blip.voice import make_tts
 
 
 def make_brain(settings, llm=None, otto_llm=None):
@@ -167,13 +167,13 @@ def test_server_websocket_round_trip(settings):
             seen.append(json.loads(ws.receive_text()))
             if seen[-1]["type"] == "turn_done":
                 break
-        assert any(e["type"] == "scene" and e["scene"]["title"] == "How Wisp works" for e in seen)
+        assert any(e["type"] == "scene" and e["scene"]["title"] == "How Blip works" for e in seen)
         assert client.get("/file", params={"path": "C:/Windows/win.ini"}).status_code == 404
         assert client.get("/crops/..%2F..%2Fsecret.png").status_code == 404
 
 
 def test_openrouter_models_need_the_openrouter_key(settings, monkeypatch):
-    from wisp.server import has_key, key_env
+    from blip.server import has_key, key_env
 
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     s = settings.model_copy(update={"model": "anthropic/claude-haiku-5.5"})

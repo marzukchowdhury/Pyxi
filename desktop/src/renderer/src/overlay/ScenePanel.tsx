@@ -66,7 +66,7 @@ export function ScenePanel() {
       if (narrated.current === key) return;
       narrated.current = key;
       voice.enqueue({ b64: null, text: step.narration, owner: "scene", onEnd: advance, onCancel: interrupted });
-    }, 9000); // Wisp's own voice; after that the words show silently
+    }, 9000); // Blip's own voice; after that the words show silently
     return () => clearTimeout(t);
   }, [scene, audio, setStep, setPlaying]);
 

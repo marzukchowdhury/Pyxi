@@ -9,7 +9,7 @@ function on<T>(channel: string, fn: Listener<T>): () => void {
   return () => ipcRenderer.removeListener(channel, handler);
 }
 
-contextBridge.exposeInMainWorld("wispBridge", {
+contextBridge.exposeInMainWorld("blipBridge", {
   electron: true,
   onCursor: (fn: Listener<{ x: number; y: number }>) => on("cursor", fn),
   onPtt: (fn: Listener<void>) => on("ptt", fn),

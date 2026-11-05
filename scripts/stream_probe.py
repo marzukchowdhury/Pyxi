@@ -16,9 +16,9 @@ import time
 import httpx
 from otto.config import load_dotenv
 
-from wisp.companion.brain import THREE_D_TOOLS
-from wisp.companion.prompts import system_prompt, turn_prompt
-from wisp.companion.tools import COMPANION_TOOLS
+from blip.companion.brain import THREE_D_TOOLS
+from blip.companion.prompts import system_prompt, turn_prompt
+from blip.companion.tools import COMPANION_TOOLS
 
 CACHE = "--cache" in sys.argv
 SAY_FIRST = (
@@ -33,7 +33,7 @@ sys.argv = [a for a in sys.argv if not a.startswith("--")]
 def main() -> None:
     load_dotenv()
     turn_id = sys.argv[1]
-    c = sqlite3.connect(".wisp/wisp.db")
+    c = sqlite3.connect(".blip/blip.db")
     screen, asked = c.execute(
         "select screen_text, user_text from turns where id=?", (turn_id,)
     ).fetchone()

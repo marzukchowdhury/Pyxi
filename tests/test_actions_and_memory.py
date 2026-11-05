@@ -5,7 +5,7 @@ from __future__ import annotations
 from conftest import fake_context
 from test_brain_and_server import make_brain
 from test_notes_and_guides import Scripted
-from wisp.companion.actions import app_target, safe_url
+from blip.companion.actions import app_target, safe_url
 
 
 def test_only_web_addresses_and_known_apps():
@@ -69,4 +69,4 @@ async def test_what_do_you_know_and_forget(settings):
     await brain.turn("what do you know about me?")
     assert "- name: Marzuk" in llm.prompts[2]  # the lookup came back to the model
     await brain.turn("forget everything about me")
-    assert brain.memory.all("agent:wisp") == []
+    assert brain.memory.all("agent:blip") == []

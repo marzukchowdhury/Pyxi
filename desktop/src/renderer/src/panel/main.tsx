@@ -5,5 +5,5 @@ import { createRoot } from "react-dom/client";
 import "./panel.css";
 import { Panel } from "./Panel";
 
-if (!window.wispBridge) document.documentElement.classList.add("web-preview");
+if (!window.blipBridge) document.documentElement.classList.add("web-preview");
 createRoot(document.getElementById("root")!).render(<Panel />);

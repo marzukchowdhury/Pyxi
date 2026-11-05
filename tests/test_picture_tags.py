@@ -4,10 +4,10 @@ import time
 
 from PIL import Image
 
-from wisp.companion.aim import Survey, gridded, match
-from wisp.companion.notes import build_card, tag_size
-from wisp.partial_json import picture_head
-from wisp.screen.context import ScreenContext, WindowInfo
+from blip.companion.aim import Survey, gridded, match
+from blip.companion.notes import build_card, tag_size
+from blip.partial_json import picture_head
+from blip.screen.context import ScreenContext, WindowInfo
 
 HEART = {
     "Right atrium": (430, 500),

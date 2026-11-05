@@ -1,4 +1,4 @@
-// Audio: a queue for Wisp's sentences (with "this sentence started" callbacks, so drawings
+// Audio: a queue for Blip's sentences (with "this sentence started" callbacks, so drawings
 // land exactly when the words do), a level meter for the buddy's mouth, and push-to-talk.
 
 import { bridge } from "./bridge";
@@ -11,7 +11,7 @@ export type Clip = {
   onStart?: () => void;
   onEnd?: () => void;
   onCancel?: () => void;
-  /** Who queued it (a model, a drawing), so it can stop its own lines without cutting Wisp off. */
+  /** Who queued it (a model, a drawing), so it can stop its own lines without cutting Blip off. */
   owner?: string;
 };
 
@@ -50,7 +50,7 @@ export class AudioQueue implements Voice {
   muted =
     new URLSearchParams(location.search).get("mute") === "1" ||
     // a browser preview is silent unless asked (?sound=1)
-    (!window.wispBridge && new URLSearchParams(location.search).get("sound") !== "1");
+    (!window.blipBridge && new URLSearchParams(location.search).get("sound") !== "1");
 
   /** 0..1 loudness of whatever is playing right now (drives the buddy's mouth). */
   level(): number {
@@ -113,7 +113,7 @@ export class AudioQueue implements Voice {
     this.playingClip = clip;
     clip.onStart?.();
     try {
-      // Wisp has one voice. With no audio (muted, or the voice failed) the words still take
+      // Blip has one voice. With no audio (muted, or the voice failed) the words still take
       // their time on screen, but no other voice ever stands in.
       if (this.muted || !clip.b64) await this.silent(clip);
       else await this.playWav(clip.b64, gen);
@@ -160,7 +160,7 @@ export class AudioQueue implements Voice {
 }
 
 /** The voice on a second monitor's overlay: every clip is played by the main screen's queue
- * (through Electron's main process), so Wisp has exactly one voice, however many monitors. */
+ * (through Electron's main process), so Blip has exactly one voice, however many monitors. */
 export class RemoteVoice implements Voice {
   muted = false;
   private pending = new Map<string, Clip>();

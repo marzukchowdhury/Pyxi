@@ -7,10 +7,10 @@ import pytest
 from PIL import Image
 
 from conftest import fake_context
-from wisp.config import ScreenConfig
-from wisp.scenes import GALLERY, build_exploded_scene, parse_scene, tool_schema
-from wisp.screen import ScreenReader, WindowInfo
-from wisp.screen.context import pick_monitor
+from blip.config import ScreenConfig
+from blip.scenes import GALLERY, build_exploded_scene, parse_scene, tool_schema
+from blip.screen import ScreenReader, WindowInfo
+from blip.screen.context import pick_monitor
 
 
 # ---------------------------------------------------------------- scenes

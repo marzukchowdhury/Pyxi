@@ -5,8 +5,8 @@ from __future__ import annotations
 from otto.types import LLMResponse, ToolCall, Usage
 
 from test_brain_and_server import make_brain
-from wisp.scenes.object_gallery import OBJECT_GALLERY
-from wisp.scenes.objects import ObjectEdit, ObjectScene, apply_edit, build_tool_schema
+from blip.scenes.object_gallery import OBJECT_GALLERY
+from blip.scenes.objects import ObjectEdit, ObjectScene, apply_edit, build_tool_schema
 
 
 def _model(**extra) -> dict:

@@ -24,15 +24,19 @@ export const Stop = (p: P) => <svg {...base(p)}><rect x="6" y="6" width="8" heig
 export const Minus = (p: P) => <svg {...base(p)}><path d="M5 10h10" /></svg>;
 export const Cube = (p: P) => <svg {...base(p)}><path d="M10 3 16 6.5v7L10 17l-6-3.5v-7Z" /><path d="M4 6.5 10 10l6-3.5M10 10v7" /></svg>;
 
-/** Wisp's mark: the same elongated diamond as the on-screen presence. */
+/** Blip's mark: the same little firefly as the on-screen presence. */
 export const Mark = ({ size = 18, ...p }: P & { size?: number }) => (
-  <svg width={size * 0.56} height={size} viewBox="0 0 12 22" {...p}>
+  <svg width={size} height={size} viewBox="-12 -12 24 24" {...p}>
     <defs>
-      <linearGradient id="mark-g" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stopColor="#eaf3ff" />
-        <stop offset="1" stopColor="#9ecbff" stopOpacity="0.15" />
-      </linearGradient>
+      <radialGradient id="mark-g">
+        <stop offset="0" stopColor="#ffe08a" stopOpacity="0.7" />
+        <stop offset="0.5" stopColor="#ffc861" stopOpacity="0.25" />
+        <stop offset="1" stopColor="#ffc861" stopOpacity="0" />
+      </radialGradient>
     </defs>
-    <path d="M6 1 10.5 11 6 21 1.5 11Z" fill="url(#mark-g)" stroke="#eaf3ff" strokeWidth="0.9" strokeLinejoin="round" />
+    <circle r="11" fill="url(#mark-g)" />
+    <ellipse cx="-3" cy="-4.2" rx="3.2" ry="1.8" transform="rotate(-32 -3 -4.2)" fill="rgba(255,250,235,.35)" />
+    <ellipse cx="3" cy="-4.2" rx="3.2" ry="1.8" transform="rotate(32 3 -4.2)" fill="rgba(255,250,235,.35)" />
+    <circle r="3.4" fill="#fff3cf" />
   </svg>
 );

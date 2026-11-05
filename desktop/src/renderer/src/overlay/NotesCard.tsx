@@ -1,6 +1,6 @@
 /**
- * Field notes: a glass notebook card beside what Wisp is explaining. Each point writes itself
- * in ink the moment Wisp says it, frames the exact thing it's about with a hand-drawn dashed
+ * Field notes: a glass notebook card beside what Blip is explaining. Each point writes itself
+ * in ink the moment Blip says it, frames the exact thing it's about with a hand-drawn dashed
  * outline numbered to match, and a thread of light ties the two together, so you never have to
  * guess which paragraph a point means. Sketches draw straight onto the real content.
  */
@@ -96,7 +96,7 @@ export function NotesCard() {
   const [leaving, setLeaving] = useState(false);
   const idleSince = useRef(0);
 
-  // Once Wisp has finished explaining, the notes stay a little while to read, then fade.
+  // Once Blip has finished explaining, the notes stay a little while to read, then fade.
   // Hovering the card keeps it; anything that changes the screen clears it sooner.
   useEffect(() => {
     if (!notes) return;

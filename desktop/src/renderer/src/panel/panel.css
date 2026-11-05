@@ -1,4 +1,4 @@
-/* Wisp panel: the same language as the overlay. Near-black glass, hairlines, one ice accent. */
+/* Blip panel: the same language as the overlay. Near-black glass, hairlines, one ice accent. */
 :root {
   --bg: rgba(10, 11, 15, 0.9);
   --surface: rgba(255, 255, 255, 0.028);
@@ -29,9 +29,9 @@ button { cursor: pointer; }
 /* header */
 .titlebar { display: flex; align-items: center; gap: 12px; padding: 16px 16px 12px 18px; -webkit-app-region: drag; }
 .titlebar button, .titlebar .meter { -webkit-app-region: no-drag; }
-.mark { display: grid; place-items: center; width: 22px; filter: drop-shadow(0 0 6px rgba(158,203,255,.55)); }
+.mark { display: grid; place-items: center; width: 22px; filter: drop-shadow(0 0 6px rgba(255,190,80,.55)); }
 .mark.state-listening, .mark.state-thinking, .mark.state-looking, .mark.state-transcribing { animation: mark-pulse 1.4s ease-in-out infinite; }
-@keyframes mark-pulse { 50% { filter: drop-shadow(0 0 12px rgba(158,203,255,.95)); transform: scaleY(1.06); } }
+@keyframes mark-pulse { 50% { filter: drop-shadow(0 0 12px rgba(255,190,80,.95)); transform: scale(1.08); } }
 .who .name { font-weight: 600; font-size: 14px; letter-spacing: -0.015em; }
 .who .status { font-size: 12px; color: var(--ink-3); }
 .spacer { flex: 1; }
@@ -73,7 +73,7 @@ h3, h4 { letter-spacing: -0.012em; }
 .chat { display: flex; flex-direction: column; height: 100%; margin: -14px -16px; }
 .lines { flex: 1; overflow: auto; padding: 18px 18px 8px; display: flex; flex-direction: column; gap: 14px; }
 .hello { text-align: center; padding: 34px 14px 10px; }
-.big-mark { display: grid; place-items: center; margin-bottom: 18px; filter: drop-shadow(0 0 14px rgba(158,203,255,.6)); animation: float 5s ease-in-out infinite; }
+.big-mark { display: grid; place-items: center; margin-bottom: 18px; filter: drop-shadow(0 0 14px rgba(255,190,80,.6)); animation: float 5s ease-in-out infinite; }
 @keyframes float { 50% { transform: translateY(-4px); filter: drop-shadow(0 0 22px rgba(158,203,255,.8)); } }
 .hello h2 { margin: 0 0 8px; font-size: 20px; font-weight: 600; letter-spacing: -0.025em; }
 .hello p { margin: 0 auto; max-width: 330px; color: var(--ink-2); font-size: 13px; line-height: 1.6; }

@@ -2,7 +2,7 @@
 
 import pytest
 
-from wisp import windows
+from blip import windows
 
 
 @pytest.fixture

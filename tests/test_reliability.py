@@ -9,10 +9,10 @@ from otto.types import LLMResponse, ToolCall, Usage
 from test_brain_and_server import make_brain
 from test_connectors_and_docs import Script
 from test_errands import connect, tomorrow_at
-from wisp.companion.brain import visual_opener
-from wisp.companion.errands import run_errand
-from wisp.connectors import Outgoing
-from wisp.screen.ocr import TextLine, find_text
+from blip.companion.brain import visual_opener
+from blip.companion.errands import run_errand
+from blip.connectors import Outgoing
+from blip.screen.ocr import TextLine, find_text
 
 
 def test_a_real_first_sentence_is_never_treated_as_filler():

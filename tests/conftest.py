@@ -8,9 +8,9 @@ from typing import Any
 import pytest
 from PIL import Image
 
-from wisp.config import WispSettings
-from wisp.hub import Hub
-from wisp.screen import ScreenContext, UIElement, WindowInfo
+from blip.config import BlipSettings
+from blip.hub import Hub
+from blip.screen import ScreenContext, UIElement, WindowInfo
 
 
 def fake_context(app: str = "app.exe", title: str = "Settings - App") -> ScreenContext:
@@ -56,10 +56,10 @@ class Recorder:
 
 
 @pytest.fixture
-def settings(tmp_path: Path) -> WispSettings:
-    return WispSettings(
+def settings(tmp_path: Path) -> BlipSettings:
+    return BlipSettings(
         _env_file=None,
-        data_dir=tmp_path / ".wisp",
+        data_dir=tmp_path / ".blip",
         voice={"tts": "client"},
         screen={"ambient_memory": False},
     )

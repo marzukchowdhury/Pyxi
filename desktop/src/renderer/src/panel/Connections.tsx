@@ -1,6 +1,6 @@
 /**
  * Connected accounts. Each one shows whether it's live and, if not, the exact steps to connect
- * it. Google and LinkedIn sign in through their own pages in your browser; Wisp never sees a
+ * it. Google and LinkedIn sign in through their own pages in your browser; Blip never sees a
  * password. Nothing is ever sent or posted without an approval card.
  */
 import { useEffect, useState } from "react";
@@ -50,7 +50,7 @@ export function Connections() {
   );
 }
 
-/** Routines Wisp runs on a schedule while it's open. Ask for one in plain words. */
+/** Routines Blip runs on a schedule while it's open. Ask for one in plain words. */
 export function Routines() {
   const list = usePanel((s) => s.routines);
   useEffect(() => brain.send({ type: "routines" }), []);

@@ -1,4 +1,4 @@
-"""Wisp's hands, without touching the real mouse: the loop, and every safety guard."""
+"""Blip's hands, without touching the real mouse: the loop, and every safety guard."""
 
 import time
 
@@ -6,9 +6,9 @@ import pytest
 from otto.types import LLMResponse, ToolCall, Usage
 from PIL import Image
 
-from wisp.companion.operator import CLOSING_KEYS, RISKY, Operator
-from wisp.hands import parse_keys
-from wisp.screen.context import ScreenContext, UIElement, WindowInfo
+from blip.companion.operator import CLOSING_KEYS, RISKY, Operator
+from blip.hands import parse_keys
+from blip.screen.context import ScreenContext, UIElement, WindowInfo
 
 
 def screen(color: str = "white") -> ScreenContext:

@@ -8,7 +8,7 @@ from otto.types import LLMResponse, ToolCall, Usage
 
 from conftest import fake_context
 from test_brain_and_server import make_brain
-from wisp.companion.notes import build_card
+from blip.companion.notes import build_card
 
 
 def test_card_points_frame_the_exact_elements():

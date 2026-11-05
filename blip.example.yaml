@@ -1,0 +1,22 @@
+# Copy to blip.yaml. Environment variables (BLIP_...) override this file.
+model: claude-opus-5-5
+effort: low
+local_mode: false
+local_model: qwen2.5vl:7b
+
+voice:
+  stt_model: base.en          # faster-whisper: tiny.en, base.en, small.en
+  tts: kokoro                 # kokoro | chatterbox | client
+  voice: af_heart
+  speed: 1.05
+
+screen:
+  ambient_memory: false       # the Memory Palace is opt-in
+  keep_screenshots: false     # let time travel show real pixels
+  retention_hours: 72
+  excluded_windows: ["1password", "bitwarden", "keepass", "\bbank\b", "banking", "credential"]
+
+budget:
+  max_tool_rounds: 4
+  max_cost_usd: 0.25          # per turn
+  daily_cost_usd: 5.0         # all turns and agent jobs

@@ -1,5 +1,5 @@
 /**
- * The voice studio. Pick who Wisp sounds like: every voice has a signature (a little waveform
+ * The voice studio. Pick who Blip sounds like: every voice has a signature (a little waveform
  * drawn from its name, so no two look alike) and a personality, and tapping one plays a short
  * line in character. Engine, speed, language and captions apply from the next sentence.
  */
@@ -40,7 +40,7 @@ export function VoiceStudio() {
     player.enqueue({ b64: preview.audio, text: preview.text, onEnd: () => setPlaying(null) });
   }, [preview]);
 
-  if (!live) return <p className="muted">Waiting for Wisp's brain…</p>;
+  if (!live) return <p className="muted">Waiting for Blip's brain…</p>;
   const set = (key: string, value: unknown) => brain.send({ type: "set", key, value });
   const voices = catalog?.[engine] ?? [];
   const current = [...(catalog?.[live.engine] ?? [])].find((v) => v.id === live.voice);
@@ -67,7 +67,7 @@ export function VoiceStudio() {
       <section className="now">
         <Signature id={live.voice} big active={playing === live.voice} />
         <div className="now-text">
-          <div className="now-kicker">Wisp sounds like</div>
+          <div className="now-kicker">Blip sounds like</div>
           <div className="now-name">{current?.name ?? live.voice}<span>{current?.vibe}</span></div>
           <div className="now-engine">{ENGINES.find((e) => e.id === live.engine)?.name}{current?.accent ? ` · ${current.accent}` : ""}</div>
         </div>
@@ -94,13 +94,13 @@ export function VoiceStudio() {
           <b>Connect {info.name}</b>
           <ol>
             <li>Create an API key on the {info.name} website.</li>
-            <li>Add <code>{info.env}=your-key</code> to <code>wisp/.env</code>.</li>
-            <li>Restart Wisp. Your voices appear here.</li>
+            <li>Add <code>{info.env}=your-key</code> to <code>blip/.env</code>.</li>
+            <li>Restart Blip. Your voices appear here.</li>
           </ol>
           <button className="primary" onClick={() => bridge.openExternal(info.site!)}>Open {info.name}</button>
         </div>
       ) : !ready ? (
-        <div className="studio-setup"><b>The on-device voice isn't installed</b><p>Run <code>wisp setup-voice</code> once (about 350 MB).</p></div>
+        <div className="studio-setup"><b>The on-device voice isn't installed</b><p>Run <code>blip setup-voice</code> once (about 350 MB).</p></div>
       ) : (
         <div className="voice-grid">
           {voices.map((v) => (
@@ -130,15 +130,15 @@ export function VoiceStudio() {
       </label>
       <p className="studio-blurb">
         {live.language === "auto"
-          ? "Wisp listens for the language you speak and answers in it. The first time, it downloads a multilingual listening model (about 480 MB)."
+          ? "Blip listens for the language you speak and answers in it. The first time, it downloads a multilingual listening model (about 480 MB)."
           : live.language === "bn" && live.engine === "kokoro"
-            ? "Wisp can read Bengali, but the on-device voice can't speak it yet. Pick ElevenLabs for a Bengali voice."
-            : "Wisp listens and answers in this language."}
+            ? "Blip can read Bengali, but the on-device voice can't speak it yet. Pick ElevenLabs for a Bengali voice."
+            : "Blip listens and answers in this language."}
       </p>
 
       <h4>Captions</h4>
       <label className="toggle-row">
-        <span>Show what Wisp says in the notch while it talks</span>
+        <span>Show what Blip says in the notch while it talks</span>
         <input type="checkbox" className="switch" checked={live.captions} onChange={(e) => set("captions", e.target.checked)} />
       </label>
     </div>
@@ -158,7 +158,7 @@ function Signature({ id, big = false, active = false }: { id: string; big?: bool
   const hue = useMemo(() => {
     let s = 0;
     for (const c of id) s = (s * 31 + c.charCodeAt(0)) % 360;
-    return 190 + (s % 70); // ice to violet, Wisp's family of colours
+    return 190 + (s % 70); // ice to violet, Blip's family of colours
   }, [id]);
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {

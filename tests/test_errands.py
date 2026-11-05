@@ -9,8 +9,8 @@ from zoneinfo import ZoneInfo
 
 from test_brain_and_server import make_brain
 from test_connectors_and_docs import Script
-from wisp.companion.errands import said_by_user
-from wisp.timecontext import now_block
+from blip.companion.errands import said_by_user
+from blip.timecontext import now_block
 
 TZ = "America/Vancouver"
 
@@ -201,7 +201,7 @@ async def test_the_conversation_can_read_accounts_but_actions_are_errands(settin
 
 
 async def test_lookups_dont_chatter_and_errors_are_human(settings):
-    from wisp.companion.brain import friendly_error, strip_filler
+    from blip.companion.brain import friendly_error, strip_filler
 
     llm = Script(
         [("say", {"text": "Let me check your calendar."}), ("calendar_list", {"days": 2})],

@@ -1,4 +1,4 @@
-"""Run one real browser job through Wisp's job runner (hidden browser) and report every step.
+"""Run one real browser job through Blip's job runner (hidden browser) and report every step.
 
 usage: python scripts/agent_check.py [agent] "<task>" [start_url]
 Prints each step, the result, the cost and the time. Never prints the API key.
@@ -13,9 +13,9 @@ import time
 
 from otto.config import load_dotenv
 
-from wisp.companion.brain import Brain
-from wisp.config import WispSettings
-from wisp.hub import Hub
+from blip.companion.brain import Brain
+from blip.config import BlipSettings
+from blip.hub import Hub
 
 
 async def main() -> None:
@@ -44,7 +44,7 @@ async def main() -> None:
             print("  NEEDS YOU:", e.get("action") or e.get("question"))
 
     hub.connect(show)
-    brain = Brain(WispSettings(), hub)
+    brain = Brain(BlipSettings(), hub)
     brain.jobs.headed = bool(
         os.getenv("HEADED")
     )  # hidden unless asked: don't pop windows on screen

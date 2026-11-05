@@ -1,6 +1,6 @@
 """Connected accounts and document fixing, end to end with fake Google APIs (no network).
 
-The scenario from the product brief: a friend emails a recommendation letter; Wisp finds it,
+The scenario from the product brief: a friend emails a recommendation letter; Blip finds it,
 downloads it, Quill fixes the grammar into a copy beside the original, and the reply with the
 fixed file goes out only after the user presses Allow.
 """
@@ -18,8 +18,8 @@ from docx import Document
 from otto.types import LLMResponse, ToolCall, Usage
 
 from test_brain_and_server import make_brain
-from wisp.connectors import Outgoing
-from wisp.docs import fix_document
+from blip.connectors import Outgoing
+from blip.docs import fix_document
 
 
 def _letter() -> bytes:
@@ -68,7 +68,7 @@ async def test_fixing_a_word_document_keeps_styles_and_the_original(tmp_path):
     src = tmp_path / "LOR.docx"
     src.write_bytes(_letter())
     result = await fix_document(src, "Fix grammar and spelling.", Script(EDITS))
-    assert result.path.name == "LOR (fixed by Wisp).docx" and result.changed == 2
+    assert result.path.name == "LOR (fixed by Blip).docx" and result.changed == 2
     fixed = Document(str(result.path))
     assert fixed.paragraphs[0].style.name == "Heading 1"
     assert fixed.paragraphs[2].text == "Nabiha has been an excellent student in my class."
@@ -126,9 +126,9 @@ class FakeGmail:
 
 
 async def test_the_recommendation_letter_errand(settings, tmp_path):
-    downloads = tmp_path / "Documents" / "Wisp"
+    downloads = tmp_path / "Documents" / "Blip"
     saved = downloads / "LOR.docx"
-    fixed = downloads / "LOR (fixed by Wisp).docx"
+    fixed = downloads / "LOR (fixed by Blip).docx"
     llm = Script(
         [("gmail_search", {"query": "from:sam has:attachment recommendation"})],
         [("gmail_download", {"id": "m1"})],
@@ -181,7 +181,7 @@ async def test_the_recommendation_letter_errand(settings, tmp_path):
     [ask] = rec.of("confirm")
     assert (
         ask["action"] == "Send an email to sam@example.com"
-        and "Attached: LOR (fixed by Wisp).docx" in ask["reason"]
+        and "Attached: LOR (fixed by Blip).docx" in ask["reason"]
     )
     assert not gmail.drafts and not gmail.sent  # nothing touches the account before approval
     brain.hub.resolve(ask["request_id"], True)

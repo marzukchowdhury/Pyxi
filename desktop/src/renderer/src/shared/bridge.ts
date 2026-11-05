@@ -1,4 +1,4 @@
-// window.wispBridge comes from the Electron preload. In a plain browser (vite.web.config.ts)
+// window.blipBridge comes from the Electron preload. In a plain browser (vite.web.config.ts)
 // a mock stands in, so every page can be previewed and tested without Electron.
 
 export interface DisplayInfo {
@@ -22,7 +22,7 @@ export interface Bridge {
   onGlobalClick(fn: (p: { x: number; y: number }) => void): () => void;
   /** Quick actions from the brain: open a URL, copy text, or paste a draft into the focused field. */
   runAction(kind: "open_url" | "copy" | "insert", value: string): void;
-  /** Open a file Wisp made, or show it in Explorer (only files in Wisp's own folders). */
+  /** Open a file Blip made, or show it in Explorer (only files in Blip's own folders). */
   openFile(path: string): void;
   showInFolder(path: string): void;
   /** A quiet Windows notification; clicking it opens the file. */
@@ -33,7 +33,7 @@ export interface Bridge {
   onMuteToggle(fn: (muted: boolean) => void): () => void;
   /** Ctrl+Alt+W or the tray icon: unfold or fold the full notch. */
   onNotchToggle(fn: () => void): () => void;
-  /** Whether screen sharing (Discord, OBS, Meet) shows Wisp's overlay. */
+  /** Whether screen sharing (Discord, OBS, Meet) shows Blip's overlay. */
   shareVisible(): Promise<boolean>;
   setShareVisible(value: boolean): void;
   onShareVisible(fn: (value: boolean) => void): () => void;
@@ -60,7 +60,7 @@ export interface Bridge {
 
 declare global {
   interface Window {
-    wispBridge?: Bridge;
+    blipBridge?: Bridge;
   }
 }
 
@@ -165,7 +165,7 @@ function mockBridge(): Bridge {
   };
 }
 
-export const bridge: Bridge = window.wispBridge ?? mockBridge();
+export const bridge: Bridge = window.blipBridge ?? mockBridge();
 
 const params = new URLSearchParams(location.search);
 
