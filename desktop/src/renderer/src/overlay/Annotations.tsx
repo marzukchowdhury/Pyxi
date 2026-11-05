@@ -44,6 +44,7 @@ export function Annotations() {
       </svg>
       {live.filter((a) => a.label && a.kind !== "arrow").map((a) => <Label key={`l${a.id}`} a={a} />)}
       {pins.map((p) => <PinNote key={p.id} pin={p} />)}
+      <Cheer />
     </>
   );
 }
@@ -231,6 +232,22 @@ function GuideLabel({ a, x, y }: { a: LiveAnnotation; x: number; y: number }) {
         </button>
       )}
     </Interactive>
+  );
+}
+
+/** They finished a guide on their own: a ring of light and a quiet well done, then gone. */
+function Cheer() {
+  const cheer = useOverlay((s) => s.cheer);
+  if (!cheer) return null;
+  return (
+    <div className="cheer" key={cheer.at} style={{ left: cheer.x, top: cheer.y }}>
+      <i className="cheer-ring" />
+      <i className="cheer-ring late" />
+      {Array.from({ length: 10 }, (_, k) => (
+        <i key={k} className="cheer-spark" style={{ ["--a" as string]: `${k * 36}deg` }} />
+      ))}
+      <div className="cheer-pill">You did it yourself</div>
+    </div>
   );
 }
 

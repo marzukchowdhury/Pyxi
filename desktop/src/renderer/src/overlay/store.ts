@@ -2,7 +2,7 @@
 // primary display's overlay plays audio and records the microphone, so nothing doubles up.
 import { create } from "zustand";
 import { AudioQueue, RemoteVoice, type Voice } from "../shared/audio";
-import { bridge, currentDisplay, onThisDisplay } from "../shared/bridge";
+import { bridge, currentDisplay, onThisDisplay, toLocal } from "../shared/bridge";
 import type { Annotation, BrainEvent, BrainState, Job, NoteCard, ObjectScene, Pin, SceneSpec, Sketchboard, TimelineMoment, Walkthrough } from "../shared/protocol";
 import { brain } from "../shared/socket";
 
@@ -102,6 +102,10 @@ interface OverlayState {
   /** The note card on screen; `revealed` holds the point numbers written so far. */
   notes: { card: NoteCard; revealed: number[]; markers: boolean; at: number } | null;
   guide: { step: number; total: number | null; goal: string; label: string; action: string } | null;
+  /** What Wisp's hands are doing right now ("Clicking Save"), while she has the mouse. */
+  driving: string | null;
+  /** A guide they finished themselves: a brief moment of light where they made the last move. */
+  cheer: { x: number; y: number; at: number } | null;
   /** Finished background jobs, shown quietly as cards (newest first). */
   toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[] }[];
   dismissToast(id: string): void;
@@ -145,6 +149,8 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   captions: true,
   notes: null,
   guide: null,
+  driving: null,
+  cheer: null,
   toasts: [],
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.job_id !== id) }),
   closeNotes: () => set({ notes: null }),
@@ -409,6 +415,9 @@ brain.on((e: BrainEvent) => {
     case "handoff":
       useOverlay.setState({ handoff: { source: e.source, target: e.target, at: performance.now() } });
       break;
+    case "driving":
+      useOverlay.setState({ driving: e.doing ?? null });
+      break;
     case "request_closed":
       useOverlay.setState((s) => ({ requests: s.requests.filter((r) => r.request_id !== e.request_id) }));
       break;
@@ -437,6 +446,11 @@ brain.on((e: BrainEvent) => {
         guide: e.active ? { step: e.step ?? 1, total: e.total ?? null, goal: e.goal ?? "", label: e.label ?? "", action: e.action ?? "click" } : null,
       });
       if (!e.active) useOverlay.setState((s) => ({ annotations: s.annotations.filter((a) => !a.guide) }));
+      if (!e.active && e.finished && e.at && onThisDisplay(e.at[0], e.at[1])) {
+        const [x, y] = toLocal(e.at[0], e.at[1]);
+        useOverlay.setState({ cheer: { x, y, at: performance.now() } });
+        setTimeout(() => useOverlay.setState({ cheer: null }), 2600);
+      }
       break;
     case "job_ready":
       if (isPrimary) {

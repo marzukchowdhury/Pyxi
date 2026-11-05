@@ -29,6 +29,7 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
   const caption = useOverlay((s) => s.caption);
   const working = useOverlay((s) => Object.values(s.jobs).some((j) => j.status === "running"));
   const target = useOverlay((s) => s.flyTo);
+  const driving = useOverlay((s) => s.driving);
 
   useEffect(
     () =>
@@ -55,6 +56,9 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
         el.style.transform = `translate3d(${p.x}px, ${p.y}px, 0)`;
         el.style.setProperty("--level", level.toFixed(3));
         el.style.opacity = onScreen.current ? "" : "0";
+        // Near an edge, labels by the diamond flip to the side with room.
+        el.classList.toggle("near-right", p.x > innerWidth - 240);
+        el.classList.toggle("near-bottom", p.y > innerHeight - 90);
       }
       if (ring.current) ring.current.setAttribute("r", (15 + level * 9).toFixed(2));
       // The thread: presence -> target, a gentle curve, alive only while the target is fresh.
@@ -90,6 +94,7 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
   const mode = paused ? "paused" : state === "listening" ? "listening"
     : state === "thinking" || state === "looking" || state === "transcribing" ? "thinking"
     : state === "speaking" || working ? "acting" : "idle";
+  // While Wisp has the mouse, the diamond rides with it and says what it's doing.
 
   return (
     <>
@@ -107,7 +112,7 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
         <path ref={thread} className="thread-line" filter="url(#soft-glow)" style={{ opacity: 0 }} />
         {target && <circle ref={spark} r="2.6" className="thread-spark" filter="url(#soft-glow)" />}
       </svg>
-      <div ref={root} className={`presence mode-${mode}`}>
+      <div ref={root} className={`presence mode-${driving ? "driving" : mode}`}>
         <svg className="presence-svg" width="40" height="56" viewBox="-14 -6 40 56">
           <defs>
             <linearGradient id="diamond-fill" x1="0" y1="0" x2="0" y2="1">
@@ -127,6 +132,12 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
           <path className="diamond" d="M6 2 10.6 22 6 42 1.4 22Z" />
           <path className="diamond-shimmer" d="M6 2 10.6 22 6 42 1.4 22Z" />
         </svg>
+        {driving && (
+          <div className="driving-tag" key={driving}>
+            <b>{driving}</b>
+            <span>Esc or move the mouse to stop</span>
+          </div>
+        )}
         {/* The main screen speaks through the notch; other screens keep a caption by the cursor. */}
         {caption && !isPrimary && (
           <div className="caption" key={caption.text}>

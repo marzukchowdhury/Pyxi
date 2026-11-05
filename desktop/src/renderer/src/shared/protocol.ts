@@ -331,7 +331,7 @@ export type BrainEvent =
   | { type: "notes"; card: NoteCard }
   | { type: "action"; kind: "open_url" | "copy" | "insert"; value: string }
   | { type: "job_ready"; job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[] }
-  | { type: "guide"; active: boolean; step?: number; total?: number | null; goal?: string; label?: string; action?: string }
+  | { type: "guide"; active: boolean; step?: number; total?: number | null; goal?: string; label?: string; action?: string; finished?: boolean; at?: [number, number] | null }
   | { type: "stop_audio" }
   | { type: "annotate"; annotations: Annotation[] }
   | { type: "clear" }
@@ -352,6 +352,7 @@ export type BrainEvent =
   | { type: "confirm"; request_id: string; job_id: string; agent: string; action: string; reason: string; always?: string }
   | { type: "ask"; request_id: string; job_id: string; agent: string; question: string }
   | { type: "request_closed"; request_id: string }
+  | { type: "driving"; doing: string | null }
   | { type: "agents"; agents: Agent[] }
   | { type: "pins"; app: string; pins: Pin[] }
   | { type: "turn_done"; turn_id: string; cost_usd: number; tokens: number; spent_today: number; daily_budget: number }

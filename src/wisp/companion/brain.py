@@ -329,6 +329,7 @@ class Brain:
         job = await self.jobs.track("Wisp", task)
 
         async def report(doing: str, step: int) -> None:
+            await self.hub.emit("driving", doing=doing)  # rides beside the cursor
             await self.hub.emit(
                 "job_event", job_id=job.id, agent="Wisp", event="status", data={"message": doing}
             )
@@ -369,6 +370,7 @@ class Brain:
             out = Outcome(False, f"I hit a snag doing that. {friendly_error(exc)}")
         finally:
             usage, self._operator = (self._operator.usage if self._operator else None), None
+            await self.hub.emit("driving", doing=None)
         cost = usage.cost_usd if usage else 0.0
         self.turns.add_spend("hands", cost)
         await self.jobs.settle(job, ok=out.ok, summary=out.summary, cost=cost)
@@ -1374,8 +1376,12 @@ class Brain:
             return f"explain_on_screen: points {missing} had nothing to frame." if missing else None
         if name == "guide":
             if args.get("done"):
-                self._guide = None
-                await self.hub.emit("guide", active=False)
+                last, self._guide = self._guide, None
+                at = None
+                if last is not None:  # celebrate where they made the last move
+                    x, y, w, h = last.rect
+                    at = (x + w // 2, y + h // 2)
+                await self.hub.emit("guide", active=False, finished=last is not None, at=at)
                 return None
             label = str(
                 args.get("label")
