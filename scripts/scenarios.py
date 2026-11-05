@@ -6,7 +6,7 @@ card that ends with an offer, 3D only when asked, account actions become errands
 goes to Scout, small talk stays short. Errands, browser jobs and 3D builds are intercepted,
 so nothing touches the user's accounts or opens a browser. Speech is off (tts=none).
 
-usage: python scripts/scenarios.py [repeats]
+usage: python scripts/scenarios.py [repeats] [name filter]
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from PIL import Image
 
 from blip.companion.brain import Brain
 from blip.config import BlipSettings
+from blip import tidy
 from blip.hub import Hub
 from blip.screen.context import ScreenContext, UIElement, WindowInfo
 from blip.screen.ocr import TextLine
@@ -184,6 +185,16 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             return None
         return await real_quick(action, value)
 
+    # A messy sample Desktop, so the tidy check doesn't depend on how tidy the real one is today.
+    mess = Path(tmp) / "Desktop"
+    mess.mkdir(exist_ok=True)
+    for fname in ["Resume final v3.pdf", "Cover letter PwC.docx", "IMG_2041.jpg", "IMG_2042.jpg",
+                 "Screenshot 2026-11-01 101233.png", "budget 2026.xlsx", "setup.exe", "notes.txt",
+                 "Lecture 4 slides.pptx", "tax return 2025.pdf", "song.mp3", "invoice-1182.pdf"]:
+        (mess / fname).write_text("x")
+    real_known = tidy.known_folder
+    tidy.known_folder = lambda n: mess if n.strip().lower() == "desktop" else real_known(n)  # type: ignore[assignment]
+
     brain._drive = fake_drive  # type: ignore[method-assign]
     brain._tidy_approved = fake_tidy  # type: ignore[method-assign]
     brain._quick_action = fake_quick  # type: ignore[method-assign]
@@ -305,10 +316,13 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
 async def main() -> None:
     load_dotenv()
     repeats = int(sys.argv[1]) if len(sys.argv) > 1 else 2
+    only = sys.argv[2] if len(sys.argv) > 2 else ""  # run just the scenarios whose name has this
     tmp = Path(tempfile.mkdtemp(prefix="blip_scen_"))
     results = []
     for r in range(repeats):
         for name, turn_id, q, expect in SCENARIOS:
+            if only not in name:
+                continue
             res = await run_one(f"{name} {r}", turn_id, q, expect, tmp)
             results.append(res)
             mark = "PASS" if res["ok"] else "FAIL"

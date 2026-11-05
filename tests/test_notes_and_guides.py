@@ -101,6 +101,27 @@ async def test_guides_wait_for_the_real_click_then_continue(settings):
     assert rec.of("guide")[-1]["active"] is False and brain._guide is None
 
 
+async def test_a_new_request_restarts_the_count_and_circles_end_the_guide(settings):
+    step = lambda label: [  # noqa: E731
+        ("guide", {"element_id": 4, "label": label, "goal": "turn on word wrap"}),
+        ("say", {"text": f"Click {label}."}),
+    ]
+    llm = Scripted(
+        step("View"), step("Word wrap"), step("View"), step("Word wrap"),
+        [("say", {"text": "Word wrap's on now."})],
+        step("View"),
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("how do I turn on word wrap?")
+    for _ in range(3):
+        await brain.guide_clicked()
+    # View, Word wrap, View, Word wrap: round in circles, so the guide ends instead.
+    assert rec.of("guide")[-1]["active"] is False and brain._guide is None
+    assert "twice" in llm.prompts[-1]
+    await brain.turn("and how do I turn it off?")
+    assert rec.of("guide")[-1]["step"] == 1  # a new request counts from 1 again
+
+
 async def test_a_card_without_speech_narrates_itself(settings):
     llm = Scripted(
         [

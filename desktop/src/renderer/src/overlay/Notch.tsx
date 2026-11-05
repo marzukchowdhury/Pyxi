@@ -446,7 +446,7 @@ function Firefly({ live = false, spin = false }: { live?: boolean; spin?: boolea
   );
 }
 
-const AGENT_COLORS: Record<string, string> = { Scout: "#7dd3fc", Quill: "#fcd34d", Sketch: "#f9a8d4", Blip: "#c4b5fd" };
+const AGENT_COLORS: Record<string, string> = { Scout: "#7dd3fc", Quill: "#fcd34d", Sketch: "#f9a8d4", Blip: "#ffc861" };
 
 function Marks({ jobs }: { jobs: string[] }) {
   return (

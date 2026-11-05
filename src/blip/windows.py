@@ -191,3 +191,72 @@ async def open_new_window(target: str, like: int | None = None, is_url: bool = T
             await asyncio.sleep(0.4)  # let it finish creating before it's moved
             return max(new)
     return None
+
+
+# Words that name a program but also turn up in ordinary requests ("explain this code").
+_TOO_COMMON = {
+    "code", "explorer", "applicationframehost", "electron", "python", "pythonw", "cmd",
+    "windowsterminal", "powershell", "blip", "shell", "settings", "search", "start", "files",
+}
+
+
+def app_names(title: str, exe: str) -> set[str]:
+    """What someone might call a window: its program ("notepad", "capcut") and the app part of
+    its title ("Untitled - Notepad" -> "notepad", "Vercel - Google Chrome" -> "google chrome")."""
+    names = {Path(exe).stem.lower()} if exe else set()
+    if " - " in title:
+        names.add(title.rsplit(" - ", 1)[1].strip().lower())
+    return {n for n in names if len(n) >= 4 and n not in _TOO_COMMON}
+
+
+def named_window(text: str, windows: list[tuple[int, str, str]]) -> int | None:
+    """The open window the request names, topmost first (windows come in z-order), or None.
+
+    ``windows`` holds (hwnd, title, exe). "Guide me to turn on word wrap in Notepad" -> the
+    Notepad window, wherever it is, so Blip looks at it even if the mouse is on another screen."""
+    words = " " + "".join(c.lower() if c.isalnum() else " " for c in text) + " "
+    for hwnd, title, exe in windows:
+        for name in app_names(title, exe):
+            spaced = " " + "".join(c if c.isalnum() else " " for c in name).strip() + " "
+            if spaced.strip() and spaced in words:
+                return hwnd
+    return None
+
+
+def open_windows(minimized: bool = False) -> list[tuple[int, str, str]]:
+    """Visible top-level windows with a title, topmost first: (hwnd, title, exe). Minimized ones
+    only when asked."""
+    if not available():
+        return []
+    u = _user32()
+    found: list[tuple[int, str, str]] = []
+
+    @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+    def visit(hwnd, _):
+        n = u.GetWindowTextLengthW(hwnd)
+        if u.IsWindowVisible(hwnd) and n > 0 and (minimized or not u.IsIconic(hwnd)):
+            buf = ctypes.create_unicode_buffer(n + 1)
+            u.GetWindowTextW(hwnd, buf, n + 1)
+            found.append((int(hwnd), buf.value, ""))
+        return True
+
+    u.EnumWindows(visit, 0)
+    return [(h, t, exe_of(h)) for h, t, _ in found]
+
+
+def is_minimized(hwnd: int) -> bool:
+    return bool(available() and _user32().IsIconic(hwnd))
+
+
+def same_app(a: int, b: int) -> bool:
+    """Do two windows belong to the same program? An app's own menus, flyouts and dialogs are
+    windows of their own, and opening one isn't switching away from the app."""
+    if not available() or not a or not b:
+        return False
+    u = _user32()
+    if u.GetAncestor(a, 3) == b or u.GetAncestor(b, 3) == a:  # GA_ROOTOWNER
+        return True
+    pa, pb = wt.DWORD(), wt.DWORD()
+    u.GetWindowThreadProcessId(a, ctypes.byref(pa))
+    u.GetWindowThreadProcessId(b, ctypes.byref(pb))
+    return bool(pa.value) and pa.value == pb.value

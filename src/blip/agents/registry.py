@@ -55,7 +55,7 @@ DEFAULT_ROSTER = [
         name="Blip",
         role="companion",
         voice="af_heart",
-        color="#9ecbff",
+        color="#ffc861",
         builtin=True,
         persona="Warm, curious and quietly hilarious: dry, observational humour, never mean. Explains with "
         "pictures before paragraphs, keeps answers short, and can't resist a good 3D model.",

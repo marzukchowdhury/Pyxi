@@ -248,6 +248,8 @@ class ScreenReader:
         except Exception:
             return None
 
+    reads_windows = True  # can look at a named window, not only the one under the mouse
+
     def __init__(self, config: ScreenConfig) -> None:
         self.config = config
         self.paused = False
@@ -262,12 +264,17 @@ class ScreenReader:
                 return window.app or "private window"
         return None
 
-    async def capture(self, *, pixels: bool = True, follow_mouse: bool = True) -> ScreenContext:
+    async def capture(
+        self, *, pixels: bool = True, follow_mouse: bool = True, hwnd: int | None = None
+    ) -> ScreenContext:
         """``follow_mouse``: read the window under the mouse (what they're looking at); off while
-        Blip drives, when the window in front is the one being worked in."""
-        return await asyncio.to_thread(self._capture_sync, pixels, follow_mouse)
+        Blip drives, when the window in front is the one being worked in. ``hwnd``: read this
+        window and its screen instead (the request named it, "...in Notepad")."""
+        return await asyncio.to_thread(self._capture_sync, pixels, follow_mouse, hwnd)
 
-    def _capture_sync(self, pixels: bool, follow_mouse: bool = True) -> ScreenContext:
+    def _capture_sync(
+        self, pixels: bool, follow_mouse: bool = True, hwnd: int | None = None
+    ) -> ScreenContext:
         now = time.time()
         if self.paused:
             return ScreenContext(
@@ -277,6 +284,7 @@ class ScreenReader:
             budget_s=self.config.uia_budget_s,
             max_elements=self.config.max_elements * 3,
             follow_mouse=follow_mouse,
+            hwnd=hwnd,
         )
         window = (
             WindowInfo(raw_window.title, raw_window.process, raw_window.rect, raw_window.hwnd)
@@ -287,7 +295,9 @@ class ScreenReader:
             return ScreenContext(captured_at=now, window=window, excluded=reason)
 
         elements = self._number(raw)
-        shot, origin = self._grab(window.rect, follow_mouse) if pixels else (None, (0, 0))
+        shot, origin = (
+            self._grab(window.rect, follow_mouse and not hwnd) if pixels else (None, (0, 0))
+        )
         if shot is not None:
             # The taskbar too (pinned apps, the clock): it's on screen and people ask about it.
             x0, y0, x1, y1 = origin[0], origin[1], origin[0] + shot.width, origin[1] + shot.height

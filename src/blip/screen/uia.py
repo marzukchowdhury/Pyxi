@@ -161,8 +161,10 @@ def read_foreground(
     max_elements: int = 400,
     max_depth: int = 25,
     follow_mouse: bool = True,
+    hwnd: int | None = None,
 ) -> tuple[RawWindow | None, list[RawElement]]:
-    """Walk the foreground window's UIA tree within a time budget. Never raises."""
+    """Walk the foreground window's UIA tree within a time budget (or ``hwnd``'s, when the
+    request names a window). Never raises."""
     if not available():
         return None, []
     try:
@@ -172,20 +174,25 @@ def read_foreground(
 
     try:
         with auto.UIAutomationInitializerInThread(debug=False):
-            return _walk(auto, budget_s, max_elements, max_depth, follow_mouse)
+            return _walk(auto, budget_s, max_elements, max_depth, follow_mouse, hwnd)
     except Exception as exc:  # UIA is best-effort: some apps throw COM errors mid-walk
         log.warning("UI Automation failed: %s", exc)
         return None, []
 
 
 def _walk(
-    auto, budget_s: float, max_elements: int, max_depth: int, follow_mouse: bool = True
+    auto,
+    budget_s: float,
+    max_elements: int,
+    max_depth: int,
+    follow_mouse: bool = True,
+    named: int | None = None,
 ) -> tuple[RawWindow | None, list[RawElement]]:
     # The window the user is looking at: the one under the mouse (on a second monitor the
     # foreground window is often somewhere else entirely), else the foreground window.
     top = None
-    pos = cursor_pos() if follow_mouse else None
-    hwnd = window_at(*pos) if pos else None
+    pos = cursor_pos() if follow_mouse and not named else None
+    hwnd = named or (window_at(*pos) if pos else None)
     if hwnd:
         try:
             top = auto.ControlFromHandle(hwnd)

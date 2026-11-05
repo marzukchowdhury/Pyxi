@@ -471,21 +471,39 @@ class Brain:
             return None
         return f"Unknown quick action {action}."
 
-    async def _capture(self, follow_mouse: bool = True) -> ScreenContext:
+    async def _capture(self, follow_mouse: bool = True, hwnd: int | None = None) -> ScreenContext:
         """Take Blip's screenshot. If the overlay is visible to captures (so a Discord stream can
-        see it), blank it for that instant so Blip never reads its own drawings."""
+        see it), blank it for that instant so Blip never reads its own drawings. ``hwnd``: look
+        at that window (and its screen) rather than the one under the mouse."""
+
+        def grab() -> Any:
+            if hwnd:
+                return self.screen.capture(hwnd=hwnd)
+            return self.screen.capture() if follow_mouse else self.screen.capture(follow_mouse=False)
+
         if not self.overlay_in_capture:
-            return await (
-                self.screen.capture() if follow_mouse else self.screen.capture(follow_mouse=False)
-            )
+            return await grab()
         await self.hub.emit("capture_hide")
         await asyncio.sleep(0.09)  # one or two frames for the overlay to go clear
         try:
-            return await (
-                self.screen.capture() if follow_mouse else self.screen.capture(follow_mouse=False)
-            )
+            return await grab()
         finally:
             await self.hub.emit("capture_show")
+
+    def _named_window(self, text: str, ctx: ScreenContext | None) -> int | None:
+        """The window the request names ("...in Notepad"), when it isn't the one Blip is already
+        looking at. With two monitors the mouse is often on the other screen (a chat, a video),
+        and guessing at what's there instead points at the wrong app entirely."""
+        if not text or not getattr(self.screen, "reads_windows", False) or not windows.available():
+            return None
+        try:
+            hwnd = windows.named_window(text, windows.open_windows(minimized=True))
+        except Exception:
+            log.warning("couldn't list windows", exc_info=True)
+            return None
+        if hwnd and ctx is not None and ctx.window.hwnd == hwnd:
+            return None
+        return hwnd
 
     def _watch_window(self) -> None:
         """Drawings point at exact pixels; once the user switches window or tab they'd point at
@@ -517,8 +535,14 @@ class Brain:
                 # Alt-tab to another maximised app: same title, but the drawings now sit on top
                 # of someone else's window. Two checks in a row, so a passing popup doesn't count.
                 if hwnd and on_top and ww > 0:
-                    top = on_top(*centre)
-                    covered = covered + 1 if top and top != hwnd else 0
+                    # Mid-guide, what matters is the spot the arrow points at, not the middle of
+                    # the window (a small dialog parked over the middle doesn't hide the step).
+                    g = self._guide
+                    spot = (g.rect[0] + g.rect[2] // 2, g.rect[1] + g.rect[3] // 2) if g else centre
+                    top = on_top(*spot)
+                    # The app's own menu or dialog opening over it isn't another window.
+                    theirs = top and top != hwnd and not windows.same_app(top, hwnd)
+                    covered = covered + 1 if theirs else 0
                     if covered >= 2:
                         log.info("clearing drawings: another window now covers %r", drawn_on)
                         await self.hub.emit("clear")
@@ -885,10 +909,16 @@ class Brain:
             "elsewhere": f"Instead of '{guide.label}' I clicked something else, and the screen changed.",
             "moved": f"The page changed after step {guide.step}.",
         }[how]
+        last = (
+            f" That was the last step you planned ({guide.step} of {guide.total}): unless the screen "
+            "clearly shows it didn't work, the goal is reached."
+            if how != "elsewhere" and guide.total and guide.step >= guide.total
+            else ""
+        )
         await self.turn(
-            f"({said} Look at the screen now and guide me to the next step toward: {guide.goal}. "
-            "If I went a different way, carry on from where I am. If the goal is reached, tell me "
-            "and call guide with done=true.)",
+            f"({said}{last} Look at the screen now and guide me to the next step toward: "
+            f"{guide.goal}. If I went a different way, carry on from where I am. If the goal is "
+            "reached, tell me and call guide with done=true.)",
             shown="Next step" if how != "clicked" else f"Clicked {guide.label}",
             synthetic=True,
         )
@@ -921,6 +951,8 @@ class Brain:
             self._visual_retry = False
             self._user_text = user_text
             self._synthetic = synthetic
+            if not synthetic:
+                self._guide_fresh = True  # a new request: a guide in it counts from step 1
             self._pending_say = ""  # an answer held back during a lookup round
             self._narrated_items: set[int] = set()  # cue-card points already said as they arrived
             self._survey: asyncio.Task | None = None  # finding the parts of a picture
@@ -996,6 +1028,11 @@ class Brain:
                     log.warning("screen prefetch failed; capturing again")
             if ctx is None:
                 ctx = await self._capture()
+            if named := self._named_window(state.get("user_text", ""), ctx):
+                if windows.is_minimized(named):  # "...in Notepad" with Notepad tucked away
+                    windows.snap(named, "restore")
+                    await asyncio.sleep(0.45)
+                ctx = await self._capture(hwnd=named)
             self._ctx = ctx
             await self.hub.emit(
                 "capture",
@@ -1438,15 +1475,26 @@ class Brain:
                     },
                 )
                 to = (dest[0] + dest[2] // 2, dest[1] + dest[3] // 2) if dest else None
-            step = (
-                self._guide.step + 1 if self._guide else 1  # one guide at a time: keep counting
-            )
+            going = self._guide if not getattr(self, "_guide_fresh", False) else None
+            self._guide_fresh = False
+            step = going.step + 1 if going else 1  # one guide at a time: keep counting
             total = (
                 int(args["steps_total"]) if str(args.get("steps_total") or "").isdigit() else None
             )
-            if self._guide and not total:
-                total = self._guide.total
+            if going and not total:
+                total = going.total
             total = max(total, step) if total else None
+            trail = (getattr(self, "_guide_trail", []) if going else []) + [label.lower()]
+            self._guide_trail = trail
+            if len(trail) >= 4 and trail[-1] == trail[-3] and trail[-2] == trail[-4]:
+                # Round in circles (View, Word wrap, View, Word wrap): they've done it already.
+                self._guide, self._guide_trail = None, []
+                await self.hub.emit("guide", active=False, finished=True, at=None)
+                return (
+                    f"guide: they've already done '{trail[-2]}' then '{trail[-1]}' twice, so the "
+                    "task is done as far as the screen can show. Don't guide again: tell them it's "
+                    "done and how to check it."
+                )
             self._guide = Guide(
                 goal=str(args["goal"])[:200],
                 label=label,
