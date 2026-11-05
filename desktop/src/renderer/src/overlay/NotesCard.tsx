@@ -205,7 +205,7 @@ export function NotesCard() {
           >
             <span className="note-bullet">
               {item.kind === "step" ? <b>{item.n}</b> : (
-                <svg width="10" height="16" viewBox="0 0 12 22"><path d="M6 1 10.5 11 6 21 1.5 11Z" pathLength={1} /></svg>
+                <svg width="10" height="16" viewBox="0 0 12 22"><path d="M1.5 11a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0 -9 0Z" pathLength={1} /></svg>
               )}
             </span>
             <span className="note-text">{item.text}</span>

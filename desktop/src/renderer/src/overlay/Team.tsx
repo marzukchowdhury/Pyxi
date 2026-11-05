@@ -38,7 +38,7 @@ export function Team() {
         const working = j.status === "running" || j.status === "queued";
         return (
           <div key={j.id} className={`hud-row ${working ? "working" : j.status}`} style={{ "--c": COLORS[j.agent_id] ?? "#9ecbff" } as React.CSSProperties}>
-            <svg className="hud-mark" width="12" height="22" viewBox="0 0 12 22"><path d="M6 1 10.5 11 6 21 1.5 11Z" /></svg>
+            <svg className="hud-mark" width="12" height="22" viewBox="0 0 12 22"><path d="M1.5 11a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0 -9 0Z" /></svg>
             <div className="hud-text">
               <div className="hud-name">{j.agent_name}<span>{working ? (j.steps ? `step ${j.steps}` : "starting") : j.status}</span></div>
               <div className="hud-status" key={status[j.id]}>{working ? status[j.id] ?? "Getting oriented" : j.summary.split(". ")[0]}</div>

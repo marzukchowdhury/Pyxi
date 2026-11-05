@@ -71,7 +71,7 @@ export function Walkthrough() {
             </div>
           )}
           <div className="ghost" style={{ left: target ? target.x : box.w / 2, top: target ? target.y : box.h * 0.6 }}>
-            <svg width="16" height="28" viewBox="0 0 12 22"><path d="M6 1 10.5 11 6 21 1.5 11Z" /></svg>
+            <svg width="16" height="28" viewBox="0 0 12 22"><path d="M1.5 11a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0 -9 0Z" /></svg>
           </div>
         </div>
         <div className="step-bar">

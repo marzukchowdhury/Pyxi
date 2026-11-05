@@ -40,3 +40,6 @@ export const Mark = ({ size = 18, ...p }: P & { size?: number }) => (
     <circle r="3.4" fill="#fff3cf" />
   </svg>
 );
+export const Compass = (p: P) => <svg {...base(p)}><circle cx="10" cy="10" r="6.5" /><path d="M12.6 7.4 11 11l-3.6 1.6L9 9Z" /></svg>;
+export const Feather = (p: P) => <svg {...base(p)}><path d="M15.5 4.5c-4.5 0-8.5 3.6-8.5 8.6V16M7 13.1h4.6c2.6 0 3.9-4.5 3.9-8.6M7 16l-2 1.5M9.5 10.5h3.6" /></svg>;
+export const Spark = (p: P) => <svg {...base(p)}><path d="M10 3.5v3M10 13.5v3M3.5 10h3M13.5 10h3M5.4 5.4l2 2M12.6 12.6l2 2M14.6 5.4l-2 2M7.4 12.6l-2 2" /></svg>;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { bridge, keysOf } from "../shared/bridge";
-import { Cube, Mark, Mic, Minus, Plus, Replay, Send, Thread } from "../shared/icons";
+import { Close, Compass, Cube, Feather, Mark, Mic, Minus, Plus, Replay, Send, Spark, Thread } from "../shared/icons";
 import type { Agent, Job } from "../shared/protocol";
 import { brain } from "../shared/socket";
 import { answer, getJson, usePanel } from "./store";
@@ -126,28 +126,85 @@ export function Team() {
   const { agents, jobs, frames, jobLog } = usePanel();
   const [creating, setCreating] = useState(false);
   const list = Object.values(jobs).sort((a, b) => b.created_at - a.created_at);
+  const doing = (id: string) => list.find((j) => j.agent_id === id && j.status === "running");
+  const lead = agents.find((a) => a.role === "companion");
+  const crew = agents.filter((a) => a !== lead);
+  const busy = list.filter((j) => j.status === "running").length;
   return (
     <div className="team">
-      <div className="section-head"><h3>Your team</h3><button onClick={() => setCreating(!creating)}>{creating ? "Cancel" : <><Plus width={14} height={14} /> New teammate</>}</button></div>
+      {lead && <LeadCard agent={lead} crew={crew.length} busy={busy} />}
+      <div className="section-head">
+        <h3>Teammates <span className="count">{crew.length}</span></h3>
+        <button onClick={() => setCreating(!creating)}>{creating ? "Cancel" : <><Plus width={14} height={14} /> New teammate</>}</button>
+      </div>
       {creating && <NewAgent onDone={() => setCreating(false)} />}
-      <div className="agents">{agents.map((a) => <AgentCard key={a.id} agent={a} busy={list.some((j) => j.agent_id === a.id && j.status === "running")} />)}</div>
-      <div className="section-head"><h3>Jobs</h3></div>
-      {!list.length && <p className="muted">No jobs yet. Try: “Scout, look up the pricing on linear.app, then Quill, write me a summary.”</p>}
+      <div className="agents">{crew.map((a) => <AgentCard key={a.id} agent={a} job={doing(a.id)} />)}</div>
+      <div className="section-head"><h3>Jobs {list.length > 0 && <span className="count">{list.length}</span>}</h3></div>
+      {!list.length && <JobsEmpty />}
       {list.map((j) => <JobCard key={j.id} job={j} frame={frames[j.id]} log={jobLog[j.id] ?? []} />)}
     </div>
   );
 }
 
-function AgentCard({ agent, busy }: { agent: Agent; busy: boolean }) {
+const ROLE: Record<string, { label: string; Icon: (p: React.SVGProps<SVGSVGElement>) => React.JSX.Element }> = {
+  browser: { label: "Researcher", Icon: Compass },
+  writer: { label: "Writer", Icon: Feather },
+  explainer: { label: "3D explainer", Icon: Cube },
+};
+
+/** Blip itself: the one you talk to, who hands work to everyone below. */
+function LeadCard({ agent, crew, busy }: { agent: Agent; crew: number; busy: number }) {
   return (
-    <div className="agent" style={{ "--c": agent.color } as React.CSSProperties}>
-      <svg className={`agent-mark ${busy ? "busy" : ""}`} width="14" height="26" viewBox="0 0 12 22"><path d="M6 1 10.5 11 6 21 1.5 11Z" /></svg>
+    <div className="lead" style={{ "--c": agent.color } as React.CSSProperties}>
+      <div className="lead-mark"><Mark size={40} /></div>
       <div className="agent-info">
-        <div className="agent-name">{agent.name} <span className="role">{agent.role}</span></div>
+        <div className="agent-name">{agent.name} <span className="role-pill">Lead</span></div>
         <div className="agent-persona">{agent.persona}</div>
+        <div className="lead-status">
+          <i className={busy ? "on" : ""} />
+          {busy ? `Coordinating ${busy} job${busy > 1 ? "s" : ""}` : `Ready, with ${crew} teammate${crew === 1 ? "" : "s"} on call`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentCard({ agent, job }: { agent: Agent; job?: Job }) {
+  const role = ROLE[agent.role] ?? { label: agent.role, Icon: Spark };
+  return (
+    <div className={`agent ${job ? "busy" : ""}`} style={{ "--c": agent.color } as React.CSSProperties}>
+      <div className="agent-avatar"><role.Icon width={18} height={18} /></div>
+      <div className="agent-info">
+        <div className="agent-top">
+          <span className="agent-name">{agent.name}</span>
+          <span className="role-pill">{role.label}</span>
+          <span className={`agent-status ${job ? "on" : ""}`}><i />{job ? "Working" : "Free"}</span>
+        </div>
+        {job ? <div className="agent-job">{job.task}</div> : <div className="agent-persona">{agent.persona}</div>}
         <div className="skills">{agent.skills.map((s) => <span key={s}>{s}</span>)}</div>
       </div>
-      {!agent.builtin && <button className="x" onClick={() => brain.send({ type: "agent_delete", id: agent.id })}>✕</button>}
+      {!agent.builtin && (
+        <button className="x" title={`Remove ${agent.name}`} onClick={() => brain.send({ type: "agent_delete", id: agent.id })}><Close width={14} height={14} /></button>
+      )}
+    </div>
+  );
+}
+
+const JOB_IDEAS = [
+  "Scout, compare the pricing pages of Linear and Notion, then Quill, write me a two-line summary",
+  "Sketch, show me how a heat pump works in 3D",
+  "Quill, draft a friendly follow-up email after a job interview",
+];
+
+function JobsEmpty() {
+  return (
+    <div className="jobs-empty">
+      <p>Hand off work and keep going with yours. Teammates run in the background and report back here.</p>
+      <div className="ideas">
+        {JOB_IDEAS.map((t) => (
+          <button key={t} onClick={() => brain.send({ type: "text", text: t })}><Send width={13} height={13} />{t}</button>
+        ))}
+      </div>
     </div>
   );
 }

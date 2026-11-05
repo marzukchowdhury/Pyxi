@@ -188,8 +188,8 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .walk-target .bloom { position: absolute; inset: -2px; border-radius: 12px; border: 1px solid var(--ice); animation: bloom 1.6s .5s var(--ease) infinite; }
 .walk-target .bloom.late { animation-delay: 1.1s; }
 @keyframes bloom { from { inset: -2px; opacity: .9; } to { inset: -22px; border-radius: 22px; opacity: 0; } }
-.walk .ghost { position: absolute; transform: translate(-30%, -10%) rotate(-28deg); transition: left .65s var(--spring), top .65s var(--spring); }
-.walk .ghost path { fill: rgba(234,243,255,.9); stroke: #fff; stroke-width: .8; filter: drop-shadow(0 0 6px rgba(158,203,255,.95)); }
+.walk .ghost { position: absolute; transform: translate(-30%, -10%); transition: left .65s var(--spring), top .65s var(--spring); }
+.walk .ghost path { fill: #fff3cf; stroke: #ffd27a; stroke-width: .8; filter: drop-shadow(0 0 6px rgba(255,190,80,.95)); }
 
 /* ============================================================ team HUD */
 .hud { position: fixed; left: 26px; bottom: 26px; z-index: 20; display: flex; flex-direction: column; gap: 6px; padding: 10px 14px 10px 12px; border-radius: 18px; background: var(--glass); border: 1px solid var(--hair); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 20px 60px rgba(0,0,0,.3); backdrop-filter: blur(18px); animation: rise .35s var(--spring); }
@@ -199,7 +199,7 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .hud-row { display: flex; align-items: center; gap: 11px; height: 40px; min-width: 250px; max-width: 360px; }
 .hud-mark { flex: none; overflow: visible; }
 .hud-mark path { fill: color-mix(in srgb, var(--c) 30%, transparent); stroke: var(--c); stroke-width: 1; filter: drop-shadow(0 0 5px var(--c)); }
-.hud-row.working .hud-mark { animation: sway 1.8s ease-in-out infinite; }
+.hud-row.working .hud-mark { animation: breathe 1.2s ease-in-out infinite; }
 .hud-row.done .hud-mark path { fill: var(--c); }
 .hud-row.failed .hud-mark path { stroke: #ff9ea0; fill: transparent; }
 .hud-text { min-width: 0; }
@@ -331,7 +331,7 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .notch-wave.small { height: 16px; margin-top: 2px; }
 .notch-wave.small i { height: 16px; width: 2px; }
 .notch-marks { display: inline-flex; gap: 5px; align-items: center; }
-.notch-marks i { width: 5px; height: 5px; border-radius: 1.5px; transform: rotate(45deg); background: var(--c); box-shadow: 0 0 7px var(--c); animation: breathe 1.4s ease-in-out infinite; }
+.notch-marks i { width: 5px; height: 5px; border-radius: 50%; background: var(--c); box-shadow: 0 0 7px var(--c); animation: breathe 1.4s ease-in-out infinite; }
 
 .notch-open { padding: 12px 0 12px; }
 /* The full notch hosts the panel's sections (chat, team, memory, 3D, voice, settings). */
