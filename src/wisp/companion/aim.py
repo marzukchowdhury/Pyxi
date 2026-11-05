@@ -152,7 +152,9 @@ async def confirm_target(
     prompt = (
         f"This {img.width}x{img.height} image is a zoomed part of a screen; grid lines every 100 px "
         f"are numbered in yellow. Is '{label}' here? If yes, give the exact centre of it in this "
-        "image's px. If it isn't clearly here, say here=false. Call `found`."
+        "image's px. If it's a plain area (a page, an empty part of a canvas or sheet) and the "
+        "middle of the image is that area, say here=true with the middle. If what's here is "
+        "clearly something else, say here=false. Call `found`."
     )
     try:
         res = await llm.complete(

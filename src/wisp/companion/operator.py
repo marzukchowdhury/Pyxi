@@ -44,6 +44,8 @@ RISKY = re.compile(
     r"close (this |the |all )?(tabs?|windows?|app|program|document|file)|quit|exit)\b",
     re.I,
 )
+# Click targets that are an area, not a control: nothing to confirm up close.
+AREA = re.compile(r"\b(body|page|canvas|area|blank|empty|background|grid|document|editor)\b", re.I)
 # Shortcuts that close a tab, a window or an app.
 CLOSING_KEYS = {"ctrl+w", "ctrl+f4", "alt+f4", "ctrl+shift+w", "ctrl+q", "ctrl+shift+q"}
 
@@ -414,8 +416,10 @@ class Operator:
         if guess is None:
             return None, "skipped: couldn't find that on screen; use an element id or quote"
         x, y, w, h = guess
-        cw, ch = max(w * 3, 360), max(h * 3, 240)
         cx, cy = x + w // 2, y + h // 2
+        if w * h >= 240 * 120 or AREA.search(label):
+            return (cx, cy), ""  # a page, a canvas, a big panel: hard to miss, nothing to check
+        cw, ch = max(w * 3, 360), max(h * 3, 240)
         region = (cx - cw // 2, cy - ch // 2, cw, ch)
         crop = ctx.crop(region)
         if crop is None:
@@ -524,15 +528,22 @@ class Operator:
 
 
 def _glance(ctx: ScreenContext) -> Image.Image | None:
-    """A tiny grey thumbnail, to tell whether anything on screen changed between looks."""
+    """A small grey picture of the window being worked in (not the whole screen, where a
+    clock or an FPS counter always changes), to tell whether an action did anything."""
     if ctx.screenshot is None:
         return None
-    return ctx.screenshot.convert("L").resize((96, 54))
+    x, y, w, h = ctx.window.rect
+    shot = ctx.crop((x, y, w, h)) if w > 50 and h > 50 else None
+    return (shot or ctx.screenshot).convert("L").resize((480, 270))
 
 
 def _same(a: Image.Image, b: Image.Image) -> bool:
-    diff = ImageChops.difference(a, b)
-    return ImageStat.Stat(diff).mean[0] < 1.2  # under ~1 grey level on average: no change
+    """Nothing changed: fewer than a handful of pixels moved by more than a faint flicker. A
+    word typed into a document changes dozens, so small edits still count as progress."""
+    if a.size != b.size:
+        return False
+    changed = ImageChops.difference(a, b).point(lambda v: 255 if v > 28 else 0)
+    return ImageStat.Stat(changed).sum[0] / 255 < 6
 
 
 def _open_url(url: str) -> None:
