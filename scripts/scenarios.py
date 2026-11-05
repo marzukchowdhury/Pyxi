@@ -117,6 +117,12 @@ SCENARIOS = [
     ),
     ("nba finals", "turn_49b75541", "Who won the NBA Finals last year?", "web"),
     ("bitcoin", "turn_49b75541", "What's the price of bitcoin right now?", "web"),
+    (
+        "binance hack",
+        "turn_f0a93d40",
+        "Do you know about the hacking that took place a few days ago, the 6.3 billion dollar one by a North Korean hacker?",
+        "news",
+    ),
 ]
 
 
@@ -217,6 +223,19 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append("didn't look it up")
         if re.search(r"can.?t (browse|search|access the internet)", said, re.I):
             problems.append("said it can't browse")
+    if expect == "news":
+        if "web_search" not in tools:
+            problems.append("didn't look it up")
+        if not re.search(r"FBI|North Korea|Lazarus|Chainalysis", said):
+            problems.append("didn't find the story")
+        if re.search(r"can.?t (confirm|verify|find)", said, re.I):
+            problems.append("said it couldn't confirm")
+    from wisp.companion.brain import drop_false_promises
+
+    if drop_false_promises(said.split(". ")[-1])[1]:
+        problems.append("ends promising a search")
+    if re.search(r"M4|model is finished", said):
+        problems.append("mentioned an old job")
     if "807" in said:
         problems.append("OCR misread repeated")
     return {

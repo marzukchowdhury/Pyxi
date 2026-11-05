@@ -711,7 +711,12 @@ class Brain:
             system = prompts.system_prompt(
                 wisp.persona if wisp else "", self.registry.roster_text()
             )
-            jobs = "\n".join(j.brief() for j in self.jobs.recent(6))
+            now_t = time.time()
+            jobs = "\n".join(
+                j.brief()
+                for j in self.jobs.recent(6)
+                if j.role != "model" and (j.ended_at is None or now_t - j.ended_at < 120)
+            )
             memories = "\n".join(
                 m.render() for m in self.memory.search("agent:wisp", cfg["user_text"], 6)
             )
@@ -818,8 +823,19 @@ class Brain:
                 # They pressed talk while this was thinking: drop it, the new question wins.
                 return {"round": round_no, "stop": "interrupted", "needs_more": False}
             if not response.tool_calls:
-                if response.text:
-                    self._speak(response.text)
+                text, promised = drop_false_promises(response.text or "")
+                if promised and not text and round_no < self.settings.budget.max_tool_rounds:
+                    return {
+                        "round": round_no,
+                        "needs_more": True,
+                        "notes": [
+                            *state.get("notes", []),
+                            "You said you'd search or check, but didn't call a tool. Call web_search "
+                            "now, or give your answer without promising anything.",
+                        ],
+                    }
+                if text:
+                    self._speak(text)
                 return {"round": round_no, "needs_more": False}
             notes: list[str] = []
             needs_more = False
@@ -907,7 +923,9 @@ class Brain:
 
         async def finish(state: TurnState) -> TurnState:
             if self._pending_say and state.get("stop") != "interrupted":
-                self._speak(self._pending_say)  # the latest answer from a lookup round
+                held, _ = drop_false_promises(self._pending_say)  # never "searching now" at the end
+                if held:
+                    self._speak(held)  # the latest answer from a lookup round
                 self._pending_say = ""
             if not self._said and not state.get("stop"):
                 card = self._turn_card
@@ -1695,6 +1713,25 @@ _FILLER_LEAD = re.compile(
     r"(i(?:'ve| have) done (this|that|it)[.!]?\s*)?",
     re.IGNORECASE,
 )
+
+
+_PROMISE = re.compile(
+    r"\b(i'?m|i am|i'?ll|i will|let me|give me a (sec|second|moment))\b[^.!?]{0,60}"
+    r"\b(search|searching|look(ing)? (it |that )?up|check(ing)?|dig(ging)?|find(ing)? out|research)",
+    re.IGNORECASE,
+)
+
+
+def drop_false_promises(text: str) -> tuple[str, bool]:
+    """Sentences like "I'm searching for it now" in a reply that makes no tool call are false:
+    nothing is going to happen. Remove them; say whether any were there."""
+    kept, promised = [], False
+    for s in split_sentences(text):
+        if _PROMISE.search(s):
+            promised = True
+        else:
+            kept.append(s)
+    return " ".join(kept).strip(), promised
 
 
 def strip_filler(text: str) -> str:

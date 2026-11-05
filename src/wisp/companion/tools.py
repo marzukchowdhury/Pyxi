@@ -320,8 +320,10 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "web_search",
         "Search the web (about a second). Use it for anything that changes or that you're not sure of: "
         "news, prices, scores, results, weather, release dates, who runs what, whether a claim or quote is "
-        "real, facts about a specific person, product or place. Returns titles, sites and snippets; answer "
-        "from them and name the source. One search is usually enough; two at most.",
+        "real, facts about a specific person, product or place. Searches the web and the news together, and "
+        "news comes with its outlet and age. In the reply where you search, say at most a few words ('Checking "
+        "the news.'), never the answer; answer once the results are back, naming the sources. One search is "
+        "usually enough; two at most. Never say you're searching unless you call this tool.",
         {
             "query": {"type": "string", "description": "What you'd type into a search box."},
         },
