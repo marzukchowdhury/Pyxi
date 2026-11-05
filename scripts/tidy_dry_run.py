@@ -48,13 +48,17 @@ async def main() -> None:
     print("SAID:", " ".join(said))
     print("TOOLS:", [c["tool"] for c in brain._calls], f"${brain._usage.cost_usd:.4f}")
     for plan in plans:
+        # Saved, so what gets approved is exactly what moves (scripts/tidy_apply.py).
+        Path(".wisp/tidy_plan.json").write_text(
+            json.dumps({"folder": str(plan.folder), "moves": plan.moves}, indent=1)
+        )
         print(plan.summary())
         groups: dict[str, list[str]] = {}
         for name, into in plan.moves:
             groups.setdefault(into, []).append(name)
         for into, names in groups.items():
             print(
-                f"  {into}/ ({len(names)}): {', '.join(names[:8])}{' ...' if len(names) > 8 else ''}"
+                f"  {into}/ ({len(names)}): {', '.join(names)}"
             )
         if plan.problems:
             print("  problems:", plan.problems[:5])

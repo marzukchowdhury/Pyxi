@@ -114,6 +114,8 @@ function createOverlay(d: Display): void {
     frame: false,
     resizable: false,
     movable: false,
+    // Show desktop (Win+D) and "minimize all" must never take the notch away.
+    minimizable: false,
     focusable: false,
     skipTaskbar: true,
     hasShadow: false,
@@ -134,6 +136,15 @@ function createOverlay(d: Display): void {
   // Wisp never ends up talking to a window that's gone.
   win.webContents.on("render-process-gone", () => {
     if (!win.isDestroyed()) win.reload();
+  });
+  // If Windows minimizes it anyway (Win+D, Win+M), bring it straight back without stealing focus.
+  win.on("minimize", () => {
+    setTimeout(() => {
+      if (win.isDestroyed()) return;
+      win.restore();
+      win.showInactive();
+      win.setAlwaysOnTop(true, "screen-saver");
+    }, 150);
   });
   win.on("closed", () => {
     if (overlays.get(d.id) === win) overlays.delete(d.id);
