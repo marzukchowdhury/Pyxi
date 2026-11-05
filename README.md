@@ -2,7 +2,7 @@
 
 # Blip
 
-**A quiet, luminous presence on your desktop that sees your screen, talks with you, points at things, sends agents off to do real work, and explains in 3D.**
+**A little firefly on your desktop that sees your screen, talks with you, points at things, does the clicking when you let it, sends agents off to do real work, and explains in 3D.**
 
 Electron · React Three Fiber · Python · LangGraph · Playwright (via [Otto](https://github.com/marzukchowdhury/otto)) · faster-whisper · Kokoro-82M · Claude or a local model
 
@@ -28,7 +28,10 @@ For real work, Blip delegates to named teammates. Scout drives a real browser, Q
 | **Ghost Walkthroughs** | Every browser job records what was clicked and why, so it can be replayed as a tutorial with a ghost pointer and spotlight on each element. |
 | **3D models of real things** | For "how does a jet engine work?" the model assembles a real-looking object from parts (cylinders, gears, springs, tubes, extrusions) with materials, callouts and narrated beats that animate like a short video. Follow-ups such as "show the inside" or "make it spin" edit the same model. |
 | **Field notes on screen** | "Explain this meme / chart / page" writes a notebook card beside the content. Each point writes itself in ink as Blip says it, frames the exact thing it means with a numbered hand-drawn outline, and a thread links the two. Freehand sketches draw trends on real charts. The card is placed wherever it covers the least text. |
-| **Guides that wait for you** | "How do I turn this on?" marks the one control to click, waits for your real click, looks again, and gives the next step. |
+| **Guides that wait for you** | "How do I add an environment variable in Vercel?" marks the one control to click with an arrow from your cursor, waits for your real click, looks again, and gives the next step until you're done. Name the app ("...in Notepad") and Blip looks at that window, even on your other monitor. |
+| **Hands, when you allow it** | "Play Blinding Lights on YouTube Music", "make a pivot table of this in Sheets": Blip asks first (an Allow card, or Always allow), then moves your real mouse and keyboard, labels what it's doing beside the cursor, and hands control back the moment you move the mouse or press <kbd>Esc</kbd>. Sending, buying, deleting and closing things always ask again. |
+| **Desktop chores** | Split the screen ("Sheets on the right, keep my browser on the left"), tidy a messy Desktop into folders (you approve the plan, nothing is deleted, and "undo that" puts it all back), pause or skip music, and find "coffee near me, open now" on Google Maps. |
+| **Pictures explained on the picture** | "Explain this diagram" pins short tags onto the actual parts of the picture and traces the flows across it, instead of opening a separate diagram. |
 | **The notch** | Hold <kbd>Ctrl</kbd>+<kbd>Alt</kbd> to talk; it shows Listening, then "Looking at Chrome", then streams Blip's words. Hover it for a small chat; double-tap <kbd>Ctrl</kbd> to type. Errors (mic blocked, no key) show up here instead of failing silently. |
 | **A voice studio** | Pick who Blip sounds like: free on-device Kokoro voices, or ElevenLabs and Gemini voices with your own key. Each voice has a drawn signature and an in-character preview; speed, language and captions are one tap away. Sentences can carry a tone that premium voices perform. |
 | **Connected accounts** | Gmail, Google Calendar, Google Docs, Discord and LinkedIn. "Sam emailed my recommendation letter, fix it" finds the email, saves the attachment, has Quill fix it into a copy beside the original, and offers to reply with it. Anything that reaches other people waits for an approval card. See [docs/CONNECT.md](docs/CONNECT.md). |
@@ -116,7 +119,7 @@ blip serve --local
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Backspace</kbd> | Dismiss drawings and scenes |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> | Pause screen sharing |
 
-Things to try: *"Explain this meme"* · *"What's the story in this chart? Draw it."* · *"How does a jet engine work? Show me in 3D."* then *"show me the inside"* · *"Walk me through turning on notifications"* · *"Write a funny reply in this box"* · *"What does this setting do?"* · *"Explode this panel"* · *"How does OAuth work? Show me."* · *"Scout, find the pricing for linear.app, then Quill, write me a two-line summary"* · *"Show me how you did it"* · *"Take me back to what I was doing 20 minutes ago"* · *"How did I get here?"* · *"Make me a teammate called Pixel who compares prices across three shops"*.
+Things to try: *"Explain this meme"* · *"What's the story in this chart? Draw it."* · *"How does a jet engine work? Show me in 3D."* then *"show me the inside"* · *"Walk me through turning on notifications"* · *"Write a funny reply in this box"* · *"What does this setting do?"* · *"Explode this panel"* · *"How does OAuth work? Show me."* · *"Scout, find the pricing for linear.app, then Quill, write me a two-line summary"* · *"Show me how you did it"* · *"Take me back to what I was doing 20 minutes ago"* · *"How did I get here?"* · *"Make me a teammate called Pixel who compares prices across three shops"* · *"Play Blinding Lights on YouTube Music"* · *"Split the screen: Google Sheets on the right"* · *"My desktop is a mess, organise it"* · *"Find coffee near me that's open now"* · *"Explain this diagram"*.
 
 <p>
 <img src="docs/images/panel-chat.png" alt="Panel: conversation" width="32%">
@@ -218,12 +221,13 @@ sequenceDiagram
 
 ## Design language
 
-*Quiet luxury and precision.* Near-black glass, hairline borders, a single ice-blue accent, Inter with tight tracking, and fast spring motion (about 220 to 550 ms).
+*Quiet luxury and precision.* Near-black glass, hairline borders, ice blue for what Blip draws and firefly gold for Blip itself, Inter with tight tracking, and fast spring motion (about 220 to 550 ms).
 
-- **A firefly, not a mascot.** A tiny dark-bodied firefly with a glowing tail rides beside the cursor, so it reads on white pages and dark ones. It hovers when you are still and leaves a dotted trail of light when you move; the glow swells with your voice, flickers with a circling mote while it thinks, and its wings buzz inside a turning ring while it talks or works.
-- **Targeting is light.** A soft expanding ring at the target and a thin luminous thread from the presence, recomputed every frame. Every glow has a hairline dark edge, so it survives on light interfaces as well as dark.
+- **A firefly, not a mascot.** A tiny dark-bodied firefly with a glowing tail rides beside the cursor, so it reads on white pages and dark ones. It hovers when you're still and leaves a dotted trail of light when you move; the glow swells with your voice, flickers with a circling mote while it thinks, and its wings buzz inside a turning ring while it talks or works.
+- **Targeting is light.** A soft expanding ring at the target and a thin luminous thread from the firefly, recomputed every frame. Every glow has a hairline dark edge, so it survives on light interfaces as well as dark.
 - **Explanations emerge.** The explanation surface is a glass plate whose top dissolves into the desktop. 3D content rises above its edge, a tether of light runs back to the element being explained, and the plate grows out of that element.
-- **No emoji, no sketches, no clutter.** One icon set (1.5 px strokes) and precise geometry.
+- **A team with faces.** Each teammate has its own colour and mark (a compass for Scout, a feather for Quill, a cube for Sketch) and shows whether it's free or what it's working on.
+- **No emoji, no clutter.** One icon set (1.5 px strokes) and precise geometry.
 
 ## Safety and privacy
 
@@ -232,7 +236,8 @@ sequenceDiagram
 | **Seeing** | The screen is captured when you talk to Blip. The Memory Palace is **off by default**; when you turn it on it records window titles, focus changes and element positions (no keystrokes), and screenshots only if you also allow that. |
 | **Private apps** | Password managers, banking and credential dialogs (configurable regexes) are never captured or recorded. Password fields are masked in every image and never stored. |
 | **Control** | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> pauses all screen access, with a visible indicator. "Forget everything" wipes the palace. Retention defaults to 72 hours. |
-| **Acting** | Blip itself never clicks or types on your desktop in v1: it points and explains. Browser teammates work in their own browser under Otto's guardrails, with domain rules, no password or card fields, and on-screen approval for anything irreversible. |
+| **Acting** | Blip only uses your mouse and keyboard after you press Allow (once, or Always allow). Moving the mouse or pressing <kbd>Esc</kbd> stops it instantly. Sending, paying, deleting, posting, signing in or out and closing tabs or apps always ask again, password fields are never typed into, and every task has a step and cost limit. Browser teammates work in their own browser under Otto's guardrails, with domain rules, no password or card fields, and on-screen approval for anything irreversible. |
+| **Local connections** | The brain listens on 127.0.0.1 only, and only Blip's own windows (and local tools) may connect: any other web page that tries to reach it is refused, so a site in your browser can't read what Blip sees or press its Allow buttons. |
 | **Content** | Screen text is treated as data. The prompt tells the model to ignore instructions it finds on screen. |
 | **Cost** | Per-turn and daily budgets across turns and agent jobs, shown in the panel. Local mode costs nothing. |
 | **Storage** | Everything (palace, turns, trajectories, memories) stays in `.blip/` on your machine. |
@@ -245,13 +250,14 @@ Every turn is logged with what Blip saw (the marked screenshot and the accessibi
 
 ```
 src/blip/
-  companion/   brain.py (LangGraph turn loop) · tools.py · prompts.py · annotations.py · turns.py
+  companion/   brain.py (LangGraph turn loop) · tools.py · prompts.py · annotations.py · notes.py · operator.py (hands) · aim.py · turns.py
   screen/      context.py (capture, marks, masking) · uia.py (Windows UI Automation)
   scenes/      spec.py (Scene schema + repair) · explode.py · gallery.py
   palace/      activity.py · tracker.py · scenes.py (time travel, causal) · when.py
   agents/      registry.py (named agents) · jobs.py (Otto jobs, handoffs)
   memory/      spatial.py (snapshots, FTS5 recall)
   voice/       stt.py (faster-whisper) · tts.py (Kokoro, Chatterbox, fallback)
+  hands.py (real mouse and keyboard) · windows.py (snap, split, focus) · tidy.py (folders, with undo)
   walkthrough.py · demo.py · hub.py · server.py · cli.py
 desktop/
   src/main/          Electron: windows, hotkeys, cursor, click-through, brain lifecycle
@@ -261,7 +267,7 @@ desktop/
     scene/           SceneView (R3F) · layout.ts (pure, unit-tested) · themes
     panel/           Chat · Team · Memory · Gallery · Settings
   e2e/smoke.mjs      launches the real Electron app and checks both windows
-scripts/             regenerate the README screenshots in headless Chromium
+scripts/             capture_readme.py (every README screenshot, staged, no personal data) · scenarios.py (replays everyday requests on recorded screens against the real model) · hands_check.py (one live desktop task)
 tests/               brain, scenes, screen, voice, palace, agents, server (pytest)
 ```
 
@@ -271,23 +277,25 @@ tests/               brain, scenes, screen, voice, palace, agents, server (pytes
 pytest
 ```
 
-50 backend tests, all offline (a fake screen, scripted brains, the OS voice). One drives a real Chromium: Scout fills a three-page form, Quill writes it up from Scout's result, and the Ghost Walkthrough is built with exact click targets. Another plays the whole recommendation-letter errand against fake Google APIs: find the email, save the attachment, fix the Word file with its styles intact, draft a threaded reply, and send only after Allow.
+105 backend tests, all offline (a fake screen, scripted brains, pretend hands, the OS voice). One drives a real Chromium: Scout fills a three-page form, Quill writes it up from Scout's result, and the Ghost Walkthrough is built with exact click targets. Another plays the whole recommendation-letter errand against fake Google APIs: find the email, save the attachment, fix the Word file with its styles intact, draft a threaded reply, and send only after Allow.
 
 ```bash
 cd desktop && npm test && npm run typecheck
 ```
 
-14 renderer tests cover layouts and the 3D motion maths (keyframes, looping machinery, piston and crank staying in step).
+20 renderer tests cover layouts, the panel's scoped styles and the 3D motion maths (keyframes, looping machinery, piston and crank staying in step).
+
+`python scripts/scenarios.py 1` replays 16 everyday requests (explain this, 3D, research, errands, play a song, a Vercel guide, tidy my desktop, coffee nearby...) on recorded screens through the real model and checks Blip's behaviour, for about $0.05.
 
 `node e2e/smoke.mjs` launches the real Electron app and checks the panel and every overlay come up healthy.
 
 ## Limitations and roadmap
 
 - **Windows first.** UI Automation, DPI handling and the overlay are built for Windows. macOS would need an AX-tree reader (and could reuse Clicky's ScreenCaptureKit approach).
-- **Light desktop control only.** Blip can open sites and apps, copy text and paste a draft into the field you're typing in, and it guides you click by click, but it never clicks for you. Agents act in their own browser.
+- **Desktop control is careful, not fast.** Blip drives your mouse and keyboard one look at a time (a simple task takes 20 to 60 seconds) and stops after five looks with nothing changing. Desktop Excel needs a license, so spreadsheet work is tested in Google Sheets.
 - **Real blur.** Electron can't blur other apps behind a transparent overlay, so glass surfaces use a dense tint. The panel uses Windows acrylic.
 - **The taskbar strip.** Windows clamps the overlay to the work area, so Blip can't draw over the taskbar.
-- **Verified live** on Claude Haiku 5.5 through OpenRouter (about $0.002 to $0.004 per turn): field notes on a meme and a chart, two 3D models built from scratch plus a follow-up edit, a full click-by-click guide, inserting a reply, memory, and push-to-talk. **Not yet verified live:** the connectors against real accounts (they're tested end to end against fake Google APIs), ElevenLabs and Gemini voices (no keys here), a local Ollama vision model, and Chatterbox on a GPU.
+- **Verified live** on Claude Haiku 5.5 through OpenRouter (about $0.002 to $0.004 per turn): field notes on a meme and a chart, two 3D models built from scratch plus a follow-up edit, click-by-click guides (Notepad, a Google Docs table of contents), typing in Notepad, a song from the YouTube Music app, a Sheets table with SUM and a pivot table, a Docs heading and bullets, a CapCut tour, splitting the screen, tidying a real Desktop with undo, coffee nearby on Maps, inserting a reply, memory, and push-to-talk. **Not yet verified live:** the connectors against real accounts (they're tested end to end against fake Google APIs), ElevenLabs and Gemini voices (no keys here), a local Ollama vision model, and Chatterbox on a GPU.
 - **3D models are explanations, not engineering drawings.** A small model builds recognisable objects from primitives; bigger models build richer ones.
 - **LinkedIn** only allows apps to post; reading your feed or messages goes through a browser agent you can watch.
 - **Next:** streaming speech-to-text and macOS.
