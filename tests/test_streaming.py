@@ -105,7 +105,12 @@ def test_a_long_first_sentence_starts_at_its_first_pause():
     from wisp.partial_json import first_chunk
 
     long = "This is a Yahoo Finance post claiming a leaked filing shows, honestly, a huge loss"
-    assert first_chunk(long) == "This is a Yahoo Finance post claiming a leaked filing shows,"
+    assert first_chunk(long) == ""  # a normal sentence is said whole, so wait for its end
+    huge = long + " that nobody saw coming because the numbers were buried, deep in the notes"
+    assert first_chunk(huge) == "This is a Yahoo Finance post claiming a leaked filing shows,"
+    # The bug: the tail of a sentence said on its own sounded like an order to Scout.
+    coffee = "On it. I'll have Scout check Google Maps for coffee spots near you, filtered to open now, ranked by what the reviews say."
+    assert first_chunk(coffee) == coffee
     assert (
         first_chunk("Real. The B version has a giant fan. More")
         == "Real. The B version has a giant fan."

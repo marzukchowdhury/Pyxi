@@ -95,15 +95,21 @@ def finished_sentences(text: str, min_words: int = 4) -> str:
     return ""
 
 
-def first_chunk(text: str, max_words: int = 14) -> str:
-    """What the voice can start on: the first sentence, or for a long one, the words up to its
-    first natural pause (a comma after six or more words), so speech begins sooner."""
+def first_chunk(text: str, max_words: int = 24) -> str:
+    """What the voice can start on: the first whole sentence(s). A sentence is only split at a
+    pause (a comma) when it's already very long, because a clause said on its own ("filtered
+    to open now, ranked by the reviews.") sounds like a separate instruction, not the end of
+    what Wisp was saying."""
     whole = finished_sentences(text)
     if whole and len(whole.split()) <= max_words:
         return whole
+    if whole:  # one very long sentence: start on it at its first pause
+        text = whole
+    elif len(text.split()) <= max_words:
+        return ""  # not finished yet, and not long enough to split: wait for its end
     for m in _PAUSE.finditer(text):
         head = text[: m.end()].strip()
-        if 6 <= len(head.split()) <= max_words + 4:
+        if 10 <= len(head.split()) <= max_words:
             return head
     return whole
 
