@@ -73,7 +73,7 @@ class Replay:
         self.ctx = ctx
         self.paused = False
 
-    async def capture(self, pixels: bool = True) -> ScreenContext:
+    async def capture(self, pixels: bool = True, **_) -> ScreenContext:
         self.ctx.captured_at = time.time()
         return self.ctx
 
@@ -124,6 +124,12 @@ SCENARIOS = [
         "teach",
     ),
     ("tidy desktop", "turn_49b75541", "My desktop is a total mess, can you organise it?", "tidy"),
+    (
+        "coffee nearby",
+        "turn_49b75541",
+        "Find me coffee places near me that are open right now and have the best coffee in the reviews.",
+        "maps",
+    ),
     ("nba finals", "turn_49b75541", "Who won the NBA Finals last year?", "web"),
     ("bitcoin", "turn_49b75541", "What's the price of bitcoin right now?", "web"),
     (
@@ -268,6 +274,12 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append("did it instead of teaching")
         if not ({"guide", "quick_action", "web_search"} & set(tools)):
             problems.append("no guide")
+    if expect == "maps":
+        opened = [c for c in brain._calls if c["tool"] in ("quick_action", "use_computer")]
+        if not any("maps" in json.dumps(c["arguments"]).lower() for c in opened):
+            problems.append("didn't open Google Maps")
+        if "look_again" not in tools and not any(b.startswith("hands") for b in background):
+            problems.append("didn't look at the results")
     if expect == "tidy" and not any(b.startswith("tidy") for b in background):
         problems.append("no tidy plan")
     from wisp.companion.brain import drop_false_promises

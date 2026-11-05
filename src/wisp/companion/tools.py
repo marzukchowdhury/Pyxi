@@ -484,6 +484,19 @@ COMPANION_TOOLS += [
         ["action", "value"],
     ),
     _tool(
+        "look_again",
+        "Look at the screen again after something you opened loads (a Google Maps search, a site, an "
+        "app), so you answer from what's really there and can mark it: e.g. quick_action open_url "
+        "'https://www.google.com/maps/search/coffee+open+now', then look_again, then explain_on_screen "
+        "tagging the best-rated places with why. Fast: use it instead of a teammate for one quick look.",
+        {
+            "seconds": {
+                "type": "number",
+                "description": "How long to let it load first (default 2.5).",
+            }
+        },
+    ),
+    _tool(
         "tidy_folder",
         "Organise a messy folder (their Desktop, Downloads, Documents, Pictures) into tidy subfolders. "
         "First call it with just `folder` to see what's there (the list comes back to you); then call it "
@@ -688,6 +701,7 @@ COMPANION_TOOLS += [
 ]
 
 INFO_TOOLS = {
+    "look_again",
     "web_search",
     "read_page",
     "list_routines",

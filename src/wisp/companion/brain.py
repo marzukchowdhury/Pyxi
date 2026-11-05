@@ -471,15 +471,19 @@ class Brain:
             return None
         return f"Unknown quick action {action}."
 
-    async def _capture(self) -> ScreenContext:
+    async def _capture(self, follow_mouse: bool = True) -> ScreenContext:
         """Take Wisp's screenshot. If the overlay is visible to captures (so a Discord stream can
         see it), blank it for that instant so Wisp never reads its own drawings."""
         if not self.overlay_in_capture:
-            return await self.screen.capture()
+            return await (
+                self.screen.capture() if follow_mouse else self.screen.capture(follow_mouse=False)
+            )
         await self.hub.emit("capture_hide")
         await asyncio.sleep(0.09)  # one or two frames for the overlay to go clear
         try:
-            return await self.screen.capture()
+            return await (
+                self.screen.capture() if follow_mouse else self.screen.capture(follow_mouse=False)
+            )
         finally:
             await self.hub.emit("capture_show")
 
@@ -1227,6 +1231,26 @@ class Brain:
                 if note and note.startswith(f"{call.name}:") and call.name not in QUIET_NOTES:
                     needs_more = True
             self._narrate_card()
+            opened = any(
+                c.name == "quick_action" and c.arguments.get("action") in ("open_url", "open_app")
+                for c in calls
+            )
+            if (
+                opened
+                and all(c.name in ("say", "quick_action") for c in calls)
+                and not needs_more
+                and not _JUST_OPEN.match(self._user_text or "")
+                and round_no < self.settings.budget.max_tool_rounds
+            ):
+                # "Find coffee near me": opening Maps isn't the answer. Look at what opened and
+                # answer from it, even if the model forgot to ask for a look.
+                await self._act("look_again", {"seconds": 3})
+                needs_more = True
+                notes.append(
+                    "It's open on their screen now (you're looking at it). Answer their question "
+                    "from it: mark the best options with explain_on_screen and say your pick. "
+                    "Don't open it again."
+                )
             promised = any(
                 drop_false_promises(str(c.arguments.get("text", "")))[1]
                 for c in calls
@@ -1665,6 +1689,21 @@ class Brain:
             return await self._use_computer(args)
         if name == "tidy_folder":
             return await self._tidy(args)
+        if name == "look_again":
+            # Something they asked for just opened (Maps, a site, an app): wait for it to load,
+            # then look at it, so the answer comes from what's really on screen now.
+            try:
+                secs = max(0.5, min(float(args.get("seconds") or 2.5), 8.0))
+            except (TypeError, ValueError):
+                secs = 2.5
+            await asyncio.sleep(secs)
+            ctx = await self._capture(follow_mouse=False)  # what just opened is in front
+            if ctx.excluded:
+                return f"look_again: that's a private app ({ctx.excluded}), so I can't look."
+            self._ctx = ctx
+            if image := ctx.model_image(self.settings.screen.model_image_width):
+                self._images = [image]
+            return f"look_again: this is the screen now ({ctx.window.title[:80]!r})."
         if name == "quick_action":
             return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
         if name == "start_walkthrough":
@@ -2087,6 +2126,12 @@ _FILLER = re.compile(
 
 
 # Tools whose notes are advice for next time, not a problem worth another round.
+# "Open YouTube", "go to my bank": opening it is the whole request, nothing to answer after.
+_JUST_OPEN = re.compile(
+    r"^\W*(hey,? )?(wisp,? )?(can you |could you |please )?(open|go to|launch|start|bring up|pull up)\b"
+    r"(?!.*\b(and|then|find|which|what|best|show me|tell me)\b)",
+    re.I,
+)
 # Names models sometimes invent for a real tool (from its options), and what they mean.
 TOOL_ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
     "explain_on_picture": ("explain_on_screen", {"style": "on_picture"}),
