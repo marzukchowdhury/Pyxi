@@ -284,16 +284,16 @@ export function Palace() {
   const set = (key: string, value: unknown) => brain.send({ type: "set", key, value });
   return (
     <div className="palace">
-      {hello && !hello.ambient_memory && (
-        <div className="palace-optin">
-          <b>The Memory Palace is off</b>
-          <p>When on, Blip records window titles, what you focus and where UI elements are (no keystrokes, no pixels unless you allow them) so you can time-travel and ask how you got somewhere. Private apps are never recorded, and it all stays on this computer.</p>
-          <button className="primary" onClick={() => set("ambient_memory", true)}>Turn on the Memory Palace</button>
-        </div>
-      )}
       <div className="palace-hero">
-        <h3>Memory Palace</h3>
-        <p>Blip quietly keeps a spatial history of your screen (what was where, and what you did), so you can travel back in time or ask how you got here. It all stays on this computer.</p>
+        <h3>Memory Palace {hello && <span className={`palace-state ${hello.ambient_memory ? "on" : ""}`}>{hello.ambient_memory ? "On" : "Off"}</span>}</h3>
+        {hello && !hello.ambient_memory ? (
+          <>
+            <p>Right now Blip only remembers the screens you ask it about. Turn this on and it also keeps a quiet history of what was where and what you did (window titles, focus and UI layout; no keystrokes, no pixels unless you allow them), so you can travel back or ask how you got somewhere. Private apps are never recorded, and it all stays on this computer.</p>
+            <button className="primary optin" onClick={() => set("ambient_memory", true)}>Turn on the Memory Palace</button>
+          </>
+        ) : (
+          <p>Blip keeps a quiet history of your screen (what was where, and what you did), so you can travel back in time or ask how you got here. It all stays on this computer.</p>
+        )}
         <form className="travel" onSubmit={(e) => { e.preventDefault(); brain.send({ type: "time_travel", query, when }); }}>
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="What were you looking at? e.g. pricing page" />
           <input value={when} onChange={(e) => setWhen(e.target.value)} placeholder="When? e.g. 20 minutes ago" />

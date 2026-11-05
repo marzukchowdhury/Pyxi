@@ -10,12 +10,12 @@ from fastapi.testclient import TestClient
 from otto.llm.base import TextPart
 from otto.types import LLMResponse, ToolCall, Usage
 
-from conftest import FakeScreen, Recorder
 from blip.companion.brain import Brain
 from blip.demo import DemoLLM
 from blip.hub import Hub
 from blip.server import create_app
 from blip.voice import make_tts
+from conftest import FakeScreen, Recorder
 
 
 def make_brain(settings, llm=None, otto_llm=None):
@@ -181,3 +181,26 @@ def test_openrouter_models_need_the_openrouter_key(settings, monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     assert has_key(s)
     assert key_env("claude-opus-5-5") == "ANTHROPIC_API_KEY"
+
+
+def test_only_blips_own_windows_can_reach_the_brain(settings):
+    from starlette.websockets import WebSocketDisconnect as Closed
+
+    brain = Brain(
+        settings,
+        Hub(),
+        llm=DemoLLM(),
+        screen=FakeScreen(),
+        tts=make_tts(settings.voice, settings.models_dir),
+    )
+    app = create_app(settings, demo=True, brain=brain)
+    with TestClient(app) as client:
+        evil = {"origin": "https://evil.example"}
+        with pytest.raises(Closed), client.websocket_connect("/ws", headers=evil) as ws:
+            ws.receive_text()
+        assert client.get("/api/timeline", headers=evil).status_code == 403
+        ok = client.get("/api/timeline", headers={"origin": "file://"})
+        assert ok.status_code == 200 and ok.headers["access-control-allow-origin"] == "file://"
+        assert client.get("/api/timeline").status_code == 200  # local scripts send no Origin
+        with client.websocket_connect("/ws", headers={"origin": "http://localhost:5173"}) as ws:
+            assert json.loads(ws.receive_text())["type"] == "hello"

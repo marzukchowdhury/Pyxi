@@ -13,8 +13,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
 
 from blip import __version__
 from blip.companion.brain import Brain
@@ -26,6 +26,25 @@ from blip.scenes.object_gallery import OBJECT_GALLERY, OBJECT_TITLES
 
 log = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"^[a-f0-9]{12}\.png$")
+
+# Who may talk to the brain. It sees the screen, drives the mouse and answers its own "Allow"
+# cards, so a web page in the user's browser must never reach it: browsers let any site open a
+# WebSocket to 127.0.0.1. Blip's own windows (the built app is file://, the dev servers are on
+# localhost) and local tools that send no Origin at all (scripts, curl) are let in.
+APP_ORIGINS = frozenset(
+    {
+        "file://",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5199",
+        "http://127.0.0.1:5199",
+    }
+)
+
+
+def origin_allowed(origin: str | None) -> bool:
+    extra = {o.strip() for o in os.environ.get("BLIP_ALLOWED_ORIGINS", "").split(",") if o.strip()}
+    return origin is None or origin in APP_ORIGINS or origin in extra
 
 
 # Panel setting keys -> VoicePrefs fields.
@@ -117,6 +136,20 @@ def create_app(
     app = FastAPI(title="Blip", version=__version__, lifespan=lifespan)
     app.state.brain, app.state.hub = brain, hub
 
+    @app.middleware("http")
+    async def own_windows_only(request: Request, call_next: Any) -> Any:
+        origin = request.headers.get("origin")
+        if not origin_allowed(origin):
+            return JSONResponse({"detail": "not one of Blip's windows"}, status_code=403)
+        if request.method == "OPTIONS" and origin:
+            response: Any = JSONResponse({})
+        else:
+            response = await call_next(request)
+        if origin:  # Blip's own pages read these replies (the Memory tab's timeline)
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+        return response
+
     def hello() -> dict[str, Any]:
         return {
             **brain.public_state(),
@@ -196,6 +229,10 @@ def create_app(
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket) -> None:
+        if not origin_allowed(socket.headers.get("origin")):
+            log.warning("refused a connection from %s", socket.headers.get("origin"))
+            await socket.close(code=1008)
+            return
         await socket.accept()
         cid = hub.connect(socket.send_text)
         await socket.send_text(json.dumps({"type": "hello", **hello()}, default=str))

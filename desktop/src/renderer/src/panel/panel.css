@@ -215,8 +215,6 @@ input[type="checkbox"] { height: auto; accent-color: #9ecbff; margin-top: 2px; }
 
 /* browser preview only: Electron renders the panel over Windows acrylic */
 html.web-preview { background: radial-gradient(120% 80% at 30% 0%, #1a1f2b, #07080b); }
-.palace-optin { margin-bottom: 12px; padding: 14px; border-radius: 12px; border: 1px solid rgba(158,203,255,.3); background: rgba(158,203,255,.05); }
-.palace-optin b { font-size: 13.5px; } .palace-optin p { margin: 6px 0 12px; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
 
 /* voice studio */
 .studio { display: grid; gap: 12px; font-size: 13px; padding-bottom: 18px; }
@@ -281,3 +279,6 @@ button.ghost { height: 30px; padding: 0 12px; border-radius: 9px; border: 1px so
 button.ghost:hover { color: var(--ink); border-color: var(--hair-hi); }
 .g-routine { background: rgba(158,203,255,.16); color: var(--ice-hi); font-size: 10.5px; border: 1px solid rgba(158,203,255,.3); }
 .brand-logo { flex: none; display: grid; place-items: center; border-radius: 9px; box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 2px 8px rgba(0,0,0,.3); }
+.palace-state { margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 500; vertical-align: 2px; color: var(--ink-3); background: var(--surface-hi); }
+.palace-state.on { color: #ffc861; background: rgba(255,200,97,.12); }
+.palace-hero .optin { width: 100%; margin: 2px 0 12px; }
