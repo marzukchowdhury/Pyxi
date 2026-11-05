@@ -224,13 +224,53 @@ COMPANION_TOOLS: list[ToolSpec] = [
     ),
     _tool(
         "guide",
-        "Walk the user through doing something themselves, one click at a time: mark the single control to click "
-        "next and say what to do. Wisp waits for their real click on it, then you see the new screen and give the "
-        "next step (call guide again), or say they're done (done=true).",
+        "Teach them to do it themselves, in any app or site (Vercel, CapCut, Excel, Settings), one step at a "
+        "time until they're done: mark the one thing to act on next, with an arrow to it, and say what to do "
+        "and why in one short friendly sentence. Wisp waits for them to do it (a click on the mark, or Done "
+        "for other steps), looks at the new screen, and you give the next step (call guide again), until "
+        "the goal is reached (done=true, with a cheerful line). Use `use_computer` instead when they want "
+        "you to do it for them. If you're not sure where things are in this version of the app, web_search "
+        "the current steps first. Before a step that inserts or pastes something at the cursor, first "
+        "guide them to put the cursor where it belongs (e.g. click at the end of a line, press Enter).",
         {
+            "action": {
+                "type": "string",
+                "enum": [
+                    "click",
+                    "double_click",
+                    "right_click",
+                    "type",
+                    "press",
+                    "scroll",
+                    "drag",
+                    "look",
+                ],
+                "description": "What they do at the mark (default click). 'type': what goes in the field "
+                "is in `text`; 'press': keys in `text` (e.g. 'ctrl+s'); 'scroll': `direction`; 'drag': from the "
+                "mark to `to_*`; 'look': just notice it.",
+            },
             "element_id": {"type": "integer"},
+            "quote": {
+                "type": "string",
+                "description": "Exact words on the control, from the OCR list.",
+            },
             "box": {"type": "array", "items": {"type": "number"}},
-            "label": {"type": "string", "description": "What to click, 1-4 words, e.g. 'Export'."},
+            "label": {
+                "type": "string",
+                "description": "What it is, 1-4 words, e.g. 'Environment Variables'.",
+            },
+            "text": {
+                "type": "string",
+                "description": "For type: what to type (e.g. 'DATABASE_URL'); for press: the keys.",
+            },
+            "direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
+            "to_element_id": {"type": "integer"},
+            "to_quote": {"type": "string"},
+            "to_box": {"type": "array", "items": {"type": "number"}},
+            "steps_total": {
+                "type": "integer",
+                "description": "Your best guess of how many steps the whole thing takes.",
+            },
             "goal": {
                 "type": "string",
                 "description": "The overall goal, e.g. 'turn on dark mode'.",

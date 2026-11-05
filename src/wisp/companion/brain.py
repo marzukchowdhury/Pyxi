@@ -41,7 +41,7 @@ from wisp.agents import AgentProfile, AgentRegistry, Job, JobManager
 from wisp.agents.jobs import Handoff
 from wisp.companion import prompts
 from wisp.companion.actions import app_target, open_app, safe_url
-from wisp.companion.aim import Survey, survey
+from wisp.companion.aim import Survey, confirm_target, survey
 from wisp.companion.annotations import (
     MARKER,
     Annotation,
@@ -456,12 +456,13 @@ class Brain:
                     return
                 if same_page(now, drawn_on) or now in ("Wisp", "Wisp overlay", ""):
                     continue
+                if self._guide:
+                    # Mid-guide, a new page is the next step, not the end: look again.
+                    self._spawn(self.guide_clicked("moved"))
+                    return
                 log.info("clearing drawings: the window changed (%r -> %r)", drawn_on, now)
                 await self.hub.emit("clear")
                 self._placed.put("card", None, 0)
-                if self._guide:
-                    self._guide = None
-                    await self.hub.emit("guide", active=False)
                 return
 
         self._watcher = asyncio.ensure_future(watch())
@@ -740,16 +741,79 @@ class Brain:
             await self.hub.emit("routines", routines=self.routines.public())
         return ran
 
-    async def guide_clicked(self) -> None:
-        """The user clicked the control Wisp was waiting on: look again and give the next step."""
+    async def _guide_target(
+        self, ctx: ScreenContext | None, args: dict[str, Any], label: str
+    ) -> tuple[int, int, int, int] | None:
+        """Where a guide step points. Words found on screen and element ids are exact; a box is
+        the model's guess, so it's zoomed into and checked first (an arrow pointing at the wrong
+        button is worse than none)."""
+        if ctx is None:
+            return None
+        exact = target_rect(ctx, {"element_id": args.get("element_id"), "quote": args.get("quote")})
+        if exact:
+            return exact
+        guess = resolve_rect(ctx, None, args.get("box"))
+        if guess is None or self.settings.local_mode:
+            return guess
+        x, y, w, h = guess
+        if w * h >= 240 * 120:
+            return guess
+        cw, ch = max(w * 3, 360), max(h * 3, 240)
+        region = (x + w // 2 - cw // 2, y + h // 2 - ch // 2, cw, ch)
+        crop = ctx.crop(region)
+        if crop is None:
+            return guess
+        origin = (max(ctx.origin[0], region[0]), max(ctx.origin[1], region[1]))
+        point, usage = await confirm_target(self.llm, crop, origin, label)
+        if usage is not None:
+            self._usage = self._usage + usage
+        if point is None:
+            return None
+        return (point[0] - w // 2, point[1] - h // 2, w, h)
+
+    async def guide_clicked(self, how: str = "clicked") -> None:
+        """They did the step (clicked the mark, or pressed Done), or did something else that
+        changed the screen: look again and give the next step, until the goal is reached."""
         guide = self._guide
-        if guide is None or self._lock.locked():
+        if guide is None or getattr(self, "_guide_advanced", None) is guide:
             return
-        await asyncio.sleep(0.7)  # let the app react to the click before looking
+        for _ in range(150):  # they were quicker than Wisp's turn: wait for it, don't drop it
+            if not self._lock.locked():
+                break
+            await asyncio.sleep(0.2)
+        if self._guide is not guide:
+            return
+        log.info("guide: %s on step %d (%s)", how, guide.step, guide.label)
+        if how != "elsewhere":
+            self._guide_advanced = guide  # a click and the page change it causes: one next step
+        await asyncio.sleep(0.8)  # let the app react before looking
+        if how == "elsewhere":
+            # They clicked somewhere other than the mark. Only worth a new look if it changed
+            # something (they found another way, or wandered off): a stray click changes nothing.
+            now = await self.screen.capture(pixels=True)
+            before = getattr(self, "_guide_glance", None)
+            after = now.crop(now.window.rect) if now.screenshot is not None else None
+            if (
+                before is None
+                or after is None
+                or _same_view(before, after)
+                or self._guide is not guide
+            ):
+                return
+            if getattr(self, "_guide_advanced", None) is guide:
+                return
+            self._guide_advanced = guide
+        said = {
+            "clicked": f"I did step {guide.step} ({guide.action} '{guide.label}').",
+            "done": f"I did step {guide.step} ({guide.action} '{guide.label}') and pressed Done.",
+            "elsewhere": f"Instead of '{guide.label}' I clicked something else, and the screen changed.",
+            "moved": f"The page changed after step {guide.step}.",
+        }[how]
         await self.turn(
-            f"(I clicked '{guide.label}', step {guide.step}. Look at the screen now and guide me to the next "
-            f"step toward: {guide.goal}. If that's done, tell me and call guide with done=true.)",
-            shown=f"Clicked {guide.label}",
+            f"({said} Look at the screen now and guide me to the next step toward: {guide.goal}. "
+            "If I went a different way, carry on from where I am. If the goal is reached, tell me "
+            "and call guide with done=true.)",
+            shown="Next step" if how != "clicked" else f"Clicked {guide.label}",
             synthetic=True,
         )
 
@@ -1243,9 +1307,6 @@ class Brain:
                 self._guide = None
                 await self.hub.emit("guide", active=False)
                 return None
-            rect = resolve_rect(ctx, args.get("element_id"), args.get("box"))
-            if rect is None:
-                return "guide: couldn't find that on screen; point at it instead."
             label = str(
                 args.get("label")
                 or (
@@ -1256,13 +1317,68 @@ class Brain:
                     else "here"
                 )
             )[:40]
+            action = str(args.get("action") or "click")
+            rect = await self._guide_target(ctx, args, label)
+            if rect is None:
+                if action in ("press", "look") and ctx is not None:
+                    rect = ctx.window.rect  # keys and looks don't need a precise spot
+                else:
+                    return (
+                        f"guide: couldn't find '{label}' on screen. Use an element id or the exact "
+                        "words on it (quote), or tell them where it is in words."
+                    )
+            to = None
+            if action == "drag":
+                dest = target_rect(
+                    ctx,
+                    {
+                        "element_id": args.get("to_element_id"),
+                        "quote": args.get("to_quote"),
+                        "box": args.get("to_box"),
+                    },
+                )
+                to = (dest[0] + dest[2] // 2, dest[1] + dest[3] // 2) if dest else None
             step = (
-                self._guide.step + 1 if self._guide and self._guide.goal == args.get("goal") else 1
+                self._guide.step + 1 if self._guide else 1  # one guide at a time: keep counting
             )
-            self._guide = Guide(goal=str(args["goal"])[:200], label=label, rect=rect, step=step)
-            ann = Annotation(kind="click", rect=rect, label=label, ttl_s=600, guide=True)
+            total = (
+                int(args["steps_total"]) if str(args.get("steps_total") or "").isdigit() else None
+            )
+            if self._guide and not total:
+                total = self._guide.total
+            total = max(total, step) if total else None
+            self._guide = Guide(
+                goal=str(args["goal"])[:200],
+                label=label,
+                rect=rect,
+                step=step,
+                action=action,
+                total=total,
+            )
+            self._guide_glance = ctx.crop(ctx.window.rect) if ctx else None
+            hint = str(args.get("text") or args.get("direction") or "")[:80] or None
+            ann = Annotation(
+                kind="click",
+                rect=rect,
+                to=to,
+                label=label,
+                ttl_s=900,
+                guide=True,
+                action=action,
+                hint=hint,
+                step=step,
+                total=total,
+            )
             await self.hub.emit("annotate", annotations=[ann.model_dump()])
-            await self.hub.emit("guide", active=True, step=step, goal=self._guide.goal, label=label)
+            await self.hub.emit(
+                "guide",
+                active=True,
+                step=step,
+                total=total,
+                goal=self._guide.goal,
+                label=label,
+                action=action,
+            )
             self._watch_window()
             return None
         if name == "explain_in_3d":
@@ -1963,6 +2079,14 @@ def strip_filler(text: str) -> str:
     """Drop stock openers ("There you go, I have done this.") when there's a real sentence after."""
     rest = _FILLER_LEAD.sub("", text, count=1)
     return rest[0].upper() + rest[1:] if rest.strip() and rest != text else text
+
+
+def _same_view(a: Image.Image, b: Image.Image) -> bool:
+    """The window looks the same as before (nothing their click did)."""
+    from wisp.companion.operator import _same
+
+    size = (480, 270)
+    return _same(a.convert("L").resize(size), b.convert("L").resize(size))
 
 
 def ctypes_foreground() -> int:

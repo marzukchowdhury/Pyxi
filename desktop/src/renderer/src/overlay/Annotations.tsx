@@ -3,7 +3,9 @@
  * with viewfinder corners), motion is fast and springy, and light does the emphasis.
  */
 import { useEffect, useRef, useState } from "react";
-import { rectToLocal, toLocal } from "../shared/bridge";
+import { bridge, cursorToLocal, rectToLocal, toLocal } from "../shared/bridge";
+import { brain } from "../shared/socket";
+import { Interactive } from "./Interactive";
 import type { Pin } from "../shared/protocol";
 import { type LiveAnnotation, useOverlay } from "./store";
 
@@ -77,19 +79,7 @@ function Shape({ a }: { a: LiveAnnotation }) {
       </g>
     );
   }
-  if (a.kind === "click" && a.rect) {
-    // A click target: a steady frame you can't miss, a ring that keeps inviting, and a cursor tip.
-    const r = rectToLocal(a.rect);
-    const pad = 5;
-    const x = r.x - pad, y = r.y - pad, w = r.w + pad * 2, h = r.h + pad * 2;
-    return (
-      <g className="click-target">
-        <rect x={x} y={y} width={w} height={h} rx="10" className="click-frame" />
-        <rect x={x} y={y} width={w} height={h} rx="10" className="click-pulse" style={{ transformOrigin: `${x + w / 2}px ${y + h / 2}px` }} />
-        <path className="click-cursor" transform={`translate(${x + w - 6} ${y + h - 4})`} d="M0 0 L0 15 L4 11 L7 18 L10 16.6 L7 10 L12.5 10 Z" />
-      </g>
-    );
-  }
+  if (a.kind === "click" && a.rect) return <GuideShape a={a} />;
   if (a.kind === "arrow" && a.at && a.to) {
     const [x1, y1] = toLocal(a.at[0], a.at[1]);
     const [x2, y2] = toLocal(a.to[0], a.to[1]);
@@ -144,15 +134,104 @@ function Label({ a }: { a: LiveAnnotation }) {
     [x, y] = toLocal(a.at[0], a.at[1]);
     y += 22;
   }
-  if (a.kind === "click") {
-    const step = useOverlay.getState().guide?.step;
-    return (
-      <div className="ann-label click-label" style={{ left: x, top: y + 6 }}>
-        {step ? <span className="click-step">{step}</span> : <i />}Click {a.label}
-      </div>
-    );
-  }
+  if (a.kind === "click") return <GuideLabel a={a} x={x} y={y + 6} />;
   return <div className={`ann-label ${side ? "side" : ""}`} style={{ left: x, top: y }}><i />{a.label}</div>;
+}
+
+// Where the pointer is, so a guide's arrow can start from it (eyes are already there).
+let lastCursor: [number, number] | null = null;
+bridge.onCursor((p) => {
+  lastCursor = cursorToLocal(p);
+});
+
+const VERB: Record<string, string> = {
+  click: "Click",
+  double_click: "Double-click",
+  right_click: "Right-click",
+  look: "Look at",
+};
+
+/** A guide step on the real screen: the mark, an arrow that sweeps in from your pointer (or,
+ * for a drag, from the thing to where it goes), and for scrolling a chevron that nudges. */
+function GuideShape({ a }: { a: LiveAnnotation }) {
+  const r = rectToLocal(a.rect!);
+  const pad = 5;
+  const x = r.x - pad, y = r.y - pad, w = r.w + pad * 2, h = r.h + pad * 2;
+  const cx = x + w / 2, cy = y + h / 2;
+  // The pointer as it was when this step appeared: the arrow doesn't chase the mouse around.
+  const from = useRef<[number, number] | null>(lastCursor ?? [innerWidth / 2, innerHeight * 0.8]).current;
+  let arrow = "";
+  let head = "";
+  const curve = (x1: number, y1: number, x2: number, y2: number) => {
+    const mx = (x1 + x2) / 2 + (y2 - y1) * 0.18;
+    const my = (y1 + y2) / 2 - (x2 - x1) * 0.18;
+    const ang = Math.atan2(y2 - my, x2 - mx);
+    const tip = (d: number) => `${x2 - 13 * Math.cos(ang + d)} ${y2 - 13 * Math.sin(ang + d)}`;
+    arrow = `M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`;
+    head = `M ${tip(0.5)} L ${x2} ${y2} L ${tip(-0.5)}`;
+  };
+  if (a.action === "drag" && a.to) {
+    const [tx, ty] = toLocal(a.to[0], a.to[1]);
+    curve(cx, cy, tx, ty);
+  } else if (from && Math.hypot(from[0] - cx, from[1] - cy) > 90) {
+    // Stop at the frame's edge, on the side facing the pointer.
+    const dx = from[0] - cx, dy = from[1] - cy;
+    const k = Math.min(Math.abs((w / 2 + 8) / (dx || 1e-6)), Math.abs((h / 2 + 8) / (dy || 1e-6)));
+    curve(from[0], from[1], cx + dx * k, cy + dy * k);
+  }
+  const dir = a.action === "scroll" ? (a.hint ?? "down") : null;
+  const rot = { down: 0, up: 180, left: 90, right: -90 }[dir as "down"] ?? 0;
+  return (
+    <g className="click-target">
+      <rect x={x} y={y} width={w} height={h} rx="10" className="click-frame" />
+      <rect x={x} y={y} width={w} height={h} rx="10" className="click-pulse" style={{ transformOrigin: `${cx}px ${cy}px` }} />
+      {arrow && (
+        <g className={`guide-arrow ${a.action === "drag" ? "drag" : ""}`}>
+          <DrawOn d={arrow} className="stroke-arrow" />
+          <path className="arrow-head" d={head} />
+        </g>
+      )}
+      {dir ? (
+        <g className="guide-scroll" transform={`translate(${cx} ${cy}) rotate(${rot})`}>
+          <path d="M -14 -8 L 0 6 L 14 -8" />
+          <path d="M -14 4 L 0 18 L 14 4" className="late" />
+        </g>
+      ) : (
+        (!a.action || a.action.endsWith("click")) && (
+          <path className="click-cursor" transform={`translate(${x + w - 6} ${y + h - 4})`} d="M0 0 L0 15 L4 11 L7 18 L10 16.6 L7 10 L12.5 10 Z" />
+        )
+      )}
+    </g>
+  );
+}
+
+/** "2/5 · Type DATABASE_URL in Key", with a Done button for steps a click can't finish. */
+function GuideLabel({ a, x, y }: { a: LiveAnnotation; x: number; y: number }) {
+  const action = a.action ?? "click";
+  const what = a.label && a.label !== "here" ? a.label : "";
+  const text =
+    action === "type" ? `Type “${a.hint ?? ""}”${what ? ` in ${what}` : ""}`
+    : action === "press" ? `Press ${a.hint ?? what}`
+    : action === "scroll" ? `Scroll ${a.hint ?? "down"}${what ? ` to ${what}` : ""}`
+    : action === "drag" ? `Drag ${what || "this"} to the arrow`
+    : `${VERB[action] ?? "Click"} ${what || "here"}`;
+  const needsDone = !action.endsWith("click");
+  const done = () => {
+    useOverlay.setState((s) => ({ annotations: s.annotations.filter((n) => !n.guide) }));
+    brain.send({ type: "guide_clicked", how: "done" });
+  };
+  const step = a.step ?? useOverlay.getState().guide?.step;
+  return (
+    <Interactive className="ann-label click-label guide-label" style={{ left: x, top: y }} active={needsDone}>
+      {step ? <span className="click-step">{a.total ? `${step}/${a.total}` : step}</span> : <i />}
+      <span>{text}</span>
+      {needsDone && (
+        <button className="guide-done" onClick={done}>
+          Done
+        </button>
+      )}
+    </Interactive>
+  );
 }
 
 function PinNote({ pin }: { pin: Pin }) {

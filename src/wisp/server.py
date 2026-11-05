@@ -244,7 +244,10 @@ def create_app(
             getattr(brain.connectors, str(msg["id"])).disconnect()
             await hub.emit("connectors", connectors=brain.connectors.statuses())
         elif kind == "guide_clicked":
-            brain._spawn(brain.guide_clicked())
+            how = str(msg.get("how") or "clicked")
+            brain._spawn(
+                brain.guide_clicked(how if how in ("clicked", "done", "elsewhere") else "clicked")
+            )
         elif kind == "guide_cancel":
             brain._guide = None
         elif kind == "voice_catalog" and brain.studio:

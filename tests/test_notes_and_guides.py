@@ -97,7 +97,7 @@ async def test_guides_wait_for_the_real_click_then_continue(settings):
 
     await brain.guide_clicked()
     assert rec.of("user")[-1]["text"] == "Clicked Export"  # what the chat shows
-    assert "I clicked 'Export'" in llm.prompts[-1]  # what the model is told
+    assert "I did step 1 (click 'Export')" in llm.prompts[-1]  # what the model is told
     assert rec.of("guide")[-1]["active"] is False and brain._guide is None
 
 

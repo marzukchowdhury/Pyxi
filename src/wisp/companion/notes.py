@@ -398,3 +398,5 @@ class Guide(BaseModel):
     label: str
     rect: tuple[int, int, int, int]
     step: int = 1
+    action: str = "click"
+    total: int | None = None

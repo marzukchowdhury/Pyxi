@@ -481,3 +481,18 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 @keyframes pic-tag-in { from { opacity: 0; transform: translate(-50%, -30%) scale(.7); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 @keyframes pic-pop { from { transform: scale(0); } to { transform: scale(1); } }
 @keyframes pic-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.45); } }
+
+/* Guide steps: the arrow sweeps in from where you're looking, then settles back so the mark
+   stays the star; scroll steps nudge in the direction to go; non-click steps get a Done. */
+.guide-arrow { animation: guide-arrow-settle 3.2s 1.2s var(--ease) forwards; }
+.guide-arrow.drag { animation: none; }
+.guide-arrow.drag .stroke-arrow { stroke-dasharray: 7 6; }
+@keyframes guide-arrow-settle { to { opacity: .65; } }
+.guide-scroll path { fill: none; stroke: var(--ice-hi); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; filter: var(--lum-edge); animation: guide-nudge 1.1s var(--ease) infinite; }
+.guide-scroll path.late { animation-delay: .18s; }
+@keyframes guide-nudge { 0% { transform: translateY(-4px); opacity: .2; } 50% { opacity: 1; } 100% { transform: translateY(8px); opacity: .2; } }
+.guide-label { display: flex; align-items: center; gap: 8px; }
+.guide-done { margin-left: 4px; padding: 3px 10px; border-radius: 999px; border: 1px solid rgba(158,203,255,.5); background: rgba(158,203,255,.16); color: var(--ice-hi); font: 600 12px/1.2 "Inter", ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
+.guide-done:hover { background: rgba(158,203,255,.3); }
+.guide-arrow .stroke-arrow { stroke: #2f6bff; stroke-width: 3.2; filter: drop-shadow(0 0 1.5px rgba(255,255,255,.95)) drop-shadow(0 0 8px rgba(63,140,255,.7)); }
+.guide-arrow .arrow-head { stroke: #2f6bff; stroke-width: 3; filter: drop-shadow(0 0 1.5px rgba(255,255,255,.95)); }

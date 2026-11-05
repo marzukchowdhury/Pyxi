@@ -26,6 +26,12 @@ class Annotation(BaseModel):
     label: str | None = None
     ttl_s: float = 9.0
     guide: bool = False  # a click target Wisp is waiting for you to click
+    # Guide steps: what to do there (click, type, press, scroll, drag, look), what to type or
+    # which keys, and where this step sits ("step 2 of 5").
+    action: str | None = None
+    hint: str | None = None
+    step: int | None = None
+    total: int | None = None
 
 
 def resolve_rect(

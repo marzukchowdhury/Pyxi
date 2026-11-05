@@ -91,21 +91,26 @@ export function Overlay() {
     };
   }, []);
 
-  // Guides: when you click the control Wisp marked, tell the brain so it can look again.
-  useEffect(
-    () =>
-      bridge.onGlobalClick(({ x, y }) => {
-        const target = useOverlay.getState().annotations.find((a) => a.guide && a.rect);
-        if (!target?.rect) return;
-        const [rx, ry, rw, rh] = target.rect;
-        const pad = 6;
-        if (x >= rx - pad && y >= ry - pad && x <= rx + rw + pad && y <= ry + rh + pad) {
-          useOverlay.setState((s) => ({ annotations: s.annotations.filter((a) => !a.guide) }));
-          brain.send({ type: "guide_clicked" });
-        }
-      }),
-    [],
-  );
+  // Guides: a click on the mark is the step done (for click steps); a click anywhere else may
+  // be them going another way, so the brain checks whether the screen changed.
+  useEffect(() => {
+    let lastElsewhere = 0;
+    return bridge.onGlobalClick(({ x, y }) => {
+      const target = useOverlay.getState().annotations.find((a) => a.guide && a.rect);
+      if (!target?.rect) return;
+      const [rx, ry, rw, rh] = target.rect;
+      const pad = 6;
+      const inside = x >= rx - pad && y >= ry - pad && x <= rx + rw + pad && y <= ry + rh + pad;
+      const clicky = !target.action || target.action.endsWith("click");
+      if (inside && clicky) {
+        useOverlay.setState((s) => ({ annotations: s.annotations.filter((a) => !a.guide) }));
+        brain.send({ type: "guide_clicked", how: "clicked" });
+      } else if (!inside && performance.now() - lastElsewhere > 1500) {
+        lastElsewhere = performance.now();
+        brain.send({ type: "guide_clicked", how: "elsewhere" });
+      }
+    });
+  }, []);
 
   useEffect(() => bridge.onDismiss(() => {
     useOverlay.getState().dismissAll();

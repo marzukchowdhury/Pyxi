@@ -12,6 +12,11 @@ export interface Annotation {
   label: string | null;
   ttl_s: number;
   guide?: boolean;
+  /** Guide steps: what to do at the mark, what to type or press, and "step 2 of 5". */
+  action?: "click" | "double_click" | "right_click" | "type" | "press" | "scroll" | "drag" | "look" | null;
+  hint?: string | null;
+  step?: number | null;
+  total?: number | null;
 }
 
 export interface NoteItem {
@@ -326,7 +331,7 @@ export type BrainEvent =
   | { type: "notes"; card: NoteCard }
   | { type: "action"; kind: "open_url" | "copy" | "insert"; value: string }
   | { type: "job_ready"; job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[] }
-  | { type: "guide"; active: boolean; step?: number; goal?: string; label?: string }
+  | { type: "guide"; active: boolean; step?: number; total?: number | null; goal?: string; label?: string; action?: string }
   | { type: "stop_audio" }
   | { type: "annotate"; annotations: Annotation[] }
   | { type: "clear" }
@@ -373,7 +378,7 @@ export type ClientMessage =
   | { type: "set"; key: string; value: unknown }
   | { type: "notice"; message: string }
   | { type: "voice_catalog" }
-  | { type: "guide_clicked" }
+  | { type: "guide_clicked"; how?: "clicked" | "done" | "elsewhere" }
   | { type: "connectors" }
   | { type: "routines" }
   | { type: "routine_delete"; id: string }

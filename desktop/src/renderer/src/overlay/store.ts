@@ -101,7 +101,7 @@ interface OverlayState {
   captions: boolean;
   /** The note card on screen; `revealed` holds the point numbers written so far. */
   notes: { card: NoteCard; revealed: number[]; markers: boolean; at: number } | null;
-  guide: { step: number; goal: string; label: string } | null;
+  guide: { step: number; total: number | null; goal: string; label: string; action: string } | null;
   /** Finished background jobs, shown quietly as cards (newest first). */
   toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[] }[];
   dismissToast(id: string): void;
@@ -430,7 +430,9 @@ brain.on((e: BrainEvent) => {
       break;
     }
     case "guide":
-      useOverlay.setState({ guide: e.active ? { step: e.step ?? 1, goal: e.goal ?? "", label: e.label ?? "" } : null });
+      useOverlay.setState({
+        guide: e.active ? { step: e.step ?? 1, total: e.total ?? null, goal: e.goal ?? "", label: e.label ?? "", action: e.action ?? "click" } : null,
+      });
       if (!e.active) useOverlay.setState((s) => ({ annotations: s.annotations.filter((a) => !a.guide) }));
       break;
     case "job_ready":
