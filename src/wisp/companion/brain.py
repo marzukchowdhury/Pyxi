@@ -421,6 +421,27 @@ class Brain:
     async def _quick_action(self, action: str, value: str) -> str | None:
         if not value.strip():
             return f"{action}: nothing to do."
+        if action == "media":
+            key = value.strip().lower().replace(" ", "").replace("_", "")
+            if key not in (
+                "playpause",
+                "play",
+                "pause",
+                "next",
+                "previous",
+                "volumeup",
+                "volumedown",
+                "mute",
+            ):
+                return (
+                    f"media: I can play/pause, skip, go back, or change the volume, not {value!r}."
+                )
+            if not hands.available():
+                return "media: this only works on Windows."
+            presses = 5 if key.startswith("volume") else 1  # one volume step is barely audible
+            for _ in range(presses):
+                await asyncio.to_thread(hands.Hands().press, key)
+            return None
         if action == "open_url":
             url = safe_url(value)
             if url is None:

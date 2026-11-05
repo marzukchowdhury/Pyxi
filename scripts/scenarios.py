@@ -115,6 +115,15 @@ SCENARIOS = [
         "Can you research whether Sam Altman really posted that, and tell me?",
         "delegate",
     ),
+    ("play a song", "turn_49b75541", "Play Blinding Lights by The Weeknd for me.", "hands"),
+    ("pause music", "turn_49b75541", "Pause the music.", "media"),
+    (
+        "vercel guide",
+        "turn_49b75541",
+        "Can you guide me through adding an environment variable in Vercel? I want to learn how.",
+        "teach",
+    ),
+    ("tidy desktop", "turn_49b75541", "My desktop is a total mess, can you organise it?", "tidy"),
     ("nba finals", "turn_49b75541", "Who won the NBA Finals last year?", "web"),
     ("bitcoin", "turn_49b75541", "What's the price of bitcoin right now?", "web"),
     (
@@ -154,6 +163,24 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         return J()
 
     brain._run_errand = fake_errand  # type: ignore[method-assign]
+
+    async def fake_drive(task, window, come_back=False):  # never touch the real mouse
+        background.append(f"hands: {task[:70]}")
+
+    async def fake_tidy(plan, log_dir):  # never move real files
+        background.append(f"tidy: {plan.summary()[:70]}")
+
+    real_quick = brain._quick_action
+
+    async def fake_quick(action, value):  # never pause their real music
+        if action == "media":
+            background.append(f"media: {value}")
+            return None
+        return await real_quick(action, value)
+
+    brain._drive = fake_drive  # type: ignore[method-assign]
+    brain._tidy_approved = fake_tidy  # type: ignore[method-assign]
+    brain._quick_action = fake_quick  # type: ignore[method-assign]
     # Pretend an account is connected (without touching the real one), so errands can start.
     from otto.llm.base import ToolSpec
 
@@ -230,6 +257,19 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append("didn't find the story")
         if re.search(r"can.?t (confirm|verify|find)", said, re.I):
             problems.append("said it couldn't confirm")
+    if expect == "hands" and not any(b.startswith("hands") for b in background):
+        problems.append("didn't do it with the mouse and keyboard")
+    if re.search(r"can.?t (click|control|use your (mouse|keyboard))", said, re.I):
+        problems.append("said it can't click")
+    if expect == "media" and not any(b.startswith("media") for b in background):
+        problems.append("no media key")
+    if expect == "teach":
+        if any(b.startswith("hands") for b in background):
+            problems.append("did it instead of teaching")
+        if not ({"guide", "quick_action", "web_search"} & set(tools)):
+            problems.append("no guide")
+    if expect == "tidy" and not any(b.startswith("tidy") for b in background):
+        problems.append("no tidy plan")
     from wisp.companion.brain import drop_false_promises
 
     if drop_false_promises(said.split(". ")[-1])[1]:

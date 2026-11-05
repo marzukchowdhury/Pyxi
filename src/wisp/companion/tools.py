@@ -472,9 +472,13 @@ COMPANION_TOOLS += [
         "Do a small thing for the user right now: open_url (a website), open_app (notepad, calculator, chrome, "
         "word, excel, spotify, discord, settings, 'sound settings', 'microphone privacy'...), copy (exact text to "
         "the clipboard), or insert (type a drafted message into the text field they're in, e.g. 'write a reply "
-        "to this'). Only when they asked for it.",
+        "to this'), or media (the music or video that's playing, in any app: value playpause, next, "
+        "previous, volumeup, volumedown or mute; instant, no mouse). Only when they asked for it.",
         {
-            "action": {"type": "string", "enum": ["open_url", "open_app", "copy", "insert"]},
+            "action": {
+                "type": "string",
+                "enum": ["open_url", "open_app", "copy", "insert", "media"],
+            },
             "value": {"type": "string", "description": "The URL, app name, or text."},
         },
         ["action", "value"],
