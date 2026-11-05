@@ -36,7 +36,7 @@ from otto.types import ToolCall, Usage
 from PIL import Image
 from pydantic import ValidationError
 
-from wisp import hands, web, windows
+from wisp import hands, tidy, web, windows
 from wisp.agents import AgentProfile, AgentRegistry, Job, JobManager
 from wisp.agents.jobs import Handoff
 from wisp.companion import prompts
@@ -238,6 +238,55 @@ class Brain:
             await self.say_line(f"That didn't go through. {friendly_error(exc)}")
             return
         await self.say_line(line if not line.startswith(("CREATED", "SENT")) else "Done.")
+
+    async def _tidy(self, args: dict[str, Any]) -> str | None:
+        """Look, then plan, then one Allow card, then move (with an undo log)."""
+        log_dir = self.settings.data_dir / "tidy"
+        if args.get("undo"):
+            return f"tidy_folder: {await asyncio.to_thread(tidy.undo_last, log_dir)} Tell them."
+        name = str(args.get("folder") or "desktop")
+        folder = tidy.known_folder(name) or (Path(name) if Path(name).is_dir() else None)
+        if folder is None:
+            return f"tidy_folder: I don't know a folder called {name!r}; try desktop or downloads."
+        groups = [g for g in args.get("groups") or [] if isinstance(g, dict)]
+        if not groups:
+            listing = await asyncio.to_thread(tidy.listing, folder)
+            return (
+                f"tidy_folder: {listing}\nNow call tidy_folder again with groups (and say one short "
+                "line about what you see, e.g. the funniest thing in there)."
+            )
+        plan = await asyncio.to_thread(tidy.make_plan, folder, groups)
+        if not plan.moves:
+            return "tidy_folder: nothing in that plan matched real files; list the folder again."
+        self._spawn(self._tidy_approved(plan, log_dir))
+        return (
+            f"Waiting for them to approve: {plan.summary()} Tell them it's ready on the card; don't "
+            "say it's done."
+        )
+
+    async def _tidy_approved(self, plan: tidy.Plan, log_dir: Path) -> None:
+        ok = await self.hub.request(
+            "confirm",
+            timeout=600,
+            job_id="",
+            agent="Wisp",
+            action=plan.summary(),
+            reason=f"In {plan.folder.name}. Files are only moved, never deleted or overwritten. "
+            "Say 'undo that' and I'll put everything back.",
+        )
+        if not ok:
+            await self.say_line("No problem, I left it as it is.")
+            return
+        moved, failed, _ = await asyncio.to_thread(tidy.apply, plan, log_dir)
+        folders = len({into for _, into in plan.moves})
+        tail = f" {len(failed)} were open somewhere, so I left those." if failed else ""
+        self.history = [
+            *self.history[-11:],
+            (f"(tidied {plan.folder})", f"(moved {moved} files into {folders} folders)"),
+        ]
+        await self.say_line(
+            f"Done. {moved} files are in {folders} folders now.{tail} Say undo if you want it back."
+        )
 
     def _hands_always(self) -> bool:
         try:
@@ -1587,6 +1636,8 @@ class Brain:
             return await self._arrange_windows(args)
         if name == "use_computer":
             return await self._use_computer(args)
+        if name == "tidy_folder":
+            return await self._tidy(args)
         if name == "quick_action":
             return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
         if name == "start_walkthrough":

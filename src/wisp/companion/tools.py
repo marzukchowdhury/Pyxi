@@ -475,6 +475,36 @@ COMPANION_TOOLS += [
         ["action", "value"],
     ),
     _tool(
+        "tidy_folder",
+        "Organise a messy folder (their Desktop, Downloads, Documents, Pictures) into tidy subfolders. "
+        "First call it with just `folder` to see what's there (the list comes back to you); then call it "
+        "again with `groups`: 3-8 folders with plain names by what things are (Screenshots, Documents, "
+        "Images, Videos, Installers, Archives, Shortcuts, or a project or topic when files clearly belong "
+        "together), every loose file in one group, leaving out only files that already fit nowhere. Sort "
+        "like a sharp assistant would: when several files share a topic, give it its own folder "
+        "(Resumes, Bank statements, Immigration forms, Invoices) instead of one big Documents pile. They "
+        "see one Allow card with the plan. Files are only moved, never deleted or overwritten, and "
+        "`undo` puts the last tidy back exactly.",
+        {
+            "folder": {
+                "type": "string",
+                "description": "desktop, downloads, documents or pictures (default desktop).",
+            },
+            "groups": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "folder": {"type": "string", "description": "e.g. 'Screenshots'"},
+                        "files": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["folder", "files"],
+                },
+            },
+            "undo": {"type": "boolean", "description": "Put the last tidy back."},
+        },
+    ),
+    _tool(
         "use_computer",
         "Do it yourself on their PC with the mouse and keyboard, in any app: play a song (in YouTube Music "
         "from the taskbar, or a new tab, then come back), search Maps, fill in or format a spreadsheet, "
