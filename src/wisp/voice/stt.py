@@ -45,6 +45,34 @@ def decode_audio(data: bytes, rate: int = 16000):
     return np.concatenate(chunks).astype(np.float32) / 32768.0
 
 
+_NVIDIA_READY = False
+
+
+def _find_nvidia_libraries() -> None:
+    """Let the GPU path find cuBLAS and cuDNN installed as pip wheels (nvidia-cublas-cu12,
+    nvidia-cudnn-cu12): they live in site-packages/nvidia/*/bin, which Windows doesn't search.
+    Without them Whisper runs on the CPU, about five times slower."""
+    global _NVIDIA_READY
+    if _NVIDIA_READY:
+        return
+    _NVIDIA_READY = True
+    import os
+    import sys
+    from pathlib import Path
+
+    if sys.platform != "win32":
+        return
+    try:
+        import nvidia  # the namespace package the wheels install into
+    except ImportError:
+        return
+    for root in getattr(nvidia, "__path__", []):
+        for bin_dir in Path(root).glob("*/bin"):
+            if any(bin_dir.glob("*.dll")):
+                os.add_dll_directory(str(bin_dir))
+                os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+
+
 class Transcriber:
     def __init__(self, config: VoiceConfig) -> None:
         self.config = config
@@ -52,6 +80,7 @@ class Transcriber:
         self._lock = asyncio.Lock()
 
     def _load(self, name: str):
+        _find_nvidia_libraries()
         from faster_whisper import WhisperModel
 
         device = self.config.stt_device
