@@ -163,6 +163,10 @@ class Brain:
         self._visual_retry = False
         self._noted: set[int] = set()
         self._narrated_card = ""
+        self._turn_gen = 0
+        self._turn_id = ""
+        self._synthetic = False
+        self._pending_say = ""
         self._placed = Placed()  # what's on screen now (cards, stages), so new things keep clear
         self.overlay_in_capture = (
             False  # the desktop app says whether screen shares see the overlay
@@ -192,13 +196,15 @@ class Brain:
             )
             if studio:
                 studio.detected_language = spoken
-        except Exception as exc:
+        except Exception:
             log.exception("transcription failed")
-            await self.hub.emit("error", message=f"I couldn't hear that: {exc}")
+            await self.hub.emit("error", message="I couldn't make out the audio. Try again?")
+            self._prefetch = None
             await self.set_state("idle")
             return
         await self.hub.emit("transcript", text=text, seconds=round(took, 2))
         if not text.strip():
+            self._prefetch = None  # the next question looks at the screen afresh
             await self.say_line("Sorry, I didn't catch that.")
             await self.set_state("idle")
             return
@@ -286,10 +292,24 @@ class Brain:
         if self._watcher and not self._watcher.done():
             self._watcher.cancel()
         drawn_on = self._ctx.window.title
+        wx, wy, ww, wh = self._ctx.window.rect
+        centre = (wx + ww // 2, wy + wh // 2)
+        on_top = getattr(self.screen, "window_at_point", None)
 
         async def watch() -> None:
+            covered = 0
             for _ in range(600):  # up to ~6 minutes
                 await asyncio.sleep(0.6)
+                # Alt-tab to another maximised app: same title, but the drawings now sit on top
+                # of someone else's window. Two checks in a row, so a passing popup doesn't count.
+                if hwnd and on_top and ww > 0:
+                    top = on_top(*centre)
+                    covered = covered + 1 if top and top != hwnd else 0
+                    if covered >= 2:
+                        log.info("clearing drawings: another window now covers %r", drawn_on)
+                        await self.hub.emit("clear")
+                        self._placed.put("card", None, 0)
+                        return
                 now = title_of()
                 if now is None:
                     if hwnd and by_handle:  # the window closed: its drawings go too
@@ -365,6 +385,11 @@ class Brain:
     async def _build_from_brief(self, args: dict[str, Any]) -> None:
         """Build the model with the 3D builder, then show it; the notch says it's being made."""
         subject = str(args.get("subject") or "the model")[:80]
+        if self.turns.spent_today() >= self.settings.budget.daily_cost_usd:
+            await self.say_line(
+                "I'd love to build that, but today's budget is used up.", record=False
+            )
+            return
         brief = f"{subject}. {args.get('show', '')}".strip()
         if args.get("beats"):
             brief += "\nBeats: " + "; ".join(str(b) for b in args["beats"][:6])
@@ -382,17 +407,21 @@ class Brain:
         )
         try:
             result = await build_model(self._builder_llm(), brief, context)
-        except Exception as exc:
+        except Exception:
             log.exception("3D build failed")
-            await self.jobs.settle(job, ok=False, summary=str(exc)[:200])
-            await self.say_line("Hmm, that model wouldn't come together. Want me to try again?")
+            await self.jobs.settle(job, ok=False, summary="The model wouldn't come together.")
+            await self.say_line(
+                "Hmm, that model wouldn't come together. Want me to try again?", record=False
+            )
             return
         self.turns.add_spend("model_3d", result.cost_usd)
         await self.jobs.settle(
             job, ok=result.model is not None, summary=subject, cost=result.cost_usd
         )
         if result.model is None:
-            await self.say_line("Hmm, that model wouldn't come together. Want me to try again?")
+            await self.say_line(
+                "Hmm, that model wouldn't come together. Want me to try again?", record=False
+            )
             return
         # Let Wisp finish its opening line first: the model's narration must never talk over it
         # (they can play from different screens).
@@ -401,7 +430,7 @@ class Brain:
         wait = self._talking_until - time.monotonic()
         if wait > 0:
             await asyncio.sleep(min(wait, 12.0))
-        await self.show_object(result.model, restart=True)
+        await self.show_object(result.model, restart=True, background=True)
 
     def _errand_llm(self) -> LLMProvider:
         """Errands can use a stronger model than conversation (WISP_JOB_MODEL), if set."""
@@ -501,7 +530,7 @@ class Brain:
             if self._lock.locked() or self.state != "idle":
                 break
             self.routines.mark_ran(r, now)
-            await self.turn(f"(Routine: {r.task})", shown=f"Routine: {r.task[:80]}")
+            await self.turn(f"(Routine: {r.task})", shown=f"Routine: {r.task[:80]}", synthetic=True)
             ran += 1
         if ran:
             await self.hub.emit("routines", routines=self.routines.public())
@@ -517,13 +546,18 @@ class Brain:
             f"(I clicked '{guide.label}', step {guide.step}. Look at the screen now and guide me to the next "
             f"step toward: {guide.goal}. If that's done, tell me and call guide with done=true.)",
             shown=f"Clicked {guide.label}",
+            synthetic=True,
         )
 
     def interrupt(self) -> None:
         self._speech_gen += 1
         self._spawn(self.hub.emit("stop_audio"))
 
-    async def turn(self, user_text: str, *, shown: str | None = None) -> None:
+    async def turn(
+        self, user_text: str, *, shown: str | None = None, synthetic: bool = False
+    ) -> None:
+        """``synthetic``: a routine or a guide step, not words the user actually said (so an
+        address in it never counts as the user naming that person)."""
         async with self._lock:
             self._ctx, self._images, self._usage, self._said, self._calls = (
                 None,
@@ -540,7 +574,11 @@ class Brain:
             self._narrated_card = ""
             self._visual_retry = False
             self._user_text = user_text
+            self._synthetic = synthetic
+            self._pending_say = ""  # an answer held back during a lookup round
+            self._turn_gen = self._speech_gen  # push-to-talk bumps the gen: this turn is then stale
             turn_id = "turn_" + secrets.token_hex(4)
+            self._turn_id = turn_id
             started = time.monotonic()
             await self.hub.emit("user", text=shown or user_text, turn_id=turn_id)
             error = None
@@ -600,8 +638,15 @@ class Brain:
     def _build_graph(self) -> Any:
         async def perceive(state: TurnState) -> TurnState:
             await self.set_state("looking")
-            ctx = await self._prefetch if self._prefetch else await self._capture()
-            self._prefetch = None
+            task, self._prefetch = self._prefetch, None
+            ctx = None
+            if task is not None:
+                try:
+                    ctx = await task
+                except Exception:
+                    log.warning("screen prefetch failed; capturing again")
+            if ctx is None:
+                ctx = await self._capture()
             self._ctx = ctx
             await self.hub.emit(
                 "capture",
@@ -632,6 +677,7 @@ class Brain:
                 )
                 return {"stop": "daily budget", "needs_more": False}
             await self.set_state("thinking")
+            self._say_in_board = False  # a board only takes over the reply of its own round
             wisp = self.registry.get("wisp")
             system = prompts.system_prompt(
                 wisp.persona if wisp else "", self.registry.roster_text()
@@ -663,7 +709,7 @@ class Brain:
             async def speak_early(call: ToolCall) -> None:
                 # Streamed: start talking the moment the spoken line is complete, while the cue
                 # card and drawings are still arriving.
-                if call.name == "say" and not early:
+                if call.name == "say" and not early and self._speech_gen == self._turn_gen:
                     early.add(call.id)
                     self._calls.append(
                         {
@@ -691,6 +737,9 @@ class Brain:
             )
             self._usage = self._usage + response.usage
             round_no = state.get("round", 0) + 1
+            if self._speech_gen != self._turn_gen:
+                # They pressed talk while this was thinking: drop it, the new question wins.
+                return {"round": round_no, "stop": "interrupted", "needs_more": False}
             if not response.tool_calls:
                 if response.text:
                     self._speak(response.text)
@@ -722,12 +771,23 @@ class Brain:
                 if call.id in early:
                     continue  # already said, while the rest was still streaming in
                 if call.name == "say" and looks_up and self._said:
-                    continue  # mid-lookup chatter ("my first search came up empty"): say it once, at the end
+                    # Mid-lookup chatter ("my first search came up empty"): held back, and only
+                    # said if the turn ends before a newer answer.
+                    self._pending_say = str(call.arguments.get("text", ""))
+                    continue
                 if call.name == "say" and retrying and self._said:
                     continue  # a retried drawing mustn't make Wisp say its reply twice
                 self._calls.append(
                     {"round": round_no, "tool": call.name, "arguments": call.arguments}
                 )
+                if call.arguments.get("__unparseable__"):
+                    # Cut off by the length limit or garbled in transit: ask for it again.
+                    notes.append(
+                        f"TOOL_INVALID: your {call.name} call was cut off or malformed. "
+                        f"Call {call.name} again, shorter."
+                    )
+                    needs_more = self._visual_retry = True
+                    continue
                 try:
                     note = await self._act(call.name, dict(call.arguments))
                 except Exception as exc:
@@ -747,6 +807,10 @@ class Brain:
                     needs_more = True
                 if note and note.startswith(("SCENE_INVALID", "MODEL_INVALID", "SKETCH_INVALID")):
                     self._visual_retry = True
+                # A tool that couldn't do its job ("errand: no accounts are connected yet") goes
+                # back to the model, so the user hears what happened instead of silence.
+                if note and note.startswith(f"{call.name}:") and call.name not in QUIET_NOTES:
+                    needs_more = True
             self._narrate_card()
             return {
                 "round": round_no,
@@ -765,6 +829,9 @@ class Brain:
             return "finish"
 
         async def finish(state: TurnState) -> TurnState:
+            if self._pending_say and state.get("stop") != "interrupted":
+                self._speak(self._pending_say)  # the latest answer from a lookup round
+                self._pending_say = ""
             if not self._said and not state.get("stop"):
                 card = self._turn_card
                 if card is not None:
@@ -794,11 +861,13 @@ class Brain:
         ctx = self._ctx
         if name == "say":
             text = strip_filler(str(args.get("text", "")))
+            self._pending_say = ""
             self._noted |= {
                 int(m.group(2)) for m in MARKER.finditer(text) if m.group(1).lower() == "note"
             }
             if self._say_in_board:
-                return None  # already being said, step by step, by the drawing
+                self._said.append(split_markers(text)[0])  # said by the drawing, step by step
+                return None
             if self._visual_turn:
                 text = visual_opener(text)
             self._speak(text)
@@ -828,6 +897,7 @@ class Brain:
             if ann is None:
                 return f"{name}: couldn't find that on screen."
             await self.hub.emit("annotate", annotations=[ann.model_dump()])
+            self._watch_window()
             return None
         if name == "arrow":
             a = resolve_point(ctx, args.get("from_element_id"), args.get("from_xy"))
@@ -840,6 +910,7 @@ class Brain:
                     Annotation(kind="arrow", at=a, to=b, label=args.get("label")).model_dump()
                 ],
             )
+            self._watch_window()
             return None
         if name == "clear_drawings":
             await self.hub.emit("clear")
@@ -979,7 +1050,7 @@ class Brain:
         if name == "delegate":
             then = (
                 Handoff(agent=args["then_agent"], task=args.get("then_task") or "Use the result.")
-                if args.get("then_agent")
+                if args.get("then_agent") and self.registry.get(str(args["then_agent"]))
                 else None
             )
             files = [str(f) for f in args.get("files", []) or [] if Path(str(f)).is_file()]
@@ -1075,7 +1146,10 @@ class Brain:
                 return "errand: say what to do."
             if not self.connectors.tools():
                 return "errand: no accounts are connected yet; tell the user to connect one in Settings."
-            self._spawn(self._run_errand(task, self._user_text))
+            if self.turns.spent_today() >= self.settings.budget.daily_cost_usd:
+                return "errand: today's budget is used up, so I can't start it. Tell the user."
+            words = "" if getattr(self, "_synthetic", False) else self._user_text
+            self._spawn(self._run_errand(task, words))
             return None
         if name == "quick_action":
             return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
@@ -1129,11 +1203,15 @@ class Brain:
         return f"Unknown tool {name}."
 
     # ================================================================== speech
-    def _speak(self, text: str, *, agent: str = "Wisp", voice: str | None = None) -> None:
-        """Queue speech behind anything already being said."""
+    def _speak(
+        self, text: str, *, agent: str = "Wisp", voice: str | None = None, record: bool = True
+    ) -> None:
+        """Queue speech behind anything already being said. ``record=False`` for background
+        lines (a finished build, an error) that aren't part of the current turn."""
         if not text.strip():
             return
-        self._said.append(split_markers(text)[0])
+        if record:
+            self._said.append(split_markers(text)[0])
         previous, gen, ctx = self._speech, self._speech_gen, self._ctx
 
         async def run() -> None:
@@ -1143,10 +1221,14 @@ class Brain:
 
         self._speech = asyncio.create_task(run())
 
-    async def say_line(self, text: str, *, agent: str = "Wisp", voice: str | None = None) -> None:
-        self._speak(text, agent=agent, voice=voice)
+    async def say_line(
+        self, text: str, *, agent: str = "Wisp", voice: str | None = None, record: bool = True
+    ) -> None:
+        self._speak(text, agent=agent, voice=voice, record=record)
         if self._speech:
             await asyncio.gather(self._speech, return_exceptions=True)
+        if not self._lock.locked():
+            await self.set_state("idle")  # said outside a turn: don't stay "speaking" forever
 
     async def _stream_speech(
         self, text: str, *, agent: str, voice: str | None, gen: int, ctx: ScreenContext | None
@@ -1243,13 +1325,17 @@ class Brain:
             audio_key=audio_key,
             place=list(place) if place else None,
         )
+        self._watch_window()
         self._spawn(self._narrate_beats(audio_key, [s.narration for s in board.steps]))
 
-    async def show_object(self, model: ObjectScene, *, restart: bool) -> None:
+    async def show_object(
+        self, model: ObjectScene, *, restart: bool, background: bool = False
+    ) -> None:
         """Put a 3D model on screen. Edits keep the id (the view keeps its camera); new beats get
         a new audio key so old narration can't play over the new explanation."""
         self._object = model
-        self._visual_turn = True
+        if not background:  # a finished background build mustn't reshape the turn in progress
+            self._visual_turn = True
         place = place_stage(self._ctx, self._placed.others("stage"))
         self._placed.put("stage", place, 90.0)
         audio_key = (
@@ -1484,6 +1570,8 @@ _FILLER = re.compile(
 )
 
 
+# Tools whose notes are advice for next time, not a problem worth another round.
+QUIET_NOTES = {"say", "explain_on_screen", "point", "circle", "highlight", "arrow", "remember"}
 THREE_D_TOOLS = {"build_3d_model", "edit_3d_model", "explain_in_3d", "explode_view"}
 _ASKS_3D = re.compile(
     r"\b(3d|3-d|three[- ]?d|in three dimensions|(build|make|show) (me )?(a |the )?model|render|build (it|this|me|one|a|an|the)|"
@@ -1557,7 +1645,9 @@ def wants_3d(user_text: str, *, has_model: bool = False) -> bool:
 def visual_opener(text: str, limit: int = 200) -> str:
     """What Wisp says before a drawing or model takes over: the verdict and a hook (two short
     sentences at most), minus empty openers like "There you go." that say nothing."""
-    sentences = [s for s in split_sentences(text) if not _FILLER.match(s.strip())]
+    sentences = [
+        s for s in split_sentences(text) if not (_FILLER.match(s.strip()) and len(s.strip()) < 40)
+    ]
     out = ""
     for s in sentences[:2]:
         if out and len(out) + 1 + len(s) > limit:

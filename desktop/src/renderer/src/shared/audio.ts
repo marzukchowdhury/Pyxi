@@ -1,7 +1,29 @@
 // Audio: a queue for Wisp's sentences (with "this sentence started" callbacks, so drawings
 // land exactly when the words do), a level meter for the buddy's mouth, and push-to-talk.
 
-type Clip = { b64: string | null; text: string; onStart?: () => void; onEnd?: () => void };
+import { bridge } from "./bridge";
+
+/** ``onCancel``: the clip was stopped before it finished (an interruption), so whatever was
+ * waiting for ``onEnd`` (a model's next beat, a drawing's next step) can pause instead of hanging. */
+export type Clip = {
+  b64: string | null;
+  text: string;
+  onStart?: () => void;
+  onEnd?: () => void;
+  onCancel?: () => void;
+  /** Who queued it (a model, a drawing), so it can stop its own lines without cutting Wisp off. */
+  owner?: string;
+};
+
+/** What the overlay needs from a voice: the real player, or a stand-in on other monitors. */
+export interface Voice {
+  muted: boolean;
+  readonly busy: boolean;
+  enqueue(clip: Clip): void;
+  /** No owner: stop everything (an interruption). With an owner: only that owner's clips. */
+  stop(owner?: string): void;
+  level(): number;
+}
 
 let ctx: AudioContext | null = null;
 function audioCtx(): AudioContext {
@@ -17,8 +39,9 @@ function b64ToBuffer(b64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-export class AudioQueue {
+export class AudioQueue implements Voice {
   private queue: Clip[] = [];
+  private playingClip: Clip | null = null;
   private playing = false;
   private current: AudioBufferSourceNode | null = null;
   private analyser: AnalyserNode | null = null;
@@ -48,9 +71,28 @@ export class AudioQueue {
     if (!this.playing) void this.next();
   }
 
-  stop(): void {
+  private cutCurrent = false;
+
+  stop(owner?: string): void {
+    if (owner !== undefined) {
+      const mine = this.queue.filter((c) => c.owner === owner);
+      this.queue = this.queue.filter((c) => c.owner !== owner);
+      mine.forEach((c) => c.onCancel?.());
+      if (this.playingClip?.owner === owner) {
+        this.cutCurrent = true;
+        try {
+          this.current?.stop();
+        } catch {
+          /* already stopped */
+        }
+      }
+      return;
+    }
     this.gen++;
+    const dropped = [...(this.playingClip ? [this.playingClip] : []), ...this.queue];
+    this.playingClip = null;
     this.queue = [];
+    dropped.forEach((c) => c.onCancel?.());
     try {
       this.current?.stop();
     } catch {
@@ -68,17 +110,22 @@ export class AudioQueue {
     }
     this.playing = true;
     const gen = this.gen;
+    this.playingClip = clip;
     clip.onStart?.();
     try {
       // Wisp has one voice. With no audio (muted, or the voice failed) the words still take
       // their time on screen, but no other voice ever stands in.
       if (this.muted || !clip.b64) await this.silent(clip);
-      else await this.playWav(clip.b64);
+      else await this.playWav(clip.b64, gen);
     } catch (err) {
       console.warn("audio failed", err);
     }
     if (gen !== this.gen) return;
-    clip.onEnd?.();
+    this.playingClip = null;
+    if (this.cutCurrent) {
+      this.cutCurrent = false;
+      clip.onCancel?.();
+    } else clip.onEnd?.();
     void this.next();
   }
 
@@ -94,9 +141,10 @@ export class AudioQueue {
     await new Promise((r) => setTimeout(r, Math.max(300, seconds * 1000)));
   }
 
-  private async playWav(b64: string): Promise<void> {
+  private async playWav(b64: string, gen: number): Promise<void> {
     const ac = audioCtx();
     const buffer = await ac.decodeAudioData(b64ToBuffer(b64));
+    if (gen !== this.gen) return; // stopped while decoding: this sentence must not start
     const src = ac.createBufferSource();
     src.buffer = buffer;
     this.analyser ??= ac.createAnalyser();
@@ -108,6 +156,47 @@ export class AudioQueue {
       src.onended = () => resolve();
       src.start();
     });
+  }
+}
+
+/** The voice on a second monitor's overlay: every clip is played by the main screen's queue
+ * (through Electron's main process), so Wisp has exactly one voice, however many monitors. */
+export class RemoteVoice implements Voice {
+  muted = false;
+  private pending = new Map<string, Clip>();
+  private n = 0;
+
+  constructor() {
+    bridge.onVoiceEvent((m) => {
+      const clip = this.pending.get(m.id);
+      if (!clip) return;
+      if (m.kind === "start") return clip.onStart?.();
+      this.pending.delete(m.id);
+      if (m.kind === "end") clip.onEnd?.();
+      else clip.onCancel?.();
+    });
+  }
+
+  get busy(): boolean {
+    return this.pending.size > 0;
+  }
+
+  level(): number {
+    return 0;
+  }
+
+  enqueue(clip: Clip): void {
+    const id = `${Date.now().toString(36)}-${this.n++}`;
+    this.pending.set(id, clip);
+    bridge.voicePlay({ id, b64: clip.b64, text: clip.text });
+  }
+
+  stop(owner?: string): void {
+    const ids = [...this.pending].filter(([, c]) => owner === undefined || c.owner === owner).map(([id]) => id);
+    bridge.voiceStop(owner === undefined ? undefined : ids);
+    const dropped = ids.map((id) => this.pending.get(id)!);
+    ids.forEach((id) => this.pending.delete(id));
+    dropped.forEach((c) => c.onCancel?.());
   }
 }
 
@@ -123,9 +212,18 @@ export class Recorder {
   }
 
   /** ``autoStop``: end on ~1.2 s of silence after speech (toggle mode). Hold mode passes false. */
+  private starting = false;
+  private stopAsked = false;
+
   async start(onDone: (b64: string, mime: string) => void, autoStop = true): Promise<void> {
-    if (this.active) return;
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    if (this.active || this.starting) return; // a second press while the mic opens is ignored
+    this.starting = true;
+    this.stopAsked = false;
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } finally {
+      this.starting = false;
+    }
     const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
     this.rec = new MediaRecorder(this.stream, { mimeType: mime });
     this.chunks = [];
@@ -141,10 +239,16 @@ export class Recorder {
     };
     this.rec.start(250);
     this.watchSilence(autoStop);
+    // Released while the mic was still opening (a quick tap): stop now, don't record a minute.
+    if (this.stopAsked) {
+      this.stopAsked = false;
+      this.rec.stop();
+    }
   }
 
   stop(): void {
-    if (this.active) this.rec?.stop();
+    if (this.starting) this.stopAsked = true;
+    else if (this.active) this.rec?.stop();
   }
 
   private watchSilence(autoStop: boolean): void {

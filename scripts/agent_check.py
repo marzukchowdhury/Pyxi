@@ -7,6 +7,7 @@ Prints each step, the result, the cost and the time. Never prints the API key.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import time
 
@@ -44,7 +45,9 @@ async def main() -> None:
 
     hub.connect(show)
     brain = Brain(WispSettings(), hub)
-    brain.jobs.headed = False  # don't pop a browser onto the user's screen
+    brain.jobs.headed = bool(
+        os.getenv("HEADED")
+    )  # hidden unless asked: don't pop windows on screen
     print("agents:", [(a.name, a.role) for a in brain.registry.all()])
     started = time.monotonic()
     job = await brain.jobs.start(agent, task, start_url=start_url)

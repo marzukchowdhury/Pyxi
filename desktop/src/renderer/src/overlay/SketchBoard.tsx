@@ -27,7 +27,12 @@ export function SketchBoard() {
   const close = useOverlay((s) => s.closeSketch);
   const [step, setStep] = useState(0);
   const [done, setDone] = useState(false);
-  const [take, setTake] = useState(0); // bumps on replay so every stroke draws again
+  // Replays of *this* board (a new board always starts at 0, so it's never silently skipped).
+  const [replay, setReplay] = useState({ of: "", n: 0 });
+  const take = sketch && replay.of === sketch.audioKey ? replay.n : 0;
+  const setTake = (n: number) => sketch && setReplay({ of: sketch.audioKey, n });
+  const [stalled, setStalled] = useState(false); // interrupted: waits a while, then goes
+  const clipGen = useRef(0);
   const spoken = useRef(new Set<number>());
   const inkedAt = useRef<number[]>([]);
   const started = useRef("");
@@ -39,8 +44,11 @@ export function SketchBoard() {
     spoken.current = new Set();
     inkedAt.current = [];
     started.current = "";
+    clipGen.current++;
+    voice.stop("sketch"); // the previous board's lines, not Wisp's reply
     setStep(0);
     setDone(false);
+    setStalled(false);
   }, [key]);
 
   // Size and place: fill the brain's empty spot, keep the drawing's 100 x 64 shape, and make
@@ -94,7 +102,14 @@ export function SketchBoard() {
     const speak = (clip?: { audio: string | null; text: string }) => {
       if (started.current === k) return;
       started.current = k;
-      voice.enqueue({ b64: clip?.audio ?? null, text: clip?.text ?? s.narration, onEnd: () => spoken.current.add(step) });
+      const g = clipGen.current;
+      voice.enqueue({
+        b64: clip?.audio ?? null,
+        text: clip?.text ?? s.narration,
+        owner: "sketch",
+        onEnd: () => spoken.current.add(step),
+        onCancel: () => g === clipGen.current && setStalled(true),
+      });
     };
     const clip = take === 0 ? audio?.[step] : undefined; // a replay is quiet: the ink tells it
     if (take > 0) {
@@ -119,7 +134,7 @@ export function SketchBoard() {
     return () => window.clearInterval(id);
   }, [board, step, key]);
 
-  const linger = useLinger(done, close);
+  const linger = useLinger(done || stalled, close, done ? 2500 : 15000);
   if (!sketch || !board) return null;
 
   const ask = (shape: SketchShape) => {

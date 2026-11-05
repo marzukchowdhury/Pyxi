@@ -29,6 +29,9 @@ class BrainSocket {
     };
     ws.onclose = () => {
       this.connected = false;
+      // A question or recording from before the drop would be answered minutes late: keep only
+      // settings changes.
+      this.queue = this.queue.filter((m) => m.startsWith('{"type":"set"'));
       this.statusHandlers.forEach((fn) => fn(false));
       setTimeout(() => this.connect(), this.retry);
       this.retry = Math.min(this.retry * 2, 8000);

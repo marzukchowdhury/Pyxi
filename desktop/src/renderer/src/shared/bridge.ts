@@ -42,6 +42,19 @@ export interface Bridge {
   ptt(): void;
   openExternal(url: string): void;
   displays(): Promise<DisplayInfo[]>;
+  /** One voice across monitors: other overlays send clips to the main screen's player. */
+  voicePlay(clip: { id: string; b64: string | null; text: string }): void;
+  onVoicePlay(fn: (clip: { id: string; from: number; b64: string | null; text: string }) => void): () => void;
+  voiceEvent(msg: { id: string; from: number; kind: "start" | "end" | "cancel" }): void;
+  onVoiceEvent(fn: (msg: { id: string; kind: "start" | "end" | "cancel" }) => void): () => void;
+  /** No ids: stop everything. With ids: only those clips from this window. */
+  voiceStop(ids?: string[]): void;
+  onVoiceStop(fn: (msg: { from: number; ids?: string[] }) => void): () => void;
+  /** The main screen started saying a line: other monitors reveal its cue-card points now. */
+  sayStarted(key: string): void;
+  onSayStarted(fn: (key: string) => void): () => void;
+  /** Hand the keyboard back to the app the user was in. */
+  releaseFocus(): void;
   hotkeys(): Promise<Record<"talk" | "panel" | "dismiss" | "privacy" | "hold", string | null>>;
 }
 
@@ -55,6 +68,15 @@ function mockBridge(): Bridge {
   const pttListeners = new Set<() => void>();
   const noop = () => () => {};
   return {
+    voicePlay: () => {},
+    onVoicePlay: noop,
+    voiceEvent: () => {},
+    onVoiceEvent: noop,
+    voiceStop: () => {},
+    onVoiceStop: noop,
+    sayStarted: () => {},
+    onSayStarted: noop,
+    releaseFocus: () => {},
     electron: false,
     onCursor(fn) {
       const h = (e: MouseEvent) => fn({ x: e.clientX, y: e.clientY });

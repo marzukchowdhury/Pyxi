@@ -36,4 +36,13 @@ contextBridge.exposeInMainWorld("wispBridge", {
   openExternal: (url: string) => ipcRenderer.send("open-external", url),
   displays: () => ipcRenderer.invoke("displays"),
   hotkeys: () => ipcRenderer.invoke("hotkeys"),
+  voicePlay: (clip: unknown) => ipcRenderer.send("voice-play", clip),
+  onVoicePlay: (fn: Listener<unknown>) => on("voice-play", fn),
+  voiceEvent: (msg: unknown) => ipcRenderer.send("voice-event", msg),
+  onVoiceEvent: (fn: Listener<unknown>) => on("voice-event", fn),
+  voiceStop: (ids?: string[]) => ipcRenderer.send("voice-stop", ids),
+  onVoiceStop: (fn: Listener<unknown>) => on("voice-stop", fn),
+  sayStarted: (key: string) => ipcRenderer.send("say-started", key),
+  onSayStarted: (fn: Listener<string>) => on("say-started", fn),
+  releaseFocus: () => ipcRenderer.send("release-focus"),
 });

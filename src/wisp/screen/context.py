@@ -66,8 +66,8 @@ class UIElement:
         x, y, w, h = self.rect
         return x + w // 2, y + h // 2
 
-    def describe(self) -> str:
-        x, y, w, h = self.rect
+    def describe(self, to_image=None) -> str:
+        x, y, w, h = to_image(self.rect) if to_image else self.rect
         name = (
             "(password field)" if self.is_password else f'"{self.name[:70]}"' if self.name else ""
         )
@@ -122,14 +122,29 @@ class ScreenContext:
             return f"The user is in a private app ({self.excluded}). You cannot see it, and you must not ask what is in it."
         w = self.window
         lines = [f"Foreground app: {w.app} | window: {w.title[:120]!r}"]
+        s = self.model_scale or 1.0
+
+        def img(r: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+            # Same units as the screenshot the model sees (and the px it answers in).
+            x, y, ww, hh = r
+            return (
+                round((x - self.origin[0]) / s),
+                round((y - self.origin[1]) / s),
+                round(ww / s),
+                round(hh / s),
+            )
+
         if self.screenshot is not None:
-            lines.append(f"Screen: {self.screenshot.width}x{self.screenshot.height} physical px")
+            lines.append(
+                f"Screenshot: {round(self.screenshot.width / s)}x{round(self.screenshot.height / s)} px "
+                "(every position below is in these screenshot px)"
+            )
         if self.elements:
             lines.append(
                 f"UI elements ({min(len(self.elements), max_elements)} of {len(self.elements)}, from the accessibility tree):"
             )
             lines.extend(
-                "  " * min(e.depth, 6) + e.describe() for e in self.elements[:max_elements]
+                "  " * min(e.depth, 6) + e.describe(img) for e in self.elements[:max_elements]
             )
         else:
             lines.append("(No accessibility tree available: rely on the screenshot.)")
@@ -139,7 +154,7 @@ class ScreenContext:
                 "so frame or underline these, or quote their exact words):"
             )
             lines.extend(
-                f'[{t.id}] "{t.text[:90]}" @({t.rect[0]},{t.rect[1]},{t.rect[2]}x{t.rect[3]})'
+                f'[{t.id}] "{t.text[:90]}" @({img(t.rect)[0]},{img(t.rect)[1]},{img(t.rect)[2]}x{img(t.rect)[3]})'
                 for t in self.text
             )
         return "\n".join(lines)
@@ -336,6 +351,10 @@ class ScreenReader:
     @staticmethod
     def window_title(hwnd: int) -> str | None:
         return uia.window_title(hwnd)
+
+    @staticmethod
+    def window_at_point(x: int, y: int) -> int | None:
+        return uia.window_at(x, y)
 
     @staticmethod
     def _grab(window_rect: tuple[int, int, int, int]) -> tuple[Image.Image | None, tuple[int, int]]:

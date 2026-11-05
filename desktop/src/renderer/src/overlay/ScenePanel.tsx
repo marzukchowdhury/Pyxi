@@ -16,7 +16,7 @@ import { brain } from "../shared/socket";
 import { SceneView, type Viewport } from "../scene/SceneView";
 import { Interactive } from "./Interactive";
 import { useLinger } from "./linger";
-import { display, isPrimary, useOverlay, voice } from "./store";
+import { display, useOverlay, voice } from "./store";
 
 const PLATE = { w: 760, h: 560, rise: 70, text: 178 }; // canvas rises above the plate; text lives in the bottom band
 
@@ -27,17 +27,29 @@ export function ScenePanel() {
   const { setStep, setPlaying, closeScene, toggleHologram } = useOverlay.getState();
   const [hover, setHover] = useState<SceneNode | null>(null);
   const narrated = useRef("");
+  const [stalled, setStalled] = useState(false); // interrupted: waits a while, then goes
+  const clipGen = useRef(0);
   // The last step told and nothing left to play: go away by itself (a memory palace stays, it is explored).
   const done = !!scene && !palace && !scene.playing && narrated.current === `${scene.spec.id}:${scene.spec.steps.length - 1}`;
-  const linger = useLinger(done, closeScene);
+  const linger = useLinger(done || (stalled && !palace), closeScene, done ? 2500 : 15000);
+  useEffect(() => {
+    clipGen.current++;
+    setStalled(false);
+  }, [scene?.spec.id]);
 
   // Narrate the current step, then advance (auto-play).
   useEffect(() => {
-    if (!scene || !isPrimary) return;
+    if (!scene) return; // only the window showing the scene has one, on whichever monitor
     const key = `${scene.spec.id}:${scene.step}`;
     if (!scene.playing || narrated.current === key) return;
     const step = scene.spec.steps[scene.step];
     const clip = audio?.[scene.step];
+    const g = clipGen.current;
+    const interrupted = () => {
+      if (g !== clipGen.current) return;
+      setPlaying(false);
+      setStalled(true);
+    };
     const advance = () => {
       const s = useOverlay.getState().scene;
       if (!s || s.spec.id !== scene.spec.id || !s.playing || s.step !== scene.step) return;
@@ -46,14 +58,14 @@ export function ScenePanel() {
     };
     if (clip || !step?.narration) {
       narrated.current = key;
-      if (step?.narration) voice.enqueue({ b64: clip?.audio ?? null, text: clip?.text ?? step.narration, onEnd: advance });
+      if (step?.narration) voice.enqueue({ b64: clip?.audio ?? null, text: clip?.text ?? step.narration, owner: "scene", onEnd: advance, onCancel: interrupted });
       else setTimeout(advance, 2400);
       return;
     }
     const t = setTimeout(() => {
       if (narrated.current === key) return;
       narrated.current = key;
-      voice.enqueue({ b64: null, text: step.narration, onEnd: advance });
+      voice.enqueue({ b64: null, text: step.narration, owner: "scene", onEnd: advance, onCancel: interrupted });
     }, 9000); // Wisp's own voice; after that the words show silently
     return () => clearTimeout(t);
   }, [scene, audio, setStep, setPlaying]);

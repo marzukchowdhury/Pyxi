@@ -29,6 +29,12 @@ export function ObjectPanel() {
   const [playing, setPlaying] = useState(true);
   const [cutaway, setCutaway] = useState(false);
   const [finished, setFinished] = useState(false); // last beat told and its animation run out
+  const [stalled, setStalled] = useState(false); // interrupted mid-beat: paused, then tidied away
+  const clipGen = useRef(0); // bumps when this panel stops its own lines, so that isn't "interrupted"
+  const stopMine = () => {
+    clipGen.current++;
+    voice.stop("object");
+  };
   const spoken = useRef(new Set<number>()); // beats whose narration has finished
   const started = useRef("");
   const spec = object?.spec;
@@ -38,7 +44,8 @@ export function ObjectPanel() {
   useEffect(() => {
     if (!object) return;
     if (object.version === 1 || object.restart) {
-      voice.stop();
+      stopMine();
+      setStalled(false);
       clock.current = { story: 0, free: object.version === 1 ? 0 : clock.current.free, playing: object.spec.auto_play, limit: 0 };
       spoken.current = new Set();
       started.current = "";
@@ -62,7 +69,20 @@ export function ObjectPanel() {
         spoken.current.add(beat);
         return;
       }
-      voice.enqueue({ b64: clip?.audio ?? null, text: clip?.text ?? b.narration, onEnd: () => spoken.current.add(beat) });
+      const g = clipGen.current;
+      voice.enqueue({
+        b64: clip?.audio ?? null,
+        text: clip?.text ?? b.narration,
+        owner: "object",
+        onEnd: () => spoken.current.add(beat),
+        // Stopped by something else (push-to-talk): pause here instead of hanging forever.
+        onCancel: () => {
+          if (g !== clipGen.current) return;
+          started.current = "";
+          setPlaying(false);
+          setStalled(true);
+        },
+      });
     };
     const clip = audio?.[beat];
     if (clip || !b.narration) {
@@ -96,7 +116,8 @@ export function ObjectPanel() {
   }, [spec, beat]);
 
   // Done means gone: the model leaves on its own once the story ends (resting the pointer on it keeps it).
-  const linger = useLinger(finished && playing, closeObject);
+  // Done: gone 2.5 s after the last beat. Interrupted: it waits 15 s for a follow-up, then goes.
+  const linger = useLinger((finished && playing) || stalled, closeObject, finished && playing ? 2500 : 15000);
 
   if (!object || !spec) return null;
   const current = spec.beats[Math.min(beat, spec.beats.length - 1)];
@@ -105,7 +126,8 @@ export function ObjectPanel() {
   const seek = (i: number) => {
     const b = spec.beats[Math.max(0, Math.min(i, spec.beats.length - 1))];
     if (!b) return;
-    voice.stop();
+    stopMine();
+    setStalled(false);
     const i2 = spec.beats.indexOf(b);
     // Move the limit with the clock, or the next frame clamps the story back to the old beat.
     clock.current.limit = spec.beats[i2 + 1]?.at ?? storyDuration(spec);
@@ -117,8 +139,9 @@ export function ObjectPanel() {
     setPlaying(true);
   };
   const toggle = () => {
-    if (playing) voice.stop();
+    if (playing) stopMine();
     else started.current = "";
+    setStalled(false);
     setPlaying(!playing);
   };
   const ask = (part: Part) => {

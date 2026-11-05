@@ -73,6 +73,24 @@ class Job(BaseModel):
         )
 
 
+def describe_failure(exc: BaseException) -> str:
+    """What went wrong, the way you'd tell a person (the notch shows this, never a stack)."""
+    text = str(exc)
+    low = text.lower()
+    if "browsertype.launch" in low or "executable doesn't exist" in low:
+        return "I couldn't open a browser window on this PC. Restarting Wisp usually fixes it."
+    if "net::err_name_not_resolved" in low or "net::err_internet" in low:
+        return "I couldn't reach that site. Is the internet connection up?"
+    if "net::err" in low:
+        return "That site wouldn't load."
+    if "timeout" in low:
+        return "The site took too long to respond."
+    if "budget" in low or "max_cost" in low:
+        return "I stopped before going over the spending limit for this job."
+    first = text.strip().splitlines()[0] if text.strip() else type(exc).__name__
+    return first[:160]
+
+
 # How Wisp's browser teammates work. The user is waiting for a notification, so quick and
 # right beats exhaustive: a found answer from a good source is a success, said plainly.
 BROWSER_RULES = """How to work:
@@ -215,7 +233,7 @@ class JobManager:
             job.status, job.summary = "stopped", job.summary or "Stopped."
         except Exception as exc:
             log.exception("job %s failed", job.id)
-            job.status, job.summary = "failed", f"{type(exc).__name__}: {exc}"
+            job.status, job.summary = "failed", describe_failure(exc)
         job.ended_at = time.time()
         await self._update(job)
         if job.status == "done" and job.then:
@@ -228,7 +246,10 @@ class JobManager:
             await self.hub.emit(
                 "handoff", source=job.agent_name, target=job.then.agent, task=job.then.task
             )
-            await self.start(job.then.agent, job.then.task, context=context, parent=job.id)
+            try:
+                await self.start(job.then.agent, job.then.task, context=context, parent=job.id)
+            except Exception:
+                log.exception("hand-off from %s to %s failed", job.agent_name, job.then.agent)
         if self.on_done:
             await self.on_done(job)
 

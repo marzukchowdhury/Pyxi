@@ -203,6 +203,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     setFull(false);
     suppress.current = true; // fold all the way, even with the pointer still on it
     input.current?.blur();
+    bridge.releaseFocus(); // hand the keyboard back to the app you were in
   };
   const send = (e: FormEvent) => {
     e.preventDefault();
@@ -214,6 +215,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     setText("");
     setPinned(false);
     input.current?.blur(); // fold away and let the answer play in the notch
+    bridge.releaseFocus();
   };
 
   const level = mode === "listening" ? micLevel : () => voice.level();

@@ -1,18 +1,47 @@
 // Overlay state. Every overlay window (one per display) receives every brain event; only the
 // primary display's overlay plays audio and records the microphone, so nothing doubles up.
 import { create } from "zustand";
-import { AudioQueue } from "../shared/audio";
+import { AudioQueue, RemoteVoice, type Voice } from "../shared/audio";
 import { bridge, currentDisplay, onThisDisplay } from "../shared/bridge";
 import type { Annotation, BrainEvent, BrainState, Job, NoteCard, ObjectScene, Pin, SceneSpec, Sketchboard, TimelineMoment, Walkthrough } from "../shared/protocol";
 import { brain } from "../shared/socket";
 
 export const display = currentDisplay();
 export const isPrimary = display.primary;
-export const voice = new AudioQueue();
-// One voice: every overlay window has its own audio queue, so only one window speaks. That's
-// the main screen, unless this turn's 3D model, scene or drawing opened on another screen; then
-// that screen speaks the reply too, one line after another.
-let voiceHere = isPrimary;
+// One voice: only the main screen's overlay plays sound. Other monitors' overlays hand their
+// clips (a model's narration, a drawing's steps) to it, so everything Wisp says is one queue.
+export const voice: Voice = isPrimary ? new AudioQueue() : new RemoteVoice();
+if (isPrimary) {
+  bridge.onVoicePlay((c) => {
+    const done = (kind: "end" | "cancel") => {
+      bridge.voiceEvent({ id: c.id, from: c.from, kind });
+    };
+    voice.enqueue({
+      b64: c.b64,
+      text: c.text,
+      owner: `remote:${c.id}`,
+      onStart: () => bridge.voiceEvent({ id: c.id, from: c.from, kind: "start" }),
+      onEnd: () => done("end"),
+      onCancel: () => done("cancel"),
+    });
+  });
+  bridge.onVoiceStop((m) => {
+    if (!m.ids) voice.stop();
+    else m.ids.forEach((id) => voice.stop(`remote:${id}`));
+  });
+}
+// Lines the main screen is saying, kept here until it starts each one (to reveal points in sync).
+const pendingSays = new Map<string, { notes?: number[]; annotations: Annotation[] }>();
+const sayKey = (e: { index: number; total: number; text: string }) => `${e.index}/${e.total}:${e.text.slice(0, 60)}`;
+if (!isPrimary) {
+  bridge.onSayStarted((key) => {
+    const e = pendingSays.get(key);
+    if (!e) return;
+    pendingSays.delete(key);
+    addAnnotations(e.annotations);
+    reveal(e.notes);
+  });
+}
 
 export interface LiveAnnotation extends Annotation {
   bornAt: number;
@@ -128,15 +157,15 @@ export const useOverlay = create<OverlayState>((set, get) => ({
     if (s) set({ scene: { ...s, playing } });
   },
   closeScene: () => {
-    voice.stop();
+    voice.stop("scene");
     set({ scene: null, palace: null });
   },
   closeSketch: () => {
-    voice.stop();
+    voice.stop("sketch");
     set({ sketch: null });
   },
   closeObject: () => {
-    voice.stop();
+    voice.stop("object");
     set({ object: null });
   },
   toggleHologram: () => {
@@ -244,7 +273,10 @@ function sceneOnThisDisplay(spec: SceneSpec, place?: [number, number, number, nu
   return isPrimary;
 }
 
-brain.onStatus((up) => useOverlay.setState({ connected: up }));
+brain.onStatus((up) => {
+  useOverlay.setState({ connected: up });
+  if (!up) document.documentElement.classList.remove("capturing");
+});
 
 let lineId = 0;
 let replyOpen = false; // later sentences of the same reply join the open line
@@ -271,8 +303,8 @@ brain.on((e: BrainEvent) => {
       break;
     case "user":
       replyOpen = false;
-      voiceHere = isPrimary;
       earlyNotes = [];
+      pendingSays.clear();
       pushLine({ who: "user", text: e.text });
       break;
     case "turn_done":
@@ -285,7 +317,7 @@ brain.on((e: BrainEvent) => {
       break;
     case "say":
       if (e.text) pushLine({ who: "agent", agent: e.agent, text: e.text });
-      if (voiceHere) {
+      if (isPrimary) {
         voice.enqueue({
           b64: e.audio,
           text: e.text,
@@ -293,13 +325,14 @@ brain.on((e: BrainEvent) => {
             useOverlay.setState({ caption: { text: e.text, agent: e.agent } });
             addAnnotations(e.annotations);
             reveal(e.notes);
+            bridge.sayStarted(sayKey(e)); // other monitors reveal their points now too
           },
         });
-      } else addAnnotations(e.annotations);
-      if (!voiceHere) useOverlay.setState({ caption: { text: e.text, agent: e.agent } });
+      } else pendingSays.set(sayKey(e), { notes: e.notes, annotations: e.annotations });
       break;
     case "stop_audio":
-      if (isPrimary) voice.stop();
+      voice.stop(); // every window: the main screen's player, and anything queued from here
+      pendingSays.clear();
       break;
     case "annotate":
       addAnnotations(e.annotations);
@@ -311,6 +344,8 @@ brain.on((e: BrainEvent) => {
       break;
     case "capture_hide":
       document.documentElement.classList.add("capturing");
+      // Never stay invisible if the "show" is lost (a reconnect mid-capture).
+      window.setTimeout(() => document.documentElement.classList.remove("capturing"), 1500);
       break;
     case "capture_show":
       document.documentElement.classList.remove("capturing");
@@ -319,16 +354,20 @@ brain.on((e: BrainEvent) => {
       useOverlay.setState({ captureFlash: performance.now(), seeing: e.excluded ? "" : prettyApp(e.app) });
       break;
     case "scene":
-      voiceHere = sceneOnThisDisplay(e.scene, e.place);
-      if (voiceHere)
-        useOverlay.setState({ scene: { spec: e.scene, step: 0, playing: e.scene.auto_play, hologram: e.scene.mode === "hologram", place: e.place ?? null }, palace: null, object: null });
+      if (!sceneOnThisDisplay(e.scene, e.place)) {
+        useOverlay.setState({ scene: null, object: null }); // the new one opens on another screen
+        break;
+      }
+      useOverlay.setState({ scene: { spec: e.scene, step: 0, playing: e.scene.auto_play, hologram: e.scene.mode === "hologram", place: e.place ?? null }, palace: null, object: null });
       break;
     case "object":
       // Models open on the screen the brain placed them on (the one you're looking at); an edit
       // keeps the same id so the view keeps its camera.
-      voiceHere = placedHere(e.place);
-      if (voiceHere)
-        useOverlay.setState((s) => ({
+      if (!placedHere(e.place)) {
+        useOverlay.setState({ object: null, scene: null }); // the new model opens on another screen
+        break;
+      }
+      useOverlay.setState((s) => ({
           object: { spec: e.scene, audioKey: e.audio_key, restart: e.restart, place: e.place ?? null, version: (s.object?.spec.id === e.scene.id ? s.object.version : 0) + 1 },
           scene: null,
           palace: null,
@@ -343,11 +382,9 @@ brain.on((e: BrainEvent) => {
       break;
     case "sketch":
       // A new drawing replaces the old one, on the screen you're looking at.
-      voiceHere = placedHere(e.place);
-      if (voiceHere) {
-        voice.stop();
-        useOverlay.setState({ sketch: { board: e.board, audioKey: e.audio_key, place: e.place ?? null } });
-      }
+      useOverlay.setState({
+        sketch: placedHere(e.place) ? { board: e.board, audioKey: e.audio_key, place: e.place ?? null } : null,
+      });
       break;
     case "scene_audio":
       useOverlay.setState((s) => ({

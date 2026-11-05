@@ -108,7 +108,9 @@ class StreamingChat:
                     continue
                 text += delta.content or ""
                 for tc in delta.tool_calls or []:
-                    i = tc.index or 0
+                    i = tc.index if tc.index is not None else max(slots, default=0)
+                    if tc.index is None and tc.id and slots.get(i, {}).get("id") not in ("", tc.id):
+                        i += 1  # a provider without indexes: a new id starts a new call
                     # A new call starting means the ones before it are complete.
                     for j in list(slots):
                         if j < i:
@@ -149,7 +151,10 @@ def _parse(slot: dict[str, Any], i: int) -> ToolCall | None:
         args = json.loads(slot["args"] or "{}")
     except ValueError:
         log.warning("tool %s sent unparseable arguments", slot["name"])
-        return None
+        # Flag it rather than drop it, so the brain asks for the call again.
+        return ToolCall(
+            id=slot["id"] or f"call_{i}", name=slot["name"], arguments={"__unparseable__": True}
+        )
     return ToolCall(
         id=slot["id"] or f"call_{i}",
         name=slot["name"],

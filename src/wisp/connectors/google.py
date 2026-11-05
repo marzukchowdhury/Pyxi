@@ -292,19 +292,11 @@ class GoogleConnector(Connector):
             ctype, _ = mimetypes.guess_type(p.name)
             maintype, subtype = (ctype or "application/octet-stream").split("/", 1)
             msg.add_attachment(p.read_bytes(), maintype=maintype, subtype=subtype, filename=p.name)
-        draft = await self._api(
-            "POST",
-            f"{GMAIL}/drafts",
-            json={
-                "message": {
-                    "raw": _b64url(msg.as_bytes()),
-                    **({"threadId": thread_id} if thread_id else {}),
-                }
-            },
-        )
+        raw = {"raw": _b64url(msg.as_bytes()), **({"threadId": thread_id} if thread_id else {})}
 
         async def send() -> str:
-            await self._api("POST", f"{GMAIL}/drafts/send", json={"id": draft["id"]})
+            # Sent only on approval; a declined email leaves nothing behind (no stray draft).
+            await self._api("POST", f"{GMAIL}/messages/send", json=raw)
             return f"Sent to {to}."
 
         attached = f"\nAttached: {', '.join(p.name for p in files)}" if files else ""

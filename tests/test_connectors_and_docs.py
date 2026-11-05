@@ -119,6 +119,9 @@ class FakeGmail:
         if method == "POST" and url.endswith("/drafts/send"):
             self.sent.append(kw["json"])
             return {}
+        if method == "POST" and url.endswith("/messages/send"):
+            self.sent.append(kw["json"])
+            return {"id": "s1"}
         raise AssertionError(f"unexpected {method} {url}")
 
 
@@ -180,14 +183,14 @@ async def test_the_recommendation_letter_errand(settings, tmp_path):
         ask["action"] == "Send an email to sam@example.com"
         and "Attached: LOR (fixed by Wisp).docx" in ask["reason"]
     )
-    assert gmail.drafts and not gmail.sent  # drafted, not sent
+    assert not gmail.drafts and not gmail.sent  # nothing touches the account before approval
     brain.hub.resolve(ask["request_id"], True)
     for _ in range(50):
         if gmail.sent:
             break
         await asyncio.sleep(0.02)
-    assert gmail.sent == [{"id": "d1"}]
-    assert gmail.drafts[0]["message"]["threadId"] == "t1"  # threaded as a reply
+    [sent] = gmail.sent
+    assert sent["threadId"] == "t1" and sent["raw"]  # sent on approval, threaded as a reply
 
 
 async def test_declining_means_nothing_is_sent(settings):

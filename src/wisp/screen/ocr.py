@@ -114,7 +114,7 @@ def _union(rects: list[Rect]) -> Rect:
 
 def _norm(s: str) -> str:
     s = s.lower().replace("’", "'").replace("“", '"').replace("”", '"')
-    return re.sub(r"[^a-z0-9]+", "", s)
+    return re.sub(r"[\W_]+", "", s.casefold())
 
 
 def find_text(lines: list[TextLine], quote: str, within: Rect | None = None) -> Rect | None:

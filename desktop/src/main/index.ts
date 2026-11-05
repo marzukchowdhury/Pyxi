@@ -14,6 +14,7 @@ import { pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
 import {
   app,
   BrowserWindow,
+  webContents,
   clipboard,
   Notification,
   type Display,
@@ -246,10 +247,22 @@ app.whenReady().then(async () => {
   for (const d of screen.getAllDisplays()) createOverlay(d);
   createPanel();
   startCursorFeed();
-  screen.on("display-added", (_e, d) => createOverlay(d));
-  screen.on("display-removed", (_e, d) => {
-    overlays.get(d.id)?.destroy();
-    overlays.delete(d.id);
+  // Monitors plugged in or out, a new main screen, or new scaling: every overlay's idea of its
+  // display (origin, scale, primary) would be stale, so they're all rebuilt from scratch.
+  let rebuild: NodeJS.Timeout | undefined;
+  const rebuildOverlays = () => {
+    clearTimeout(rebuild);
+    rebuild = setTimeout(() => {
+      primaryId = screen.getPrimaryDisplay().id;
+      for (const win of overlays.values()) if (!win.isDestroyed()) win.destroy();
+      overlays.clear();
+      for (const d of screen.getAllDisplays()) createOverlay(d);
+    }, 500);
+  };
+  screen.on("display-added", rebuildOverlays);
+  screen.on("display-removed", rebuildOverlays);
+  screen.on("display-metrics-changed", (_e, _d, changed) => {
+    if (changed.some((c) => c === "bounds" || c === "scaleFactor" || c === "workArea")) rebuildOverlays();
   });
 
   // Hold Ctrl + left Alt to talk (the main way to use Wisp). The shortcut below stays as a
@@ -312,6 +325,33 @@ ipcMain.on("set-interactive", (e, interactive: boolean) => {
   if (win && !interactive && !win.isFocused()) win.setFocusable(false);
 });
 ipcMain.on("toggle-panel", togglePanel);
+
+// One voice across monitors: clips from other overlays play on the main screen's queue, and
+// its "started / ended / cancelled" go back to the window that queued them.
+const primaryOverlay = () => {
+  const win = overlays.get(primaryId);
+  return win && !win.isDestroyed() ? win : liveOverlays()[0];
+};
+ipcMain.on("voice-play", (e, clip: Record<string, unknown>) => {
+  primaryOverlay()?.webContents.send("voice-play", { ...clip, from: e.sender.id });
+});
+ipcMain.on("voice-event", (_e, msg: { from: number }) => {
+  const target = webContents.fromId(msg.from);
+  if (target && !target.isDestroyed()) target.send("voice-event", msg);
+});
+ipcMain.on("voice-stop", (e, ids?: string[]) => {
+  primaryOverlay()?.webContents.send("voice-stop", { from: e.sender.id, ids });
+});
+ipcMain.on("say-started", (e, key: string) => {
+  for (const win of liveOverlays()) if (win.webContents.id !== e.sender.id) win.webContents.send("say-started", key);
+});
+// After typing to Wisp, the keyboard goes back to the app you were in.
+ipcMain.on("release-focus", (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win || win.isDestroyed()) return;
+  win.blur();
+  win.setFocusable(false);
+});
 ipcMain.on("ptt", () => broadcast("ptt"));
 ipcMain.on("open-external", (_e, url: string) => {
   if (/^https?:\/\//.test(url)) void shell.openExternal(url);

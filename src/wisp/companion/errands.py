@@ -40,7 +40,8 @@ day after today in that list.
 - Before creating a meeting, look at the calendar around that time (calendar_list) and \
 mention a clash in your summary if there is one.
 - After you create or send something, the tool's result reads it back. Check it matches the \
-task (title, day, date, time, people); if not, fix it.
+task (title, day, date, time, people). Never create it a second time to "fix" it: if it's \
+wrong, finish with ok=false and say exactly what's wrong.
 - If something essential is missing or ambiguous, don't guess: finish with ok=false and say \
 exactly what you need to know.
 - When the work is done, call finish once: ok, a short title (e.g. "Meeting set with \
@@ -99,15 +100,30 @@ async def run_errand(
     steps: list[str] = []
     links: dict[str, str] = {}
     cost = 0.0
+    sent = 0  # outgoing things already done (an invite, an email)
     for _ in range(MAX_STEPS):
         done = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(steps)) or "(nothing yet)"
         prompt = f"{now}\n\n# Errand\n{task}\n\n# What the user said\n{user_text}\n\n# Steps so far\n{done}"
-        response = await llm.complete(
-            system=SYSTEM,
-            messages=[Message.user(prompt)],
-            tools=[*(t.spec for t in tools), FINISH],
-            max_tokens=2000,
-        )
+        try:
+            response = await llm.complete(
+                system=SYSTEM,
+                messages=[Message.user(prompt)],
+                tools=[*(t.spec for t in tools), FINISH],
+                max_tokens=2000,
+            )
+        except Exception:
+            if sent:
+                # It already happened; don't tell the user it failed (they'd retry and duplicate).
+                return ErrandResult(
+                    ok=True,
+                    title="Done",
+                    summary="That's done, but I couldn't double-check the details. Have a quick look.",
+                    link=links.get("meet") or links.get("link"),
+                    links=links,
+                    cost_usd=cost,
+                    steps=steps,
+                )
+            raise
         cost += response.usage.cost_usd
         if not response.tool_calls:
             steps.append(f"(no tool call) {response.text[:200]}")
@@ -138,7 +154,13 @@ async def run_errand(
                 continue
             if isinstance(result, Outgoing):
                 # An invite to people the user named themselves goes ahead; anything else asks.
-                allowed = result.kind == "invite" and said_by_user(result.recipients, user_text)
+                # Only the first one: a second invite or email always asks, so a "fix it" retry
+                # can never quietly send the same thing twice.
+                allowed = (
+                    not sent
+                    and result.kind == "invite"
+                    and said_by_user(result.recipients, user_text)
+                )
                 if not allowed and not await approve(result):
                     steps.append(
                         f"{call.name}: the user said no to '{result.action}'. Don't retry it."
@@ -146,6 +168,7 @@ async def run_errand(
                     continue
                 try:
                     result = await result.run()
+                    sent += 1
                 except Exception as exc:
                     steps.append(f"{call.name}({_short(args)}) failed: {str(exc)[:200]}")
                     continue
