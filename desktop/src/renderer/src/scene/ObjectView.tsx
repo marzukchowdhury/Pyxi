@@ -331,8 +331,10 @@ function boundsOf(registry: Map<string, Registered>, ids: Set<string> | null, ou
 const SAMPLES = new WeakMap<THREE.BufferGeometry, Float32Array>();
 
 /** Up to ~60 points on each visible part's surface, in world space (for a tight camera fit). */
-function samplePoints(registry: Map<string, Registered>, ids: Set<string> | null): THREE.Vector3[] {
-  const out: THREE.Vector3[] = [];
+function samplePoints(registry: Map<string, Registered>, ids: Set<string> | null, pool: THREE.Vector3[]): THREE.Vector3[] {
+  // The vectors are reused frame to frame (a model has hundreds of samples; new ones every frame
+  // means garbage-collection stutter).
+  let n = 0;
   for (const [id, r] of registry) {
     if (ids && !ids.has(id)) continue;
     if (!r.mesh.visible || r.mat.opacity < 0.05) continue;
@@ -350,9 +352,13 @@ function samplePoints(registry: Map<string, Registered>, ids: Set<string> | null
       }
       SAMPLES.set(g, local);
     }
-    for (let i = 0; i < local.length; i += 3) out.push(new THREE.Vector3(local[i], local[i + 1], local[i + 2]).applyMatrix4(r.mesh.matrixWorld));
+    for (let i = 0; i < local.length; i += 3) {
+      const v = pool[n] ?? (pool[n] = new THREE.Vector3());
+      v.set(local[i], local[i + 1], local[i + 2]).applyMatrix4(r.mesh.matrixWorld);
+      n++;
+    }
   }
-  return out;
+  return pool.slice(0, n);
 }
 
 /** Frames the beat's subject from the beat's angle and follows it; hands over when you drag. */
@@ -368,6 +374,8 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
   const sphere = useMemo(() => new THREE.Sphere(), []);
   const goal = useMemo(() => ({ pos: new THREE.Vector3(), target: new THREE.Vector3() }), []);
   const tmp = useMemo(() => new THREE.Vector3(), []);
+  const poolA = useMemo(() => [] as THREE.Vector3[], []);
+  const poolB = useMemo(() => [] as THREE.Vector3[], []);
 
   useEffect(() => {
     manual.current = false;
@@ -426,8 +434,8 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
     // Fit the real shape, not its bounding box: a jet's box is mostly empty air between the
     // wingtips, and seen at an angle that box is far bigger than the jet. Points sampled from
     // every part's surface give a tight, centred frame for any object.
-    const pts = samplePoints(registry.current, ids);
-    const allPts = ids ? samplePoints(registry.current, null) : pts;
+    const pts = samplePoints(registry.current, ids, poolA);
+    const allPts = ids ? samplePoints(registry.current, null, poolB) : pts;
     const centre = sphere.center.clone();
     const spread = (P: THREE.Vector3[]) => {
       let [r0, r1, u0, u1] = [Infinity, -Infinity, Infinity, -Infinity];

@@ -30,6 +30,7 @@ from otto.types import LLMResponse, ToolCall, Usage
 log = logging.getLogger(__name__)
 
 OnCall = Callable[[ToolCall], Awaitable[None]]
+OnPartial = Callable[[int, str, str], Awaitable[None]]  # (index, tool name, arguments so far)
 
 
 class StreamingChat:
@@ -52,6 +53,7 @@ class StreamingChat:
         tools: list[ToolSpec] | None = None,
         max_tokens: int | None = None,
         on_call: OnCall | None = None,
+        on_partial: OnPartial | None = None,
     ) -> LLMResponse:
         req: dict[str, Any] = {
             "model": self.model,
@@ -121,6 +123,8 @@ class StreamingChat:
                     if tc.function is not None:
                         slot["name"] = tc.function.name or slot["name"]
                         slot["args"] += tc.function.arguments or ""
+                    if on_partial is not None and slot["name"] and i not in fired:
+                        await on_partial(i, slot["name"], slot["args"])
                     # The spoken line is worth starting the moment its arguments parse.
                     if slot["name"] == "say" and i not in fired and _complete_json(slot["args"]):
                         await fire(i)

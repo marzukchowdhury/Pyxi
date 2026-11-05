@@ -416,6 +416,12 @@ brain.on((e: BrainEvent) => {
     case "notes": {
       const r = e.card.region;
       const mine = r ? onThisDisplay(r[0] + r[2] / 2, r[1] + r[3] / 2) : isPrimary;
+      const cur = useOverlay.getState().notes;
+      if (cur && cur.card.id === e.card.id) {
+        // The same card, filling in point by point: keep what's already been revealed.
+        if (mine) useOverlay.setState({ notes: { ...cur, card: e.card } });
+        break;
+      }
       const early = earlyNotes.filter((x) => e.card.items.some((i: { n: number }) => i.n === x));
       earlyNotes = [];
       if (mine) useOverlay.setState({ notes: { card: e.card, revealed: early, markers: early.length > 0, at: performance.now() } });

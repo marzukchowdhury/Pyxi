@@ -57,7 +57,7 @@ class ScreenConfig(BaseModel):
         True,
         description="Read text from the pixels too (Windows OCR, offline), so text inside images can be framed.",
     )
-    max_text_lines: int = Field(120, description="Most OCR lines given to the model per look.")
+    max_text_lines: int = Field(90, description="Most OCR lines given to the model per look.")
     ambient_memory: bool = Field(
         False,
         description="Build the Memory Palace (opt-in): window, focus and UI metadata over time.",
@@ -72,7 +72,7 @@ class ScreenConfig(BaseModel):
         False, description="Also keep downscaled screenshots, so time travel shows real pixels."
     )
     retention_hours: float = Field(72.0, description="Forget palace history older than this.")
-    max_elements: int = 120
+    max_elements: int = 70
     model_image_width: int = Field(
         1366, description="Screenshots are downscaled to this width for the model."
     )

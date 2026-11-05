@@ -317,6 +317,23 @@ COMPANION_TOOLS: list[ToolSpec] = [
         ["agent", "task"],
     ),
     _tool(
+        "web_search",
+        "Search the web (about a second). Use it for anything that changes or that you're not sure of: "
+        "news, prices, scores, results, weather, release dates, who runs what, whether a claim or quote is "
+        "real, facts about a specific person, product or place. Returns titles, sites and snippets; answer "
+        "from them and name the source. One search is usually enough; two at most.",
+        {
+            "query": {"type": "string", "description": "What you'd type into a search box."},
+        },
+        ["query"],
+    ),
+    _tool(
+        "read_page",
+        "Read the text of one web page (a search result, or a link on screen) when the snippet isn't enough.",
+        {"url": {"type": "string"}},
+        ["url"],
+    ),
+    _tool(
         "recall_screen",
         "Search your spatial memory of earlier screens ('where was the export button?').",
         {"query": {"type": "string"}},
@@ -490,6 +507,8 @@ COMPANION_TOOLS += [
 ]
 
 INFO_TOOLS = {
+    "web_search",
+    "read_page",
     "list_routines",
     "recall_memories",
     "recall_screen",

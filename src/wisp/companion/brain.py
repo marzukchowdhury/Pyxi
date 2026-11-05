@@ -36,6 +36,7 @@ from otto.types import ToolCall, Usage
 from PIL import Image
 from pydantic import ValidationError
 
+from wisp import web
 from wisp.agents import AgentProfile, AgentRegistry, Job, JobManager
 from wisp.agents.jobs import Handoff
 from wisp.companion import prompts
@@ -67,6 +68,7 @@ from wisp.hub import Hub
 from wisp.llm import make_llm
 from wisp.memory import SpatialMemory
 from wisp.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
+from wisp.partial_json import complete_items, first_chunk, partial_string
 from wisp.routines import RoutineStore
 from wisp.scenes import SceneSpec, build_exploded_scene, get_scene, parse_scene
 from wisp.scenes.builder import build_model
@@ -163,6 +165,7 @@ class Brain:
         self._visual_retry = False
         self._noted: set[int] = set()
         self._narrated_card = ""
+        self._narrated_items: set[int] = set()
         self._turn_gen = 0
         self._turn_id = ""
         self._synthetic = False
@@ -345,7 +348,9 @@ class Brain:
         if card is None or self._narrated_card == card.id:
             return
         self._narrated_card = card.id
-        rest = [it for it in card.items if it.n not in self._noted]
+        rest = [
+            it for it in card.items if it.n not in self._noted and it.n not in self._narrated_items
+        ]
         lines = []
         for it in rest:
             line = (it.say or it.text).strip()
@@ -354,6 +359,28 @@ class Brain:
             lines.append(card.closing)  # land it, then offer what's next
         if lines:
             self._speak(" ".join(lines))
+
+    async def _show_card_so_far(self, title: str, items: list[dict[str, Any]]) -> None:
+        """Show the points that have arrived so far, and say the new ones."""
+        card = build_card(self._ctx, {"title": title, "items": items}, self._placed.others("card"))
+        if not card.items:
+            return
+        first = self._turn_card is None
+        if not first:
+            card.id, card.place = (
+                self._turn_card.id,
+                self._turn_card.place,
+            )  # stays put as it fills in
+        self._turn_card = card
+        await self.hub.emit("notes", card=card.model_dump(mode="json"))
+        if first:
+            self._watch_window()
+        for it in card.items:
+            if it.n in self._noted or it.n in self._narrated_items:
+                continue
+            self._narrated_items.add(it.n)
+            line = (it.say or it.text).strip()
+            self._speak(f"[note:{it.n}] {line if line[-1:] in '.!?' else line + '.'}")
 
     def _builder_on(self) -> bool:
         return bool(self.settings.model_3d) and not self.settings.local_mode
@@ -576,6 +603,8 @@ class Brain:
             self._user_text = user_text
             self._synthetic = synthetic
             self._pending_say = ""  # an answer held back during a lookup round
+            self._narrated_items: set[int] = set()  # cue-card points already said as they arrived
+            self._searches = 0
             self._turn_gen = self._speech_gen  # push-to-talk bumps the gen: this turn is then stale
             turn_id = "turn_" + secrets.token_hex(4)
             self._turn_id = turn_id
@@ -706,9 +735,17 @@ class Brain:
             connector_tools = self.connectors.tools()
             early: set[str] = set()
 
+            head = {"text": ""}  # the first sentence(s) of `say`, already being spoken
+            live_items = {"n": 0}
+
+            held = {"say": None}  # a later round's reply, waiting to go just before its card
+
             async def speak_early(call: ToolCall) -> None:
                 # Streamed: start talking the moment the spoken line is complete, while the cue
                 # card and drawings are still arriving.
+                if call.name == "say" and not first_round:
+                    held["say"] = call  # may be lookup chatter; only said if a card follows
+                    return
                 if call.name == "say" and not early and self._speech_gen == self._turn_gen:
                     early.add(call.id)
                     self._calls.append(
@@ -718,14 +755,54 @@ class Brain:
                             "arguments": call.arguments,
                         }
                     )
-                    await self._act("say", dict(call.arguments))
+                    text = str(call.arguments.get("text", ""))
+                    if head["text"] and text.startswith(head["text"]):
+                        text = text[
+                            len(head["text"]) :
+                        ].strip()  # the rest, after the first sentence
+                    if text:
+                        await self._act("say", {"text": text})
+
+            async def as_it_streams(i: int, name: str, raw: str) -> None:
+                if self._speech_gen != self._turn_gen:
+                    return
+                if name == "say" and first_round and not early and not head["text"]:
+                    # The first sentence goes to the voice as soon as it's written.
+                    got = partial_string(raw, "text")
+                    first = first_chunk(got[0]) if got and not got[1] else ""
+                    if first:
+                        head["text"] = first
+                        self._noted |= {
+                            int(m.group(2))
+                            for m in MARKER.finditer(first)
+                            if m.group(1).lower() == "note"
+                        }
+                        self._pending_say = ""
+                        self._speak(strip_filler(first))
+                elif name == "explain_on_screen":
+                    if held["say"] is not None and held["say"].id not in early:
+                        # This round's reply came first: say it before the points.
+                        call, held["say"] = held["say"], None
+                        early.add(call.id)
+                        self._calls.append(
+                            {
+                                "round": state.get("round", 0) + 1,
+                                "tool": "say",
+                                "arguments": call.arguments,
+                            }
+                        )
+                        await self._act("say", dict(call.arguments))
+                    # Each cue-card point is shown, and said, as soon as it has fully arrived.
+                    items = complete_items(raw)
+                    if len(items) > live_items["n"]:
+                        live_items["n"] = len(items)
+                        title = partial_string(raw, "title")
+                        await self._show_card_so_far(title[0] if title and title[1] else "", items)
 
             first_round = state.get("round", 0) == 0
-            extra = (
-                {"on_call": speak_early}
-                if isinstance(self.llm, StreamingChat) and first_round
-                else {}
-            )
+            extra: dict[str, Any] = {}
+            if isinstance(self.llm, StreamingChat):
+                extra = {"on_call": speak_early, "on_partial": as_it_streams}
             response = await self.llm.complete(
                 system=system,
                 messages=[Message("user", parts)],
@@ -920,6 +997,9 @@ class Brain:
             card = build_card(ctx, args, self._placed.others("card"))
             if not card.items:
                 return "explain_on_screen: give at least one point with text."
+            if self._turn_card is not None and self._narrated_items:
+                # It was shown point by point while streaming: same card, same spot, now complete.
+                card.id, card.place = self._turn_card.id, self._turn_card.place
             await self.hub.emit("notes", card=card.model_dump(mode="json"))
             if card.place:
                 w, h = card_size([it.text for it in card.items], card.title)
@@ -1062,6 +1142,13 @@ class Brain:
                 files=files,
             )
             return f"Started {job.id}: {job.agent_name} is on it."
+        if name == "web_search":
+            self._searches = getattr(self, "_searches", 0) + 1
+            if self._searches > 3:
+                return "web_search: that's enough searching. Answer now from what you've found, and say how sure you are."
+            return await web.search_text(str(args.get("query", ""))[:200])
+        if name == "read_page":
+            return await web.read_text(str(args.get("url", ""))[:500])
         if name == "recall_screen":
             hits = self.spatial.recall(str(args["query"]), 5)
             if not hits:

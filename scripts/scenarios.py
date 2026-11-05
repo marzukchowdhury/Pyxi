@@ -115,6 +115,8 @@ SCENARIOS = [
         "Can you research whether Sam Altman really posted that, and tell me?",
         "delegate",
     ),
+    ("nba finals", "turn_49b75541", "Who won the NBA Finals last year?", "web"),
+    ("bitcoin", "turn_49b75541", "What's the price of bitcoin right now?", "web"),
 ]
 
 
@@ -168,7 +170,8 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     took = time.monotonic() - started
     tools = [c["tool"] for c in brain._calls]
     said = " ".join(e["text"] for e in events if e["type"] == "say")
-    card = next((e["card"] for e in events if e["type"] == "notes"), None)
+    cards = [e["card"] for e in events if e["type"] == "notes"]
+    card = cards[-1] if cards else None  # the finished card (it fills in point by point)
     problems = []
     three_d = any(t in tools for t in ("build_3d_model", "explain_in_3d", "edit_3d_model"))
     if not said.strip():
@@ -202,8 +205,18 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append("no errand")
         if "calendar_add" in tools:
             problems.append("booked directly")
-    if expect == "delegate" and not any(b.startswith("delegate") for b in background):
-        problems.append("not delegated")
+    if (
+        expect == "delegate"
+        and not any(b.startswith("delegate") or b.startswith("web") for b in background)
+        and "web_search" not in tools
+    ):
+        problems.append("not researched")
+    if expect == "web":
+        # Looking it up, or knowing it for sure (a settled fact like last year's champion), are both fine.
+        if "web_search" not in tools and not (name.startswith("nba") and "Thunder" in said):
+            problems.append("didn't look it up")
+        if re.search(r"can.?t (browse|search|access the internet)", said, re.I):
+            problems.append("said it can't browse")
     if "807" in said:
         problems.append("OCR misread repeated")
     return {
@@ -213,7 +226,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         "tools": tools,
         "secs": round(took, 1),
         "cost": round(brain.turns.spent_today(), 4),
-        "said": said[:150],
+        "said": said[:220],
         "background": background,
     }
 
@@ -238,4 +251,5 @@ async def main() -> None:
     print(f"\n{passed}/{len(results)} passed, total ${sum(r['cost'] for r in results):.3f}")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
