@@ -436,8 +436,10 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
   background: radial-gradient(rgba(255,255,255,.065) 1px, transparent 1.2px) 0 0 / 18px 18px, linear-gradient(180deg, rgba(14,17,24,.94), rgba(9,11,16,.96));
   border: 1px solid var(--hair-hi); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 30px 80px rgba(0,0,0,.45); backdrop-filter: blur(20px) saturate(140%); animation: emerge .5s var(--spring); }
 .sketch-head { position: relative; padding: 14px 20px 2px; }
-.sketch-title { font: 700 31px/1.05 "Caveat", cursive; color: var(--ink); padding-right: 110px; animation: sk-wipe .7s var(--ease) both; }
-.sketch-sub { font: 500 19px/1.1 "Caveat", cursive; color: var(--ink-3); margin-top: 2px; animation: fade .5s .3s both; }
+/* At most two lines: a long title must never squeeze the drawing (it used to wrap to four lines,
+   shrink the drawing, and wrap again). */
+.sketch-title { font: 700 26px/1.1 "Caveat", cursive; color: var(--ink); padding-right: 84px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; animation: sk-wipe .7s var(--ease) both; }
+.sketch-sub { font: 500 17px/1.15 "Caveat", cursive; color: var(--ink-3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: fade .5s .3s both; }
 .sketch-tools { position: absolute; right: 12px; top: 12px; display: flex; gap: 6px; opacity: 0; transition: opacity .25s var(--ease); }
 .sketch-board:hover .sketch-tools { opacity: 1; }
 .sketch-art { display: block; overflow: visible; }
@@ -446,7 +448,7 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .sketch-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.16); transition: background .3s, transform .3s var(--spring); }
 .sketch-dots i.on { background: var(--sk-ice); transform: scale(1.35); }
 .sketch-dots i.done { background: rgba(127,186,255,.55); }
-.sketch-caption { font-size: 12.5px; line-height: 1.35; color: var(--ink-2); animation: fade .4s both; }
+.sketch-caption { font-size: 12.5px; line-height: 1.35; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; animation: fade .4s both; }
 .sk-line { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: ink-draw .8s cubic-bezier(.45,.05,.3,1) both; filter: drop-shadow(0 0 3px rgba(127,186,255,.18)); }
 .sk-line.dashed { stroke-dasharray: .035 .03; stroke-dashoffset: 0; animation: fade .6s both; }
 .sk-fill { fill-opacity: .13; stroke: none; animation: fade .7s both; }

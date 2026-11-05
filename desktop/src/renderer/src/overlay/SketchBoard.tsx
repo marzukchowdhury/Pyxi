@@ -11,7 +11,7 @@ import { rectToLocal } from "../shared/bridge";
 import { Close, Cube, Replay } from "../shared/icons";
 import type { SketchShape, Sketchboard } from "../shared/protocol";
 import { brain } from "../shared/socket";
-import { GRID, drawShape, placeText, smooth, timeline } from "../scene/sketchPaths";
+import { GRID, drawShape, fitView, placeText, smooth, timeline } from "../scene/sketchPaths";
 import { Interactive } from "./Interactive";
 import { useLinger } from "./linger";
 import { useOverlay, voice } from "./store";
@@ -19,6 +19,7 @@ import { useOverlay, voice } from "./store";
 const AUDIO_WAIT_MS = 9000; // Wisp's own voice for this step; after that the words show silently
 const CHROME = 160; // first guess at the title and caption around the drawing; then measured
 const EDGE = 10; // the board never comes closer than this to a screen edge
+const MIN_W = 480; // below this the drawing and its labels stop being readable
 const WEIGHT = { thin: 1.3, normal: 2.1, bold: 3.1 };
 
 export function SketchBoard() {
@@ -61,7 +62,9 @@ export function SketchBoard() {
     w: Math.min(place ? place.w : 560, innerWidth - 2 * EDGE),
     h: Math.min(place ? place.h : innerHeight * 0.7, innerHeight - 2 * EDGE),
   };
-  const width = Math.max(260, Math.round(Math.min(room.w, ((room.h - chrome) * GRID.w) / GRID.h)));
+  // Readable first: never narrower than MIN_W (it may cover a little more of the page instead).
+  const fits = Math.round(Math.min(room.w, ((room.h - chrome) * GRID.w) / GRID.h));
+  const width = Math.min(innerWidth - 2 * EDGE, Math.max(MIN_W, fits));
   const scale = width / GRID.w;
   const height = Math.round(GRID.h * scale);
   const total = height + chrome;
@@ -82,6 +85,8 @@ export function SketchBoard() {
     return () => ro.disconnect();
   }, [height, chrome, key]);
 
+  // Zoom to what was drawn, so a drawing in one corner still fills the board.
+  const view = useMemo(() => (board ? fitView(board.shapes, scale, width, height) : `0 0 ${width} ${height}`), [board, scale, width, height]);
   const timing = useMemo(
     () => (board ? board.steps.map((_, i) => timeline(board.shapes, i, scale)) : []),
     [board, scale],
@@ -158,7 +163,7 @@ export function SketchBoard() {
             <button className="icon" onClick={close} title="Close"><Close /></button>
           </div>
         </div>
-        <svg className="sketch-art" width={width} height={height} viewBox={`0 0 ${width} ${height}`} key={key}>
+        <svg className="sketch-art" width={width} height={height} viewBox={view} key={key}>
           {board.shapes.map((shape, i) =>
             shape.step <= step ? (
               <Stroke key={i} shape={shape} index={i} scale={scale} delay={shape.step === step ? timing[step]?.delays.get(i) ?? 0 : -1} onAsk={ask} />

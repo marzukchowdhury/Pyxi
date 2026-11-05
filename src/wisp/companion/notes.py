@@ -202,10 +202,10 @@ def place_card(
 STAGE_SIZES = ((1040, 700), (900, 620), (780, 560), (660, 500), (540, 440))  # CSS px, biggest first
 PLATE_SIZE = ((760, 650),)  # an explain_in_3d plate: canvas, rise and step text
 BOARD_SIZES = (
-    (620, 560),
-    (540, 505),
-    (470, 460),
-    (410, 420),
+    (760, 620),
+    (680, 560),
+    (600, 510),
+    (540, 470),
 )  # sketchboards incl. title and caption
 
 
@@ -213,6 +213,7 @@ def place_stage(
     ctx: ScreenContext | None,
     avoid: list[tuple[int, int, int, int]] | None = None,
     sizes: tuple[tuple[int, int], ...] = STAGE_SIZES,
+    size_weight: float = 0.6,
 ) -> tuple[int, int, int, int] | None:
     """Where a 3D model should float: the biggest spot that hides the least of what's on screen
     (text, images, video, controls), clear of the notch and of any note card. Returns
@@ -236,7 +237,7 @@ def place_stage(
                 if covered == float("inf"):
                     continue
                 # Mostly: hide as little as possible. A bigger stage wins near-ties.
-                score = covered / (w * h) - (w * h) / screen_area * 0.6
+                score = covered / (w * h) - (w * h) / screen_area * size_weight
                 if best is None or score < best[0]:
                     best = (score, (cx, cy, w, h))
     return best[1] if best else None

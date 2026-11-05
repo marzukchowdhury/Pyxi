@@ -160,3 +160,37 @@ export function timeline(shapes: SketchShape[], step: number, scale: number): { 
   });
   return { delays, total: end + 0.25 };
 }
+
+/** A viewBox that zooms to what was actually drawn (models often leave empty bands), keeping the
+ * board's shape, never zooming past ``maxZoom`` so strokes stay hand-drawn rather than chunky. */
+export function fitView(shapes: SketchShape[], scale: number, width: number, height: number, maxZoom = 1.4): string {
+  let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+  const add = (x: number, y: number) => {
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x);
+    y1 = Math.max(y1, y);
+  };
+  for (const s of shapes) {
+    for (const [x, y] of s.points) add(x * scale, y * scale);
+    if (s.at && s.size) {
+      add(s.at[0] * scale, s.at[1] * scale);
+      add((s.at[0] + s.size[0]) * scale, (s.at[1] + s.size[1]) * scale);
+    }
+    const t = placeText(s, scale);
+    if (t) {
+      add(t.x, t.y - t.size);
+      add(t.x + t.width, t.y + t.size * 0.3);
+    }
+  }
+  if (!Number.isFinite(x0)) return `0 0 ${width} ${height}`;
+  const pad = 4 * scale;
+  let [w, h] = [x1 - x0 + 2 * pad, y1 - y0 + 2 * pad];
+  // Keep the board's proportions, and don't zoom in further than maxZoom.
+  const aspect = width / height;
+  if (w / h > aspect) h = w / aspect;
+  else w = h * aspect;
+  if (width / w > maxZoom) [w, h] = [width / maxZoom, height / maxZoom];
+  const [cx, cy] = [(x0 + x1) / 2, (y0 + y1) / 2];
+  return `${(cx - w / 2).toFixed(1)} ${(cy - h / 2).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`;
+}

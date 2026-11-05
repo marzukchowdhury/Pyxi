@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SketchShape } from "../shared/protocol";
-import { drawShape, placeText, timeline } from "./sketchPaths";
+import { drawShape, fitView, placeText, timeline } from "./sketchPaths";
 
 const shape = (s: Partial<SketchShape>): SketchShape => ({
   kind: "line", points: [], at: null, size: null, text: null, color: "ink", fill: false,
@@ -32,5 +32,16 @@ describe("sketch paths", () => {
     expect([...t.delays.keys()]).toEqual([0, 1]);
     expect(t.delays.get(1)!).toBeGreaterThan(t.delays.get(0)!);
     expect(t.total).toBeGreaterThan(t.delays.get(1)!);
+  });
+});
+
+describe("fitting the view to the drawing", () => {
+  it("zooms into a drawing that only uses one corner, but not past the limit", () => {
+    const corner = [shape({ kind: "rect", at: [5, 5], size: [20, 12], step: 0 })];
+    const [, , w] = fitView(corner, 5, 500, 320).split(" ").map(Number);
+    expect(w).toBeCloseTo(500 / 1.4, 0); // capped at 1.4x
+    const full = [shape({ kind: "line", points: [[0, 0], [100, 64]], step: 0 })];
+    const [, , w2] = fitView(full, 5, 500, 320).split(" ").map(Number);
+    expect(w2).toBeGreaterThanOrEqual(500); // already full: no zoom in
   });
 });

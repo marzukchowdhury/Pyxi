@@ -1421,7 +1421,8 @@ class Brain:
         avoid = self._placed.others("stage")
         if board.anchor and board.anchor.rect:
             avoid = [*avoid, tuple(board.anchor.rect)]  # never cover the thing it explains
-        place = place_stage(ctx, avoid, BOARD_SIZES)
+        # A diagram has to be readable: size counts for a lot more than covering a sidebar.
+        place = place_stage(ctx, avoid, BOARD_SIZES, size_weight=2.0)
         self._placed.put("stage", place, 60.0)
         audio_key = f"{board.id}:{secrets.token_hex(3)}"
         await self.hub.emit(
