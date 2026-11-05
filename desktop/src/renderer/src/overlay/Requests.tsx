@@ -18,6 +18,7 @@ export function Requests() {
               <div className="req-reason">{r.reason}</div>
               <div className="req-buttons">
                 <button className="yes" onClick={() => answer(r.request_id, true)}>Allow</button>
+                {r.always && <button onClick={() => answer(r.request_id, "always")}>{r.always}</button>}
                 <button onClick={() => answer(r.request_id, false)}>Don't</button>
               </div>
             </>

@@ -125,6 +125,57 @@ def match(name: str, points: dict[str, tuple[int, int]]) -> tuple[int, int] | No
     return best if best_score > 0.5 else None
 
 
+CONFIRM = ToolSpec(
+    "found",
+    "Say whether the control is in this picture, and where.",
+    {
+        "type": "object",
+        "properties": {
+            "here": {"type": "boolean"},
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+        },
+        "required": ["here"],
+    },
+)
+
+
+async def confirm_target(
+    llm, crop: Image.Image, origin: tuple[int, int], label: str
+) -> tuple[tuple[int, int] | None, object | None]:
+    """Before clicking where the model only guessed (no element id, no words to find): zoom
+    into the spot and make sure the thing is really there. Returns its exact centre on screen,
+    or None when it isn't (so Wisp doesn't click a bookmark instead of a spreadsheet cell)."""
+    img, scale = gridded(crop)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    prompt = (
+        f"This {img.width}x{img.height} image is a zoomed part of a screen; grid lines every 100 px "
+        f"are numbered in yellow. Is '{label}' here? If yes, give the exact centre of it in this "
+        "image's px. If it isn't clearly here, say here=false. Call `found`."
+    )
+    try:
+        res = await llm.complete(
+            system="You check where a control is on screen, precisely and honestly.",
+            messages=[Message("user", [ImagePart(buf.getvalue(), "image/jpeg"), TextPart(prompt)])],
+            tools=[CONFIRM],
+            max_tokens=2000,
+        )
+    except Exception as exc:
+        log.info("confirming a click target failed: %s", exc)
+        return None, None
+    for call in res.tool_calls:
+        a = call.arguments
+        if call.name == "found" and a.get("here"):
+            try:
+                x, y = float(a["x"]), float(a["y"])
+            except (KeyError, TypeError, ValueError):
+                return None, res.usage
+            if 0 <= x <= img.width and 0 <= y <= img.height:
+                return (origin[0] + round(x / scale), origin[1] + round(y / scale)), res.usage
+    return None, res.usage
+
+
 async def survey(
     llm,
     picture: Image.Image,

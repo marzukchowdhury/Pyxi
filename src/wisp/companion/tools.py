@@ -435,6 +435,35 @@ COMPANION_TOOLS += [
         ["action", "value"],
     ),
     _tool(
+        "use_computer",
+        "Do it yourself on their PC with the mouse and keyboard, in any app: play a song (in YouTube Music "
+        "from the taskbar, or a new tab, then come back), search Maps, fill in or format a spreadsheet, "
+        "write formulas, make a pivot table, rename or move files in Explorer, change a setting in an app, "
+        "click through a site. They see an Allow card first, watch the cursor move, and can stop it by "
+        "moving the mouse or pressing Esc; anything that sends, buys, posts or deletes asks again. Use it "
+        "whenever they ask you to DO something on screen; use `guide` instead when they want to learn to "
+        "do it themselves. Give `task` exactly: what to do, in which app, and what done looks like, plus "
+        "what they told you (the song, the file). Say one short line first ('On it.'), never the task "
+        "itself.",
+        {
+            "task": {
+                "type": "string",
+                "description": "e.g. 'Open YouTube Music from the taskbar, search Billie Jean by Michael "
+                "Jackson, play the first song result, then switch back to the window they were in.'",
+            },
+            "app": {
+                "type": "string",
+                "description": "The app it happens in, if not the one they're in (e.g. 'YouTube Music').",
+            },
+            "come_back": {
+                "type": "boolean",
+                "description": "Put the window they're in back in front when done (music playing in "
+                "the background, a quick lookup). False when they want to see the result (a sheet).",
+            },
+        },
+        ["task"],
+    ),
+    _tool(
         "arrange_windows",
         "Arrange their windows, right now: split the screen (the window they're in on one half, a site or app "
         "in a new window on the other), snap the window they're in left, right, top or bottom, or maximize, "

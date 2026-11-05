@@ -17,6 +17,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -118,6 +119,22 @@ def snap(hwnd: int, where: str) -> None:
         "bottom": (x, y + h // 2, w, h - h // 2),
     }
     place(hwnd, *rects[where])
+
+
+def focus(hwnd: int) -> bool:
+    """Bring a window to the front so typing goes to it. Windows only lets the app the user
+    last used do this, so a harmless Alt tap first marks this process as "in use"."""
+    u = _user32()
+    if u.IsIconic(hwnd):
+        u.ShowWindow(hwnd, SW_RESTORE)
+    u.keybd_event(0x12, 0, 0, 0)  # Alt down
+    u.keybd_event(0x12, 0, 2, 0)  # Alt up
+    ok = bool(u.SetForegroundWindow(hwnd))
+    for _ in range(10):  # the switch takes a moment, with no window in front meanwhile
+        if int(u.GetForegroundWindow() or 0) == int(hwnd):
+            return True
+        time.sleep(0.03)
+    return ok
 
 
 def _visible_windows() -> set[int]:

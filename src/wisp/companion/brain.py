@@ -36,7 +36,7 @@ from otto.types import ToolCall, Usage
 from PIL import Image
 from pydantic import ValidationError
 
-from wisp import web, windows
+from wisp import hands, web, windows
 from wisp.agents import AgentProfile, AgentRegistry, Job, JobManager
 from wisp.agents.jobs import Handoff
 from wisp.companion import prompts
@@ -62,6 +62,7 @@ from wisp.companion.notes import (
     place_stage,
     target_rect,
 )
+from wisp.companion.operator import Operator, Outcome
 from wisp.companion.tools import BUILD_BRIEF, COMPANION_TOOLS, INFO_TOOLS
 from wisp.companion.turns import TurnStore
 from wisp.config import WispSettings
@@ -179,6 +180,7 @@ class Brain:
         )
         self._object: ObjectScene | None = None  # the 3D model on screen, so follow-ups can edit it
         self._guide: Guide | None = None  # a click Wisp is waiting for
+        self._operator: Operator | None = None  # Wisp using the mouse and keyboard
         self.connectors = Connectors(settings.data_dir, Path.home() / "Documents" / "Wisp")
         self.routines = RoutineStore(settings.data_dir / "routines.json")
 
@@ -236,6 +238,102 @@ class Brain:
             await self.say_line(f"That didn't go through. {friendly_error(exc)}")
             return
         await self.say_line(line if not line.startswith(("CREATED", "SENT")) else "Done.")
+
+    def _hands_always(self) -> bool:
+        try:
+            return bool(json.loads((self.settings.data_dir / "hands.json").read_text())["always"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    async def _use_computer(self, args: dict[str, Any]) -> str | None:
+        """Do a task with the mouse and keyboard, in the background, after they allow it."""
+        task = str(args.get("task") or "").strip()[:600]
+        if not task:
+            return "use_computer: say what to do."
+        if not hands.available():
+            return "use_computer: this only works on Windows."
+        if self._operator is not None:
+            return (
+                "use_computer: you're already using the mouse for another task; finish that first."
+            )
+        window = self._ctx.window.hwnd if self._ctx and self._ctx.window.hwnd else None
+        self._spawn(self._drive(task, window, bool(args.get("come_back"))))
+        return None
+
+    async def _drive(self, task: str, window: int | None, come_back: bool = False) -> None:
+        if not self._hands_always():
+            ok = await self.hub.request(
+                "confirm",
+                timeout=300,
+                job_id="",
+                agent="Wisp",
+                action=f"Use your mouse and keyboard to: {task}",
+                reason="Move the mouse or press Esc to stop me. Anything that sends, buys, posts "
+                "or deletes asks you again.",
+                always="Always allow",
+            )
+            if ok == "always":
+                (self.settings.data_dir / "hands.json").write_text(json.dumps({"always": True}))
+            elif not ok:
+                await self.say_line("Okay, hands off.")
+                return
+        job = await self.jobs.track("Wisp", task)
+
+        async def report(doing: str, step: int) -> None:
+            await self.hub.emit(
+                "job_event", job_id=job.id, agent="Wisp", event="status", data={"message": doing}
+            )
+
+        async def confirm(action: str, reason: str) -> bool:
+            return bool(
+                await self.hub.request(
+                    "confirm",
+                    timeout=300,
+                    job_id=job.id,
+                    agent="Wisp",
+                    action=action,
+                    reason=reason,
+                )
+            )
+
+        if getattr(self, "_hands_llm", None) is None:
+            model = self.settings.model_hands
+            self._hands_llm = (
+                StreamingChat(model) if model and not self.settings.local_mode else self.llm
+            )
+        self._operator = Operator(
+            self._hands_llm,
+            lambda: self.screen.capture(pixels=True, follow_mouse=False),
+            confirm,
+            report,
+            image_width=self.settings.screen.model_image_width,
+            strong_llm=(
+                StreamingChat(self.settings.model_hands_strong)
+                if self.settings.model_hands_strong and not self.settings.local_mode
+                else None
+            ),
+        )
+        try:
+            out = await self._operator.run(task, window, come_back)
+        except Exception as exc:
+            log.exception("use_computer failed")
+            out = Outcome(False, f"I hit a snag doing that. {friendly_error(exc)}")
+        finally:
+            usage, self._operator = (self._operator.usage if self._operator else None), None
+        cost = usage.cost_usd if usage else 0.0
+        self.turns.add_spend("hands", cost)
+        await self.jobs.settle(job, ok=out.ok, summary=out.summary, cost=cost)
+        self.history = [
+            *self.history[-11:],
+            (f"(you used the mouse and keyboard to: {task[:200]})", f"({out.summary})"),
+        ]
+        log.info(
+            "use_computer: %s in %d steps ($%.4f)",
+            "ok" if out.ok else "stopped",
+            len(out.steps),
+            cost,
+        )
+        await self.say_line(out.summary)
 
     async def _arrange_windows(self, args: dict[str, Any]) -> str | None:
         """Split the screen, snap, maximize, minimize or restore the window they're in."""
@@ -657,6 +755,8 @@ class Brain:
 
     def interrupt(self) -> None:
         self._speech_gen += 1
+        if self._operator is not None:
+            self._operator.cancelled = True  # talking to Wisp stops her hands too
         self._spawn(self.hub.emit("stop_audio"))
 
     async def turn(
@@ -1369,6 +1469,8 @@ class Brain:
             return None
         if name == "arrange_windows":
             return await self._arrange_windows(args)
+        if name == "use_computer":
+            return await self._use_computer(args)
         if name == "quick_action":
             return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
         if name == "start_walkthrough":

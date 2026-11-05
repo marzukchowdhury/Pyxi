@@ -344,7 +344,7 @@ export type BrainEvent =
   | { type: "job_event"; job_id: string; agent: string; event: string; data: Record<string, unknown> }
   | { type: "job_frame"; job_id: string; image: string }
   | { type: "handoff"; source: string; target: string; task: string }
-  | { type: "confirm"; request_id: string; job_id: string; agent: string; action: string; reason: string }
+  | { type: "confirm"; request_id: string; job_id: string; agent: string; action: string; reason: string; always?: string }
   | { type: "ask"; request_id: string; job_id: string; agent: string; question: string }
   | { type: "agents"; agents: Agent[] }
   | { type: "pins"; app: string; pins: Pin[] }

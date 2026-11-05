@@ -262,17 +262,21 @@ class ScreenReader:
                 return window.app or "private window"
         return None
 
-    async def capture(self, *, pixels: bool = True) -> ScreenContext:
-        return await asyncio.to_thread(self._capture_sync, pixels)
+    async def capture(self, *, pixels: bool = True, follow_mouse: bool = True) -> ScreenContext:
+        """``follow_mouse``: read the window under the mouse (what they're looking at); off while
+        Wisp drives, when the window in front is the one being worked in."""
+        return await asyncio.to_thread(self._capture_sync, pixels, follow_mouse)
 
-    def _capture_sync(self, pixels: bool) -> ScreenContext:
+    def _capture_sync(self, pixels: bool, follow_mouse: bool = True) -> ScreenContext:
         now = time.time()
         if self.paused:
             return ScreenContext(
                 captured_at=now, window=WindowInfo(), excluded="screen sharing is paused"
             )
         raw_window, raw = uia.read_foreground(
-            budget_s=self.config.uia_budget_s, max_elements=self.config.max_elements * 3
+            budget_s=self.config.uia_budget_s,
+            max_elements=self.config.max_elements * 3,
+            follow_mouse=follow_mouse,
         )
         window = (
             WindowInfo(raw_window.title, raw_window.process, raw_window.rect, raw_window.hwnd)
@@ -283,7 +287,18 @@ class ScreenReader:
             return ScreenContext(captured_at=now, window=window, excluded=reason)
 
         elements = self._number(raw)
-        shot, origin = self._grab(window.rect) if pixels else (None, (0, 0))
+        shot, origin = self._grab(window.rect, follow_mouse) if pixels else (None, (0, 0))
+        if shot is not None:
+            # The taskbar too (pinned apps, the clock): it's on screen and people ask about it.
+            x0, y0, x1, y1 = origin[0], origin[1], origin[0] + shot.width, origin[1] + shot.height
+            bar = [
+                b
+                for b in uia.read_taskbar()
+                if x0 <= b.rect[0] + b.rect[2] // 2 < x1 and y0 <= b.rect[1] + b.rect[3] // 2 < y1
+            ]
+            for b in bar:
+                elements.append(UIElement(self._next_id, b.name, b.role, b.rect))
+                self._next_id += 1
         text = self._read_text(shot, origin, elements) if shot is not None else []
         return ScreenContext(
             captured_at=now,
@@ -357,12 +372,14 @@ class ScreenReader:
         return uia.window_at(x, y)
 
     @staticmethod
-    def _grab(window_rect: tuple[int, int, int, int]) -> tuple[Image.Image | None, tuple[int, int]]:
+    def _grab(
+        window_rect: tuple[int, int, int, int], follow_mouse: bool = True
+    ) -> tuple[Image.Image | None, tuple[int, int]]:
         """Capture the monitor the user is on: the one under the mouse, else the one holding
         the window being read."""
         import mss
 
-        pos = uia.cursor_pos()
+        pos = uia.cursor_pos() if follow_mouse else None
         with (getattr(mss, "MSS", None) or mss.mss)() as sct:
             mon = pick_monitor(sct.monitors[1:], (*pos, 1, 1) if pos else window_rect)
             raw = sct.grab(mon)

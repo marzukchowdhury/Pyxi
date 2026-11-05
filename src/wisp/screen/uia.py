@@ -156,7 +156,11 @@ def process_name(pid: int) -> str:
 
 
 def read_foreground(
-    *, budget_s: float = 1.5, max_elements: int = 400, max_depth: int = 25
+    *,
+    budget_s: float = 1.5,
+    max_elements: int = 400,
+    max_depth: int = 25,
+    follow_mouse: bool = True,
 ) -> tuple[RawWindow | None, list[RawElement]]:
     """Walk the foreground window's UIA tree within a time budget. Never raises."""
     if not available():
@@ -168,19 +172,19 @@ def read_foreground(
 
     try:
         with auto.UIAutomationInitializerInThread(debug=False):
-            return _walk(auto, budget_s, max_elements, max_depth)
+            return _walk(auto, budget_s, max_elements, max_depth, follow_mouse)
     except Exception as exc:  # UIA is best-effort: some apps throw COM errors mid-walk
         log.warning("UI Automation failed: %s", exc)
         return None, []
 
 
 def _walk(
-    auto, budget_s: float, max_elements: int, max_depth: int
+    auto, budget_s: float, max_elements: int, max_depth: int, follow_mouse: bool = True
 ) -> tuple[RawWindow | None, list[RawElement]]:
     # The window the user is looking at: the one under the mouse (on a second monitor the
     # foreground window is often somewhere else entirely), else the foreground window.
     top = None
-    pos = cursor_pos()
+    pos = cursor_pos() if follow_mouse else None
     hwnd = window_at(*pos) if pos else None
     if hwnd:
         try:
@@ -244,6 +248,47 @@ def _walk(
         )
         stack.append((depth, len(out) - 1))
     return window, out
+
+
+def read_taskbar(budget_s: float = 0.4) -> list[RawElement]:
+    """The taskbar's buttons (Start, pinned and running apps, the tray, the clock), named the
+    way Windows names them ("YouTube Music pinned"), on every monitor. Never raises."""
+    if not available():
+        return []
+    try:
+        import uiautomation as auto
+
+        out: list[RawElement] = []
+        deadline = time.monotonic() + budget_s
+        with auto.UIAutomationInitializerInThread(debug=False):
+            root = auto.GetRootControl()
+            for bar in root.GetChildren():
+                if bar.ClassName not in ("Shell_TrayWnd", "Shell_SecondaryTrayWnd"):
+                    continue
+                for control, depth in auto.WalkControl(bar, maxDepth=8):
+                    if time.monotonic() > deadline:
+                        return out
+                    if control.ControlTypeName != "ButtonControl" or not control.Name:
+                        continue
+                    r = control.BoundingRectangle
+                    if r.width() < 6 or r.height() < 6:
+                        continue
+                    name = " ".join(control.Name.replace("\u200e", "").split())
+                    out.append(
+                        RawElement(
+                            name[:80],
+                            "TaskbarButton",
+                            (r.left, r.top, r.width(), r.height()),
+                            depth,
+                            None,
+                            False,
+                            "",
+                        )
+                    )
+        return out
+    except Exception as exc:
+        log.debug("taskbar read failed: %s", exc)
+        return []
 
 
 @dataclass

@@ -66,6 +66,8 @@ interface Request {
   action?: string;
   reason?: string;
   question?: string;
+  /** A third button, e.g. "Always allow" (answers "always"). */
+  always?: string;
 }
 
 interface OverlayState {

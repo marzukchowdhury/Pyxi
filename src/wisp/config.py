@@ -118,6 +118,15 @@ class WispSettings(BaseSettings):
         "empty means the chat model builds them itself.",
     )
     effort_3d: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    model_hands: str | None = Field(
+        None,
+        description="Model that drives the mouse and keyboard (WISP_MODEL_HANDS); empty = the chat model.",
+    )
+    model_hands_strong: str | None = Field(
+        "anthropic/claude-sonnet-5.5",
+        description="Takes over driving when the quick model gets stuck (canvas apps like Google "
+        "Sheets, a dialog it can't get past). About 8x the cost per look, only when needed.",
+    )
     model_aim: str | None = Field(
         "anthropic/claude-sonnet-5.5",
         description="Model that finds the parts of a picture Wisp explains (WISP_MODEL_AIM), on a "
