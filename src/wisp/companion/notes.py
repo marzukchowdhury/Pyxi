@@ -12,11 +12,13 @@ real click on it, looks at the new screen and gives the next step.
 
 from __future__ import annotations
 
+import math
 import secrets
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from wisp.companion.aim import Survey
 from wisp.companion.annotations import resolve_point, resolve_rect
 from wisp.companion.layout import Occupancy
 from wisp.screen import ScreenContext
@@ -32,6 +34,11 @@ class NoteItem(BaseModel):
     mark: Mark = "frame"
     rect: tuple[int, int, int, int] | None = None  # physical screen px of what it's about
     say: str | None = None  # the sentence Wisp speaks as this point appears
+    # On a picture: the exact spot on the part (screen px), where its tag sits, and the route
+    # traced along the picture as it's said (blood flowing, a signal's path).
+    at: tuple[int, int] | None = None
+    tag: tuple[int, int] | None = None
+    trace: list[tuple[int, int]] = Field(default_factory=list)
 
 
 class Sketch(BaseModel):
@@ -51,6 +58,8 @@ class NoteCard(BaseModel):
     )
     place: tuple[int, int] | None = None  # top-left in screen px: the emptiest spot near the region
     closing: str | None = None  # said after the last point: a related fact and an offer
+    style: Literal["card", "picture"] = "card"  # picture: tags pinned onto it, no card
+    picture: tuple[int, int, int, int] | None = None
 
 
 def _union(rects: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int] | None:
@@ -75,12 +84,35 @@ def target_rect(ctx: ScreenContext | None, raw: dict[str, Any]) -> tuple[int, in
     return elem or resolve_rect(ctx, None, raw.get("box"))
 
 
+def picture_rect(
+    ctx: ScreenContext | None, args: dict[str, Any]
+) -> tuple[int, int, int, int] | None:
+    """The picture being explained, in screen px (from its element id or screenshot box)."""
+    if ctx is None or args.get("style") != "on_picture":
+        return None
+    return resolve_rect(ctx, args.get("picture_element_id"), args.get("picture"))
+
+
+def _point(ctx: ScreenContext | None, xy: Any) -> tuple[int, int] | None:
+    if not isinstance(xy, list | tuple) or len(xy) != 2:
+        return None
+    try:
+        return resolve_point(ctx, None, [float(xy[0]), float(xy[1])])
+    except (TypeError, ValueError):
+        return None
+
+
 def build_card(
     ctx: ScreenContext | None,
     args: dict[str, Any],
     avoid: list[tuple[int, int, int, int]] | None = None,
+    survey: Survey | None = None,
+    keep: NoteCard | None = None,
 ) -> NoteCard:
-    """Turn the model's tool call (quotes, element ids, screenshot px) into screen-exact geometry."""
+    """Turn the model's tool call (quotes, element ids, screenshot px) into screen-exact geometry.
+    On a picture, each point is pinned to its part where the aiming survey found it."""
+    if args.get("style") == "on_picture" and (pic := picture_rect(ctx, args)):
+        return _picture_card(ctx, args, pic, survey, keep)
     items: list[NoteItem] = []
     for i, raw in enumerate(args.get("items", [])[:7], start=1):
         if not isinstance(raw, dict) or not str(raw.get("text", "")).strip():
@@ -138,6 +170,123 @@ def build_card(
     )
     card.place = place_card(ctx, region, [it.text for it in items], card.title, avoid)
     return card
+
+
+def _picture_card(
+    ctx: ScreenContext | None,
+    args: dict[str, Any],
+    pic: tuple[int, int, int, int],
+    survey: Survey | None,
+    keep: NoteCard | None = None,
+) -> NoteCard:
+    """``keep``: the same card as shown so far (while it streams in); its tags stay put."""
+    shown = {it.n: it for it in keep.items} if keep and keep.style == "picture" else {}
+
+    def locate(name: Any, rough: Any = None) -> tuple[int, int] | None:
+        found = survey.find(str(name)) if survey and name else None
+        return found or _point(ctx, rough)
+
+    items: list[NoteItem] = []
+    for i, raw in enumerate(args.get("items", [])[:8], start=1):
+        if not isinstance(raw, dict) or not str(raw.get("text", "")).strip():
+            continue
+        at = locate(raw.get("part") or raw.get("text"), raw.get("at"))
+        if at is None and (r := target_rect(ctx, raw)):
+            at = (r[0] + r[2] // 2, r[1] + r[3] // 2)
+        trace = [p for n in (raw.get("flow") or [])[:8] if (p := locate(n))]
+        trace = [p for j, p in enumerate(trace) if j == 0 or p != trace[j - 1]]
+        items.append(
+            NoteItem(
+                n=i,
+                text=str(raw["text"]).strip()[:40],
+                say=(str(raw.get("say") or "").strip()[:240] or None),
+                kind="point",
+                mark="none",
+                at=at,
+                trace=trace if len(trace) >= 2 else [],
+            )
+        )
+        if (old := shown.get(i)) and old.text == items[-1].text and old.at:
+            items[-1].at, items[-1].tag, items[-1].trace = old.at, old.tag, old.trace
+    place_tags(items, pic, ctx)
+    return NoteCard(
+        title=str(args.get("title", "")).strip()[:60] or "Notes",
+        closing=(str(args.get("closing") or "").strip()[:300] or None),
+        items=items,
+        region=pic,
+        style="picture",
+        picture=pic,
+    )
+
+
+def tag_size(text: str) -> tuple[int, int]:
+    """A tag pill in screen px: 12 px semibold Inter, ~7 px a character."""
+    k = _dpi_scale()
+    return int((len(text) * 7 + 22) * k), int(24 * k)
+
+
+def place_tags(
+    items: list[NoteItem], pic: tuple[int, int, int, int], ctx: ScreenContext | None = None
+) -> None:
+    """Put each tag a short leader away from its spot: fanning outward from the picture's
+    middle the way a labelled diagram does, never on another tag, another pinned spot or a
+    traced route, and never off the screen."""
+    k = _dpi_scale()
+    cx, cy = pic[0] + pic[2] / 2, pic[1] + pic[3] / 2
+    if ctx is not None and ctx.screenshot is not None:
+        sx0, sy0 = ctx.origin
+        sx1, sy1 = sx0 + ctx.screenshot.width, sy0 + ctx.screenshot.height
+    else:
+        sx0, sy0, sx1, sy1 = (
+            pic[0] - 400,
+            pic[1] - 400,
+            pic[0] + pic[2] + 400,
+            pic[1] + pic[3] + 400,
+        )
+    spots = [it.at for it in items if it.at]
+    route = [p for it in items for p in it.trace]
+    words = [t.rect for t in (ctx.text if ctx is not None else [])]  # labels already on it
+    taken: list[tuple[int, int, int, int]] = []
+    for it in items:
+        if it.tag:  # already on screen: stays put, and the new ones keep clear of it
+            w, h = tag_size(it.text)
+            taken.append((it.tag[0] - w // 2, it.tag[1] - h // 2, w, h))
+    for it in items:
+        if it.at is None or it.tag is not None:
+            continue
+        ax, ay = it.at
+        w, h = tag_size(it.text)
+        out = math.atan2(ay - cy, ax - cx) if (ax, ay) != (cx, cy) else -math.pi / 2
+        best, best_score = None, None
+        for dist in (60 * k, 90 * k, 125 * k):
+            for step in range(16):
+                a = step * math.pi / 8
+                tx, ty = ax + math.cos(a) * dist, ay + math.sin(a) * dist
+                box = (int(tx - w / 2), int(ty - h / 2), w, h)
+                if (
+                    box[0] < sx0 + 6
+                    or box[1] < sy0 + 6
+                    or box[0] + w > sx1 - 6
+                    or box[1] + h > sy1 - 6
+                ):
+                    continue
+                pad = int(8 * k)
+                grown = (box[0] - pad, box[1] - pad, w + 2 * pad, h + 2 * pad)
+                score = sum(_overlap(grown, t) for t in taken) * 50.0
+                score += sum(4000.0 for s in spots if _inside(s, grown))
+                score += sum(600.0 for p in route if _inside(p, grown))
+                score += sum(_overlap(box, r) for r in words) * 20.0
+                turn = abs((a - out + math.pi) % (2 * math.pi) - math.pi)  # 0 = straight outward
+                score += turn * 900.0 + dist * 4.0
+                if best_score is None or score < best_score:
+                    best, best_score = box, score
+        if best is not None:
+            taken.append(best)
+            it.tag = (best[0] + best[2] // 2, best[1] + best[3] // 2)
+
+
+def _inside(p: tuple[int, int], r: tuple[int, int, int, int]) -> bool:
+    return r[0] <= p[0] <= r[0] + r[2] and r[1] <= p[1] <= r[1] + r[3]
 
 
 def _dpi_scale() -> float:

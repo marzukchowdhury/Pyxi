@@ -41,6 +41,7 @@ from wisp.agents import AgentProfile, AgentRegistry, Job, JobManager
 from wisp.agents.jobs import Handoff
 from wisp.companion import prompts
 from wisp.companion.actions import app_target, open_app, safe_url
+from wisp.companion.aim import Survey, survey
 from wisp.companion.annotations import (
     MARKER,
     Annotation,
@@ -57,6 +58,7 @@ from wisp.companion.notes import (
     Guide,
     build_card,
     card_size,
+    picture_rect,
     place_stage,
     target_rect,
 )
@@ -68,7 +70,7 @@ from wisp.hub import Hub
 from wisp.llm import make_llm
 from wisp.memory import SpatialMemory
 from wisp.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
-from wisp.partial_json import complete_items, first_chunk, partial_string
+from wisp.partial_json import complete_items, first_chunk, partial_string, picture_head
 from wisp.routines import RoutineStore
 from wisp.scenes import SceneSpec, build_exploded_scene, get_scene, parse_scene
 from wisp.scenes.builder import build_model
@@ -155,6 +157,7 @@ class Brain:
         self._calls: list[dict[str, Any]] = []
         self._scene_retry = False
         self._turn_card = None  # the note card drawn this turn, if any
+        self._survey: asyncio.Task | None = None
         self._watcher: asyncio.Future[None] | None = None
         self._job_llm: LLMProvider | None = None
         self._user_text = ""  # the user's own words this turn (errands check addresses against it)
@@ -394,9 +397,51 @@ class Brain:
         if lines:
             self._speak(" ".join(lines))
 
-    async def _show_card_so_far(self, title: str, items: list[dict[str, Any]]) -> None:
+    def _start_survey(self, args: dict[str, Any]) -> None:
+        """Explaining a picture: start finding its parts now, while the opener is spoken."""
+        if self._survey is not None or not self.settings.model_aim or self.settings.local_mode:
+            return
+        ctx = self._ctx
+        pic = picture_rect(ctx, args)
+        if ctx is None or pic is None or pic[2] < 40 or pic[3] < 40:
+            return
+        pad = int(min(pic[2], pic[3]) * 0.04)
+        crop = ctx.crop(pic, pad)
+        if crop is None:
+            return
+        origin = (max(ctx.origin[0], pic[0] - pad), max(ctx.origin[1], pic[1] - pad))
+        if getattr(self, "_aim_llm", None) is None:
+            self._aim_llm = StreamingChat(self.settings.model_aim)
+        names = [
+            str(it.get("part"))
+            for it in args.get("items", [])
+            if isinstance(it, dict) and it.get("part")
+        ]
+
+        async def run() -> Survey:
+            found, usage = await survey(self._aim_llm, crop, origin, self._user_text, names)
+            if usage is not None:
+                self._usage = self._usage + usage
+            log.info("picture survey found %s", sorted(found.points))
+            return found
+
+        self._survey = asyncio.create_task(run())
+
+    async def _survey_result(self) -> Survey | None:
+        if self._survey is None:
+            return None
+        try:
+            return await asyncio.wait_for(asyncio.shield(self._survey), 10)
+        except Exception:
+            return None
+
+    async def _show_card_so_far(
+        self, title: str, items: list[dict[str, Any]], head: dict[str, Any] | None = None
+    ) -> None:
         """Show the points that have arrived so far, and say the new ones."""
-        card = build_card(self._ctx, {"title": title, "items": items}, self._placed.others("card"))
+        args = {**(head or {}), "title": title, "items": items}
+        found = await self._survey_result() if args.get("style") == "on_picture" else None
+        card = build_card(self._ctx, args, self._placed.others("card"), found, self._turn_card)
         if not card.items:
             return
         first = self._turn_card is None
@@ -638,6 +683,7 @@ class Brain:
             self._synthetic = synthetic
             self._pending_say = ""  # an answer held back during a lookup round
             self._narrated_items: set[int] = set()  # cue-card points already said as they arrived
+            self._survey: asyncio.Task | None = None  # finding the parts of a picture
             self._searches = 0
             self._turn_gen = self._speech_gen  # push-to-talk bumps the gen: this turn is then stale
             turn_id = "turn_" + secrets.token_hex(4)
@@ -818,7 +864,7 @@ class Brain:
                         }
                         self._pending_say = ""
                         self._speak(strip_filler(first))
-                elif name == "explain_on_screen":
+                elif name in ("explain_on_screen", "explain_on_picture"):
                     if held["say"] is not None and held["say"].id not in early:
                         # This round's reply came first: say it before the points.
                         call, held["say"] = held["say"], None
@@ -831,12 +877,18 @@ class Brain:
                             }
                         )
                         await self._act("say", dict(call.arguments))
+                    # A picture: start finding its parts the moment we know which picture.
+                    head_args = picture_head(raw, on_picture=name == "explain_on_picture")
+                    if head_args:
+                        self._start_survey(head_args)
                     # Each cue-card point is shown, and said, as soon as it has fully arrived.
                     items = complete_items(raw)
                     if len(items) > live_items["n"]:
                         live_items["n"] = len(items)
                         title = partial_string(raw, "title")
-                        await self._show_card_so_far(title[0] if title and title[1] else "", items)
+                        await self._show_card_so_far(
+                            title[0] if title and title[1] else "", items, head_args
+                        )
 
             first_round = state.get("round", 0) == 0
             extra: dict[str, Any] = {}
@@ -939,6 +991,23 @@ class Brain:
                 if note and note.startswith(f"{call.name}:") and call.name not in QUIET_NOTES:
                     needs_more = True
             self._narrate_card()
+            promised = any(
+                drop_false_promises(str(c.arguments.get("text", "")))[1]
+                for c in calls
+                if c.name == "say"
+            )
+            if (
+                promised
+                and all(c.name == "say" for c in calls)
+                and not needs_more
+                and round_no < self.settings.budget.max_tool_rounds
+            ):
+                # "Checking the news on that one." and then nothing: make it true.
+                needs_more = True
+                notes.append(
+                    "You told them you'd check, so check now: call web_search (or delegate for "
+                    "deep research), then answer. Don't say again that you're checking."
+                )
             return {
                 "round": round_no,
                 "notes": [*state.get("notes", []), *notes],
@@ -988,6 +1057,9 @@ class Brain:
     # ================================================================== tools
     async def _act(self, name: str, args: dict[str, Any]) -> str | None:
         ctx = self._ctx
+        if name in TOOL_ALIASES:  # a name the model made up for a real tool
+            name, extra = TOOL_ALIASES[name]
+            args = {**extra, **args}
         if name == "say":
             text = strip_filler(str(args.get("text", "")))
             self._pending_say = ""
@@ -1046,7 +1118,12 @@ class Brain:
             self._placed.put("card", None, 0)
             return None
         if name == "explain_on_screen":
-            card = build_card(ctx, args, self._placed.others("card"))
+            found = None
+            if args.get("style") == "on_picture":
+                self._start_survey(args)
+                found = await self._survey_result()
+            keep = self._turn_card if self._narrated_items else None
+            card = build_card(ctx, args, self._placed.others("card"), found, keep)
             if not card.items:
                 return "explain_on_screen: give at least one point with text."
             if self._turn_card is not None and self._narrated_items:
@@ -1341,7 +1418,8 @@ class Brain:
             )
             await self.hub.emit("agents", agents=[a.model_dump() for a in self.registry.all()])
             return f"Created {agent.name} ({agent.role})."
-        return f"Unknown tool {name}."
+        # Phrased as a problem note, so the model hears it and tries a real tool.
+        return f"{name}: there's no tool by that name. Use one of the tools you have."
 
     # ================================================================== speech
     def _speak(
@@ -1713,6 +1791,11 @@ _FILLER = re.compile(
 
 
 # Tools whose notes are advice for next time, not a problem worth another round.
+# Names models sometimes invent for a real tool (from its options), and what they mean.
+TOOL_ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
+    "explain_on_picture": ("explain_on_screen", {"style": "on_picture"}),
+    "explain_picture": ("explain_on_screen", {"style": "on_picture"}),
+}
 QUIET_NOTES = {"say", "explain_on_screen", "point", "circle", "highlight", "arrow", "remember"}
 THREE_D_TOOLS = {"build_3d_model", "edit_3d_model", "explain_in_3d", "explode_view"}
 _ASKS_3D = re.compile(
@@ -1754,7 +1837,10 @@ _FILLER_LEAD = re.compile(
 
 _PROMISE = re.compile(
     r"\b(i'?m|i am|i'?ll|i will|let me|give me a (sec|second|moment))\b[^.!?]{0,60}"
-    r"\b(search|searching|look(ing)? (it |that )?up|check(ing)?|dig(ging)?|find(ing)? out|research)",
+    r"\b(search|searching|look(ing)? (it |that )?up|check(ing)?|dig(ging)?|find(ing)? out|research)"
+    # ...or with no "I": "Checking the news on that one.", "Looking it up now."
+    r"|^\W*(checking (the|on|that|it|now)|searching|looking (it |that )?(up|into)|digging|"
+    r"pulling (it |that )?up|researching)\b",
     re.IGNORECASE,
 )
 

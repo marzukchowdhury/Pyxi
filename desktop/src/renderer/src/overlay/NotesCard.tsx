@@ -171,6 +171,7 @@ export function NotesCard() {
     setAnchors(next);
   }, [notes?.revealed.join(","), notes?.card.id, cardH]);
 
+  if (notes?.card.style === "picture") return <PictureTags items={notes.card.items} revealed={notes.revealed} id={notes.card.id} leaving={leaving} />;
   if (!notes || !placed) return null;
   const { card, revealed } = notes;
   const shown = card.items.filter((i) => revealed.includes(i.n));
@@ -213,6 +214,54 @@ export function NotesCard() {
         ))}
         </div>
       </Interactive>
+    </>
+  );
+}
+
+/**
+ * Explaining a picture by writing on it: each point is a small tag pinned to its part with a
+ * leader line, and a route (blood, air, a signal) traces itself along the picture as it's said.
+ */
+function PictureTags({ items, revealed, id, leaving }: { items: NoteItem[]; revealed: number[]; id: string; leaving: boolean }) {
+  const shown = items.filter((i) => revealed.includes(i.n) && i.at);
+  const latest = revealed[revealed.length - 1];
+  return (
+    <>
+      <svg className={`notes-ink pic-ink ${leaving ? "leaving" : ""}`} width="100%" height="100%">
+        {shown.map((it) => {
+          const at = toLocal(it.at![0], it.at![1]) as Pt;
+          const tag = it.tag ? (toLocal(it.tag[0], it.tag[1]) as Pt) : ([at[0], at[1] - 70] as Pt);
+          const route = (it.trace ?? []).map(([x, y]) => toLocal(x, y) as Pt);
+          let head = "";
+          if (route.length > 1) {
+            const [ex, ey] = route[route.length - 1];
+            const [px, py] = route[route.length - 2];
+            const a = Math.atan2(ey - py, ex - px);
+            head = `M ${ex - 12 * Math.cos(a - 0.5)} ${ey - 12 * Math.sin(a - 0.5)} L ${ex} ${ey} L ${ex - 12 * Math.cos(a + 0.5)} ${ey - 12 * Math.sin(a + 0.5)}`;
+          }
+          return (
+            <g key={`${id}-${it.n}`}>
+              {route.length > 1 && (
+                <>
+                  <path className="pic-route" d={through(route)} pathLength={1} />
+                  <path className="pic-route head" d={head} pathLength={1} />
+                </>
+              )}
+              <path className="pic-leader" d={`M ${tag[0]} ${tag[1]} L ${at[0]} ${at[1]}`} pathLength={1} />
+              <circle className={`pic-dot ${it.n === latest ? "live" : ""}`} cx={at[0]} cy={at[1]} r={4.5} />
+            </g>
+          );
+        })}
+      </svg>
+      {shown.map((it) => {
+        const at = toLocal(it.at![0], it.at![1]);
+        const [x, y] = it.tag ? toLocal(it.tag[0], it.tag[1]) : [at[0], at[1] - 70];
+        return (
+          <div key={`${id}-t${it.n}`} className={`pic-tag ${leaving ? "leaving" : ""}`} style={{ left: x, top: y }}>
+            {it.text}
+          </div>
+        );
+      })}
     </>
   );
 }

@@ -113,8 +113,30 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "speak as it appears (its mark draws at that moment), explaining it in your voice, not reading the card. "
         "Your separate `say` call is only the opener (the verdict and a hook, no [note:N] markers); Wisp then "
         "talks through the points in order. Answer their actual question in the points (the why, the catch). "
-        "Finish with `closing`, so the explanation lands instead of stopping.",
+        "Finish with `closing`, so the explanation lands instead of stopping. "
+        "PICTURES: when they ask about a diagram, photo, drawing, map or illustration on screen (a heart, an "
+        "engine, a circuit, a painting), use style 'on_picture' and give `picture` (its box) FIRST: no card, "
+        "the explanation goes onto the picture itself. Each point's `text` becomes a small tag (1-3 words, "
+        "e.g. 'right ventricle', 'toward lungs') pinned to its `part` (the part's usual name; Wisp finds it "
+        "precisely), and `flow` traces a route through named parts as you say it (blood, air, current, a "
+        "signal): give a `flow` on every point where something moves, so the route draws itself across "
+        "the picture step by step. Walk it in the order things happen. Never make a separate diagram for this: sketch_diagram "
+        "is only for when they ask you to draw one.",
         {
+            "style": {
+                "type": "string",
+                "enum": ["card", "on_picture"],
+                "description": "on_picture to explain a picture by tagging it; card for everything else.",
+            },
+            "picture": {
+                "type": "array",
+                "items": {"type": "number"},
+                "description": "on_picture: [x, y, w, h] screenshot px of the whole picture.",
+            },
+            "picture_element_id": {
+                "type": "integer",
+                "description": "on_picture: the picture's Image element id, if it has one.",
+            },
             "title": {"type": "string", "description": "2-4 words, e.g. 'Why this is funny'."},
             "closing": {
                 "type": "string",
@@ -136,6 +158,23 @@ COMPANION_TOOLS: list[ToolSpec] = [
                             "description": "One spoken sentence for this point, said as its mark draws.",
                         },
                         "kind": {"type": "string", "enum": ["point", "step", "formula", "aside"]},
+                        "part": {
+                            "type": "string",
+                            "description": "on_picture: the part this tag pins to, e.g. 'right atrium'.",
+                        },
+                        "at": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "on_picture: your rough [x, y] of the part, screenshot px.",
+                        },
+                        "flow": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "on_picture: 3-5 parts a route passes through in order, "
+                            "including the valves or vessels on the way so the line follows the real "
+                            "path, traced as this point is said, e.g. ['superior vena cava', 'right "
+                            "atrium', 'tricuspid valve', 'right ventricle'].",
+                        },
                         "quote": _QUOTE["quote"],
                         "element_id": {
                             "type": "integer",

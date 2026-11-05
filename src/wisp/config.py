@@ -118,6 +118,11 @@ class WispSettings(BaseSettings):
         "empty means the chat model builds them itself.",
     )
     effort_3d: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    model_aim: str | None = Field(
+        "anthropic/claude-sonnet-5.5",
+        description="Model that finds the parts of a picture Wisp explains (WISP_MODEL_AIM), on a "
+        "zoomed crop: about $0.004 a picture, run while Wisp speaks. Empty: the chat model's guess.",
+    )
 
     host: str = "127.0.0.1"
     port: int = 8766

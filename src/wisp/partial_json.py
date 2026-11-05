@@ -106,3 +106,23 @@ def first_chunk(text: str, max_words: int = 14) -> str:
         if 6 <= len(head.split()) <= max_words + 4:
             return head
     return whole
+
+
+_STYLE = re.compile(r'"style"\s*:\s*"on_picture"')
+_PICTURE = re.compile(r'"picture"\s*:\s*\[\s*([-\d.eE+]+(?:\s*,\s*[-\d.eE+]+){3})\s*\]')
+_PICTURE_ID = re.compile(r'"picture_element_id"\s*:\s*(\d+)\s*[,}]')
+
+
+def picture_head(src: str, on_picture: bool = False) -> dict[str, Any] | None:
+    """From a streaming explain_on_screen call: the picture being explained, once its style and
+    box (or element id) have fully arrived, so its parts can be found while the rest streams."""
+    if not on_picture and not _STYLE.search(src):
+        return None
+    head: dict[str, Any] = {"style": "on_picture"}
+    if m := _PICTURE.search(src):
+        head["picture"] = [float(v) for v in m.group(1).split(",")]
+    elif m := _PICTURE_ID.search(src):
+        head["picture_element_id"] = int(m.group(1))
+    else:
+        return None
+    return head

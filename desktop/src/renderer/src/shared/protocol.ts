@@ -20,6 +20,10 @@ export interface NoteItem {
   kind: "point" | "step" | "formula" | "aside";
   mark: "frame" | "underline" | "circle" | "none";
   rect: Rect | null;
+  /** On a picture: the spot on the part, where its tag sits, and a route traced along it. */
+  at?: [number, number] | null;
+  tag?: [number, number] | null;
+  trace?: [number, number][];
 }
 
 export interface Sketch {
@@ -36,6 +40,8 @@ export interface NoteCard {
   sketches: Sketch[];
   region: Rect | null;
   place?: [number, number] | null;
+  /** "picture": the points are tags pinned onto the picture itself, with no card. */
+  style?: "card" | "picture";
 }
 
 export type Shape =

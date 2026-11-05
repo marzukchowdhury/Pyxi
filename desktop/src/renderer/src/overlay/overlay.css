@@ -465,3 +465,19 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 
 /* The takeaway line on a drawing reads like a pull quote. */
 .sk-text.eq text { font-family: "Fraunces", Georgia, serif; font-style: italic; font-weight: 500; }
+
+/* Explaining a picture on the picture: red tags pinned to parts, routes traced along it. */
+.pic-route { fill: none; stroke: #ff4d4f; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 5px rgba(255,77,79,.55)); animation: ink-draw 1.5s .35s cubic-bezier(.45,.05,.3,1) forwards; }
+.pic-route.head { animation-delay: 1.8s; animation-duration: .3s; }
+.pic-leader { fill: none; stroke: #ff4d4f; stroke-width: 1.6; stroke-dasharray: 1; stroke-dashoffset: 1; filter: drop-shadow(0 0 1px rgba(255,255,255,.85)); animation: ink-draw .35s .15s ease-out forwards; }
+.pic-dot { fill: #ff4d4f; stroke: #fff; stroke-width: 1.8; transform-box: fill-box; transform-origin: center; animation: pic-pop .3s .4s both; }
+.pic-dot.live { animation: pic-pop .3s .4s both, pic-pulse 1.6s .8s ease-in-out infinite; }
+.pic-tag { position: fixed; z-index: 27; transform: translate(-50%, -50%); pointer-events: none; white-space: nowrap;
+  padding: 3px 9px 4px; border-radius: 7px; background: #e5383b; color: #fff;
+  font: 600 12.5px/1.25 "Inter", ui-sans-serif, system-ui, "Segoe UI", sans-serif; letter-spacing: .01em;
+  box-shadow: 0 1px 0 rgba(255,255,255,.25) inset, 0 4px 14px rgba(120,0,0,.35), 0 0 0 1px rgba(255,255,255,.6);
+  animation: pic-tag-in .32s cubic-bezier(.2,1.4,.4,1) both; transition: opacity .7s var(--ease); }
+.pic-tag.leaving { opacity: 0; }
+@keyframes pic-tag-in { from { opacity: 0; transform: translate(-50%, -30%) scale(.7); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+@keyframes pic-pop { from { transform: scale(0); } to { transform: scale(1); } }
+@keyframes pic-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.45); } }
