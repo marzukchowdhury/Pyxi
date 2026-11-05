@@ -351,6 +351,7 @@ export type BrainEvent =
   | { type: "handoff"; source: string; target: string; task: string }
   | { type: "confirm"; request_id: string; job_id: string; agent: string; action: string; reason: string; always?: string }
   | { type: "ask"; request_id: string; job_id: string; agent: string; question: string }
+  | { type: "request_closed"; request_id: string }
   | { type: "agents"; agents: Agent[] }
   | { type: "pins"; app: string; pins: Pin[] }
   | { type: "turn_done"; turn_id: string; cost_usd: number; tokens: number; spent_today: number; daily_budget: number }

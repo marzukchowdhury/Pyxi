@@ -90,6 +90,8 @@ def picture_rect(
     """The picture being explained, in screen px (from its element id or screenshot box)."""
     if ctx is None or args.get("style") != "on_picture":
         return None
+    if args.get("picture_window"):  # a tour of the app itself: its window is the picture
+        return ctx.window.rect if ctx.window.rect[2] > 0 else None
     return resolve_rect(ctx, args.get("picture_element_id"), args.get("picture"))
 
 

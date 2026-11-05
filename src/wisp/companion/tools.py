@@ -137,6 +137,11 @@ COMPANION_TOOLS: list[ToolSpec] = [
                 "type": "integer",
                 "description": "on_picture: the picture's Image element id, if it has one.",
             },
+            "picture_window": {
+                "type": "boolean",
+                "description": "on_picture for a tour of the app they're in ('show me how to use "
+                "CapCut', 'what does everything here do'): its whole window is the picture.",
+            },
             "title": {"type": "string", "description": "2-4 words, e.g. 'Why this is funny'."},
             "closing": {
                 "type": "string",

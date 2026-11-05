@@ -58,6 +58,8 @@ class Hub:
             return None
         finally:
             self._pending.pop(rid, None)
+            # Answered here, in another window, or timed out: every screen drops the card.
+            await self.emit("request_closed", request_id=rid)
 
     def resolve(self, request_id: str, value: Any) -> bool:
         future = self._pending.get(request_id)

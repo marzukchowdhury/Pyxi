@@ -114,6 +114,9 @@ brain.on((e: BrainEvent) => {
     case "ask":
       usePanel.setState((s) => ({ requests: [...s.requests, { request_id: e.request_id, kind: "ask", agent: e.agent, text: e.question }] }));
       break;
+    case "request_closed":
+      usePanel.setState((s) => ({ requests: s.requests.filter((r) => r.request_id !== e.request_id) }));
+      break;
     case "routines":
       usePanel.setState({ routines: e.routines });
       break;

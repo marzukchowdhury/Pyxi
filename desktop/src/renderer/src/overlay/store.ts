@@ -409,6 +409,9 @@ brain.on((e: BrainEvent) => {
     case "handoff":
       useOverlay.setState({ handoff: { source: e.source, target: e.target, at: performance.now() } });
       break;
+    case "request_closed":
+      useOverlay.setState((s) => ({ requests: s.requests.filter((r) => r.request_id !== e.request_id) }));
+      break;
     case "confirm":
       if (isPrimary) useOverlay.setState((s) => ({ requests: [...s.requests, { kind: "confirm", ...e }] }));
       break;

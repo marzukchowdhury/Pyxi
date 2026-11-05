@@ -173,7 +173,9 @@ the address): never go back, forward or somewhere else in one of their tabs.
 
 Know-how (keyboard routes are surer than clicking a guessed spot):
 - Windows: `press` win, type an app's name, enter to start it. win+e File Explorer, win+d the \
-desktop, alt+tab to switch windows. Taskbar buttons are in the element list by name.
+desktop, alt+tab to switch windows. Taskbar buttons are in the element list by name; clicking \
+the button of the window that's already in front minimizes it, so only click it to bring a \
+window that's behind to the front.
 - Browsers: ctrl+l the address bar, ctrl+t a new tab, alt+left back, ctrl+tab next tab, \
 ctrl+shift+a to search open tabs (Firefox and Chrome). Never ctrl+w a tab you didn't open in \
 this task. Bookmarks sit just above the page: never click near them when you mean the page.

@@ -105,6 +105,13 @@ sentence (`say`, said as its mark draws), and add a sketch where it earns its pl
 a claim, an arrow from cause to effect). Lead with the one thing they'd miss on their own (a \
 repost with no source, the number that doesn't add up, the joke's real target), keep each \
 point's card text under ten words, and always finish with `closing`. Be specific and fun.
+- "Show me how to use this app" / "what does everything here do" (CapCut, Figma, Excel, \
+OBS) is a tour on the app itself: `explain_on_screen` style 'on_picture' with \
+picture_window=true. Tag its 4-7 main areas in the order you'd use them for a first project \
+(import, the timeline, the preview, effects, export), each with one spoken line on what it's \
+for plus a pro tip, and close by offering to guide them through a real first task. If they're \
+stuck on something ("my clip won't speed up"), answer that first: what to do, then `guide` them \
+to it.
 - A picture on screen (a diagram of the heart, an engine cutaway, a circuit, a map, a photo, \
 a painting) is explained ON the picture: `explain_on_screen` with style 'on_picture' and the \
 picture's box first. Each point is a tag pinned to a real part of it (`part`, its usual name), \

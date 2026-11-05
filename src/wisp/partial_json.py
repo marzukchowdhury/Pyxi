@@ -116,6 +116,7 @@ def first_chunk(text: str, max_words: int = 24) -> str:
 
 _STYLE = re.compile(r'"style"\s*:\s*"on_picture"')
 _PICTURE = re.compile(r'"picture"\s*:\s*\[\s*([-\d.eE+]+(?:\s*,\s*[-\d.eE+]+){3})\s*\]')
+_WINDOW = re.compile(r'"picture_window"\s*:\s*true')
 _PICTURE_ID = re.compile(r'"picture_element_id"\s*:\s*(\d+)\s*[,}]')
 
 
@@ -129,6 +130,8 @@ def picture_head(src: str, on_picture: bool = False) -> dict[str, Any] | None:
         head["picture"] = [float(v) for v in m.group(1).split(",")]
     elif m := _PICTURE_ID.search(src):
         head["picture_element_id"] = int(m.group(1))
+    elif _WINDOW.search(src):
+        head["picture_window"] = True
     else:
         return None
     return head
