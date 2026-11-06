@@ -1,14 +1,24 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { defineConfig } from "vite";
 import { marked } from "marked";
 
 const root = import.meta.dirname;
 const config = JSON.parse(readFileSync(resolve(root, "site.config.json"), "utf8"));
 
-/** The privacy page is docs/PRIVACY.md, rendered at build time so the site never drifts from it. */
+/**
+ * The privacy page is docs/PRIVACY.md, rendered at build time so the site never drifts from it.
+ * Vercel only uploads website/, so every local build refreshes content/PRIVACY.md (committed)
+ * and the cloud build reads that copy.
+ */
 function privacyHtml() {
-  let md = readFileSync(resolve(root, "../docs/PRIVACY.md"), "utf8");
+  const source = resolve(root, "../docs/PRIVACY.md");
+  const copy = resolve(root, "content/PRIVACY.md");
+  if (existsSync(source)) {
+    mkdirSync(dirname(copy), { recursive: true });
+    copyFileSync(source, copy);
+  }
+  let md = readFileSync(copy, "utf8");
   md = md.replace(/^# .*\n/, ""); // the page supplies its own title
   if (config.contactEmail) {
     md = md.replaceAll("**[privacy contact email]**", `[${config.contactEmail}](mailto:${config.contactEmail})`);

@@ -43,9 +43,11 @@ anyway, for example in a demo on a PC with animations turned off.
 ## Deploy
 
 ```bash
-npx vercel link --project pyxi-site
-npx vercel deploy --prod
+npm run build                      # refreshes content/PRIVACY.md from docs/PRIVACY.md
+npx vercel deploy --prod --scope marzuks-projects
 ```
 
-Run from `website/`. `vercel.json` sets clean URLs (`/download`, `/privacy`), long caching for
+Run from `website/` (the project is `pyxi-site`, live at https://pyxi-site.vercel.app). Vercel
+only uploads this folder, so the build reads the committed copy in `content/PRIVACY.md`: build
+locally after editing the policy, then deploy. `vercel.json` sets clean URLs (`/download`, `/privacy`), long caching for
 hashed assets and a few security headers.
