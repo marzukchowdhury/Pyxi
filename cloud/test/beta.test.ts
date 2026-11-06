@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { chat, configFromEnv, join, usage } from "../lib/beta";
-import { MemoryStore } from "../lib/store";
+import { chat, configFromEnv, join, usage } from "../lib/beta.js";
+import { MemoryStore } from "../lib/store.js";
 
 const cfg = configFromEnv({
   OPENROUTER_API_KEY: "sk-or-test",

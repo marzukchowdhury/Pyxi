@@ -2,7 +2,7 @@
 // user inside a daily allowance and the whole beta inside a monthly cap. The founder's
 // OpenRouter key lives only here (an environment variable), never on anyone's PC.
 
-import type { Store } from "./store";
+import type { Store } from "./store.js";
 
 export interface Config {
   openrouterKey: string;
