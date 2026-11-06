@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!--include:head-->
+    <title>Download Pyxi for Windows and join the beta</title>
+    <meta name="description" content="Download Pyxi for Windows 10 and 11, get past the unsigned-installer warning, and join the beta with your invite code. No API key or payment needed." />
+    <link rel="canonical" href="{{siteUrl}}/download" />
+    <meta property="og:url" content="{{siteUrl}}/download" />
+    <meta property="og:title" content="Install Pyxi and join the beta" />
+    <meta property="og:description" content="Download for Windows, choose More info and Run anyway, then join the beta in Settings with your invite code." />
+    <meta name="twitter:title" content="Install Pyxi and join the beta" />
+    <meta name="twitter:description" content="Download for Windows, choose More info and Run anyway, then join the beta in Settings with your invite code." />
+    <script type="module" src="/src/main.js"></script>
+  </head>
+  <body class="page-download">
+    <!--include:nav-->
+    <!--include:firefly-->
+
+    <main id="main">
+      <section class="page-hero" data-say="Let's get you set up. I'll point at every click.">
+        <div class="wrap dl-grid">
+          <div>
+            <p class="kicker reveal">Download</p>
+            <h1 class="display-sm reveal">Install Pyxi and join the beta.</h1>
+            <p class="lead reveal">Download, install, type your invite code. No API key, no payment, no admin rights. If Windows hesitates along the way, this page shows you exactly where to click.</p>
+          </div>
+          <aside class="dl-card reveal" aria-label="Download">
+            <img class="dl-icon" src="/icon-192.png" width="72" height="72" alt="" />
+            <div class="dl-meta">
+              <b>Pyxi for Windows</b>
+              <span>Version {{version}} beta &middot; {{downloadSize}}</span>
+              <span>Windows 10 and 11</span>
+            </div>
+            <a class="btn btn-fly btn-lg dl-btn" href="{{downloadUrl}}" data-download data-track="download-page">
+              <svg class="win" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2.3 6.6 1.5v5.4H1zM7.4 1.4 15 .3v6.6H7.4zM1 7.7h5.6v5.4L1 12.3zM7.4 7.7H15v6.6l-7.6-1.1z" /></svg>
+              Download {{downloadFile}}
+            </a>
+            <p class="dl-mac"><!--if:macWaitlistUrl-->On a Mac? <a href="{{macWaitlistUrl}}">Join the Mac waitlist</a>.<!--else-->On a Mac? A Mac version is next on the roadmap.<!--end--></p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="steps-wrap" aria-label="Install steps">
+        <div class="wrap">
+          <ol class="steps">
+            <li class="step solo reveal" id="get" data-say="Step one: grab the installer.">
+              <div class="step-copy">
+                <span class="step-n" aria-hidden="true">1</span>
+                <h2>Download the installer</h2>
+                <p>Click <b>Download for Windows</b> and save <code>{{downloadFile}}</code>. If your browser says the file isn't commonly downloaded, open the download's menu and choose <b>Keep</b>.</p>
+              </div>
+            </li>
+
+            <li class="step reveal" id="smartscreen" data-say="Windows doesn't know us yet. More info, then Run anyway.">
+              <div class="step-copy">
+                <span class="step-n" aria-hidden="true">2</span>
+                <h2>Open it, and tell Windows it's OK</h2>
+                <p>The beta installer isn't code-signed yet, so Windows SmartScreen doesn't recognise the publisher and may show a blue <b>Windows protected your PC</b> box.</p>
+                <p>Click <b>More info</b>, check that the app is <code>{{downloadFile}}</code>, then click <b>Run anyway</b>.</p>
+              </div>
+              <div class="step-media">
+                <div class="smartscreen" role="img" aria-label="Illustration: the Windows SmartScreen box. Click More info, then Run anyway.">
+                  <div class="ss-pane">
+                    <span class="ss-x" aria-hidden="true"></span>
+                    <b class="ss-title">Windows protected your PC</b>
+                    <p>Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</p>
+                    <span class="ss-link">More info<span class="pt" style="--x: 50%; --y: 50%" data-label="More info"></span></span>
+                    <div class="ss-buttons"><span class="ss-btn">Don't run</span></div>
+                  </div>
+                  <div class="ss-arrow" aria-hidden="true"></div>
+                  <div class="ss-pane">
+                    <span class="ss-x" aria-hidden="true"></span>
+                    <b class="ss-title">Windows protected your PC</b>
+                    <p class="ss-kv">App: <span>{{downloadFile}}</span><br />Publisher: <span>Unknown publisher</span></p>
+                    <div class="ss-buttons"><span class="ss-btn">Run anyway<span class="pt" style="--x: 50%; --y: 50%" data-label="Run anyway"></span></span><span class="ss-btn">Don't run</span></div>
+                  </div>
+                </div>
+              </div>
+            </li>
+
+            <li class="step reveal" id="first-run" data-say="That's me, by your cursor. The notch up top is where I talk.">
+              <div class="step-copy">
+                <span class="step-n" aria-hidden="true">3</span>
+                <h2>Pyxi installs and opens</h2>
+                <p>It installs in one click for just your account, no admin rights needed. A little firefly appears beside your cursor and a slim glass notch sits on the top edge of your screen. Pyxi's voice downloads by itself the first time it opens.</p>
+              </div>
+              <div class="step-media">
+                <div class="shot shot-notch">
+                  <img src="/img/notch.webp" width="480" height="230" alt="The Pyxi notch opened: a small chat with a text box, a mic button and the hold-to-talk hint" loading="lazy" />
+                  <span class="pt" style="--x: 14.5%; --y: 11.7%" data-label="Pyxi"></span>
+                </div>
+              </div>
+            </li>
+
+            <li class="step reveal" id="settings" data-say="Open the panel, then Settings.">
+              <div class="step-copy">
+                <span class="step-n" aria-hidden="true">4</span>
+                <h2>Open Settings</h2>
+                <p>Press <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>W</kbd>, or click the Pyxi icon in the system tray, to open the notch. Click the expand button for the full panel, then choose <b>Settings</b>.</p>
+              </div>
+              <div class="step-media">
+                <div class="panel-mock" role="img" aria-label="Illustration: the Pyxi panel's tabs, with Settings selected">
+                  <div class="pm-head"><span class="pm-fly"></span><b>Pyxi</b><span>Ready when you are</span></div>
+                  <div class="pm-tabs"><span>Chat</span><span>Team</span><span>Memory</span><span>3D</span><span>Voice</span><span class="on">Settings<span class="pt" style="--x: 50%; --y: 50%" data-label="Settings"></span></span></div>
+                </div>
+              </div>
+            </li>
+
+            <li class="step reveal" id="join" data-say="Your invite code goes here. No key, no card.">
+              <div class="step-copy">
+                <span class="step-n" aria-hidden="true">5</span>
+                <h2>Join the Pyxi beta</h2>
+                <p>At the top of Settings, under <b>Join the Pyxi beta</b>, type the invite code you were given and click <b>Join</b>. That's all. Pyxi now runs on the beta server, with a free daily allowance that resets at midnight UTC.</p>
+                <p class="muted"><!--if:contactEmail-->No code yet? Email <a href="mailto:{{contactEmail}}">{{contactEmail}}</a>.<!--else-->Invite codes come from the Pyxi team during the beta.<!--end--></p>
+              </div>
+              <div class="step-media">
+                <form class="beta-card" onsubmit="return false" aria-label="Illustration of the beta card in Pyxi's Settings">
+                  <b>Join the Pyxi beta</b>
+                  <p>Type the invite code you were given. No API key or payment needed.</p>
+                  <div class="beta-row">
+                    <input value="" placeholder="Invite code" aria-label="Invite code (illustration only)" tabindex="-1" readonly />
+                    <span class="beta-join">Join<span class="pt" style="--x: 50%; --y: 50%" data-label="Join"></span></span>
+                  </div>
+                </form>
+              </div>
+            </li>
+
+            <li class="step solo reveal" id="hey" data-say="Now hold Ctrl and Alt, and ask me anything.">
+              <div class="step-copy">
+                <span class="step-n" aria-hidden="true">6</span>
+                <h2>Say hey</h2>
+                <p>Hold <kbd>Ctrl</kbd> <kbd>Alt</kbd>, ask about anything on your screen, and let go to send. Or tap <kbd>Ctrl</kbd> twice to type. A few to start with:</p>
+                <ul class="asks" aria-label="Things to try">
+                  <li>What does this setting do?</li>
+                  <li>How does HTTPS work? Show me.</li>
+                  <li>Explain this chart</li>
+                  <li>Play Billie Jean, a bit quieter</li>
+                  <li>My desktop is a mess, organise it</li>
+                </ul>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="help" aria-labelledby="help-title">
+        <div class="wrap faq-grid">
+          <div>
+            <p class="kicker">If something's off</p>
+            <h2 class="h2" id="help-title">Quick fixes.</h2>
+          </div>
+          <div class="faq-list">
+            <details>
+              <summary>Nothing happens when I hold Ctrl Alt</summary>
+              <p>Hold-to-talk uses the left <kbd>Alt</kbd> key, so AltGr typing never triggers it. You can also press <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>Space</kbd> to start and stop. If the microphone is blocked, the notch says so: allow Pyxi in Windows Settings, Privacy and security, Microphone.</p>
+            </details>
+            <details>
+              <summary>I don't see "Join the Pyxi beta"</summary>
+              <p>Make sure you're on the Settings tab of the full panel (the expand button in the notch). If you've already joined, the card says "You're in the beta" and shows today's allowance instead.</p>
+            </details>
+            <details>
+              <summary>How do I stop Pyxi seeing my screen for a while?</summary>
+              <p>Press <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>P</kbd> to pause all screen access, with a visible indicator. Press it again to resume.</p>
+            </details>
+            <details>
+              <summary>How do I uninstall it?</summary>
+              <p>Windows Settings, Apps, Installed apps, Pyxi, Uninstall. To remove your history too, delete the <code>%APPDATA%\Pyxi</code> folder. See the <a href="/privacy">privacy policy</a> for what's stored there.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!--include:footer-->
+  </body>
+</html>
