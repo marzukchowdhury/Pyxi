@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyxi-buddy"
-version = "0.1.0"
+version = "0.1.1"
 description = "Pyxi: a playful desktop AI buddy that sees your screen, talks, points, sends agents to do real browser work, and explains things in 3D."
 readme = "README.md"
 requires-python = ">=3.11"
