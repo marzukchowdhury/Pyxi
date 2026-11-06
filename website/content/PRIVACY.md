@@ -35,6 +35,7 @@ You can pause all screen access at any time with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+
 | Your request, the masked screenshot and on-screen text, and recent conversation | The AI model, through OpenRouter (during the beta, via the Pyxi beta server) | To understand your screen and answer |
 | Web searches you ask for | DuckDuckGo or Bing | To look things up |
 | Pages a teammate opens | Those websites, in a browser on your computer | To do the research or task you asked for |
+| The booking details you saved (only the ones a form asks for) | The booking site you approved, typed in by Scout in a browser you can watch | To book the appointment, tickets or table you asked for. Each booking shows you which details it will use before it starts, and you approve the final booking click |
 | Emails, calendar events and documents you ask Pyxi to send or create | Google, Discord or LinkedIn, only for accounts you connected | To do the errand. Every email, post or message shows you an approval card first |
 | Optional premium voices | ElevenLabs or Google, only if you add your own key | To speak with that voice |
 
@@ -54,6 +55,8 @@ It sends OpenRouter an anonymous per-user ID, not your name or email, so abuse c
 
 Everything lives in `%APPDATA%\Pyxi\.pyxi`:
 
+- your booking details (name, email, phone, date of birth, city and preferences, as you entered them in Settings). Health card, insurance, SIN and passport numbers are never saved; if a form needs one, Pyxi asks you to type it yourself;
+
 - conversations, with the masked screenshot each answer used (deleted after 30 days);
 - things you asked Pyxi to remember;
 - Memory Palace history, if it's on (deleted after 72 hours);
@@ -63,6 +66,10 @@ Everything lives in `%APPDATA%\Pyxi\.pyxi`:
 - your beta token.
 
 Files Pyxi makes for you go to `Documents\Pyxi`.
+
+## Bookings and payments
+
+Pyxi never pays for anything and never types card numbers. When a booking reaches a payment page, Scout stops and hands the browser window to you; you pay, then press Done. Final booking buttons ("Book appointment", "Reserve", "Confirm") always need your approval first.
 
 ## Using your mouse and keyboard
 
