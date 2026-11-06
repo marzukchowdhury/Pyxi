@@ -38,6 +38,19 @@ class TurnStore:
         finally:
             conn.close()
 
+    def prune(self, days: float) -> int:
+        """Forget turns older than ``days``, with their screenshots. Returns how many went."""
+        import time
+
+        cutoff = time.time() - days * 86400
+        with self._conn() as c:
+            old = c.execute("SELECT id, image_path FROM turns WHERE ts < ?", (cutoff,)).fetchall()
+            c.execute("DELETE FROM turns WHERE ts < ?", (cutoff,))
+        for _id, image in old:
+            if image:
+                Path(image).unlink(missing_ok=True)
+        return len(old)
+
     def save_image(self, turn_id: str, jpeg: bytes) -> str:
         path = self.turns_dir / f"{turn_id}.jpg"
         path.write_bytes(jpeg)

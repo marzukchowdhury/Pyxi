@@ -72,6 +72,9 @@ class ScreenConfig(BaseModel):
         False, description="Also keep downscaled screenshots, so time travel shows real pixels."
     )
     retention_hours: float = Field(72.0, description="Forget palace history older than this.")
+    turn_retention_days: float = Field(
+        30.0, description="Forget conversations (and the screenshots they used) older than this."
+    )
     max_elements: int = 70
     model_image_width: int = Field(
         1366, description="Screenshots are downscaled to this width for the model."

@@ -142,6 +142,7 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal ambient
         brain.spatial.prune()
+        brain.turns.prune(settings.screen.turn_retention_days)
         tracker = PalaceTracker(
             settings.screen,
             brain.screen,

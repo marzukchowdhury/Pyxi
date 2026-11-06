@@ -55,3 +55,26 @@ def test_your_own_key_always_wins(tmp_path, clean_env, monkeypatch):
     assert (
         os.environ["OPENROUTER_API_KEY"] == "sk-or-mine" and "PYXI_OPENROUTER_URL" not in os.environ
     )
+
+
+def test_old_conversations_and_their_screenshots_are_forgotten(tmp_path):
+    import sqlite3
+    import time
+
+    from pyxi.companion.turns import TurnStore
+
+    store = TurnStore(tmp_path / "t.db", tmp_path / "turns")
+    old_img = store.save_image("old", b"jpg")
+    new_img = store.save_image("new", b"jpg")
+    with sqlite3.connect(tmp_path / "t.db") as c:
+        c.execute(
+            "INSERT INTO turns (id, ts, image_path) VALUES ('old', ?, ?)",
+            (time.time() - 40 * 86400, old_img),
+        )
+        c.execute(
+            "INSERT INTO turns (id, ts, image_path) VALUES ('new', ?, ?)", (time.time(), new_img)
+        )
+    assert store.prune(30) == 1
+    from pathlib import Path
+
+    assert not Path(old_img).exists() and Path(new_img).exists()
