@@ -52,7 +52,13 @@ For real work, Pyxi delegates to named teammates. Scout drives a real browser, Q
 <img src="docs/images/walkthrough.png" alt="Ghost Walkthrough: the agent's run replayed with a spotlight on the field it typed into" width="49%">
 </p>
 
-## Quickstart
+## Install
+
+**For beta users:** run `Pyxi-Setup-<version>.exe` (one click, no admin rights). Windows may warn about an unknown publisher during the beta: choose **More info → Run anyway**. Open Pyxi, go to **Settings → Join the Pyxi beta**, and type your invite code. No API key needed. The voice downloads by itself on first launch.
+
+**To build the installer:** `python scripts/build_installer.py` (a private Python with the brain inside, then electron-builder) writes `desktop/dist/Pyxi-Setup-<version>.exe`. The beta server lives in [`cloud/`](cloud/README.md).
+
+## Quickstart (from source)
 
 Pyxi targets **Windows 10/11** (the accessibility layer uses Windows UI Automation). You need Python 3.11+, Node 20+, and Chromium for the browser agents.
 
@@ -230,6 +236,8 @@ sequenceDiagram
 - **No emoji, no clutter.** One icon set (1.5 px strokes) and precise geometry.
 
 ## Safety and privacy
+
+The full policy is in [docs/PRIVACY.md](docs/PRIVACY.md).
 
 | | |
 |---|---|

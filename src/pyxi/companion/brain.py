@@ -1058,6 +1058,9 @@ class Brain:
             self._narrated_items: set[int] = set()  # cue-card points already said as they arrived
             self._survey: asyncio.Task | None = None  # finding the parts of a picture
             self._searches = 0
+            self._looked: dict[tuple[str, str], str] = {}  # lookups this turn, and what they said
+            self._lookups: dict[str, int] = {}
+            self._repeats = 0
             self._turn_gen = self._speech_gen  # push-to-talk bumps the gen: this turn is then stale
             turn_id = "turn_" + secrets.token_hex(4)
             self._turn_id = turn_id
@@ -1345,14 +1348,33 @@ class Brain:
                     )
                     needs_more = self._visual_retry = True
                     continue
+                is_info = any(t.info and t.spec.name == call.name for t in connector_tools)
+                lookup = is_info or call.name in INFO_TOOLS
+                key = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
+                looks = self._lookups.setdefault(call.name, 0) + 1 if lookup else 0
+                if lookup:
+                    self._lookups[call.name] = looks
+                if lookup and (key in self._looked or looks > 3):
+                    # The same lookup again (an empty memory, a calendar that said nothing new):
+                    # looping on it only makes them wait. Answer with what's known.
+                    seen = self._looked.get(key) or "nothing new"
+                    notes.append(
+                        f"{call.name}: you already looked this turn and got: {seen[:300]}. Don't "
+                        "look again: answer them now with what you have, and say plainly if "
+                        "that's nothing."
+                    )
+                    self._repeats += 1
+                    needs_more = needs_more or self._repeats <= 1
+                    continue
                 try:
                     note = await self._act(call.name, dict(call.arguments))
                 except Exception as exc:
                     log.exception("tool %s failed", call.name)
                     note = f"{call.name} failed: {exc}"
+                if lookup:
+                    self._looked[key] = note or ""
                 if note:
                     notes.append(note)
-                is_info = any(t.info and t.spec.name == call.name for t in connector_tools)
                 if (
                     is_info
                     or call.name in INFO_TOOLS
