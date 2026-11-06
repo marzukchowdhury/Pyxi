@@ -36,7 +36,7 @@ from otto.types import ToolCall, Usage
 from PIL import Image
 from pydantic import ValidationError
 
-from pyxi import hands, media, tidy, web, windows
+from pyxi import booking, hands, media, tidy, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
 from pyxi.companion import prompts
@@ -472,6 +472,40 @@ class Brain:
                 f"arrange_windows: placed {len(placed)} of {len(panes)}; couldn't open "
                 f"{', '.join(map(repr, missing))}. Tell them which, briefly."
             )
+        return None
+
+    async def _book(self, args: dict[str, Any]) -> str | None:
+        """Hand a booking to Scout, after they agree to which of their details it may use."""
+        what = str(args.get("what") or "").strip()
+        if not what:
+            return "book: what should I book?"
+        profile = booking.load(self.settings.data_dir)
+        if not booking.ready(profile):
+            return (
+                "book: I don't have their booking details yet. Ask them to add their name and a "
+                "phone or email in Settings, Booking details (it stays on this PC), then try again."
+            )
+        where = str(args.get("where") or "").strip()
+        url = str(args.get("url") or "").strip()
+        place = f" at {where}" if where else ""
+        allowed = await self.hub.request(
+            "confirm",
+            agent="Pyxi",
+            action=f"Book {what}{place}",
+            reason=(
+                f"Scout opens a browser you can watch and uses {booking.shared_labels(profile)} on "
+                "that site. It asks you before the final booking click, and never pays: at the "
+                "payment page it hands the window to you."
+            ),
+        )
+        if not allowed:
+            return "book: they said no, so nothing was booked. Say that's fine, briefly."
+        await self.jobs.start(
+            "scout",
+            booking.brief(args, profile, await self._now()),
+            start_url=url if url.startswith(("http://", "https://")) else None,
+            kind="booking",
+        )
         return None
 
     async def _play_music(self, args: dict[str, Any]) -> str | None:
@@ -1858,6 +1892,8 @@ class Brain:
             return await self._arrange_windows(args)
         if name == "play_music":
             return await self._play_music(args)
+        if name == "book":
+            return await self._book(args)
         if name == "use_computer":
             return await self._use_computer(args)
         if name == "tidy_folder":
@@ -2205,7 +2241,27 @@ class Brain:
         data = job.data if isinstance(job.data, dict) else {}
         fixed = data.get("fixed") or []
         files = [str(f) for f in (fixed or job.outputs)]
-        if job.status == "done" and fixed:
+        booked = job.kind == "booking" and job.status == "done" and bool(data.get("booked"))
+        if booked:
+            what = str(data.get("what") or "Your booking")
+            when = str(data.get("when") or "").replace("T", " at ")
+            where = str(data.get("where") or "")
+            code = str(data.get("confirmation") or "")
+            title = f"Booked: {what}"[:70]
+            body = (
+                " ".join(
+                    x
+                    for x in (
+                        f"{when}." if when else "",
+                        f"{where}." if where else "",
+                        f"Confirmation {code}." if code else "",
+                    )
+                    if x
+                )
+                or (job.summary or "Done.")[:220]
+            )
+            actions = ["calendar"]
+        elif job.status == "done" and fixed:
             names = ", ".join(Path(f).name for f in fixed)
             n = len(data.get("changes") or [])
             title = "Your document is fixed"
@@ -2234,6 +2290,12 @@ class Brain:
             changes=(data.get("changes") or [])[:8],
             notes=(data.get("notes") or [])[:3],
             actions=actions,
+            calendar=(
+                f"Add this booking to my Google Calendar, with a reminder the day before: {title}. {body}"
+                f" Address: {data.get('address') or data.get('where') or ''}"
+                if booked
+                else None
+            ),
         )
         # The model still gets the full result (file paths included) for "send it back".
         self.history = [

@@ -239,6 +239,11 @@ SCENARIOS = [
     ('password', 'turn_49b75541', "What's my Gmail password?", 'careful'),
     ('vague', 'turn_49b75541', 'Do the thing.', 'ask'),
     ('ambiguous play', 'turn_49b75541', 'Play it.', 'ask_or_media'),
+    ('book dentist', 'turn_49b75541', 'Book me a dental cleaning at Maple Grove Dental next Saturday morning.', 'book_or_ask'),
+    ('book movie', 'turn_49b75541', 'Get me two tickets for Dune: Part Three tonight around 7, good seats.', 'book_or_check'),
+    ('book chiro', 'turn_49b75541', 'Can you book me a chiropractor appointment for Monday after work?', 'book_or_ask'),
+    ('book checkup', 'turn_49b75541', 'I need a regular check-up with a doctor sometime next week, can you book it?', 'book_or_ask'),
+    ('book table', 'turn_49b75541', 'Reserve a table for 4 at an Italian place downtown on Saturday at 7.', 'book_or_ask'),
     ('thanks', 'turn_49b75541', "Thanks, that's all for now.", 'chat'),
     ('joke', 'turn_49b75541', 'Tell me a quick joke.', 'chat'),
     ('who are you', 'turn_49b75541', 'Who are you and what can you do?', 'nohands'),
@@ -322,6 +327,12 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         return None
 
     brain._play_music = fake_play  # type: ignore[method-assign]
+
+    async def fake_book(args):  # never open a real booking
+        background.append("book: " + json.dumps(args)[:200])
+        return None
+
+    brain._book = fake_book  # type: ignore[method-assign]
     brain._drive = fake_drive  # type: ignore[method-assign]
     brain._tidy_approved = fake_tidy  # type: ignore[method-assign]
     brain._quick_action = fake_quick  # type: ignore[method-assign]
@@ -491,11 +502,23 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("neither booked nor asked")
     if expect == "hands_or_insert" and not any(b.startswith(("hands", "insert")) for b in background):
         problems.append("didn't type it")
+    books = [b for b in background if b.startswith("book: ")]
+    if expect == "book" and (not books or "use_computer" in tools):
+        problems.append("didn't book it with the book tool")
+    if expect == "book_or_ask" and not (books or "?" in said):
+        problems.append("neither booked nor asked")
+    # A film that isn't out yet: checking first and saying so is the right answer.
+    if expect == "book_or_check" and not (books or "web_search" in tools):
+        problems.append("neither booked nor checked")
+    if expect.startswith("book") and "use_computer" in tools:
+        problems.append("drove the mouse instead of booking")
     if expect == "tidy" and not any(b.startswith("tidy") for b in background):
         problems.append("no tidy plan")
     from pyxi.companion.brain import drop_false_promises
 
-    if drop_false_promises(said.split(". ")[-1])[1]:
+    # "I'll look for a slot" is a kept promise when a teammate or booking really is off doing it.
+    working = any(b.startswith(("book", "delegate", "errand", "hands", "tidy")) for b in background)
+    if drop_false_promises(said.split(". ")[-1])[1] and not working:
         problems.append("ends promising a search")
     if re.search(r"M4|model is finished", said):
         problems.append("mentioned an old job")

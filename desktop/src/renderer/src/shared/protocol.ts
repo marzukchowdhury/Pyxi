@@ -331,7 +331,7 @@ export type BrainEvent =
   | { type: "say"; agent: string; index: number; total: number; text: string; audio: string | null; duration_s: number; annotations: Annotation[]; notes?: number[] }
   | { type: "notes"; card: NoteCard }
   | { type: "action"; kind: "open_url" | "copy" | "insert"; value: string }
-  | { type: "job_ready"; job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[] }
+  | { type: "job_ready"; job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null }
   | { type: "guide"; active: boolean; step?: number; total?: number | null; goal?: string; label?: string; action?: string; finished?: boolean; at?: [number, number] | null }
   | { type: "stop_audio" }
   | { type: "annotate"; annotations: Annotation[] }
@@ -351,7 +351,7 @@ export type BrainEvent =
   | { type: "job_frame"; job_id: string; image: string }
   | { type: "handoff"; source: string; target: string; task: string }
   | { type: "confirm"; request_id: string; job_id: string; agent: string; action: string; reason: string; always?: string }
-  | { type: "ask"; request_id: string; job_id: string; agent: string; question: string }
+  | { type: "ask"; request_id: string; job_id: string; agent: string; question: string; handover?: boolean }
   | { type: "request_closed"; request_id: string }
   | { type: "driving"; doing: string | null }
   | { type: "agents"; agents: Agent[] }
@@ -362,13 +362,16 @@ export type BrainEvent =
   | { type: "routines"; routines: RoutineInfo[] }
   | { type: "voice_preview"; engine: string; voice: string; text: string; audio: string | null; error: string | null }
   | { type: "error"; message: string }
-  | { type: "beta"; ok: boolean; message: string };
+  | { type: "beta"; ok: boolean; message: string }
+  | { type: "profile"; profile: Record<string, string>; saved?: boolean };
 
 export type ClientMessage =
   | { type: "text"; text: string }
   | { type: "ptt_start" }
   | { type: "look_ahead" }
   | { type: "beta_join"; code: string }
+  | { type: "profile_get" }
+  | { type: "profile_save"; profile: Record<string, string> }
   | { type: "ptt_cancel" }
   | { type: "audio"; data: string; mime: string }
   | { type: "interrupt" }

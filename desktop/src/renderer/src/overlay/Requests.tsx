@@ -22,6 +22,16 @@ export function Requests() {
                 <button onClick={() => answer(r.request_id, false)}>Don't</button>
               </div>
             </>
+          ) : r.handover ? (
+            <>
+              <div className="req-title">Your turn</div>
+              <div className="req-action">{r.question}</div>
+              <div className="req-reason">{r.agent} has the browser window open for you and will read the confirmation once you're done.</div>
+              <div className="req-buttons">
+                <button className="yes" onClick={() => answer(r.request_id, "done")}>Done</button>
+                <button onClick={() => answer(r.request_id, null)}>Cancel</button>
+              </div>
+            </>
           ) : (
             <Ask id={r.request_id} agent={r.agent} question={r.question ?? ""} onAnswer={answer} />
           )}

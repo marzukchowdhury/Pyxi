@@ -485,6 +485,41 @@ COMPANION_TOOLS += [
         ["action", "value"],
     ),
     _tool(
+        "book",
+        "Book something for them in a browser they can watch: a dentist, chiropractor, doctor or "
+        "clinic appointment, a haircut, movie tickets, a restaurant table. Scout finds the slot, fills "
+        "the form from their saved details, asks them before the final booking click, and never pays: "
+        "it hands them the browser at the payment page. Use this for any 'book', 'reserve', 'get me "
+        "tickets' or 'make an appointment' that happens on a website (not calendar invites: errand).",
+        {
+            "what": {
+                "type": "string",
+                "description": "e.g. 'dental cleaning', '2 tickets for Dune: Part Three'.",
+            },
+            "where": {
+                "type": "string",
+                "description": "The place or site if they said one (e.g. 'Maple Grove Dental', 'Cineplex Marine Gateway').",
+            },
+            "url": {
+                "type": "string",
+                "description": "The booking page if you know it (an https link).",
+            },
+            "when": {
+                "type": "string",
+                "description": "Their timing, in their words plus the date: 'Saturday 8 Nov, morning'.",
+            },
+            "people": {
+                "type": "string",
+                "description": "How many, if it matters (tickets, a table).",
+            },
+            "notes": {
+                "type": "string",
+                "description": "Anything else they asked for: practitioner, seats, new patient.",
+            },
+        },
+        ["what"],
+    ),
+    _tool(
         "play_music",
         "Play a song, album or video right now: finds it on YouTube, opens it in a window behind the one "
         "they're in (so they keep working), checks it's really playing, and sets the volume if they "

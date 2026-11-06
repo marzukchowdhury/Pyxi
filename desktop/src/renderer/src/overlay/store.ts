@@ -61,6 +61,7 @@ export interface ChatLine {
 
 interface Request {
   kind: "confirm" | "ask";
+  handover?: boolean; // their turn in the browser (paying): a Done button, no text box
   request_id: string;
   agent: string;
   action?: string;
@@ -107,7 +108,7 @@ interface OverlayState {
   /** A guide they finished themselves: a brief moment of light where they made the last move. */
   cheer: { x: number; y: number; at: number } | null;
   /** Finished background jobs, shown quietly as cards (newest first). */
-  toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[] }[];
+  toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null }[];
   dismissToast(id: string): void;
   closeNotes(): void;
   setStep(step: number): void;

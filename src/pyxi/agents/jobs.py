@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import secrets
 import time
 from collections.abc import Awaitable, Callable
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from otto.agent.runner import Otto
+from otto.config import DEFAULT_SENSITIVE_PATTERNS
 from otto.core.controls import RunControls
 from otto.llm.base import LLMProvider, Message
 from otto.storage import MemoryStore
@@ -28,6 +30,7 @@ from otto.types import AgentEvent
 from pydantic import BaseModel, Field
 
 from pyxi.agents.registry import AgentProfile, AgentRegistry
+from pyxi.booking import CONFIRM_PATTERNS, HANDOVER
 from pyxi.config import PyxiSettings
 from pyxi.docs import SUPPORTED, fix_document
 from pyxi.hub import Hub
@@ -54,6 +57,7 @@ class Job(BaseModel):
     context: str = ""
     start_url: str | None = None
     files: list[str] = Field(default_factory=list)  # documents to work on (writers fix them)
+    kind: str = "task"  # "booking": the final click is approved, payment is handed to the user
     status: JobStatus = "queued"
     summary: str = ""
     data: Any = None
@@ -104,6 +108,19 @@ BROWSER_RULES = """How to work:
   matters. Use success=false only when you really could not find or do it."""
 
 
+def plain_card(action: str, reason: str, *, booking: bool = False) -> tuple[str, str]:
+    """Otto's confirm text ("click [8] "Book appointment"" / "... (matched '\\bbook\\b')") in
+    words a person reads at a glance: Click "Book appointment" / This books it."""
+    label = re.search(r'"([^"]+)"', action)
+    what = f'Click "{label.group(1)}"' if label else action
+    if booking:
+        return (
+            what,
+            "This makes the booking with the details on that page. Check them in the window first.",
+        )
+    return what, re.sub(r"\s*\(matched .*\)\.?$", ".", reason)
+
+
 class JobManager:
     def __init__(
         self,
@@ -140,6 +157,7 @@ class JobManager:
         then: Handoff | None = None,
         parent: str | None = None,
         files: list[str] | None = None,
+        kind: str = "task",
     ) -> Job:
         agent = self.registry.get(agent_ref)
         if agent is None:
@@ -156,6 +174,7 @@ class JobManager:
             then=then,
             parent=parent,
             files=list(files or []),
+            kind=kind,
         )
         self.jobs[job.id] = job
         await self._update(job)
@@ -254,25 +273,50 @@ class JobManager:
             await self.on_done(job)
 
     async def _run_browser(self, job: Job, agent: AgentProfile) -> None:
+        booking = job.kind == "booking"
         safety: dict[str, Any] = {"confirm_policy": "ask"}
         if agent.allowed_domains:
             safety["allowed_domains"] = agent.allowed_domains
+        if booking:  # "Book appointment" and "Reserve" are as final as "Submit": approve first
+            safety["sensitive_action_patterns"] = [*DEFAULT_SENSITIVE_PATTERNS, *CONFIRM_PATTERNS]
         s = otto_settings(
             self.settings,
             model=self.settings.job_model,
-            headless=not self.headed,
-            budget={"max_steps": 18, "max_cost_usd": agent.max_cost_usd},
+            headless=not self.headed and not booking,  # they may need to pay in that window
+            budget={
+                "max_steps": 30 if booking else 18,
+                "max_cost_usd": max(agent.max_cost_usd, 0.3) if booking else agent.max_cost_usd,
+            },
             safety=safety,
             memory={"scope": agent.memory_scope},
         )
 
         async def confirm(action: str, reason: str) -> bool:
+            action, reason = plain_card(action, reason, booking=booking)
             answer = await self.hub.request(
                 "confirm", job_id=job.id, agent=agent.name, action=action, reason=reason
             )
             return bool(answer)
 
         async def ask(question: str) -> str | None:
+            if booking and question.strip().upper().startswith(HANDOVER):
+                # Their turn: pay (or sign in) in the browser window Scout has open. That can
+                # take a while, so the card waits 15 minutes and just needs a Done.
+                answer = await self.hub.request(
+                    "ask",
+                    timeout=900,
+                    job_id=job.id,
+                    agent=agent.name,
+                    question=question.strip()[len(HANDOVER) :].strip(),
+                    handover=True,
+                )
+                return (
+                    "They pressed Done: they say they've finished in the browser. Reload the page "
+                    "(navigate to the current address again) and look for the confirmation before "
+                    "you finish."
+                    if answer
+                    else None
+                )
             answer = await self.hub.request(
                 "ask", job_id=job.id, agent=agent.name, question=question
             )
@@ -296,7 +340,8 @@ class JobManager:
 
         controls.subscribe(relay)
         self._controls[job.id] = controls
-        task = f"{job.task}\n\nYou are {agent.name}: {agent.persona}\n\n{BROWSER_RULES}"
+        rules = "" if booking else "\n\n" + BROWSER_RULES  # bookings carry their own rules
+        task = f"{job.task}\n\nYou are {agent.name}: {agent.persona}{rules}"
         if job.context:
             task += f"\n\nContext from your teammates:\n{job.context}"
         otto = Otto(s, llm=self.otto_llm, controls=controls)

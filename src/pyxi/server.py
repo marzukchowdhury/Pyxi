@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
-from pyxi import __version__, cloud
+from pyxi import __version__, booking, cloud
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
 from pyxi.hub import Hub
@@ -294,6 +294,11 @@ def create_app(
             brain.begin_listening()
         elif kind == "look_ahead":
             brain.look_ahead()
+        elif kind == "profile_get":
+            await hub.emit("profile", profile=booking.load(settings.data_dir))
+        elif kind == "profile_save" and isinstance(msg.get("profile"), dict):
+            saved = booking.save(settings.data_dir, msg["profile"])
+            await hub.emit("profile", profile=saved, saved=True)
         elif kind == "beta_join" and str(msg.get("code") or "").strip():
             brain._spawn(_beta_join(str(msg["code"])))
         elif kind == "audio" and msg.get("data"):

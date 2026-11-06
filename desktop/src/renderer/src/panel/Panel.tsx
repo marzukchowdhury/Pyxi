@@ -337,6 +337,50 @@ export function Palace() {
   );
 }
 
+// ---------------------------------------------------------------------------- booking details
+const DETAILS: [string, string, string][] = [
+  ["first_name", "First name", "given-name"],
+  ["last_name", "Last name", "family-name"],
+  ["email", "Email", "email"],
+  ["phone", "Phone", "tel"],
+  ["date_of_birth", "Date of birth (YYYY-MM-DD)", "bday"],
+  ["city", "City or postal code", "postal-code"],
+  ["preferences", "Preferences (mornings, aisle seats, Dr. Lee)", "off"],
+];
+
+/** What Scout may fill in when it books something for you. Kept only on this PC. */
+function BookingDetails() {
+  const [profile, setProfile] = useState<Record<string, string>>({});
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    const off = brain.on((e) => {
+      if (e.type === "profile") {
+        setProfile(e.profile);
+        if (e.saved) setSaved(true);
+      }
+    });
+    brain.send({ type: "profile_get" });
+    return off;
+  }, []);
+  return (
+    <form className="booking-details" onSubmit={(e) => { e.preventDefault(); setSaved(false); brain.send({ type: "profile_save", profile }); }}>
+      <p className="muted">When you ask Pyxi to book an appointment, tickets or a table, Scout fills these in. They stay on this PC, and you approve each booking. Health card and other ID numbers are never saved: if a form needs one, Pyxi asks you to type it.</p>
+      <div className="booking-grid">
+        {DETAILS.map(([key, label, auto]) => (
+          <label key={key} className={key === "preferences" ? "wide" : ""}>
+            <span>{label}</span>
+            <input value={profile[key] ?? ""} autoComplete={auto} onChange={(e) => { setSaved(false); setProfile({ ...profile, [key]: e.target.value }); }} />
+          </label>
+        ))}
+      </div>
+      <div className="booking-row">
+        <button className="primary" type="submit">Save</button>
+        {saved && <span className="beta-ok">Saved on this PC.</span>}
+      </div>
+    </form>
+  );
+}
+
 // ---------------------------------------------------------------------------- the beta
 /** Join with an invite code (no API key needed), or see what's left of today's allowance. */
 function BetaCard() {
@@ -435,6 +479,8 @@ export function Settings() {
       <label><input type="checkbox" checked={hello.privacy_paused} onChange={(e) => set("privacy_paused", e.target.checked)} /> Pause screen sharing (Ctrl+Alt+P)</label>
       <label><input type="checkbox" defaultChecked onChange={(e) => set("jobs_headed", e.target.checked)} /> Show teammates' browser windows</label>
       <ShareToggle />
+      <h4>Booking details</h4>
+      <BookingDetails />
       <h4>Connected accounts</h4>
       <Connections />
       <h4>Routines</h4>

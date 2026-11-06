@@ -287,3 +287,11 @@ button.ghost:hover { color: var(--ink); border-color: var(--hair-hi); }
 .beta-card b { font-size: 13.5px; } .beta-card p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
 .beta-row { display: flex; gap: 8px; } .beta-row input { flex: 1; height: 32px; letter-spacing: .06em; text-transform: uppercase; }
 .beta-card .beta-ok { color: #ffc861; } .beta-card .beta-error { color: #ff9ea0; }
+/* booking details: what Scout may fill in, kept on this PC */
+.booking-details { display: grid; gap: 10px; margin-bottom: 14px; }
+.booking-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+.booking-grid label { display: grid; gap: 4px; font-size: 11.5px; color: var(--ink-3); }
+.booking-grid label.wide { grid-column: 1 / -1; }
+.booking-grid input { height: 30px; font-size: 12.5px; }
+.booking-row { display: flex; align-items: center; gap: 10px; }
+.booking-row .beta-ok { color: #ffc861; font-size: 12px; }
