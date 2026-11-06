@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
+from blip.scenes.model_examples import HEART
 from test_brain_and_server import make_brain
 from test_connectors_and_docs import Script
-from blip.scenes.model_examples import HEART
 
 
 async def test_a_brief_is_built_in_the_background_and_shown(settings):

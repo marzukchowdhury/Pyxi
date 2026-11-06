@@ -7,10 +7,10 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from test_brain_and_server import make_brain
-from test_connectors_and_docs import Script
 from blip.companion.errands import said_by_user
 from blip.timecontext import now_block
+from test_brain_and_server import make_brain
+from test_connectors_and_docs import Script
 
 TZ = "America/Vancouver"
 

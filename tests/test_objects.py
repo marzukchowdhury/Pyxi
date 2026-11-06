@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from otto.types import LLMResponse, ToolCall, Usage
 
-from test_brain_and_server import make_brain
 from blip.scenes.object_gallery import OBJECT_GALLERY
 from blip.scenes.objects import ObjectEdit, ObjectScene, apply_edit, build_tool_schema
+from test_brain_and_server import make_brain
 
 
 def _model(**extra) -> dict:

@@ -51,3 +51,68 @@ def test_named_window_finds_the_app_the_request_names():
     # Ordinary words that happen to be program names don't count.
     assert named_window("explain this code to me", open_now) is None
     assert named_window("what's on my screen?", open_now) is None
+
+
+def test_panes_tile_the_screen_without_gaps():
+    from blip.windows import pane_rects
+
+    area = (0, 0, 1921, 1032)
+    three = pane_rects(area, 3)
+    assert [r[0] for r in three] == [0, 640, 1280] and sum(r[2] for r in three) == 1921
+    assert all(r[3] == 1032 for r in three)
+    grid = pane_rects(area, 4)
+    assert grid[3] == (960, 516, 961, 516)
+    main = pane_rects(area, 3, "main")
+    assert main[0] == (0, 0, 960, 1032) and main[1][1] == 0 and main[2][1] == 516
+
+
+def test_open_windows_are_found_by_site_or_name():
+    from blip.windows import window_like
+
+    open_now = [
+        (1, "Facebook - Mozilla Firefox", r"C:\x\firefox.exe"),
+        (2, "Inbox (3) - me@gmail.com - Gmail - Mozilla Firefox", r"C:\x\firefox.exe"),
+        (3, "Spotify Premium", r"C:\x\Spotify.exe"),
+    ]
+    assert window_like("https://mail.google.com", open_now, set()) == 2
+    assert window_like("Gmail", open_now, set()) == 2
+    assert window_like("spotify", open_now, set()) == 3
+    assert window_like("https://stake.com", open_now, set()) is None
+    assert window_like("facebook.com", open_now, {1}) is None  # already placed
+
+
+async def test_three_parts_in_one_call(settings, monkeypatch):
+    """ "Split my screen in three: Facebook (here), Stake and Gmail": one tool call, no hands."""
+    from test_brain_and_server import make_brain
+
+    placed, opened = {}, []
+    monkeypatch.setattr(windows, "available", lambda: True)
+    monkeypatch.setattr(windows, "work_area", lambda hwnd: (0, 0, 1920, 1032))
+    monkeypatch.setattr(windows, "place", lambda hwnd, *rect: placed.__setitem__(hwnd, rect))
+    monkeypatch.setattr(windows, "focus", lambda hwnd: True)
+    monkeypatch.setattr(
+        windows,
+        "open_windows",
+        lambda minimized=False: [
+            (7, "Facebook - Mozilla Firefox", "firefox.exe"),
+            (8, "Inbox - Gmail - Mozilla Firefox", "firefox.exe"),
+        ],
+    )
+
+    async def fake_open(target, like=None, is_url=True):
+        opened.append(target)
+        return 9
+
+    monkeypatch.setattr(windows, "open_new_window", fake_open)
+    monkeypatch.setattr("blip.companion.brain.asyncio.sleep", _no_sleep)
+    brain, _ = make_brain(settings)
+    brain._ctx = type("C", (), {"window": type("W", (), {"hwnd": 7})()})()
+    note = await brain._arrange_windows(
+        {"layout": "panes", "panes": ["current", "https://stake.com", "Gmail"]}
+    )
+    assert note is None and opened == ["https://stake.com"]  # Gmail was already open: reused
+    assert placed == {7: (0, 0, 640, 1032), 9: (640, 0, 640, 1032), 8: (1280, 0, 640, 1032)}
+
+
+async def _no_sleep(_s):
+    return None

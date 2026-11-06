@@ -6,9 +6,9 @@ import asyncio
 
 from otto.types import LLMResponse, ToolCall, Usage
 
+from blip.companion.notes import build_card
 from conftest import fake_context
 from test_brain_and_server import make_brain
-from blip.companion.notes import build_card
 
 
 def test_card_points_frame_the_exact_elements():
@@ -107,7 +107,10 @@ async def test_a_new_request_restarts_the_count_and_circles_end_the_guide(settin
         ("say", {"text": f"Click {label}."}),
     ]
     llm = Scripted(
-        step("View"), step("Word wrap"), step("View"), step("Word wrap"),
+        step("View"),
+        step("Word wrap"),
+        step("View"),
+        step("Word wrap"),
         [("say", {"text": "Word wrap's on now."})],
         step("View"),
     )

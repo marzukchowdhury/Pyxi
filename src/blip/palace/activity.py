@@ -165,7 +165,8 @@ class ActivityLog:
         since = time.time() - minutes * 60
         with self._conn() as c:
             rows = c.execute(
-                "SELECT * FROM activity WHERE ts >= ? ORDER BY ts DESC, id DESC LIMIT ?", (since, limit)
+                "SELECT * FROM activity WHERE ts >= ? ORDER BY ts DESC, id DESC LIMIT ?",
+                (since, limit),
             ).fetchall()
         return [_event(r) for r in reversed(rows)]
 

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
+from blip.scenes.sketch import Sketchboard
 from test_brain_and_server import make_brain
 from test_connectors_and_docs import Script
-from blip.scenes.sketch import Sketchboard
 
 HOVER = {
     "title": "Push air down, lift up",

@@ -93,6 +93,23 @@ LEADING_NOTES = re.compile(r"^\s*(?:\[note:\d+\]\s*)+", re.IGNORECASE)
 State = Literal["idle", "listening", "transcribing", "looking", "thinking", "speaking"]
 
 
+# A site named in a word ("put Gmail on the right") and where it lives, when it isn't <word>.com.
+_SITE_WORDS = {
+    "gmail": "https://mail.google.com",
+    "email": "https://mail.google.com",
+    "google sheets": "https://sheets.google.com",
+    "sheets": "https://sheets.google.com",
+    "google docs": "https://docs.google.com",
+    "docs": "https://docs.google.com",
+    "calendar": "https://calendar.google.com",
+    "youtube music": "https://music.youtube.com",
+    "whatsapp": "https://web.whatsapp.com",
+    "chatgpt": "https://chatgpt.com",
+    "maps": "https://maps.google.com",
+    "google maps": "https://maps.google.com",
+}
+
+
 class TurnState(TypedDict, total=False):
     user_text: str
     turn_id: str
@@ -329,6 +346,7 @@ class Brain:
         job = await self.jobs.track("Blip", task)
 
         async def report(doing: str, step: int) -> None:
+            log.info("hands step %d: %s", step, doing)
             await self.hub.emit("driving", doing=doing)  # rides beside the cursor
             await self.hub.emit(
                 "job_event", job_id=job.id, agent="Blip", event="status", data={"message": doing}
@@ -387,7 +405,8 @@ class Brain:
         await self.say_line(out.summary)
 
     async def _arrange_windows(self, args: dict[str, Any]) -> str | None:
-        """Split the screen, snap, maximize, minimize or restore the window they're in."""
+        """Lay windows out (two, three or four panes), or snap, maximize, minimize or restore the
+        window they're in."""
         if not windows.available():
             return "arrange_windows: this only works on Windows."
         ctx = self._ctx
@@ -395,29 +414,59 @@ class Brain:
         if not hwnd:
             return "arrange_windows: I couldn't tell which window you mean."
         layout = str(args.get("layout") or "split")
-        if layout != "split":
+        panes = [str(p).strip() for p in args.get("panes") or [] if str(p).strip()]
+        if layout == "split":
+            target = str(args.get("open") or "").strip()
+            if not target:
+                return "arrange_windows: say what should go on the other half."
+            panes = (
+                [target, "current"] if args.get("current_side") == "right" else ["current", target]
+            )
+        elif layout != "panes":
             windows.snap(hwnd, layout)
             return None
-        side = "right" if args.get("current_side") == "right" else "left"
-        other = "left" if side == "right" else "right"
-        target = str(args.get("open") or "").strip()
-        if not target:
-            return "arrange_windows: say what should go on the other half."
-        windows.snap(hwnd, side)
-        url, app = safe_url(target), app_target(target)
-        if url:
-            new = await windows.open_new_window(url, like=hwnd, is_url=True)
-        elif app:
-            new = await windows.open_new_window(app, is_url=False)
-        else:
-            return f"arrange_windows: I can open a website or a known app, not {target!r}."
-        if new is None:
-            return "arrange_windows: it opened, but its window didn't show up for me to place."
-        windows.snap(new, other)
+        if len(panes) < 2:
+            return "arrange_windows: give at least two panes."
+        panes = panes[:6]
+        rects = windows.pane_rects(
+            windows.work_area(hwnd), len(panes), str(args.get("arrangement") or "auto")
+        )
+        open_now = windows.open_windows()
+        used: set[int] = {hwnd}
+        placed: list[tuple[int, tuple[int, int, int, int]]] = []
+        missing: list[str] = []
+        for item, rect in zip(panes, rects, strict=True):
+            if item.lower() in ("current", "this", "this window", "here"):
+                win: int | None = hwnd
+            else:
+                win = windows.window_like(item, open_now, used)
+                if win is None:
+                    word = item.lower()
+                    site = _SITE_WORDS.get(word) or (
+                        f"https://{word}.com" if re.fullmatch(r"[a-z0-9-]{2,30}", word) else item
+                    )
+                    url, app = (
+                        (None, app_target(item)) if app_target(item) else (safe_url(site), None)
+                    )
+                    if url:
+                        win = await windows.open_new_window(url, like=hwnd, is_url=True)
+                    elif app:
+                        win = await windows.open_new_window(app, is_url=False)
+            if win is None:
+                missing.append(item)
+                continue
+            used.add(win)
+            windows.place(win, *rect)
+            placed.append((win, rect))
         await asyncio.sleep(0.8)
-        windows.snap(
-            new, other
-        )  # browsers sometimes resize their new window a moment after opening
+        for win, rect in placed:  # browsers sometimes resize a new window a moment after opening
+            windows.place(win, *rect)
+        windows.focus(hwnd)
+        if missing:
+            return (
+                f"arrange_windows: placed {len(placed)} of {len(panes)}; couldn't open "
+                f"{', '.join(map(repr, missing))}. Tell them which, briefly."
+            )
         return None
 
     async def _quick_action(self, action: str, value: str) -> str | None:
@@ -479,7 +528,9 @@ class Brain:
         def grab() -> Any:
             if hwnd:
                 return self.screen.capture(hwnd=hwnd)
-            return self.screen.capture() if follow_mouse else self.screen.capture(follow_mouse=False)
+            return (
+                self.screen.capture() if follow_mouse else self.screen.capture(follow_mouse=False)
+            )
 
         if not self.overlay_in_capture:
             return await grab()

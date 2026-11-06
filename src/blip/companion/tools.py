@@ -557,13 +557,15 @@ COMPANION_TOOLS += [
     ),
     _tool(
         "arrange_windows",
-        "Arrange their windows, right now: split the screen (the window they're in on one half, a site or app "
-        "in a new window on the other), snap the window they're in left, right, top or bottom, or maximize, "
-        "minimize or restore it. Just do it when asked; never tell them to do it themselves.",
+        "Arrange their windows, right now, in one call: two, three or four windows side by side, stacked or in "
+        "a grid (layout 'panes'), split the screen in two ('split'), or snap, maximize, minimize or restore the "
+        "window they're in. Any request to lay windows out goes here, never to use_computer: this places "
+        "every window exactly and instantly. Just do it when asked; never tell them to do it themselves.",
         {
             "layout": {
                 "type": "string",
                 "enum": [
+                    "panes",
                     "split",
                     "left",
                     "right",
@@ -573,6 +575,21 @@ COMPANION_TOOLS += [
                     "minimize",
                     "restore",
                 ],
+            },
+            "panes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "For panes: what goes in each part, in order (left to right, or top to "
+                "bottom; for a grid: top left, top right, bottom left, bottom right). Each is 'current' "
+                "(the window they're in), a website (https://stake.com, https://mail.google.com), an app "
+                "(notepad, spotify), or a window that's already open (Gmail, CapCut). Open windows are "
+                "reused; the rest open in new windows of their browser.",
+            },
+            "arrangement": {
+                "type": "string",
+                "enum": ["columns", "rows", "grid", "main"],
+                "description": "For panes: columns side by side (default for 2 or 3), rows stacked, grid "
+                "2x2 (default for 4), or main: a big left half with the rest stacked on the right.",
             },
             "open": {
                 "type": "string",

@@ -17,9 +17,9 @@ from typing import Any
 from docx import Document
 from otto.types import LLMResponse, ToolCall, Usage
 
-from test_brain_and_server import make_brain
 from blip.connectors import Outgoing
 from blip.docs import fix_document
+from test_brain_and_server import make_brain
 
 
 def _letter() -> bytes:

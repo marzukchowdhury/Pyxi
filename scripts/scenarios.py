@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -23,9 +24,9 @@ from pathlib import Path
 from otto.config import load_dotenv
 from PIL import Image
 
+from blip import tidy
 from blip.companion.brain import Brain
 from blip.config import BlipSettings
-from blip import tidy
 from blip.hub import Hub
 from blip.screen.context import ScreenContext, UIElement, WindowInfo
 from blip.screen.ocr import TextLine
@@ -131,6 +132,13 @@ SCENARIOS = [
         "Find me coffee places near me that are open right now and have the best coffee in the reviews.",
         "maps",
     ),
+    (
+        "three-way split",
+        "turn_57095984",
+        "Hey Blip, can you keep my screen into three parts and in one part kept the Facebook right now "
+        "I'm in in one part kept stake and in one part kept my gmail on",
+        "arrange3",
+    ),
     ("nba finals", "turn_49b75541", "Who won the NBA Finals last year?", "web"),
     ("bitcoin", "turn_49b75541", "What's the price of bitcoin right now?", "web"),
     (
@@ -188,13 +196,29 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     # A messy sample Desktop, so the tidy check doesn't depend on how tidy the real one is today.
     mess = Path(tmp) / "Desktop"
     mess.mkdir(exist_ok=True)
-    for fname in ["Resume final v3.pdf", "Cover letter PwC.docx", "IMG_2041.jpg", "IMG_2042.jpg",
-                 "Screenshot 2026-11-01 101233.png", "budget 2026.xlsx", "setup.exe", "notes.txt",
-                 "Lecture 4 slides.pptx", "tax return 2025.pdf", "song.mp3", "invoice-1182.pdf"]:
+    for fname in [
+        "Resume final v3.pdf",
+        "Cover letter PwC.docx",
+        "IMG_2041.jpg",
+        "IMG_2042.jpg",
+        "Screenshot 2026-11-01 101233.png",
+        "budget 2026.xlsx",
+        "setup.exe",
+        "notes.txt",
+        "Lecture 4 slides.pptx",
+        "tax return 2025.pdf",
+        "song.mp3",
+        "invoice-1182.pdf",
+    ]:
         (mess / fname).write_text("x")
     real_known = tidy.known_folder
     tidy.known_folder = lambda n: mess if n.strip().lower() == "desktop" else real_known(n)  # type: ignore[assignment]
 
+    async def fake_arrange(args):  # never move their real windows
+        background.append("arrange: " + json.dumps(args)[:160])
+        return None
+
+    brain._arrange_windows = fake_arrange  # type: ignore[method-assign]
     brain._drive = fake_drive  # type: ignore[method-assign]
     brain._tidy_approved = fake_tidy  # type: ignore[method-assign]
     brain._quick_action = fake_quick  # type: ignore[method-assign]
@@ -291,6 +315,12 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append("didn't open Google Maps")
         if "look_again" not in tools and not any(b.startswith("hands") for b in background):
             problems.append("didn't look at the results")
+    if expect == "arrange3":
+        arr = [b for b in background if b.startswith("arrange: ")]
+        if not arr or "use_computer" in tools:
+            problems.append("didn't lay the windows out with arrange_windows")
+        elif '"panes"' not in arr[0]:
+            problems.append("arranged without panes")
     if expect == "tidy" and not any(b.startswith("tidy") for b in background):
         problems.append("no tidy plan")
     from blip.companion.brain import drop_false_promises
@@ -329,7 +359,7 @@ async def main() -> None:
             print(
                 f"{mark} {res['name']:18s} {res['secs']:5.1f}s ${res['cost']:.4f} {res['tools']} {res['problems']}"
             )
-            if not res["ok"]:
+            if not res["ok"] or os.environ.get("SCEN_VERBOSE"):
                 print("      said:", res["said"])
                 print("      background:", res["background"])
     passed = sum(r["ok"] for r in results)

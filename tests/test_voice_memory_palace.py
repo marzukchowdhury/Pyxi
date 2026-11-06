@@ -5,13 +5,13 @@ from datetime import datetime
 
 import pytest
 
-from conftest import fake_context
 from blip.agents import AgentRegistry
 from blip.companion.annotations import split_markers
 from blip.memory import SpatialMemory
 from blip.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
 from blip.voice import split_sentences, strip_tags
 from blip.voice.tts import FallbackTTS, Speech
+from conftest import fake_context
 
 
 # ---------------------------------------------------------------- voice

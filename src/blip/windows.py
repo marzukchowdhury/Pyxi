@@ -195,8 +195,21 @@ async def open_new_window(target: str, like: int | None = None, is_url: bool = T
 
 # Words that name a program but also turn up in ordinary requests ("explain this code").
 _TOO_COMMON = {
-    "code", "explorer", "applicationframehost", "electron", "python", "pythonw", "cmd",
-    "windowsterminal", "powershell", "blip", "shell", "settings", "search", "start", "files",
+    "code",
+    "explorer",
+    "applicationframehost",
+    "electron",
+    "python",
+    "pythonw",
+    "cmd",
+    "windowsterminal",
+    "powershell",
+    "blip",
+    "shell",
+    "settings",
+    "search",
+    "start",
+    "files",
 }
 
 
@@ -260,3 +273,74 @@ def same_app(a: int, b: int) -> bool:
     u.GetWindowThreadProcessId(a, ctypes.byref(pa))
     u.GetWindowThreadProcessId(b, ctypes.byref(pb))
     return bool(pa.value) and pa.value == pb.value
+
+
+def pane_rects(
+    area: tuple[int, int, int, int], n: int, arrangement: str = "auto"
+) -> list[tuple[int, int, int, int]]:
+    """Split a work area into ``n`` panes, gap-free, in reading order.
+
+    columns: side by side · rows: stacked · grid: 2x2 (four) · main: a big left half and the rest
+    stacked on the right. "auto" is columns for two or three (what "split it into three parts"
+    means) and a grid for four."""
+    x, y, w, h = area
+    n = max(1, min(n, 6))
+    if arrangement == "auto":
+        arrangement = "grid" if n == 4 else "columns"
+    if n == 1:
+        return [area]
+    if arrangement == "rows":
+        cuts = [y + h * i // n for i in range(n + 1)]
+        return [(x, cuts[i], w, cuts[i + 1] - cuts[i]) for i in range(n)]
+    if arrangement == "grid" and n == 4:
+        mx, my = x + w // 2, y + h // 2
+        return [
+            (x, y, mx - x, my - y),
+            (mx, y, x + w - mx, my - y),
+            (x, my, mx - x, y + h - my),
+            (mx, my, x + w - mx, y + h - my),
+        ]
+    if arrangement in ("main", "grid"):
+        mx = x + w // 2
+        rest = pane_rects((mx, y, x + w - mx, h), n - 1, "rows")
+        return [(x, y, mx - x, h), *rest]
+    cuts = [x + w * i // n for i in range(n + 1)]
+    return [(cuts[i], y, cuts[i + 1] - cuts[i], h) for i in range(n)]
+
+
+# What a site's window is called, when its address doesn't say (Gmail's tab title is "Gmail").
+_SITE_TITLES = {
+    "mail.google.com": "gmail",
+    "music.youtube.com": "youtube music",
+    "web.whatsapp.com": "whatsapp",
+    "docs.google.com": "google docs",
+    "sheets.google.com": "google sheets",
+    "calendar.google.com": "google calendar",
+    "x.com": "x",
+}
+
+
+def window_like(name: str, open_now: list[tuple[int, str, str]], skip: set[int]) -> int | None:
+    """An open window that already shows ``name`` ("Gmail", "Spotify", "https://stake.com"),
+    by its title or program, topmost first. A site in a background tab can't be seen this way."""
+    from urllib.parse import urlparse
+
+    text = name.strip().lower()
+    if "://" in text or "." in text.split("/")[0]:
+        host = urlparse(text if "://" in text else "https://" + text).hostname or ""
+        host = host.removeprefix("www.")
+        text = _SITE_TITLES.get(host) or host.split(".")[0]
+    words = " " + "".join(c if c.isalnum() else " " for c in text).strip() + " "
+    if len(words.strip()) < 2:
+        return None
+    for hwnd, title, exe in open_now:
+        if hwnd in skip:
+            continue
+        hay = (
+            " "
+            + "".join(c.lower() if c.isalnum() else " " for c in f"{title} {Path(exe).stem}")
+            + " "
+        )
+        if words in hay:
+            return hwnd
+    return None

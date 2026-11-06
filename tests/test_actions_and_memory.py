@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from blip.companion.actions import app_target, safe_url
 from conftest import fake_context
 from test_brain_and_server import make_brain
 from test_notes_and_guides import Scripted
-from blip.companion.actions import app_target, safe_url
 
 
 def test_only_web_addresses_and_known_apps():

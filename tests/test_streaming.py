@@ -7,9 +7,9 @@ import json
 
 from otto.types import LLMResponse, ToolCall, Usage
 
-from test_brain_and_server import make_brain
 from blip.partial_json import complete_items, finished_sentences, partial_string
 from blip.stream_llm import StreamingChat
+from test_brain_and_server import make_brain
 
 
 def test_reading_json_that_is_still_arriving():
