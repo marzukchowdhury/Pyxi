@@ -134,3 +134,18 @@ def test_testers_use_the_google_client_the_installer_ships(tmp_path, monkeypatch
     assert g.client_config()["installed"]["client_id"] == "pyxi"
     (store.parent / "google_client.json").write_text(json.dumps({"installed": {"client_id": "mine"}}))
     assert g.client_config()["installed"]["client_id"] == "mine"  # their own still wins
+
+
+def test_the_brain_quits_when_its_app_does():
+    """After an update an old brain must never be left running on its own."""
+    import subprocess
+    import sys
+
+    if sys.platform != "win32":
+        return
+    app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"])
+    brain = subprocess.Popen(
+        [sys.executable, "-c", "import sys, time; from pyxi.cli import _quit_with_app; _quit_with_app(sys.argv[1]); time.sleep(60)", str(app.pid)]
+    )
+    assert brain.wait(timeout=20) == 0  # well before its 60 s sleep: it followed the app out
+    app.wait()

@@ -206,6 +206,12 @@ def create_app(
     async def health() -> dict[str, Any]:
         return {"ok": True, "version": __version__}
 
+    @app.post("/api/quit")
+    async def quit_brain() -> dict[str, Any]:
+        """A newer app asks an older brain to make way (see ensureBrain in the desktop app)."""
+        asyncio.get_running_loop().call_later(0.2, os._exit, 0)
+        return {"ok": True}
+
     @app.get("/api/state")
     async def state() -> dict[str, Any]:
         return hello()

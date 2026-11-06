@@ -217,17 +217,25 @@ function broadcast(channel: string, ...args: unknown[]): void {
   }
 }
 
-async function backendUp(): Promise<boolean> {
+/** The running brain's version, or null when nothing answers. */
+async function backendVersion(): Promise<string | null> {
   try {
     const res = await fetch(`${BACKEND}/api/health`);
-    return res.ok;
+    return res.ok ? String(((await res.json()) as { version?: string }).version ?? "") : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 async function ensureBrain(): Promise<void> {
-  if (await backendUp()) return;
+  const running = await backendVersion();
+  // Reuse a brain only if it's this version. After an update an old brain can still be running
+  // (left behind when the installer closed the app): ask it to quit, then start our own.
+  if (running !== null && (running === app.getVersion() || !app.isPackaged)) return;
+  if (running !== null) {
+    await fetch(`${BACKEND}/api/quit`, { method: "POST" }).catch(() => undefined);
+    for (let i = 0; i < 30 && (await backendVersion()) !== null; i++) await new Promise((r) => setTimeout(r, 200));
+  }
   // The installed app carries its own Python with the brain already in it (resources/python).
   const py =
     process.env.PYXI_PYTHON ??
@@ -246,7 +254,8 @@ async function ensureBrain(): Promise<void> {
     cwd: HOME,
     stdio: log === null ? "inherit" : ["ignore", log, log],
     windowsHide: true,
-    env: { ...process.env, PYTHONUTF8: "1", PYTHONNOUSERSITE: "1" },
+    // PYXI_APP_PID: the brain quits when this app does, so it's never left running on its own.
+    env: { ...process.env, PYTHONUTF8: "1", PYTHONNOUSERSITE: "1", PYXI_APP_PID: String(process.pid) },
   });
   brain.on("exit", (code) => {
     console.log(`[pyxi] brain exited (${code})`);

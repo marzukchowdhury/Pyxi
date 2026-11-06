@@ -22,6 +22,26 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 
+def _quit_with_app(pid: str | None) -> None:
+    """Started by the desktop app: exit the moment that app's process ends (closed, crashed or
+    replaced by an installer), so an old brain is never left running on its own."""
+    if not pid or not pid.isdigit() or os.name != "nt":
+        return
+    import ctypes
+    import threading
+
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(0x00100000, False, int(pid))  # SYNCHRONIZE
+    if not handle:  # the app is already gone
+        os._exit(0)
+
+    def wait() -> None:
+        kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)  # INFINITE
+        os._exit(0)
+
+    threading.Thread(target=wait, name="quit-with-app", daemon=True).start()
+
+
 def _load_dotenv() -> None:
     from otto.config import load_dotenv
 
@@ -48,6 +68,7 @@ def serve(
     from pyxi import cloud
 
     cloud.apply(Path(os.environ.get("PYXI_DATA_DIR", ".pyxi")))  # joined the beta: models go through it
+    _quit_with_app(os.environ.get("PYXI_APP_PID"))
     logging.basicConfig(
         level=logging.INFO if verbose else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
