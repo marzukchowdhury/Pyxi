@@ -23,6 +23,7 @@
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
     "@react-three/postprocessing": "^3.2.2",
+    "electron-updater": "^6.8.11",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "three": "^0.187.0",
@@ -76,11 +77,19 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "artifactName": "Pyxi-Setup-${version}.exe",
+      "artifactName": "Pyxi-Setup.exe",
       "shortcutName": "Pyxi",
       "uninstallDisplayName": "Pyxi",
       "deleteAppDataOnUninstall": false
     },
-    "npmRebuild": false
+    "npmRebuild": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "marzukchowdhury",
+        "repo": "Pyxi",
+        "releaseType": "release"
+      }
+    ]
   }
 }

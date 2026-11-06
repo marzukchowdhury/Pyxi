@@ -339,6 +339,9 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                 {result.link?.includes("meet.google.com") && <span className="result-link">{result.link.replace("https://", "")}</span>}
                 {result.files[0] && <button className="primary" onClick={() => bridge.openFile(result.files[0])}>Open file</button>}
                 {result.actions.includes("folder") && result.files[0] && <button onClick={() => bridge.showInFolder(result.files[0])}>Show in folder</button>}
+                {result.actions.includes("update") && (
+                  <button className="primary" onClick={() => bridge.installUpdate()}>Restart to update</button>
+                )}
                 {result.actions.includes("calendar") && result.calendar && (
                   <button className="primary" onClick={() => { brain.send({ type: "text", text: result.calendar! }); dismissToast(result.job_id); }}>Add to calendar</button>
                 )}

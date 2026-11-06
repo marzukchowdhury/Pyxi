@@ -1,0 +1,195 @@
+"""Ship a new Pyxi version with one command.
+
+    python scripts/release.py 0.1.5 "What's new, in a sentence or two."  [--full] [--skip-tests]
+
+1. Sets the version everywhere (pyproject.toml, src/pyxi/__init__.py, desktop/package.json).
+2. Runs the tests (unless --skip-tests).
+3. Builds the installer (only Pyxi's own code is refreshed in the bundled Python; --full rebuilds
+   that Python too, for new dependencies).
+4. Checks the build holds no keys, tokens, invite codes or personal data.
+5. Publishes GitHub release v<version> with Pyxi-Setup.exe, its blockmap and latest.yml.
+   The website's download button points at GitHub's "latest release" link, so it serves the new
+   version straight away, and installed copies of Pyxi find it, download it in the background
+   and offer "Restart to update".
+6. Checks the latest link really gives the new version, then commits the version bump.
+
+GitHub access uses the sign-in Git already has on this PC; the token is never printed.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import httpx
+
+ROOT = Path(__file__).resolve().parents[1]
+REPO = "marzukchowdhury/Pyxi"
+DIST = ROOT / "desktop" / "dist"
+ASSETS = ["Pyxi-Setup.exe", "Pyxi-Setup.exe.blockmap", "latest.yml"]
+AUTHOR = [
+    "-c",
+    "user.name=Marzuk Haider Chowdhury",
+    "-c",
+    "user.email=342144728+marzukchowdhury@users.noreply.github.com",
+]
+# Things that must never ship: real keys and tokens, and files with someone's own data.
+SECRET = re.compile(
+    rb"sk-or-v1-[0-9a-f]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|ghp_[A-Za-z0-9]{30,}|pyxi_[0-9a-f]{40,}"
+)
+PRIVATE_FILES = {
+    ".env",
+    "cloud.json",
+    "profile.json",
+    "beta_invite_codes.txt",
+    "beta_invite_codes.csv",
+    "google.json",
+}
+
+
+def sh(*cmd: str, **kw) -> subprocess.CompletedProcess:
+    print("+", " ".join(cmd[:6]), "..." if len(cmd) > 6 else "")
+    return subprocess.run(cmd, cwd=ROOT, check=True, **kw)
+
+
+def set_version(v: str) -> None:
+    edits = [
+        (ROOT / "pyproject.toml", r'^version = "[^"]+"', f'version = "{v}"'),
+        (ROOT / "src/pyxi/__init__.py", r'^__version__ = "[^"]+"', f'__version__ = "{v}"'),
+    ]
+    for path, pattern, new in edits:
+        text = path.read_text(encoding="utf-8")
+        path.write_text(re.sub(pattern, new, text, count=1, flags=re.M), encoding="utf-8")
+    pkg = ROOT / "desktop/package.json"
+    data = json.loads(pkg.read_text(encoding="utf-8"))
+    data["version"] = v
+    pkg.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def check_clean_build() -> None:
+    """Scan everything that ships (the app archive and the bundled Python's Pyxi code)."""
+    resources = DIST / "win-unpacked" / "resources"
+    for path in [resources / "app.asar", *(resources / "python").rglob("*")]:
+        if not path.is_file():
+            continue
+        if path.name in PRIVATE_FILES:
+            raise SystemExit(f"STOP: {path} must not ship.")
+        text_like = path.suffix in {".py", ".json", ".txt", ".asar", ".env", ".yml"}
+        if text_like and path.stat().st_size < 200_000_000 and SECRET.search(path.read_bytes()):
+            raise SystemExit(f"STOP: something that looks like a key is inside {path}.")
+    print("build is clean: no keys, tokens or personal files")
+
+
+def github() -> httpx.Client:
+    cred = sh(
+        "git",
+        "credential",
+        "fill",
+        input="protocol=https\nhost=github.com\n\n",
+        capture_output=True,
+        text=True,
+    ).stdout
+    token = next(
+        line.split("=", 1)[1] for line in cred.splitlines() if line.startswith("password=")
+    )
+    return httpx.Client(
+        timeout=httpx.Timeout(1800, connect=30),
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+    )
+
+
+def publish(v: str, notes: str) -> None:
+    with github() as gh:
+        r = gh.post(
+            f"https://api.github.com/repos/{REPO}/releases",
+            json={
+                "tag_name": f"v{v}",
+                "target_commitish": "main",
+                "name": f"Pyxi {v} beta",
+                "body": notes,
+                "prerelease": False,
+                "make_latest": "true",
+            },
+        )
+        if r.status_code == 422:
+            raise SystemExit(f"STOP: release v{v} already exists. Pick a new version number.")
+        r.raise_for_status()
+        rel = r.json()
+        for name in ASSETS:
+            f = DIST / name
+            print(f"uploading {name} ({f.stat().st_size / 2**20:.0f} MB)")
+            with f.open("rb") as body:
+                up = gh.post(
+                    f"https://uploads.github.com/repos/{REPO}/releases/{rel['id']}/assets",
+                    params={"name": name},
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "Content-Length": str(f.stat().st_size),
+                    },
+                    content=body,
+                )
+            if up.status_code >= 300:
+                raise SystemExit(f"STOP: uploading {name} failed: {up.status_code} {up.text[:200]}")
+        print("release:", rel["html_url"])
+
+
+def verify(v: str) -> None:
+    latest = f"https://github.com/{REPO}/releases/latest/download"
+    yml = httpx.get(f"{latest}/latest.yml", follow_redirects=True, timeout=60).text
+    if f"version: {v}" not in yml:
+        raise SystemExit(f"STOP: the latest release doesn't say {v} yet:\n{yml[:200]}")
+    size = (DIST / "Pyxi-Setup.exe").stat().st_size
+    r = httpx.get(
+        f"{latest}/Pyxi-Setup.exe",
+        headers={"Range": "bytes=0-0"},
+        follow_redirects=True,
+        timeout=60,
+    )
+    total = int(r.headers.get("content-range", "/0").rsplit("/", 1)[-1] or 0)
+    if total != size:
+        raise SystemExit(f"STOP: the latest download is {total} bytes, the build is {size}.")
+    print(f"verified: the website's download link now gives Pyxi {v} ({size / 2**20:.0f} MB)")
+
+
+def main() -> None:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if not args or not re.fullmatch(r"\d+\.\d+\.\d+", args[0]):
+        raise SystemExit(__doc__)
+    v = args[0]
+    notes = args[1] if len(args) > 1 else "Fixes and improvements."
+    notes = (
+        f"{notes}\n\nInstall: run Pyxi-Setup.exe. During the beta Windows may warn about an unknown "
+        "publisher: choose More info, then Run anyway. Already have Pyxi? It updates itself: look for "
+        '"Restart to update" in the notch.'
+    )
+    set_version(v)
+    sh(sys.executable, "-m", "pip", "install", "-e", ".", "-q", "--no-deps")
+    if "--skip-tests" not in sys.argv:
+        sh(sys.executable, "-m", "pytest", "-q")
+    for name in ASSETS:  # never upload a leftover from an earlier build
+        (DIST / name).unlink(missing_ok=True)
+    full = "--full" in sys.argv or not (ROOT / "desktop/build/python/python.exe").exists()
+    sh(sys.executable, "scripts/build_installer.py", *([] if full else ["--update-pyxi"]))
+    missing = [n for n in ASSETS if not (DIST / n).exists()]
+    if missing:
+        raise SystemExit(f"STOP: the build didn't produce {missing}.")
+    check_clean_build()
+    publish(v, notes)
+    verify(v)
+    sh("git", "add", "pyproject.toml", "src/pyxi/__init__.py", "desktop/package.json")
+    sh(
+        "git",
+        *AUTHOR,
+        "commit",
+        "-q",
+        "-m",
+        f"Pyxi {v}\n\n{args[1] if len(args) > 1 else ''}".strip(),
+    )
+    print(f"done: Pyxi {v} is out.")
+
+
+if __name__ == "__main__":
+    main()

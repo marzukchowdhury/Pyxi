@@ -53,7 +53,7 @@
             </div>
             <p class="fine reveal">
               Free beta with an invite code. No API key or payment needed.<br />
-              Version {{version}} &middot; {{downloadSize}} &middot; <!--if:macWaitlistUrl-->On a Mac? <a href="{{macWaitlistUrl}}">Join the Mac waitlist</a><!--else-->Mac is next on the roadmap<!--end-->
+              Version <span data-version>{{version}}</span> &middot; <span data-size>{{downloadSize}}</span> &middot; <!--if:macWaitlistUrl-->On a Mac? <a href="{{macWaitlistUrl}}">Join the Mac waitlist</a><!--else-->Mac is next on the roadmap<!--end-->
             </p>
           </div>
 
@@ -640,7 +640,7 @@
             </a>
             <a class="btn btn-ghost btn-lg" href="/download">Install guide</a>
           </div>
-          <p class="fine reveal">Version {{version}}, {{downloadSize}}. Windows 10 and 11.</p>
+          <p class="fine reveal">Version <span data-version>{{version}}</span>, <span data-size>{{downloadSize}}</span>. Windows 10 and 11.</p>
         </div>
       </section>
     </main>

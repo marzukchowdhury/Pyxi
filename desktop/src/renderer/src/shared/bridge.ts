@@ -18,6 +18,9 @@ export interface Bridge {
   onPttUp(fn: () => void): () => void;
   onPttCancel(fn: () => void): () => void;
   onQuickType(fn: () => void): () => void;
+  /** A new version finished downloading in the background (installed app only). */
+  onUpdateReady(fn: (info: { version: string }) => void): () => void;
+  installUpdate(): void;
   /** Mouse clicks anywhere on the desktop, in physical screen px (only used for guides). */
   onGlobalClick(fn: (p: { x: number; y: number }) => void): () => void;
   /** Quick actions from the brain: open a URL, copy text, or paste a draft into the focused field. */
@@ -110,6 +113,8 @@ function mockBridge(): Bridge {
       return () => window.removeEventListener("mousedown", h);
     },
     // Browser preview: double-tap Ctrl while the page has focus.
+    onUpdateReady: () => () => {},
+    installUpdate: () => {},
     onQuickType(fn) {
       let last = 0;
       const h = (e: KeyboardEvent) => {

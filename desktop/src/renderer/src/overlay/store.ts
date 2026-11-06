@@ -300,6 +300,27 @@ function pushLine(line: Omit<ChatLine, "id">): void {
   replyOpen = line.who === "agent";
 }
 
+// A new version downloaded in the background: offer it in the notch, like a finished job.
+if (isPrimary)
+  bridge.onUpdateReady(({ version }) =>
+    useOverlay.setState((s) => ({
+      toasts: [
+        {
+          job_id: "update",
+          agent: "Pyxi",
+          ok: true,
+          title: `Pyxi ${version} is ready`,
+          body: "Restart to update. It takes about a minute, and Pyxi opens again by itself. Or keep going: it updates next time you quit.",
+          files: [],
+          changes: [],
+          notes: [],
+          actions: ["update"],
+        },
+        ...s.toasts.filter((t) => t.job_id !== "update"),
+      ].slice(0, 3),
+    })),
+  );
+
 brain.on((e: BrainEvent) => {
   switch (e.type) {
     case "hello":

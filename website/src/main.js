@@ -187,3 +187,18 @@ if (windows && !reduced) {
 
 // ------------------------------------------------------------------ watch it work
 initDemos({ reduced });
+
+// ------------------------------------------------------------------ the latest version
+// Downloads always go to GitHub's latest release (a link that never changes), so the version
+// and size shown are read from it too. The values baked in at build time stay if it can't answer.
+fetch("https://api.github.com/repos/marzukchowdhury/Pyxi/releases/latest")
+  .then((r) => (r.ok ? r.json() : null))
+  .then((rel) => {
+    const asset = rel?.assets?.find((a) => a.name === "Pyxi-Setup.exe");
+    if (!rel || !asset) return;
+    const version = String(rel.tag_name || "").replace(/^v/, "");
+    const size = `${Math.round(asset.size / 2 ** 20)} MB`;
+    document.querySelectorAll("[data-version]").forEach((el) => (el.textContent = version));
+    document.querySelectorAll("[data-size]").forEach((el) => (el.textContent = size));
+  })
+  .catch(() => {});

@@ -11,6 +11,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
+import { startUpdates } from "./updates";
 import {
   app,
   BrowserWindow,
@@ -281,6 +282,7 @@ function trayIcon(): Electron.NativeImage {
 }
 
 app.whenReady().then(async () => {
+  startUpdates(broadcast);
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));
   primaryId = screen.getPrimaryDisplay().id;
   await ensureBrain();

@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("pyxiBridge", {
   onPttUp: (fn: Listener<void>) => on("ptt-up", fn),
   onPttCancel: (fn: Listener<void>) => on("ptt-cancel", fn),
   onQuickType: (fn: Listener<void>) => on("quick-type", fn),
+  onUpdateReady: (fn: Listener<{ version: string }>) => on("update-ready", fn),
+  installUpdate: () => ipcRenderer.send("install-update"),
   onGlobalClick: (fn: Listener<{ x: number; y: number }>) => on("global-click", fn),
   focusOverlay: () => ipcRenderer.send("focus-overlay"),
   runAction: (kind: string, value: string) => ipcRenderer.send("action", kind, value),
