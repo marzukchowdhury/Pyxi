@@ -122,6 +122,227 @@
         </div>
       </section>
 
+      <!-- ============================================================ demos -->
+      <section class="demos" id="demos" data-say="Watch me work. Anything that reaches people waits for your OK.">
+        <div class="wrap">
+          <p class="kicker reveal">Watch it work</p>
+          <h2 class="h2 reveal">It works the way you would.<br /><span class="dim">Only with your OK.</span></h2>
+          <p class="lead narrow reveal">Ask in your own words. Pyxi explains what's on your screen right where it is, writes the email, books the meeting, and sends Scout off to research in the background while you keep working. Anything that reaches another person, or costs money, waits until you press Allow.</p>
+
+          <div class="demo-tabs reveal" role="tablist" aria-label="Demos">
+            <button type="button" role="tab" id="tab-explain" aria-controls="demo-explain" aria-selected="true">Explain a post</button>
+            <button type="button" role="tab" id="tab-email" aria-controls="demo-email" aria-selected="false" tabindex="-1">Reply to an email</button>
+            <button type="button" role="tab" id="tab-meet" aria-controls="demo-meet" aria-selected="false" tabindex="-1">Book a meeting</button>
+            <button type="button" role="tab" id="tab-place" aria-controls="demo-place" aria-selected="false" tabindex="-1">Find a place</button>
+            <button type="button" role="tab" id="tab-movie" aria-controls="demo-movie" aria-selected="false" tabindex="-1">Plan a movie night</button>
+          </div>
+
+          <!-- 1. Cue cards: explaining a post, right beside it -->
+          <div class="demo reveal is-on" id="demo-explain" role="tabpanel" aria-labelledby="tab-explain" data-demo="explain" data-ask="“Hey Pyxi, explain this post.”" data-look="Looking at your browser" data-write="Writing a cue card" data-end="Ask a follow-up any time">
+            <ol class="demo-steps">
+              <li><b>You ask</b><span>"Hey Pyxi, explain this post."</span></li>
+              <li><b>Pyxi looks</b><span>It reads the post from your screen, wherever it is.</span></li>
+              <li><b>A cue card appears</b><span>Beside the post, never on top of what you're reading.</span></li>
+              <li><b>Each point shows its source</b><span>A numbered outline and a thread of light to the exact part it means.</span></li>
+              <li><b>The takeaway</b><span>What it means for you, in one line. Ask a follow-up any time.</span></li>
+            </ol>
+            <div class="demo-stage" role="img" aria-label="Illustration: Pyxi writes a cue card beside a social media post, with numbered outlines on the chart, the page name and the caption, and threads linking each point to them.">
+              <div class="ds">
+                <div class="ds-notch"><i></i><span></span></div>
+                <article class="post">
+                  <header><span class="post-av">DB</span><span><b class="t-name">Daily Byte</b><small>18 hours ago</small></span><span class="post-x">&times;</span></header>
+                  <p class="post-text"><span class="t-cap">Our office coffee tally is in. Launch week nearly broke the machine.</span></p>
+                  <div class="post-chart">
+                    <b>Cups of coffee per week</b>
+                    <div class="bars"><i style="--v: 0.33"><em>Wk 1</em></i><i style="--v: 0.36"><em>Wk 2</em></i><i style="--v: 0.31"><em>Wk 3</em></i><i class="t-bar" style="--v: 1"><em>Launch</em></i><i style="--v: 0.39"><em>Wk 5</em></i></div>
+                  </div>
+                  <footer><span>861 likes</span><span>109 comments</span></footer>
+                </article>
+                <aside class="fn">
+                  <h4>What this post is about</h4>
+                  <ul>
+                    <li data-for="t-bar"><span>Coffee orders tripled in launch week</span><sup>1</sup></li>
+                    <li data-for="t-name"><span>It's the office's own count</span><sup>2</sup></li>
+                    <li data-for="t-cap" class="take"><span>Impact on you: none, unless you share their kitchen</span><sup>3</sup></li>
+                  </ul>
+                </aside>
+                <svg class="ds-ink" viewBox="0 0 880 560" aria-hidden="true"></svg>
+                <span class="ds-fly"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. An email reply, sent only after Allow -->
+          <div class="demo" id="demo-email" role="tabpanel" aria-labelledby="tab-email" data-demo="email" hidden>
+            <ol class="demo-steps">
+              <li><b>You ask</b><span>"Reply to Sam: thanks, the dates are right, I'll send the signed copy Friday."</span></li>
+              <li><b>Pyxi opens the email</b><span>In your own connected Gmail account.</span></li>
+              <li><b>It writes the reply</b><span>In your words, in the thread, ready to read over.</span></li>
+              <li><b>It asks first</b><span>Nothing is sent until you say so.</span></li>
+              <li><b>You press Allow</b><span>Sent. Press Don't and it stays a draft.</span></li>
+            </ol>
+            <div class="demo-stage" role="img" aria-label="Illustration: Pyxi drafts a reply to Sam in a mail app, shows an approval card, and sends it only after the user clicks Allow.">
+              <div class="ds">
+                <div class="ds-notch"><i></i><span></span></div>
+                <div class="app mail">
+                  <div class="app-bar"><i></i><i></i><i></i><span>Mail</span></div>
+                  <div class="mail-list">
+                    <div class="row sel t-sam"><b>Sam Rivera</b><span>Recommendation letter</span><small>Hi! I've attached the draft letter...</small></div>
+                    <div class="row"><b>Priya Shah</b><span>Notes from Thursday</span><small>Here's the summary we talked about...</small></div>
+                    <div class="row"><b>Weekly digest</b><span>Your week in review</span><small>Five things worth reading...</small></div>
+                  </div>
+                  <div class="mail-read">
+                    <h5>Recommendation letter</h5>
+                    <p class="from"><b>Sam Rivera</b> &lt;sam.rivera@example.com&gt;</p>
+                    <p>Hi! I've attached the draft letter. Can you check that the dates are right before I sign it?</p>
+                    <span class="att">Letter-draft.docx</span>
+                  </div>
+                  <div class="compose">
+                    <div class="c-head">Reply</div>
+                    <div class="c-row"><span>To</span>sam.rivera@example.com</div>
+                    <div class="c-row"><span>Subject</span>Re: Recommendation letter</div>
+                    <p class="c-body" data-text="Hi Sam, thank you so much! The dates are right. I'll send you the signed copy on Friday."></p>
+                    <span class="c-send">Send</span>
+                  </div>
+                </div>
+                <div class="request ds-req">
+                  <div class="req-title">Pyxi needs your OK</div>
+                  <div class="req-action">Send this reply to Sam Rivera</div>
+                  <div class="req-buttons"><span class="req-btn yes t-allow">Allow</span><span class="req-btn">Don't</span></div>
+                </div>
+                <div class="ds-toast">Sent to Sam Rivera</div>
+                <span class="ds-fly"></span>
+                <span class="ds-cursor"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. A meeting: the free slot, the event, then the invite after Allow -->
+          <div class="demo" id="demo-meet" role="tabpanel" aria-labelledby="tab-meet" data-demo="meet" hidden>
+            <ol class="demo-steps">
+              <li><b>You ask</b><span>"Book a call with Priya next Tuesday at 3, and invite her."</span></li>
+              <li><b>Pyxi checks your calendar</b><span>Tuesday at 3 is free.</span></li>
+              <li><b>It adds the event</b><span>Half an hour, titled, on your Google Calendar.</span></li>
+              <li><b>It asks before inviting</b><span>An invite reaches Priya, so it waits for you.</span></li>
+              <li><b>You press Allow</b><span>The invite is on its way.</span></li>
+            </ol>
+            <div class="demo-stage" role="img" aria-label="Illustration: Pyxi finds a free slot on Tuesday at 3 PM in a calendar, adds a call with Priya, and sends the invite only after the user clicks Allow.">
+              <div class="ds">
+                <div class="ds-notch"><i></i><span></span></div>
+                <div class="app cal">
+                  <div class="app-bar"><i></i><i></i><i></i><span>Calendar &middot; Next week</span></div>
+                  <div class="cal-grid">
+                    <div class="cal-days"><span></span><b>Mon</b><b>Tue</b><b>Wed</b><b>Thu</b><b>Fri</b></div>
+                    <div class="cal-body">
+                      <div class="cal-hours"><span>9 AM</span><span>10</span><span>11</span><span>12 PM</span><span>1</span><span>2</span><span>3</span><span>4</span></div>
+                      <div class="cal-cols">
+                        <span class="ev" style="--d: 0; --h: 1; --len: 0.5">Team standup</span>
+                        <span class="ev" style="--d: 1; --h: 4; --len: 1">Lunch with Alex</span>
+                        <span class="ev" style="--d: 2; --h: 5; --len: 1">Design review</span>
+                        <span class="ev" style="--d: 3; --h: 2; --len: 0.5">1:1</span>
+                        <span class="ev" style="--d: 4; --h: 0.5; --len: 1">Planning</span>
+                        <span class="slot t-slot" style="--d: 1; --h: 6; --len: 0.5"></span>
+                        <span class="ev new t-new" style="--d: 1; --h: 6; --len: 0.5"><b>Call with Priya</b>3:00 to 3:30 PM</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="request ds-req">
+                  <div class="req-title">Pyxi needs your OK</div>
+                  <div class="req-action">Send a calendar invite to priya@example.com for Tuesday at 3:00 PM</div>
+                  <div class="req-buttons"><span class="req-btn yes t-allow">Allow</span><span class="req-btn">Don't</span></div>
+                </div>
+                <div class="ds-toast">Invite sent to Priya</div>
+                <span class="ds-fly"></span>
+                <span class="ds-cursor"></span>
+              </div>
+            </div>
+          </div>
+          <!-- 4. Maps: the search, then a cue card that rings the best picks on the map -->
+          <div class="demo" id="demo-place" role="tabpanel" aria-labelledby="tab-place" data-demo="explain" data-ask="“Find coffee near me that's open now.”" data-look="Searching Google Maps" data-write="Picking the best ones" data-end="Want directions to Ember &amp; Oak?" hidden>
+            <ol class="demo-steps">
+              <li><b>You ask</b><span>"Find coffee near me that's open now."</span></li>
+              <li><b>Pyxi searches</b><span>It opens Google Maps and runs the search for you.</span></li>
+              <li><b>It reads the results</b><span>Ratings, reviews and opening hours, right off the screen.</span></li>
+              <li><b>A cue card picks the best</b><span>Each pick is ringed and numbered on the map itself.</span></li>
+              <li><b>Ask what's next</b><span>"Give me directions to the first one."</span></li>
+            </ol>
+            <div class="demo-stage" role="img" aria-label="Illustration: Pyxi searches a map for coffee open now, then a cue card lists the two best picks and rings each one on the map.">
+              <div class="ds">
+                <div class="ds-notch"><i></i><span></span></div>
+                <div class="app map">
+                  <div class="app-bar"><i></i><i></i><i></i><span>Google Maps</span></div>
+                  <div class="map-list">
+                    <div class="map-search">coffee near me open now</div>
+                    <div class="row"><b>Ember &amp; Oak</b><span><em>4.8</em> &#9733;&#9733;&#9733;&#9733;&#9733; (212)</span><small><u>Open</u> &middot; Closes 6 PM</small></div>
+                    <div class="row"><b>Little Kettle</b><span><em>4.6</em> &#9733;&#9733;&#9733;&#9733;&#9733; (98)</span><small><u>Open</u> &middot; Closes 5 PM</small></div>
+                    <div class="row"><b>Night Owl Roasters</b><span><em>4.5</em> &#9733;&#9733;&#9733;&#9733;&#9734; (301)</span><small><s>Closed</s> &middot; Opens 7 AM</small></div>
+                  </div>
+                  <div class="map-area">
+                    <i class="water"></i><i class="road r1"></i><i class="road r2"></i><i class="road r3"></i><i class="park"></i>
+                    <span class="pin t-p1" style="left: 150px; top: 250px"><b>Ember &amp; Oak</b></span>
+                    <span class="pin t-p2" style="left: 260px; top: 140px"><b>Little Kettle</b></span>
+                    <span class="pin dim" style="left: 380px; top: 300px"><b>Night Owl Roasters</b></span>
+                    <span class="pin dim" style="left: 90px; top: 110px"></span>
+                    <span class="you" style="left: 205px; top: 205px"></span>
+                  </div>
+                </div>
+                <aside class="fn map-card">
+                  <h4>Coffee spots open now</h4>
+                  <ul>
+                    <li data-for="t-p1"><span>Ember &amp; Oak: 4.8 stars, 212 reviews</span><sup>1</sup></li>
+                    <li data-for="t-p2"><span>Little Kettle: 4.6 stars, closes at 5</span><sup>2</sup></li>
+                  </ul>
+                </aside>
+                <svg class="ds-ink" viewBox="0 0 880 560" aria-hidden="true"></svg>
+                <span class="ds-fly"></span>
+              </div>
+            </div>
+          </div>
+          <!-- 5. Background research by Scout, a quiet report, then booking up to checkout -->
+          <div class="demo" id="demo-movie" role="tabpanel" aria-labelledby="tab-movie" data-demo="movie" hidden>
+            <ol class="demo-steps">
+              <li><b>You ask, mid-work</b><span>"Find what's on tonight at the closest cinema. Don't interrupt me."</span></li>
+              <li><b>Scout takes it</b><span>Pyxi hands it to Scout, who researches in its own browser window.</span></li>
+              <li><b>You keep working</b><span>Progress stays in a small card in the corner. No pop-ups.</span></li>
+              <li><b>One quiet report</b><span>The list appears under the notch when it's ready.</span></li>
+              <li><b>Book it</b><span>"Get two tickets for the 7:40." Scout picks the seats; paying always waits for you.</span></li>
+            </ol>
+            <div class="demo-stage" role="img" aria-label="Illustration: while you type in a document, Scout researches tonight's showtimes in the background, shows a short list under the notch, then books two seats and stops at checkout after you press Allow.">
+              <div class="ds">
+                <div class="ds-notch"><i></i><span></span></div>
+                <div class="notch-card">
+                  <b>Tonight at Northgate Cinema</b><small>1.2 km away &middot; found by Scout</small>
+                  <ul>
+                    <li><span>The Long Light</span><em>7:40 PM &middot; 9:15 PM</em></li>
+                    <li><span>Paper Moons</span><em>8:00 PM</em></li>
+                    <li><span>Night Bus</span><em>9:30 PM</em></li>
+                  </ul>
+                </div>
+                <div class="app doc">
+                  <div class="app-bar"><i></i><i></i><i></i><span>Docs &middot; Q4 plan</span></div>
+                  <div class="doc-page">
+                    <h5>Q4 plan</h5>
+                    <p>Goals for the quarter, in order of how much they matter.</p>
+                    <p class="doc-typed" data-text="1. Ship the beta to our first testers and hear from them every week. 2. Make setup faster. 3. Write the investor update by Friday."></p>
+                  </div>
+                </div>
+                <div class="hud"><i></i><span><b>Scout</b><em class="hud-step">Step 1</em></span><small class="hud-text">Searching cinemas near you</small></div>
+                <div class="request ds-req">
+                  <div class="req-title">Scout needs your OK</div>
+                  <div class="req-action">Book 2 seats for The Long Light at 7:40 PM, then stop at checkout</div>
+                  <div class="req-buttons"><span class="req-btn yes t-allow">Allow</span><span class="req-btn">Don't</span></div>
+                </div>
+                <div class="ds-toast">Seats F7 and F8 picked. Checkout is ready for you.</div>
+                <span class="ds-fly"></span>
+                <span class="ds-cursor"></span>
+              </div>
+            </div>
+          </div>
+          <p class="footnote">Illustrated with made-up names and addresses, using Pyxi's own cue cards and approval cards. Pyxi works in any app you can see; emails and invites go through the Google account you connect.</p>
+        </div>
+      </section>
+
       <!-- ============================================================ features -->
       <section class="features" aria-label="Features">
         <div class="wrap">

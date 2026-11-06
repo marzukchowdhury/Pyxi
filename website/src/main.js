@@ -1,6 +1,9 @@
 import "@fontsource-variable/inter";
 import "./styles.css";
 import "./pages.css";
+import "./demos.css";
+import "@fontsource-variable/fraunces/wght.css";
+import { initDemos } from "./demos.js";
 import { Firefly } from "./firefly.js";
 
 document.documentElement.classList.add("js");
@@ -181,3 +184,6 @@ if (windows && !reduced) {
     windows.classList.toggle("n4", n === 4);
   }, 2400);
 }
+
+// ------------------------------------------------------------------ watch it work
+initDemos({ reduced });
