@@ -16,7 +16,7 @@ npm run build      # dist/
 
 | Key | What it is |
 |---|---|
-| `downloadUrl` | Where every "Download for Windows" button points. The installer (about 319 MB) is too big for a Vercel static file, so host it on GitHub Releases or Vercel Blob and paste the URL here. |
+| `downloadUrl` | Where every "Download for Windows" button points. The installer (about 304 MB) is too big for a Vercel static file, so host it on GitHub Releases or Vercel Blob and paste the URL here. |
 | `downloadFile`, `downloadSize`, `version` | Shown next to the buttons. |
 | `siteUrl` | The deployed address, used in canonical links and social previews. |
 | `macWaitlistUrl` | Optional. When set, "Join the Mac waitlist" links appear. Empty means "Mac is next on the roadmap". |
