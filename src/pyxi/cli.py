@@ -45,6 +45,9 @@ def serve(
     from pyxi.server import create_app
 
     _load_dotenv()
+    from pyxi import cloud
+
+    cloud.apply(Path(os.environ.get("PYXI_DATA_DIR", ".pyxi")))  # no key of their own: the beta
     logging.basicConfig(
         level=logging.INFO if verbose else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",

@@ -40,7 +40,8 @@ class StreamingChat:
         self.model = model
         self.client = openai.AsyncOpenAI(
             api_key=os.getenv("OPENROUTER_API_KEY") or "missing-openrouter-key",
-            base_url=OPENROUTER_BASE_URL,
+            # The beta routes through its own server (pyxi.cloud); otherwise straight to OpenRouter.
+            base_url=os.environ.get("PYXI_OPENROUTER_URL", OPENROUTER_BASE_URL),
             max_retries=1,
             default_headers={"X-Title": "Pyxi"},
         )

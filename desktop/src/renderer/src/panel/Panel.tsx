@@ -34,7 +34,13 @@ export function Panel() {
         )}
         <button className="win" onClick={() => bridge.togglePanel()} title="Hide (Ctrl+Alt+W)"><Minus /></button>
       </header>
-      {hello?.demo && <div className="demo-banner">Demo mode: no API key found, so Pyxi uses a scripted brain. Add OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) to pyxi/.env, or run <code>pyxi serve --local</code>.</div>}
+      {hello?.demo && (
+        <div className="demo-banner">
+          {hello.beta?.can_join
+            ? <>Demo mode: Pyxi is using a scripted brain. Have an invite code? Join the beta in <b>Settings</b>.</>
+            : <>Demo mode: no API key found, so Pyxi uses a scripted brain. Add OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) to <code>.env</code>, or run <code>pyxi serve --local</code>.</>}
+        </div>
+      )}
       {requests.map((r) => (
         <div key={r.request_id} className="approval">
           <b>{r.agent}</b> {r.kind === "confirm" ? "wants to" : "asks"}: {r.text}
@@ -331,6 +337,44 @@ export function Palace() {
   );
 }
 
+// ---------------------------------------------------------------------------- the beta
+/** Join with an invite code (no API key needed), or see what's left of today's allowance. */
+function BetaCard() {
+  const { hello } = usePanel();
+  const [code, setCode] = useState("");
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [left, setLeft] = useState<number | null>(null);
+  const joined = !!hello?.beta?.joined;
+  useEffect(() => brain.on((e) => {
+    if (e.type === "beta") setMessage({ ok: e.ok, text: e.message });
+  }), []);
+  useEffect(() => {
+    if (!joined) return;
+    void getJson<{ allowance: { left_today_usd: number } | null }>("/api/beta")
+      .then((b) => setLeft(b.allowance ? b.allowance.left_today_usd : null))
+      .catch(() => setLeft(null));
+  }, [joined]);
+  if (!hello?.beta || (!joined && !hello.beta.can_join)) return null;
+  if (joined)
+    return (
+      <div className="beta-card joined">
+        <b>Pyxi beta</b>
+        <p>{left === null ? "You're in the beta." : `You're in the beta. $${left.toFixed(2)} of today's allowance left; it resets at midnight UTC.`}</p>
+      </div>
+    );
+  return (
+    <form className="beta-card" onSubmit={(e) => { e.preventDefault(); setMessage(null); brain.send({ type: "beta_join", code }); }}>
+      <b>Join the Pyxi beta</b>
+      <p>Type the invite code you were given. No API key or payment needed.</p>
+      <div className="beta-row">
+        <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Invite code" autoComplete="off" spellCheck={false} />
+        <button className="primary" type="submit" disabled={!code.trim()}>Join</button>
+      </div>
+      {message && <p className={message.ok ? "beta-ok" : "beta-error"}>{message.text}</p>}
+    </form>
+  );
+}
+
 // ---------------------------------------------------------------------------- gallery
 const BLURBS: Record<string, string> = {
   https: "Animated packets between browser, DNS, server and a certificate authority.",
@@ -384,6 +428,7 @@ export function Settings() {
   const set = (key: string, value: unknown) => brain.send({ type: "set", key, value });
   return (
     <div className="settings">
+      <BetaCard />
       <div className="kv"><span>Brain</span><b>{hello.model}{hello.local_mode ? " (local)" : ""}{hello.demo ? " · demo" : ""}</b></div>
       <div className="kv"><span>Voice</span><b>{hello.tts}</b></div>
       <div className="kv"><span>Spent today</span><b>${hello.spent_today.toFixed(3)} of ${hello.daily_budget.toFixed(2)}</b></div>

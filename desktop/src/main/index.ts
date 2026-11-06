@@ -8,7 +8,7 @@
  * - Global hotkeys, the cursor feed for the buddy, and the Python brain's lifecycle.
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
 import {
@@ -32,6 +32,9 @@ const BACKEND = process.env.PYXI_BACKEND ?? "http://127.0.0.1:8766";
 // Opt-in: inspect the live overlay and panel from a debugger (developers only).
 if (process.env.PYXI_DEBUG_PORT) app.commandLine.appendSwitch("remote-debugging-port", process.env.PYXI_DEBUG_PORT);
 const REPO = resolve(__dirname, "../../..");
+// Where Pyxi keeps its data and runs its brain: the repo while developing, the user's own app
+// data folder (%APPDATA%/Pyxi) once installed, where a .env can also go.
+const HOME = app.isPackaged ? app.getPath("userData") : REPO;
 // Each action tries its shortcuts in order and keeps the first one Windows lets us have.
 // Other apps (Discord, overlays, launchers) often own a combination already; without a
 // fallback the shortcut would silently do nothing.
@@ -70,7 +73,7 @@ let muted = process.env.PYXI_MUTE === "1";
 
 // Screen sharing (Discord, OBS, Meet): visible by default so people watching see Pyxi.
 // Turn it off for privacy and the overlay is hidden from every capture, Pyxi's own included.
-const UI_PREFS = join(REPO, ".pyxi", "ui.json");
+const UI_PREFS = join(HOME, ".pyxi", "ui.json");
 function loadShareVisible(): boolean {
   if (process.env.PYXI_SHOW_OVERLAY_IN_CAPTURE === "1") return true;
   if (process.env.PYXI_SHOW_OVERLAY_IN_CAPTURE === "0") return false;
@@ -225,14 +228,31 @@ async function backendUp(): Promise<boolean> {
 
 async function ensureBrain(): Promise<void> {
   if (await backendUp()) return;
-  const py = process.env.PYXI_PYTHON ?? join(REPO, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  // The installed app carries its own Python with the brain already in it (resources/python).
+  const py =
+    process.env.PYXI_PYTHON ??
+    (app.isPackaged
+      ? join(process.resourcesPath, "python", "python.exe")
+      : join(REPO, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"));
   if (!existsSync(py)) {
     console.warn(`[pyxi] Python not found at ${py}; start the brain yourself: pyxi serve`);
     return;
   }
   const args = ["-m", "pyxi", "serve", ...(process.env.PYXI_ARGS?.split(" ").filter(Boolean) ?? [])];
-  brain = spawn(py, args, { cwd: REPO, stdio: "inherit", windowsHide: true });
-  brain.on("exit", (code) => console.log(`[pyxi] brain exited (${code})`));
+  mkdirSync(join(HOME, ".pyxi"), { recursive: true });
+  // Installed, there's no terminal: the brain's log goes to .pyxi/brain.log for support.
+  const log = app.isPackaged ? openSync(join(HOME, ".pyxi", "brain.log"), "a") : null;
+  brain = spawn(py, args, {
+    cwd: HOME,
+    stdio: log === null ? "inherit" : ["ignore", log, log],
+    windowsHide: true,
+    env: { ...process.env, PYTHONUTF8: "1", PYTHONNOUSERSITE: "1" },
+  });
+  brain.on("exit", (code) => {
+    console.log(`[pyxi] brain exited (${code})`);
+    // 75: the brain asked to be restarted (it just joined the beta, so its models changed).
+    if (code === 75) setTimeout(() => void ensureBrain(), 300);
+  });
 }
 
 function startCursorFeed(): void {
@@ -391,7 +411,7 @@ ipcMain.on("action", async (_e, kind: string, value: string) => {
 function pyxiFile(path: unknown): string | null {
   if (typeof path !== "string" || !path) return null;
   const full = resolve(path);
-  const allowed = [join(app.getPath("documents"), "Pyxi"), join(REPO, ".pyxi", "outputs")].map((d) => resolve(d).toLowerCase());
+  const allowed = [join(app.getPath("documents"), "Pyxi"), join(HOME, ".pyxi", "outputs")].map((d) => resolve(d).toLowerCase());
   return allowed.some((d) => full.toLowerCase().startsWith(d + "\\") || full.toLowerCase().startsWith(d + "/")) && existsSync(full) ? full : null;
 }
 ipcMain.on("open-file", (_e, path: unknown) => {
@@ -414,7 +434,7 @@ ipcMain.on("set-share-visible", (_e, value: boolean) => {
   shareVisible = !!value;
   for (const win of liveOverlays()) win.setContentProtection(!shareVisible);
   try {
-    mkdirSync(join(REPO, ".pyxi"), { recursive: true });
+    mkdirSync(join(HOME, ".pyxi"), { recursive: true });
     writeFileSync(UI_PREFS, JSON.stringify({ shareVisible }));
   } catch (err) {
     console.warn("[pyxi] couldn't save the screen-share setting:", err);

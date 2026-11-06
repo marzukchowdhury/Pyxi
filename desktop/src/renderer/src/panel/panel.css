@@ -282,3 +282,8 @@ button.ghost:hover { color: var(--ink); border-color: var(--hair-hi); }
 .palace-state { margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 500; vertical-align: 2px; color: var(--ink-3); background: var(--surface-hi); }
 .palace-state.on { color: #ffc861; background: rgba(255,200,97,.12); }
 .palace-hero .optin { width: 100%; margin: 2px 0 12px; }
+/* the beta: an invite code instead of an API key */
+.beta-card { display: grid; gap: 6px; padding: 14px; margin-bottom: 14px; border-radius: 12px; background: radial-gradient(120% 140% at 0% 0%, rgba(255,200,97,.08), transparent 55%), var(--surface); border: 1px solid rgba(255,200,97,.25); }
+.beta-card b { font-size: 13.5px; } .beta-card p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.beta-row { display: flex; gap: 8px; } .beta-row input { flex: 1; height: 32px; letter-spacing: .06em; text-transform: uppercase; }
+.beta-card .beta-ok { color: #ffc861; } .beta-card .beta-error { color: #ff9ea0; }

@@ -319,6 +319,7 @@ export interface Hello {
   version: string;
   demo: boolean;
   gallery: Record<string, string>;
+  beta?: { joined: boolean; can_join: boolean };
 }
 
 export type BrainEvent =
@@ -360,12 +361,14 @@ export type BrainEvent =
   | { type: "connectors"; connectors: ConnectorStatus[]; message?: string }
   | { type: "routines"; routines: RoutineInfo[] }
   | { type: "voice_preview"; engine: string; voice: string; text: string; audio: string | null; error: string | null }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "beta"; ok: boolean; message: string };
 
 export type ClientMessage =
   | { type: "text"; text: string }
   | { type: "ptt_start" }
   | { type: "look_ahead" }
+  | { type: "beta_join"; code: string }
   | { type: "ptt_cancel" }
   | { type: "audio"; data: string; mime: string }
   | { type: "interrupt" }

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from otto.config import OttoSettings
 from otto.llm import make_provider
 from otto.llm.base import LLMProvider
@@ -22,6 +24,10 @@ def otto_settings(
         )
     else:
         base.update(model=model or settings.model)
+        if beta := os.environ.get(
+            "PYXI_OPENROUTER_URL"
+        ):  # the beta server stands in for OpenRouter
+            base.update(provider="openrouter", base_url=beta)
     base.update(overrides)
     return OttoSettings(**base)
 

@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
-from pyxi import __version__
+from pyxi import __version__, cloud
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
 from pyxi.hub import Hub
@@ -40,6 +40,9 @@ APP_ORIGINS = frozenset(
         "http://127.0.0.1:5199",
     }
 )
+
+
+RESTART = 75  # exit code that asks the desktop app to start the brain again
 
 
 def origin_allowed(origin: str | None) -> bool:
@@ -107,6 +110,34 @@ def create_app(
         except Exception as exc:  # never block startup on the microphone model
             log.warning("speech model warm-up failed: %s", exc)
 
+    async def _beta_join(code: str) -> None:
+        """An invite code from Settings: get a token, then restart the brain so every model call
+        goes through the beta server (the app restarts it when it exits with RESTART)."""
+        result = await cloud.join(settings.data_dir, code)
+        if result != "ok":
+            await hub.emit("beta", ok=False, message=result)
+            return
+        await hub.emit("beta", ok=True, message="You're in. Pyxi is restarting with the beta…")
+        asyncio.get_running_loop().call_later(0.8, os._exit, RESTART)
+
+    async def _fetch_voice() -> None:
+        """A fresh install has no voice model yet (about 350 MB): fetch it in the background on
+        first run, so nobody has to run `pyxi setup-voice`. Until it's there, the OS voice talks."""
+        from pyxi.voice.tts import download_kokoro
+
+        models = settings.models_dir
+        if (models / "kokoro-v1.0.onnx").exists() and (models / "voices-v1.0.bin").exists():
+            return
+        if os.environ.get("PYXI_AUTO_VOICE", "1") == "0":
+            return
+        try:
+            log.info("downloading the voice model to %s", models)
+            await download_kokoro(models)
+            log.info("voice model ready")
+            await hub.emit("notice", message="Pyxi's voice is ready.")
+        except Exception as exc:  # offline, or the download host is down: try again next start
+            log.warning("voice model download failed: %s", exc)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal ambient
@@ -124,9 +155,12 @@ def create_app(
         # Load the speech model now (in the background), so the first push-to-talk is quick.
         # The OS-voice setup used by tests skips it.
         warm = asyncio.create_task(_warm_ears()) if settings.voice.tts != "client" else None
+        voice = asyncio.create_task(_fetch_voice()) if settings.voice.tts == "kokoro" else None
         yield
         if warm:
             warm.cancel()
+        if voice:
+            voice.cancel()
         ambient.cancel()
         routines.cancel()
         hub.cancel_all()
@@ -153,6 +187,8 @@ def create_app(
     def hello() -> dict[str, Any]:
         return {
             **brain.public_state(),
+            # The beta: joined (models go through the beta server), or could join (no own key).
+            "beta": {"joined": cloud.in_beta(), "can_join": demo and not cloud.has_own_key()},
             "version": __version__,
             "demo": demo,
             "gallery": {**TITLES, **OBJECT_TITLES},
@@ -169,6 +205,10 @@ def create_app(
     @app.get("/api/turns")
     async def turns(limit: int = 30) -> list[dict[str, Any]]:
         return brain.turns.recent(limit)
+
+    @app.get("/api/beta")
+    async def beta() -> dict[str, Any]:
+        return {"joined": cloud.in_beta(), "allowance": await cloud.allowance(settings.data_dir)}
 
     @app.get("/api/timeline")
     async def timeline(limit: int = 40) -> list[dict[str, Any]]:
@@ -253,6 +293,8 @@ def create_app(
             brain.begin_listening()
         elif kind == "look_ahead":
             brain.look_ahead()
+        elif kind == "beta_join" and str(msg.get("code") or "").strip():
+            brain._spawn(_beta_join(str(msg["code"])))
         elif kind == "audio" and msg.get("data"):
             brain._spawn(brain.hear(base64.b64decode(msg["data"])))
         elif kind == "ptt_cancel":
