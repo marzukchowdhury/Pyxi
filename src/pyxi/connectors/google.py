@@ -17,6 +17,7 @@ import logging
 import mimetypes
 import os
 import re
+import sys
 import uuid
 from datetime import datetime, timedelta
 from email.message import EmailMessage
@@ -93,6 +94,16 @@ def _is_iana(name: str) -> bool:
     return "/" in name or name == "UTC"
 
 
+# The installed app's private Python lives in resources/python; the build puts Pyxi's own Google
+# OAuth client (a "Desktop app" client, which Google doesn't treat as secret) beside it.
+BUNDLED_CLIENT = "google_client.json"
+
+
+def bundled_client() -> Path | None:
+    path = Path(sys.prefix) / BUNDLED_CLIENT
+    return path if path.is_file() else None
+
+
 class GoogleConnector(Connector):
     id = "google"
     name = "Google (Gmail, Calendar, Docs)"
@@ -107,6 +118,9 @@ class GoogleConnector(Connector):
 
     # ------------------------------------------------------------------ auth
     def client_config(self) -> dict[str, Any] | None:
+        """Their own client (.pyxi/google_client.json or GOOGLE_CLIENT_ID/SECRET) wins; otherwise
+        the one the installer ships for beta testers (desktop/build-secrets at build time), so a
+        tester only presses Connect."""
         if self.client_path.exists():
             return json.loads(self.client_path.read_text(encoding="utf-8"))
         cid, secret = os.environ.get("GOOGLE_CLIENT_ID"), os.environ.get("GOOGLE_CLIENT_SECRET")
@@ -120,6 +134,9 @@ class GoogleConnector(Connector):
                     "redirect_uris": ["http://localhost"],
                 }
             }
+        shipped = bundled_client()
+        if shipped is not None:
+            return json.loads(shipped.read_text(encoding="utf-8"))
         return None
 
     def connected(self) -> bool:

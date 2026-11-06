@@ -114,3 +114,23 @@ def test_a_used_up_allowance_reads_plainly():
     assert friendly_error(Exception(raw)) == "You've used today's Pyxi beta allowance. It resets at midnight UTC."
     raw = "Error code: 429 - {'error': {'message': 'The Pyxi beta is at its limit for this month. Back soon.'}}"
     assert friendly_error(Exception(raw)) == "The Pyxi beta is at its limit for this month. Back soon."
+
+
+def test_testers_use_the_google_client_the_installer_ships(tmp_path, monkeypatch):
+    """No client of their own: the one beside the bundled Python is used, so Connect just works."""
+    import sys
+
+    from pyxi.connectors.google import GoogleConnector
+
+    for k in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"):
+        monkeypatch.delenv(k, raising=False)
+    store = tmp_path / ".pyxi" / "connectors"
+    store.mkdir(parents=True)
+    g = GoogleConnector(store, tmp_path)
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "python"))
+    assert g.client_config() is None
+    (tmp_path / "python").mkdir()
+    (tmp_path / "python" / "google_client.json").write_text(json.dumps({"installed": {"client_id": "pyxi"}}))
+    assert g.client_config()["installed"]["client_id"] == "pyxi"
+    (store.parent / "google_client.json").write_text(json.dumps({"installed": {"client_id": "mine"}}))
+    assert g.client_config()["installed"]["client_id"] == "mine"  # their own still wins

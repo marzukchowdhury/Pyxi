@@ -90,6 +90,20 @@ def install_packages() -> None:
     )
 
 
+def ship_google_client() -> None:
+    """Beta testers connect Gmail, Calendar and Docs with Pyxi's own Google OAuth client, so they
+    only press Connect. The client JSON lives in desktop/build-secrets (git-ignored) and goes in
+    beside the bundled Python (pyxi.connectors.google.bundled_client)."""
+    src = DESKTOP / "build-secrets" / "google_client.json"
+    dest = BUNDLE / "google_client.json"
+    if src.is_file():
+        shutil.copy2(src, dest)
+        print("google: shipping Pyxi's OAuth client")
+    else:
+        dest.unlink(missing_ok=True)
+        print("google: no desktop/build-secrets/google_client.json; testers would need their own")
+
+
 def run(cmd: list[str], check: bool = True) -> None:
     print("+", " ".join(cmd[:6]), "..." if len(cmd) > 6 else "")
     subprocess.run(cmd, check=check, cwd=ROOT)
@@ -115,6 +129,7 @@ def main() -> None:
     elif "--skip-python" not in sys.argv:
         copy_python()
         install_packages()
+    ship_google_client()
     npm = shutil.which("npm") or "npm"
     subprocess.run([npm, "run", "build"], check=True, cwd=DESKTOP, shell=sys.platform == "win32")
     subprocess.run([npm, "run", "dist"], check=True, cwd=DESKTOP, shell=sys.platform == "win32")
