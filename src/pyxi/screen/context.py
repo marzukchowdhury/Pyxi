@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from PIL import Image, ImageDraw, ImageFont
 
 from pyxi.config import ScreenConfig
-from pyxi.screen import ocr, uia
+from pyxi.screen import ocr, secrets, uia
 from pyxi.screen.ocr import TextLine
 
 _DPI_SET = False
@@ -310,6 +310,7 @@ class ScreenReader:
                 elements.append(UIElement(self._next_id, b.name, b.role, b.rect))
                 self._next_id += 1
         text = self._read_text(shot, origin, elements) if shot is not None else []
+        text = self._hide_secrets(shot, origin, elements, text)
         return ScreenContext(
             captured_at=now,
             window=window,
@@ -318,6 +319,33 @@ class ScreenReader:
             origin=origin,
             text=text,
         )
+
+    @staticmethod
+    def _hide_secrets(
+        shot: Image.Image | None,
+        origin: tuple[int, int],
+        elements: list[UIElement],
+        text: list[TextLine],
+    ) -> list[TextLine]:
+        """Black out anything that looks like a key or token, in the pixels and the text, so it's
+        never sent to the model or saved (see screen/secrets.py)."""
+        spots = []
+        for e in elements:
+            if secrets.looks_secret(e.name):
+                e.name = secrets.HIDDEN
+                spots.append(e.rect)
+        kept = []
+        for ln in text:
+            if secrets.looks_secret(ln.text):
+                spots.append(ln.rect)
+            else:
+                kept.append(ln)
+        if shot is not None and spots:
+            draw = ImageDraw.Draw(shot)
+            for x, y, w, h in spots:
+                lx, ly = x - origin[0], y - origin[1]
+                draw.rectangle([lx - 2, ly - 2, lx + w + 2, ly + h + 2], fill=(20, 20, 20))
+        return kept
 
     def _read_text(
         self, shot: Image.Image, origin: tuple[int, int], elements: list[UIElement]
