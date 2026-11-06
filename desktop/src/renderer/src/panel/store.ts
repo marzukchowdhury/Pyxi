@@ -75,7 +75,9 @@ brain.on((e: BrainEvent) => {
   switch (e.type) {
     case "hello":
     case "settings":
-      usePanel.setState({ hello: e, state: e.state, agents: e.agents, spentToday: e.spent_today, voice: e.voice,
+      // "settings" carries only the brain's live state: merge it into the hello, or the version,
+      // the beta card and the gallery would vanish the first time a setting changes.
+      usePanel.setState({ hello: { ...(usePanel.getState().hello ?? {}), ...e } as Hello, state: e.state, agents: e.agents, spentToday: e.spent_today, voice: e.voice,
         jobs: { ...usePanel.getState().jobs, ...Object.fromEntries(e.jobs.map((j) => [j.id, j])) } });
       break;
     case "state":
