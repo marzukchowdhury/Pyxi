@@ -70,6 +70,29 @@ def _safe_name(name: str) -> str:
     return name[:120] or "attachment"
 
 
+def event_time(when: datetime, tz_name: str | None) -> dict[str, str]:
+    """A start or end time Google Calendar accepts. With the calendar's own IANA zone
+    ("America/Vancouver") it's local time plus that zone. Without it, the exact offset goes in the
+    time itself: Windows' zone names ("Pacific Standard Time") aren't valid Google time zones, and
+    sending one fails with "Invalid time zone definition"."""
+    if tz_name and _is_iana(tz_name):
+        return {
+            "dateTime": when.replace(tzinfo=None).isoformat(timespec="seconds"),
+            "timeZone": tz_name,
+        }
+    return {"dateTime": when.isoformat(timespec="seconds")}
+
+
+def _is_iana(name: str) -> bool:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return False
+    return "/" in name or name == "UTC"
+
+
 class GoogleConnector(Connector):
     id = "google"
     name = "Google (Gmail, Calendar, Docs)"
@@ -341,8 +364,9 @@ class GoogleConnector(Connector):
                     "GET", "https://www.googleapis.com/calendar/v3/users/me/settings/timezone"
                 )
                 self._tz = str(data.get("value") or "")
-            except Exception:
-                self._tz = ""
+            except Exception as exc:
+                log.warning("couldn't read the calendar's time zone: %s", exc)
+                return None  # try again next time rather than remembering the failure
         return self._tz or None
 
     async def calendar_add(self, args: dict[str, Any]) -> Result:
@@ -378,14 +402,8 @@ class GoogleConnector(Connector):
         meet = bool(args.get("meet", bool(guests)))
         event: dict[str, Any] = {
             "summary": str(args.get("title") or "Meeting"),
-            "start": {
-                "dateTime": start.replace(tzinfo=None).isoformat(timespec="seconds"),
-                "timeZone": tz_name or str(start.tzinfo),
-            },
-            "end": {
-                "dateTime": end.replace(tzinfo=None).isoformat(timespec="seconds"),
-                "timeZone": tz_name or str(end.tzinfo),
-            },
+            "start": event_time(start, tz_name),
+            "end": event_time(end, tz_name),
         }
         if args.get("location"):
             event["location"] = str(args["location"])

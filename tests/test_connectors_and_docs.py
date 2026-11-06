@@ -221,3 +221,18 @@ def test_unconnected_services_add_no_tools(settings, monkeypatch):
         "discord_send",
     }
     assert not Path(settings.data_dir / "connectors" / "google.json").exists()
+
+
+def test_event_times_google_accepts_even_without_the_calendar_zone():
+    from datetime import datetime, timedelta, timezone
+
+    from pyxi.connectors.google import event_time
+
+    when = datetime(2026, 11, 9, 15, 0, tzinfo=timezone(timedelta(hours=-8)))
+    assert event_time(when, "America/Vancouver") == {
+        "dateTime": "2026-11-09T15:00:00",
+        "timeZone": "America/Vancouver",
+    }
+    # No calendar zone, or a Windows name Google rejects: the offset goes in the time instead.
+    assert event_time(when, None) == {"dateTime": "2026-11-09T15:00:00-08:00"}
+    assert event_time(when, "Pacific Standard Time") == {"dateTime": "2026-11-09T15:00:00-08:00"}
