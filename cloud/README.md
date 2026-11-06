@@ -40,6 +40,7 @@ It stores no prompts or screen content. It keeps only token hashes and spend tot
    - `DAILY_LIMIT_USD=0.25`: per user, per UTC day.
    - `MONTHLY_CAP_USD=20`: the whole beta.
    - `USES_PER_CODE=3`: devices per code.
+   - `MAX_TOKENS=16000`: the longest reply allowed (a detailed 3D model asks for 12000).
    - `ALLOWED_MODELS`: comma-separated; defaults to Claude Haiku 5.5 and Sonnet 5.5.
 
 5. **Deploy:**

@@ -28,7 +28,7 @@ export function configFromEnv(env: Record<string, string | undefined> = process.
     dailyLimitUsd: Number(env.DAILY_LIMIT_USD ?? 0.25),
     monthlyCapUsd: Number(env.MONTHLY_CAP_USD ?? 20),
     models: new Set(list(env.ALLOWED_MODELS).length ? list(env.ALLOWED_MODELS) : DEFAULT_MODELS),
-    maxTokens: Number(env.MAX_TOKENS ?? 8000),
+    maxTokens: Number(env.MAX_TOKENS ?? 16000), // detailed 3D models ask for 12000
   };
 }
 

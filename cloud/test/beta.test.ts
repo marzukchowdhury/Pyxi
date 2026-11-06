@@ -67,7 +67,7 @@ describe("the proxy", () => {
     const text = await res.text();
     expect(text).toContain("On it.");
     expect(sent!.headers.get("authorization")).toBe("Bearer sk-or-test");
-    expect(sent!.body.max_tokens).toBe(8000);
+    expect(sent!.body.max_tokens).toBe(16000); // capped, but roomy enough for a detailed 3D model
     expect(sent!.body.usage).toEqual({ include: true });
     const who = { id: [...store.data.keys()].find((k) => k.startsWith("tok:"))!.slice(4), code: "FIREFLY" };
     expect((await usage(store, cfg, who)).spent_today_usd).toBeCloseTo(0.0031);

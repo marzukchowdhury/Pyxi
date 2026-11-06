@@ -105,3 +105,12 @@ def test_old_conversations_and_their_screenshots_are_forgotten(tmp_path):
     from pathlib import Path
 
     assert not Path(old_img).exists() and Path(new_img).exists()
+
+
+def test_a_used_up_allowance_reads_plainly():
+    from pyxi.companion.brain import friendly_error
+
+    raw = "OpenRouter API error: Error code: 429 - You've used today's Pyxi beta allowance. It resets at midnight UTC."
+    assert friendly_error(Exception(raw)) == "You've used today's Pyxi beta allowance. It resets at midnight UTC."
+    raw = "Error code: 429 - {'error': {'message': 'The Pyxi beta is at its limit for this month. Back soon.'}}"
+    assert friendly_error(Exception(raw)) == "The Pyxi beta is at its limit for this month. Back soon."

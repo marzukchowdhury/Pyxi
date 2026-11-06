@@ -2392,6 +2392,11 @@ _COUNTER = re.compile(r"^\s*[\(\[]\d+\+?[\)\]]\s*|^\s*[•●]\s*|\s*[\(\[]\d+\+
 def friendly_error(exc: BaseException) -> str:
     """'Google said 400: {"error": ...}' becomes 'Google said the request was invalid.'"""
     text = str(exc)
+    # The Pyxi beta server says why in plain words ("You've used today's Pyxi beta allowance...");
+    # show exactly that, without the "OpenRouter API error: Error code: 429 - " in front.
+    beta = re.search(r"(You've used today's Pyxi beta allowance[^\"'}]*|The Pyxi beta is at its limit[^\"'}]*|Sign in to the Pyxi beta first[^\"'}]*)", text)
+    if beta:
+        return beta.group(1).strip()
     m = re.search(r'"message":\s*"([^"]{3,140})"', text)
     detail = m.group(1) if m else ""
     service = "Google" if "Google" in text else "The service"
