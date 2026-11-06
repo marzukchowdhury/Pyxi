@@ -382,13 +382,15 @@ function BookingDetails() {
 }
 
 // ---------------------------------------------------------------------------- the beta
-/** Join with an invite code (no API key needed), or see what's left of today's allowance. */
+/** Join with an invite code (no API key needed), or see what's left of today's allowance.
+ *  Shown to everyone who hasn't joined, including people with a key of their own on this PC. */
 function BetaCard() {
   const { hello } = usePanel();
   const [code, setCode] = useState("");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [left, setLeft] = useState<number | null>(null);
   const joined = !!hello?.beta?.joined;
+  const ownKey = !!hello?.beta?.own_key;
   useEffect(() => brain.on((e) => {
     if (e.type === "beta") setMessage({ ok: e.ok, text: e.message });
   }), []);
@@ -404,12 +406,20 @@ function BetaCard() {
       <div className="beta-card joined">
         <b>Pyxi beta</b>
         <p>{left === null ? "You're in the beta." : `You're in the beta. $${left.toFixed(2)} of today's allowance left; it resets at midnight UTC.`}</p>
+        {ownKey && (
+          <div className="beta-row">
+            <button type="button" onClick={() => { setMessage(null); brain.send({ type: "beta_leave" }); }}>Use my own key instead</button>
+          </div>
+        )}
+        {message && <p className={message.ok ? "beta-ok" : "beta-error"}>{message.text}</p>}
       </div>
     );
   return (
     <form className="beta-card" onSubmit={(e) => { e.preventDefault(); setMessage(null); brain.send({ type: "beta_join", code }); }}>
       <b>Join the Pyxi beta</b>
-      <p>Type the invite code you were given. No API key or payment needed.</p>
+      <p>{ownKey
+        ? "Pyxi is using an AI key already on this PC, so that key pays. Type your invite code to use the Pyxi beta instead; you can switch back here any time."
+        : "Type the invite code you were given. No API key or payment needed."}</p>
       <div className="beta-row">
         <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Invite code" autoComplete="off" spellCheck={false} />
         <button className="primary" type="submit" disabled={!code.trim()}>Join</button>

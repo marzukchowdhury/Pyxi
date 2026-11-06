@@ -3,7 +3,9 @@
 A beta user types an invite code once (Settings). Pyxi swaps it for a token at the beta server,
 saves it in the data folder (cloud.json), and from then on every model call goes to the beta
 server, which adds the founder's OpenRouter key and keeps each user inside a daily allowance.
-Someone with their own key in .env never touches the beta server.
+Joining is a deliberate choice, so once someone has joined, the beta wins even if a key of their
+own is on the PC (common for developers, who often have ANTHROPIC_API_KEY set for other tools).
+Settings offers "Use my own key instead", which leaves the beta.
 """
 
 from __future__ import annotations
@@ -21,6 +23,11 @@ log = logging.getLogger(__name__)
 # Where the beta server lives (cloud/ in this repo, deployed on Vercel). Overridable for testing.
 DEFAULT_URL = "https://pyxi-beta.vercel.app"
 BETA_MODEL = "anthropic/claude-haiku-5.5"
+# What the beta server lets through (cloud/lib/beta.ts DEFAULT_MODELS).
+BETA_MODELS = ("anthropic/claude-haiku-5.5", "anthropic/claude-sonnet-5.5")
+# Per-feature model overrides: in the beta, anything the server wouldn't allow falls back to the
+# chat model (empty), so nothing quietly bills a key of their own.
+MODEL_VARS = ("PYXI_JOB_MODEL", "PYXI_MODEL_3D", "PYXI_MODEL_HANDS", "PYXI_MODEL_HANDS_STRONG", "PYXI_MODEL_AIM")
 FILE = "cloud.json"
 
 
@@ -40,19 +47,38 @@ def has_own_key() -> bool:
     return bool(os.environ.get("OPENROUTER_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"))
 
 
+def had_own_key() -> bool:
+    """Whether this PC had a key of its own before the beta took over (apply() records it,
+    because joining replaces OPENROUTER_API_KEY with the beta token)."""
+    flag = os.environ.get("PYXI_OWN_KEY")
+    return flag == "1" if flag is not None else has_own_key()
+
+
 def apply(data_dir: Path) -> bool:
-    """Before settings load: if there's no key of their own but a beta token, route the models
-    through the beta server. Returns whether the beta is in use."""
-    if has_own_key():
-        return False
+    """Before settings load: with a saved beta token, route every model call through the beta
+    server, even when a key of their own is set. Returns whether the beta is in use."""
+    os.environ["PYXI_OWN_KEY"] = "1" if has_own_key() else "0"
     beta = saved(data_dir)
     if beta is None:
         return False
     url = str(beta.get("url") or server_url()).rstrip("/")
     os.environ["OPENROUTER_API_KEY"] = beta["token"]
     os.environ["PYXI_OPENROUTER_URL"] = url + "/api/v1"
-    os.environ.setdefault("PYXI_MODEL", BETA_MODEL)
+    if os.environ.get("PYXI_MODEL") not in BETA_MODELS:
+        os.environ["PYXI_MODEL"] = BETA_MODEL
+    for var in MODEL_VARS:
+        if os.environ.get(var) and os.environ[var] not in BETA_MODELS:
+            os.environ[var] = ""
     os.environ["PYXI_BETA"] = "1"
+    return True
+
+
+def leave(data_dir: Path) -> bool:
+    """Forget the beta token, so the next start uses their own key again."""
+    try:
+        (data_dir / FILE).unlink()
+    except FileNotFoundError:
+        return False
     return True
 
 
@@ -90,7 +116,3 @@ async def allowance(data_dir: Path) -> dict[str, Any] | None:
         return r.json() if r.status_code == 200 else None
     except (httpx.HTTPError, ValueError):
         return None
-
-
-def leave(data_dir: Path) -> None:
-    (data_dir / FILE).unlink(missing_ok=True)

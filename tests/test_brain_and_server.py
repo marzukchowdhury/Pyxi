@@ -172,6 +172,19 @@ def test_server_websocket_round_trip(settings):
         assert client.get("/crops/..%2F..%2Fsecret.png").status_code == 404
 
 
+def test_settings_offers_the_beta_to_someone_with_their_own_key(settings, monkeypatch):
+    """A key already on the PC (ANTHROPIC_API_KEY for other tools) must not hide the beta card."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-mine")
+    monkeypatch.setenv("PYXI_OWN_KEY", "1")
+    monkeypatch.delenv("PYXI_BETA", raising=False)
+    hub = Hub()
+    brain = Brain(settings, hub, llm=DemoLLM(), screen=FakeScreen(), tts=make_tts(settings.voice, settings.models_dir))
+    app = create_app(settings, demo=False, brain=brain)
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        hello = json.loads(ws.receive_text())
+    assert hello["beta"] == {"joined": False, "can_join": True, "own_key": True}
+
+
 def test_openrouter_models_need_the_openrouter_key(settings, monkeypatch):
     from pyxi.server import has_key, key_env
 

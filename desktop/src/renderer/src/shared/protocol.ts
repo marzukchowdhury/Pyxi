@@ -319,7 +319,7 @@ export interface Hello {
   version: string;
   demo: boolean;
   gallery: Record<string, string>;
-  beta?: { joined: boolean; can_join: boolean };
+  beta?: { joined: boolean; can_join: boolean; own_key?: boolean };
 }
 
 export type BrainEvent =
@@ -370,6 +370,7 @@ export type ClientMessage =
   | { type: "ptt_start" }
   | { type: "look_ahead" }
   | { type: "beta_join"; code: string }
+  | { type: "beta_leave" }
   | { type: "profile_get" }
   | { type: "profile_save"; profile: Record<string, string> }
   | { type: "ptt_cancel" }

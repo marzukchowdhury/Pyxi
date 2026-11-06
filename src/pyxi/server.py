@@ -120,6 +120,12 @@ def create_app(
         await hub.emit("beta", ok=True, message="You're in. Pyxi is restarting with the beta…")
         asyncio.get_running_loop().call_later(0.8, os._exit, RESTART)
 
+    async def _beta_leave() -> None:
+        """Back to the key on this PC: forget the beta token and restart the brain."""
+        cloud.leave(settings.data_dir)
+        await hub.emit("beta", ok=True, message="Switching to your own key. Pyxi is restarting…")
+        asyncio.get_running_loop().call_later(0.8, os._exit, RESTART)
+
     async def _fetch_voice() -> None:
         """A fresh install has no voice model yet (about 350 MB): fetch it in the background on
         first run, so nobody has to run `pyxi setup-voice`. Until it's there, the OS voice talks."""
@@ -188,8 +194,9 @@ def create_app(
     def hello() -> dict[str, Any]:
         return {
             **brain.public_state(),
-            # The beta: joined (models go through the beta server), or could join (no own key).
-            "beta": {"joined": cloud.in_beta(), "can_join": demo and not cloud.has_own_key()},
+            # The beta: joined (models go through the beta server), or could join. Anyone can join,
+            # including people with a key of their own (own_key), whose key then sits unused.
+            "beta": {"joined": cloud.in_beta(), "can_join": not cloud.in_beta(), "own_key": cloud.had_own_key()},
             "version": __version__,
             "demo": demo,
             "gallery": {**TITLES, **OBJECT_TITLES},
@@ -301,6 +308,8 @@ def create_app(
             await hub.emit("profile", profile=saved, saved=True)
         elif kind == "beta_join" and str(msg.get("code") or "").strip():
             brain._spawn(_beta_join(str(msg["code"])))
+        elif kind == "beta_leave" and cloud.in_beta():
+            brain._spawn(_beta_leave())
         elif kind == "audio" and msg.get("data"):
             brain._spawn(brain.hear(base64.b64decode(msg["data"])))
         elif kind == "ptt_cancel":

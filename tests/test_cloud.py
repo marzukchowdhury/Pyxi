@@ -44,17 +44,44 @@ async def test_joining_saves_a_token_and_routes_the_models(tmp_path, clean_env, 
     assert os.environ["PYXI_MODEL"] == cloud.BETA_MODEL and cloud.in_beta()
 
 
-def test_your_own_key_always_wins(tmp_path, clean_env, monkeypatch):
-    (tmp_path / cloud.FILE).write_text(
-        json.dumps({"url": "https://beta.example", "token": "pyxi_x"})
-    )
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-mine")
+def test_without_joining_your_own_key_is_used(tmp_path, clean_env, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-mine")
     assert not cloud.apply(tmp_path)
     import os
 
-    assert (
-        os.environ["OPENROUTER_API_KEY"] == "sk-or-mine" and "PYXI_OPENROUTER_URL" not in os.environ
+    assert "PYXI_OPENROUTER_URL" not in os.environ and not cloud.in_beta()
+    assert cloud.had_own_key()
+
+
+def test_an_invite_code_wins_over_a_key_already_on_the_pc(tmp_path, clean_env, monkeypatch):
+    """Developers often have ANTHROPIC_API_KEY set for other tools; joining must still work."""
+    import os
+
+    for var in cloud.MODEL_VARS:
+        monkeypatch.delenv(var, raising=False)
+    (tmp_path / cloud.FILE).write_text(
+        json.dumps({"url": "https://beta.example", "token": "pyxi_x"})
     )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-mine")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-mine")
+    monkeypatch.setenv("PYXI_MODEL", "claude-opus-5-5")  # a native Anthropic model: their key
+    monkeypatch.setenv("PYXI_MODEL_3D", "claude-opus-5-5")
+    monkeypatch.setenv("PYXI_MODEL_AIM", "anthropic/claude-sonnet-5.5")  # the beta allows this
+    assert cloud.apply(tmp_path) and cloud.in_beta()
+    assert os.environ["OPENROUTER_API_KEY"] == "pyxi_x"
+    assert os.environ["PYXI_OPENROUTER_URL"] == "https://beta.example/api/v1"
+    assert os.environ["PYXI_MODEL"] == cloud.BETA_MODEL
+    assert os.environ["PYXI_MODEL_3D"] == ""  # falls back to the chat model, not their key
+    assert os.environ["PYXI_MODEL_AIM"] == "anthropic/claude-sonnet-5.5"
+    assert cloud.had_own_key()  # so Settings can offer "Use my own key instead"
+
+
+def test_leaving_the_beta_goes_back_to_your_own_key(tmp_path, clean_env, monkeypatch):
+    (tmp_path / cloud.FILE).write_text(json.dumps({"token": "pyxi_x"}))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-mine")
+    assert cloud.leave(tmp_path) and not (tmp_path / cloud.FILE).exists()
+    assert not cloud.leave(tmp_path)
+    assert not cloud.apply(tmp_path)
 
 
 def test_old_conversations_and_their_screenshots_are_forgotten(tmp_path):

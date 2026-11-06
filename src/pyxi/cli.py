@@ -47,7 +47,7 @@ def serve(
     _load_dotenv()
     from pyxi import cloud
 
-    cloud.apply(Path(os.environ.get("PYXI_DATA_DIR", ".pyxi")))  # no key of their own: the beta
+    cloud.apply(Path(os.environ.get("PYXI_DATA_DIR", ".pyxi")))  # joined the beta: models go through it
     logging.basicConfig(
         level=logging.INFO if verbose else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
