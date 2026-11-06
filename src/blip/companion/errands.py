@@ -166,12 +166,29 @@ async def run_errand(
                         f"{call.name}: the user said no to '{result.action}'. Don't retry it."
                     )
                     continue
+                outgoing = result
                 try:
                     result = await result.run()
                     sent += 1
                 except Exception as exc:
                     steps.append(f"{call.name}({_short(args)}) failed: {str(exc)[:200]}")
                     continue
+                if (
+                    outgoing.kind == "message"
+                    and call.name.endswith("_send")
+                    and len(response.tool_calls) == 1
+                ):
+                    # An email that went out is the whole errand: report it now rather than
+                    # spending another model round on a summary (it's read back below).
+                    to = ", ".join(outgoing.recipients) or "them"
+                    return ErrandResult(
+                        ok=True,
+                        title="Email sent",
+                        summary=f"Sent to {to}. {str(result)[:200]}",
+                        links=links,
+                        cost_usd=cost,
+                        steps=[*steps, f"{call.name}({_short(args)}) -> {str(result)[:600]}"],
+                    )
             text = str(result)
             for kind, url in LINK.findall(text):
                 links.setdefault(kind, url)

@@ -251,6 +251,8 @@ def create_app(
             brain._spawn(brain.turn(msg["text"].strip()))
         elif kind == "ptt_start":
             brain.begin_listening()
+        elif kind == "look_ahead":
+            brain.look_ahead()
         elif kind == "audio" and msg.get("data"):
             brain._spawn(brain.hear(base64.b64decode(msg["data"])))
         elif kind == "ptt_cancel":

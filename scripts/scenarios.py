@@ -117,7 +117,14 @@ SCENARIOS = [
         "Can you research whether Sam Altman really posted that, and tell me?",
         "delegate",
     ),
-    ("play a song", "turn_49b75541", "Play Blinding Lights by The Weeknd for me.", "hands"),
+    ("play a song", "turn_49b75541", "Play Blinding Lights by The Weeknd for me.", "play"),
+    (
+        "song, quieter",
+        "turn_57095984",
+        "Hey Blip, can you play a song on YouTube? Umm... Biddie Jean Michael Jackson and keep the "
+        "volume a bit lower.",
+        "play+volume",
+    ),
     ("pause music", "turn_49b75541", "Pause the music.", "media"),
     (
         "vercel guide",
@@ -138,6 +145,13 @@ SCENARIOS = [
         "Hey Blip, can you keep my screen into three parts and in one part kept the Facebook right now "
         "I'm in in one part kept stake and in one part kept my gmail on",
         "arrange3",
+    ),
+    ("open a tab", "turn_57095984", "Open Gmail in a new tab for me.", "open"),
+    (
+        "send an email",
+        "turn_57095984",
+        "Email test.person@example.com saying I'll be ten minutes late to our call.",
+        "errand",
     ),
     ("nba finals", "turn_49b75541", "Who won the NBA Finals last year?", "web"),
     ("bitcoin", "turn_49b75541", "What's the price of bitcoin right now?", "web"),
@@ -219,6 +233,12 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         return None
 
     brain._arrange_windows = fake_arrange  # type: ignore[method-assign]
+
+    async def fake_play(args):  # never play music on their speakers
+        background.append("play: " + json.dumps(args)[:160])
+        return None
+
+    brain._play_music = fake_play  # type: ignore[method-assign]
     brain._drive = fake_drive  # type: ignore[method-assign]
     brain._tidy_approved = fake_tidy  # type: ignore[method-assign]
     brain._quick_action = fake_quick  # type: ignore[method-assign]
@@ -315,6 +335,20 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append("didn't open Google Maps")
         if "look_again" not in tools and not any(b.startswith("hands") for b in background):
             problems.append("didn't look at the results")
+    if expect == "open" and ("use_computer" in tools or "quick_action" not in tools):
+        problems.append("didn't open it with quick_action")
+    if expect in ("play", "play+volume"):
+        plays = [b for b in background if b.startswith("play: ")]
+        if not plays or "use_computer" in tools:
+            problems.append("didn't use play_music")
+        elif (
+            expect == "play+volume"
+            and '"volume"' not in plays[0]
+            and not any(b.startswith("volume") for b in background)
+        ):
+            problems.append("didn't lower the volume")
+        elif expect == "play+volume" and "billie jean" not in plays[0].lower():
+            problems.append("didn't fix 'Biddie Jean' to Billie Jean")
     if expect == "arrange3":
         arr = [b for b in background if b.startswith("arrange: ")]
         if not arr or "use_computer" in tools:

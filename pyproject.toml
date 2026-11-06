@@ -20,6 +20,8 @@ dependencies = [
     "pillow>=10.0",
     "numpy>=1.26",
     "uiautomation>=2.0; sys_platform == 'win32'",
+    # Windows volume and "is it playing?" for music (Core Audio)
+    "pycaw>=20240210; sys_platform == 'win32'",
     "kokoro-onnx>=0.4",
     "soundfile>=0.12",
     "faster-whisper>=1.0",

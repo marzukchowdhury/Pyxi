@@ -344,3 +344,7 @@ def window_like(name: str, open_now: list[tuple[int, str, str]], skip: set[int])
         if words in hay:
             return hwnd
     return None
+
+
+def foreground() -> int:
+    return int(_user32().GetForegroundWindow() or 0) if available() else 0

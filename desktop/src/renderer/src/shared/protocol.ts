@@ -365,6 +365,7 @@ export type BrainEvent =
 export type ClientMessage =
   | { type: "text"; text: string }
   | { type: "ptt_start" }
+  | { type: "look_ahead" }
   | { type: "ptt_cancel" }
   | { type: "audio"; data: string; mime: string }
   | { type: "interrupt" }

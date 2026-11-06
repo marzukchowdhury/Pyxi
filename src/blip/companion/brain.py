@@ -36,7 +36,7 @@ from otto.types import ToolCall, Usage
 from PIL import Image
 from pydantic import ValidationError
 
-from blip import hands, tidy, web, windows
+from blip import hands, media, tidy, web, windows
 from blip.agents import AgentProfile, AgentRegistry, Job, JobManager
 from blip.agents.jobs import Handoff
 from blip.companion import prompts
@@ -211,6 +211,11 @@ class Brain:
         self.interrupt()
         self._prefetch = asyncio.create_task(self._capture())
         self._spawn(self.set_state("listening"))
+
+    def look_ahead(self) -> None:
+        """They started typing to Blip: capture the screen now, so the answer starts sooner."""
+        if self._prefetch is None and not self._lock.locked():
+            self._prefetch = asyncio.create_task(self._capture())
 
     async def hear(self, audio: bytes) -> None:
         await self.set_state("transcribing")
@@ -469,9 +474,54 @@ class Brain:
             )
         return None
 
+    async def _play_music(self, args: dict[str, Any]) -> str | None:
+        """Play a song behind the window they're in, and set the volume. The volume is instant;
+        the song starts in the background (a few seconds), so the turn and the next request
+        don't wait for it, and the notch shows when it's playing."""
+        query = str(args.get("query") or "").strip()
+        if not query:
+            return "play_music: what should I play?"
+        if not windows.available():
+            return "play_music: this only works on Windows."
+        ctx = self._ctx
+        here = ctx.window.hwnd if ctx and ctx.window.hwnd else ctypes_foreground()
+        if args.get("volume"):
+            log.info(
+                "play_music: %s", await asyncio.to_thread(media.set_volume, str(args["volume"]))
+            )
+        job = await self.jobs.track("Blip", f"Playing {query}")
+
+        async def go() -> None:
+            try:
+                played = await media.play(
+                    query, music=args.get("app") == "youtube_music", back_to=here
+                )
+            except Exception as exc:  # never leave the notch saying it's still starting
+                log.warning("play_music failed", exc_info=True)
+                await self.jobs.settle(job, ok=False, summary=f"Couldn't play that: {exc}")
+                return
+            log.info("play_music: %r -> %s (%s)", query, played.title, played.ok or played.note)
+            if played.ok:
+                await self.jobs.settle(job, ok=True, summary=f"Playing {played.title}")
+            else:
+                why = (
+                    played.note
+                    if not played.title
+                    else f"{played.title} is open, but {played.note[0].lower()}{played.note[1:]} Press play on it."
+                )
+                await self.jobs.settle(job, ok=False, summary=why)
+
+        self._spawn(go())
+        return None
+
     async def _quick_action(self, action: str, value: str) -> str | None:
         if not value.strip():
             return f"{action}: nothing to do."
+        if action == "volume":
+            if not windows.available():
+                return "volume: this only works on Windows."
+            note = await asyncio.to_thread(media.set_volume, value)
+            return None if note.startswith("Volume") else note
         if action == "media":
             key = value.strip().lower().replace(" ", "").replace("_", "")
             if key not in (
@@ -1784,6 +1834,8 @@ class Brain:
             return None
         if name == "arrange_windows":
             return await self._arrange_windows(args)
+        if name == "play_music":
+            return await self._play_music(args)
         if name == "use_computer":
             return await self._use_computer(args)
         if name == "tidy_folder":

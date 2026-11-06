@@ -472,16 +472,39 @@ COMPANION_TOOLS += [
         "Do a small thing for the user right now: open_url (a website), open_app (notepad, calculator, chrome, "
         "word, excel, spotify, discord, settings, 'sound settings', 'microphone privacy'...), copy (exact text to "
         "the clipboard), or insert (type a drafted message into the text field they're in, e.g. 'write a reply "
-        "to this'), or media (the music or video that's playing, in any app: value playpause, next, "
-        "previous, volumeup, volumedown or mute; instant, no mouse). Only when they asked for it.",
+        "to this'), media (the music or video that's playing, in any app: value playpause, next, "
+        "previous; instant, no mouse), or volume (Windows' volume, instant: a number like 30, a change "
+        "like -15, or lower, a bit lower, higher, low, mute). Only when they asked for it.",
         {
             "action": {
                 "type": "string",
-                "enum": ["open_url", "open_app", "copy", "insert", "media"],
+                "enum": ["open_url", "open_app", "copy", "insert", "media", "volume"],
             },
             "value": {"type": "string", "description": "The URL, app name, or text."},
         },
         ["action", "value"],
+    ),
+    _tool(
+        "play_music",
+        "Play a song, album or video right now: finds it on YouTube, opens it in a window behind the one "
+        "they're in (so they keep working), checks it's really playing, and sets the volume if they "
+        "asked. Takes a couple of seconds, no mouse: always use this for 'play X', never use_computer.",
+        {
+            "query": {
+                "type": "string",
+                "description": "What to play, e.g. 'Billie Jean Michael Jackson'.",
+            },
+            "app": {
+                "type": "string",
+                "enum": ["youtube", "youtube_music"],
+                "description": "youtube_music when they say YouTube Music, else youtube.",
+            },
+            "volume": {
+                "type": "string",
+                "description": "Only if they asked: 30, -15, lower, a bit lower, higher, low.",
+            },
+        },
+        ["query"],
     ),
     _tool(
         "look_again",

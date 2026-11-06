@@ -408,7 +408,11 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                   ref={input}
                   value={text}
                   placeholder="Ask Blip anything"
-                  onChange={(e) => setText(e.target.value)}
+                  onChange={(e) => {
+                    // The first key of a new message: Blip starts looking at the screen now, not after Enter.
+                    if (!text && e.target.value) brain.send({ type: "look_ahead" });
+                    setText(e.target.value);
+                  }}
                   onMouseDown={() => bridge.focusOverlay()}
                   onFocus={() => setFocused(true)}
                   onBlur={() => {

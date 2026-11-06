@@ -217,3 +217,54 @@ async def test_lookups_dont_chatter_and_errors_are_human(settings):
     raw = 'Google said 400: { "error": { "message": "Bad Request" } }'
     assert friendly_error(Exception(raw)) == "Google rejected the request: Bad Request."
     assert strip_filler("There you go, I have done this. It's saved.") == "It's saved."
+
+
+async def test_a_sent_email_finishes_the_errand_without_another_model_round():
+    from otto.llm.base import ToolSpec
+    from otto.types import ToolCall, Usage
+
+    from blip.companion.errands import run_errand
+    from blip.connectors import Outgoing, Tool
+
+    calls = 0
+
+    class OneShot:
+        async def complete(self, **kw):
+            nonlocal calls
+            calls += 1
+            args = {"to": "sam@example.com", "subject": "Late", "body": "Ten minutes late, sorry."}
+            return type(
+                "R",
+                (),
+                {
+                    "text": "",
+                    "usage": Usage(),
+                    "tool_calls": [ToolCall(id="t1", name="gmail_send", arguments=args)],
+                },
+            )()
+
+    async def send(args):
+        async def run():
+            return "sent, subject 'Late'"
+
+        return Outgoing(
+            action="Send email to sam@example.com",
+            preview="",
+            run=run,
+            recipients=["sam@example.com"],
+        )
+
+    spec = ToolSpec("gmail_send", "send", {"type": "object", "properties": {}})
+
+    async def yes(_o):
+        return True
+
+    result = await run_errand(
+        task="email sam",
+        user_text="email sam@example.com",
+        now="Now",
+        llm=OneShot(),
+        tools=[Tool(spec, send)],
+        approve=yes,
+    )
+    assert result.ok and result.title == "Email sent" and calls == 1
