@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from blip.config import VoiceConfig
-from blip.voice.studio import VoiceStudio, split_tone
-from blip.voice.tts import Speech, split_sentences, strip_tags
+from pyxi.config import VoiceConfig
+from pyxi.voice.studio import VoiceStudio, split_tone
+from pyxi.voice.tts import Speech, split_sentences, strip_tags
 
 
 @pytest.fixture
@@ -64,7 +64,7 @@ async def test_a_failing_cloud_voice_falls_back_and_says_why(studio, monkeypatch
 
 async def test_spanish_gets_a_spanish_voice(studio):
     studio.update(language="es")
-    await studio.synthesize("Hola, soy Blip.")
+    await studio.synthesize("Hola, soy Pyxi.")
     assert studio.calls[-1]["lang"] == "es" and studio.calls[-1]["voice"] == "ef_dora"
 
 
@@ -76,7 +76,7 @@ def test_recorded_clips_decode_with_current_pyav():
     import av
     import numpy as np
 
-    from blip.voice.stt import decode_audio
+    from pyxi.voice.stt import decode_audio
 
     buf = io.BytesIO()
     with av.open(buf, mode="w", format="webm") as out:
@@ -95,7 +95,7 @@ def test_recorded_clips_decode_with_current_pyav():
 
 
 async def test_missing_gpu_libraries_fall_back_to_cpu(monkeypatch):
-    from blip.voice.stt import Transcriber
+    from pyxi.voice.stt import Transcriber
 
     cfg = VoiceConfig(stt_device="cuda")
     tr = Transcriber(cfg)
@@ -115,6 +115,6 @@ async def test_missing_gpu_libraries_fall_back_to_cpu(monkeypatch):
         return Model(cfg.stt_device)
 
     monkeypatch.setattr(tr, "_load", load)
-    monkeypatch.setattr("blip.voice.stt.decode_audio", lambda data: data)
+    monkeypatch.setattr("pyxi.voice.stt.decode_audio", lambda data: data)
     text, _, lang = await tr.transcribe(b"x", "en")
     assert (text, lang, loads, cfg.stt_device) == ("hello", "en", ["cuda", "cpu"], "cpu")

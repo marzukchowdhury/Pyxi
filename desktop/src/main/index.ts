@@ -1,9 +1,9 @@
 /**
- * Blip's Electron main process.
+ * Pyxi's Electron main process.
  *
  * - One transparent, click-through, always-on-top overlay window per display. The overlay
  *   only catches the mouse while you hover something interactive (the 3D card, controls).
- *   It is excluded from screen capture, so Blip never sees its own drawings.
+ *   It is excluded from screen capture, so Pyxi never sees its own drawings.
  * - A control panel window (chat, team, memory palace, gallery, settings).
  * - Global hotkeys, the cursor feed for the buddy, and the Python brain's lifecycle.
  */
@@ -28,9 +28,9 @@ import {
   Tray,
 } from "electron";
 
-const BACKEND = process.env.BLIP_BACKEND ?? "http://127.0.0.1:8766";
+const BACKEND = process.env.PYXI_BACKEND ?? "http://127.0.0.1:8766";
 // Opt-in: inspect the live overlay and panel from a debugger (developers only).
-if (process.env.BLIP_DEBUG_PORT) app.commandLine.appendSwitch("remote-debugging-port", process.env.BLIP_DEBUG_PORT);
+if (process.env.PYXI_DEBUG_PORT) app.commandLine.appendSwitch("remote-debugging-port", process.env.PYXI_DEBUG_PORT);
 const REPO = resolve(__dirname, "../../..");
 // Each action tries its shortcuts in order and keeps the first one Windows lets us have.
 // Other apps (Discord, overlays, launchers) often own a combination already; without a
@@ -51,11 +51,11 @@ function registerHotkeys(handlers: Record<HotkeyName, () => void>): void {
         activeHotkeys[name] = accelerator;
         break;
       }
-      console.warn(`[blip] ${accelerator} is taken by another app; trying the next option for "${name}".`);
+      console.warn(`[pyxi] ${accelerator} is taken by another app; trying the next option for "${name}".`);
     }
-    if (!activeHotkeys[name]) console.warn(`[blip] no free shortcut for "${name}"; use the panel instead.`);
+    if (!activeHotkeys[name]) console.warn(`[pyxi] no free shortcut for "${name}"; use the panel instead.`);
   }
-  console.log("[blip] hotkeys:", JSON.stringify(activeHotkeys));
+  console.log("[pyxi] hotkeys:", JSON.stringify(activeHotkeys));
 }
 
 const pretty = (accelerator: string | null) => (accelerator ?? "unavailable").replace("Control", "Ctrl");
@@ -66,14 +66,14 @@ let tray: Tray | null = null;
 let brain: ChildProcess | null = null;
 let primaryId = 0;
 let holdToTalk = false;
-let muted = process.env.BLIP_MUTE === "1";
+let muted = process.env.PYXI_MUTE === "1";
 
-// Screen sharing (Discord, OBS, Meet): visible by default so people watching see Blip.
-// Turn it off for privacy and the overlay is hidden from every capture, Blip's own included.
-const UI_PREFS = join(REPO, ".blip", "ui.json");
+// Screen sharing (Discord, OBS, Meet): visible by default so people watching see Pyxi.
+// Turn it off for privacy and the overlay is hidden from every capture, Pyxi's own included.
+const UI_PREFS = join(REPO, ".pyxi", "ui.json");
 function loadShareVisible(): boolean {
-  if (process.env.BLIP_SHOW_OVERLAY_IN_CAPTURE === "1") return true;
-  if (process.env.BLIP_SHOW_OVERLAY_IN_CAPTURE === "0") return false;
+  if (process.env.PYXI_SHOW_OVERLAY_IN_CAPTURE === "1") return true;
+  if (process.env.PYXI_SHOW_OVERLAY_IN_CAPTURE === "0") return false;
   try {
     return JSON.parse(readFileSync(UI_PREFS, "utf-8")).shareVisible !== false;
   } catch {
@@ -127,13 +127,13 @@ function createOverlay(d: Display): void {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setIgnoreMouseEvents(true, { forward: true });
   // Visible to screen sharing unless the user turned that off. When visible, the overlay blanks
-  // for a moment while Blip takes its own screenshot, so it never reads its own drawings.
+  // for a moment while Pyxi takes its own screenshot, so it never reads its own drawings.
   win.setContentProtection(!shareVisible);
   const info = displayInfo(d);
   loadPage(win, "overlay", { display: JSON.stringify(info), backend: BACKEND, mute: muted ? "1" : "0" });
   overlays.set(d.id, win);
   // A crashed page reloads; a closed overlay comes back while its screen is still there, so
-  // Blip never ends up talking to a window that's gone.
+  // Pyxi never ends up talking to a window that's gone.
   win.webContents.on("render-process-gone", () => {
     if (!win.isDestroyed()) win.reload();
   });
@@ -225,14 +225,14 @@ async function backendUp(): Promise<boolean> {
 
 async function ensureBrain(): Promise<void> {
   if (await backendUp()) return;
-  const py = process.env.BLIP_PYTHON ?? join(REPO, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  const py = process.env.PYXI_PYTHON ?? join(REPO, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
   if (!existsSync(py)) {
-    console.warn(`[blip] Python not found at ${py}; start the brain yourself: blip serve`);
+    console.warn(`[pyxi] Python not found at ${py}; start the brain yourself: pyxi serve`);
     return;
   }
-  const args = ["-m", "blip", "serve", ...(process.env.BLIP_ARGS?.split(" ").filter(Boolean) ?? [])];
+  const args = ["-m", "pyxi", "serve", ...(process.env.PYXI_ARGS?.split(" ").filter(Boolean) ?? [])];
   brain = spawn(py, args, { cwd: REPO, stdio: "inherit", windowsHide: true });
-  brain.on("exit", (code) => console.log(`[blip] brain exited (${code})`));
+  brain.on("exit", (code) => console.log(`[pyxi] brain exited (${code})`));
 }
 
 function startCursorFeed(): void {
@@ -276,7 +276,7 @@ app.whenReady().then(async () => {
     if (changed.some((c) => c === "bounds" || c === "scaleFactor" || c === "workArea")) rebuildOverlays();
   });
 
-  // Hold Ctrl + left Alt to talk (the main way to use Blip). The shortcut below stays as a
+  // Hold Ctrl + left Alt to talk (the main way to use Pyxi). The shortcut below stays as a
   // press-to-toggle fallback, and also covers keyboards where the hook can't start.
   holdToTalk = startHoldToTalk({
     down: () => broadcast("ptt-down"),
@@ -303,16 +303,16 @@ app.whenReady().then(async () => {
   });
 
   tray = new Tray(trayIcon());
-  tray.setToolTip("Blip");
+  tray.setToolTip("Pyxi");
   tray.on("click", toggleNotch);
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: `Open Blip  (${pretty(activeHotkeys.panel)})`, click: toggleNotch },
+      { label: `Open Pyxi  (${pretty(activeHotkeys.panel)})`, click: toggleNotch },
       { label: "Open as a separate window", click: togglePanel },
       { label: `Talk  (${pretty(activeHotkeys.talk)})`, click: () => broadcast("ptt") },
       { label: `Dismiss drawings  (${pretty(activeHotkeys.dismiss)})`, click: () => broadcast("dismiss") },
       {
-        label: "Mute Blip's voice",
+        label: "Mute Pyxi's voice",
         type: "checkbox",
         checked: muted,
         click: (item) => {
@@ -321,7 +321,7 @@ app.whenReady().then(async () => {
         },
       },
       { type: "separator" },
-      { label: "Quit Blip", click: () => app.quit() },
+      { label: "Quit Pyxi", click: () => app.quit() },
     ]),
   );
   // No window pops up at launch: the notch on the top edge is the whole interface.
@@ -356,7 +356,7 @@ ipcMain.on("voice-stop", (e, ids?: string[]) => {
 ipcMain.on("say-started", (e, key: string) => {
   for (const win of liveOverlays()) if (win.webContents.id !== e.sender.id) win.webContents.send("say-started", key);
 });
-// After typing to Blip, the keyboard goes back to the app you were in.
+// After typing to Pyxi, the keyboard goes back to the app you were in.
 ipcMain.on("release-focus", (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!win || win.isDestroyed()) return;
@@ -376,7 +376,7 @@ ipcMain.on("action", async (_e, kind: string, value: string) => {
   else if (kind === "insert") {
     const focused = BrowserWindow.getFocusedWindow();
     if (focused) {
-      // Typing went to Blip's own window (the notch text box); hand focus back first.
+      // Typing went to Pyxi's own window (the notch text box); hand focus back first.
       focused.blur();
       await new Promise((r) => setTimeout(r, 180));
     }
@@ -387,25 +387,25 @@ ipcMain.on("action", async (_e, kind: string, value: string) => {
     setTimeout(() => clipboard.writeText(previous), 900);
   }
 });
-// Files Blip made: open them or show them in Explorer, but only inside Blip's own folders.
-function blipFile(path: unknown): string | null {
+// Files Pyxi made: open them or show them in Explorer, but only inside Pyxi's own folders.
+function pyxiFile(path: unknown): string | null {
   if (typeof path !== "string" || !path) return null;
   const full = resolve(path);
-  const allowed = [join(app.getPath("documents"), "Blip"), join(REPO, ".blip", "outputs")].map((d) => resolve(d).toLowerCase());
+  const allowed = [join(app.getPath("documents"), "Pyxi"), join(REPO, ".pyxi", "outputs")].map((d) => resolve(d).toLowerCase());
   return allowed.some((d) => full.toLowerCase().startsWith(d + "\\") || full.toLowerCase().startsWith(d + "/")) && existsSync(full) ? full : null;
 }
 ipcMain.on("open-file", (_e, path: unknown) => {
-  const file = blipFile(path);
+  const file = pyxiFile(path);
   if (file) void shell.openPath(file);
 });
 ipcMain.on("show-in-folder", (_e, path: unknown) => {
-  const file = blipFile(path);
+  const file = pyxiFile(path);
   if (file) shell.showItemInFolder(file);
 });
 ipcMain.on("notify", (_e, title: string, body: string, path?: string) => {
   if (!Notification.isSupported()) return;
   const note = new Notification({ title: String(title).slice(0, 80), body: String(body).slice(0, 200), silent: true });
-  const file = blipFile(path);
+  const file = pyxiFile(path);
   if (file) note.on("click", () => void shell.openPath(file));
   note.show();
 });
@@ -414,10 +414,10 @@ ipcMain.on("set-share-visible", (_e, value: boolean) => {
   shareVisible = !!value;
   for (const win of liveOverlays()) win.setContentProtection(!shareVisible);
   try {
-    mkdirSync(join(REPO, ".blip"), { recursive: true });
+    mkdirSync(join(REPO, ".pyxi"), { recursive: true });
     writeFileSync(UI_PREFS, JSON.stringify({ shareVisible }));
   } catch (err) {
-    console.warn("[blip] couldn't save the screen-share setting:", err);
+    console.warn("[pyxi] couldn't save the screen-share setting:", err);
   }
   broadcast("share-visible", shareVisible);
 });

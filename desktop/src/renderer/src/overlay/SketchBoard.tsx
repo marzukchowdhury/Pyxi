@@ -1,5 +1,5 @@
 /**
- * A sketchboard: a diagram that inks itself in while Blip explains it. Each step's strokes draw
+ * A sketchboard: a diagram that inks itself in while Pyxi explains it. Each step's strokes draw
  * as its sentence is spoken; the board waits for both the words and the ink before moving on,
  * then leaves on its own (resting the pointer on it keeps it). A thread ties it to the real
  * thing on screen it's about. Labels can be clicked to ask about them; the cube makes it 3D.
@@ -14,7 +14,7 @@ import { Interactive } from "./Interactive";
 import { useLinger } from "./linger";
 import { useOverlay, voice } from "./store";
 
-const AUDIO_WAIT_MS = 9000; // Blip's own voice for this step; after that the words show silently
+const AUDIO_WAIT_MS = 9000; // Pyxi's own voice for this step; after that the words show silently
 const CHROME = 160; // first guess at the title and caption around the drawing; then measured
 const EDGE = 10; // the board never comes closer than this to a screen edge
 const MIN_W = 480; // below this the drawing and its labels stop being readable
@@ -44,7 +44,7 @@ export function SketchBoard() {
     inkedAt.current = [];
     started.current = "";
     clipGen.current++;
-    voice.stop("sketch"); // the previous board's lines, not Blip's reply
+    voice.stop("sketch"); // the previous board's lines, not Pyxi's reply
     setStep(0);
     setDone(false);
     setStalled(false);

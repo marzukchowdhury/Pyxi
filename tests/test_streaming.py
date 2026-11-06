@@ -7,8 +7,8 @@ import json
 
 from otto.types import LLMResponse, ToolCall, Usage
 
-from blip.partial_json import complete_items, finished_sentences, partial_string
-from blip.stream_llm import StreamingChat
+from pyxi.partial_json import complete_items, finished_sentences, partial_string
+from pyxi.stream_llm import StreamingChat
 from test_brain_and_server import make_brain
 
 
@@ -102,7 +102,7 @@ async def test_first_sentence_and_points_are_said_as_they_arrive(settings):
 
 
 def test_a_long_first_sentence_starts_at_its_first_pause():
-    from blip.partial_json import first_chunk
+    from pyxi.partial_json import first_chunk
 
     long = "This is a Yahoo Finance post claiming a leaked filing shows, honestly, a huge loss"
     assert first_chunk(long) == ""  # a normal sentence is said whole, so wait for its end

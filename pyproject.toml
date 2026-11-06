@@ -3,9 +3,9 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "blip-buddy"
+name = "pyxi-buddy"
 version = "0.1.0"
-description = "Blip: a playful desktop AI buddy that sees your screen, talks, points, sends agents to do real browser work, and explains things in 3D."
+description = "Pyxi: a playful desktop AI buddy that sees your screen, talks, points, sends agents to do real browser work, and explains things in 3D."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -32,7 +32,7 @@ dependencies = [
     "pypdf>=4.0",
     # Time zones on Windows (zoneinfo needs the IANA database)
     "tzdata>=2024.1",
-    # Windows' built-in OCR: reads text inside images so Blip can underline it
+    # Windows' built-in OCR: reads text inside images so Pyxi can underline it
     "winrt-runtime>=3.0; sys_platform == 'win32'",
     "winrt-Windows.Media.Ocr>=3.0; sys_platform == 'win32'",
     "winrt-Windows.Graphics.Imaging>=3.0; sys_platform == 'win32'",
@@ -50,10 +50,10 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.6", "httpx>=0.27"]
 gpu = ["nvidia-cublas-cu12>=12.4; sys_platform == 'win32'", "nvidia-cudnn-cu12>=9,<10; sys_platform == 'win32'"]
 
 [project.scripts]
-blip = "blip.cli:app"
+pyxi = "pyxi.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/blip"]
+packages = ["src/pyxi"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
@@ -74,4 +74,4 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 ignore = ["E501", "RUF001", "RUF012", "SIM105"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/blip/cli.py" = ["B008"]
+"src/pyxi/cli.py" = ["B008"]

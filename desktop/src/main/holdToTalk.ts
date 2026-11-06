@@ -48,7 +48,7 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
     try {
       fn(e);
     } catch (err) {
-      console.warn("[blip] keyboard hook handler failed:", err);
+      console.warn("[pyxi] keyboard hook handler failed:", err);
     }
   };
 
@@ -84,7 +84,7 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
           try {
             events.down();
           } catch (err) {
-            console.warn("[blip] push-to-talk start failed:", err);
+            console.warn("[pyxi] push-to-talk start failed:", err);
           }
         }
       }, HOLD_MS);
@@ -119,7 +119,7 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
     uIOhook.start();
     return true;
   } catch (err) {
-    console.warn("[blip] keyboard hook unavailable, hold-to-talk disabled:", err);
+    console.warn("[pyxi] keyboard hook unavailable, hold-to-talk disabled:", err);
     return false;
   }
 }
@@ -129,7 +129,7 @@ export function pasteText(): void {
   try {
     uIOhook.keyTap(UiohookKey.V, [UiohookKey.Ctrl]);
   } catch (err) {
-    console.warn("[blip] couldn't paste:", err);
+    console.warn("[pyxi] couldn't paste:", err);
   }
 }
 

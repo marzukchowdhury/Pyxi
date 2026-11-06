@@ -1,7 +1,7 @@
 /**
  * A 3D model floating on the desktop: no window, no background, just the object, its callouts
  * and a slim glass caption bar. Beats play like a short video: the story clock runs each beat's
- * animation while Blip narrates it, waits if the sentence runs long, then moves on.
+ * animation while Pyxi narrates it, waits if the sentence runs long, then moves on.
  *
  * Drag to orbit. Click a labelled part to ask about it. The cutaway button ghosts the casing.
  */
@@ -18,7 +18,7 @@ import { useOverlay, voice } from "./store";
 
 const STAGE = { w: 780, h: 560 };
 const CAPTION = 52; // the slim step bar under the model, in CSS px
-const AUDIO_WAIT_MS = 9000; // Blip's own voice for this step; after that the words show silently
+const AUDIO_WAIT_MS = 9000; // Pyxi's own voice for this step; after that the words show silently
 
 export function ObjectPanel() {
   const object = useOverlay((s) => s.object);
@@ -38,7 +38,7 @@ export function ObjectPanel() {
   const spoken = useRef(new Set<number>()); // beats whose narration has finished
   const started = useRef("");
   const spec = object?.spec;
-  if (import.meta.env.DEV) (window as unknown as { __blipClock: unknown }).__blipClock = clock;
+  if (import.meta.env.DEV) (window as unknown as { __pyxiClock: unknown }).__pyxiClock = clock;
 
   // New model (or an edit that replaced the explanation): start from the top.
   useEffect(() => {

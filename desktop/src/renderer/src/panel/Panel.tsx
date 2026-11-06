@@ -22,8 +22,8 @@ export function Panel() {
       <header className="titlebar">
         <div className={`mark state-${state}`}><Mark size={22} /></div>
         <div className="who">
-          <div className="name">Blip</div>
-          <div className="status">{connected ? STATE_LABEL[state] ?? state : "Brain offline: run blip serve"}</div>
+          <div className="name">Pyxi</div>
+          <div className="status">{connected ? STATE_LABEL[state] ?? state : "Brain offline: run pyxi serve"}</div>
         </div>
         <div className="spacer" />
         {hello && (
@@ -34,7 +34,7 @@ export function Panel() {
         )}
         <button className="win" onClick={() => bridge.togglePanel()} title="Hide (Ctrl+Alt+W)"><Minus /></button>
       </header>
-      {hello?.demo && <div className="demo-banner">Demo mode: no API key found, so Blip uses a scripted brain. Add OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) to blip/.env, or run <code>blip serve --local</code>.</div>}
+      {hello?.demo && <div className="demo-banner">Demo mode: no API key found, so Pyxi uses a scripted brain. Add OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) to pyxi/.env, or run <code>pyxi serve --local</code>.</div>}
       {requests.map((r) => (
         <div key={r.request_id} className="approval">
           <b>{r.agent}</b> {r.kind === "confirm" ? "wants to" : "asks"}: {r.text}
@@ -93,7 +93,7 @@ export function Chat() {
         {!chat.length && (
           <div className="hello">
             <div className="big-mark"><Mark size={46} /></div>
-            <h2>Hi, I'm Blip.</h2>
+            <h2>Hi, I'm Pyxi.</h2>
             <p>
               {talk.keys.length ? <>{talk.verb} {talk.keys.map((k, i) => <span key={k}>{i > 0 && "+"}<kbd>{k}</kbd></span>)} and ask</> : "Click the mic below and ask"} about anything on your screen, or type below. I'll point, draw, explain in 3D, or send a teammate to do it.
             </p>
@@ -104,7 +104,7 @@ export function Chat() {
           <div key={l.id} className={`line ${l.who}`}>
             {l.who === "agent" && <span className="avatar" style={{ ["--c" as string]: color(l.agent) }} />}
             <div className="text">
-              {l.who === "agent" && l.agent !== "Blip" && <div className="from" style={{ color: color(l.agent) }}>{l.agent}</div>}
+              {l.who === "agent" && l.agent !== "Pyxi" && <div className="from" style={{ color: color(l.agent) }}>{l.agent}</div>}
               {l.text}
             </div>
           </div>
@@ -114,7 +114,7 @@ export function Chat() {
       </div>
       <form className="composer" onSubmit={(e) => { e.preventDefault(); send(text); }}>
         <button type="button" className={`mic ${state === "listening" ? "live" : ""}`} onClick={() => bridge.ptt()} title={`Talk (${talk.keys.join("+") || "click"})`}><Mic /></button>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask Blip anything" />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask Pyxi anything" />
         <button type="submit" className="send" disabled={!text.trim()} aria-label="Send"><Send /></button>
       </form>
     </div>
@@ -152,7 +152,7 @@ const ROLE: Record<string, { label: string; Icon: (p: React.SVGProps<SVGSVGEleme
   explainer: { label: "3D explainer", Icon: Cube },
 };
 
-/** Blip itself: the one you talk to, who hands work to everyone below. */
+/** Pyxi itself: the one you talk to, who hands work to everyone below. */
 function LeadCard({ agent, crew, busy }: { agent: Agent; crew: number; busy: number }) {
   return (
     <div className="lead" style={{ "--c": agent.color } as React.CSSProperties}>
@@ -288,11 +288,11 @@ export function Palace() {
         <h3>Memory Palace {hello && <span className={`palace-state ${hello.ambient_memory ? "on" : ""}`}>{hello.ambient_memory ? "On" : "Off"}</span>}</h3>
         {hello && !hello.ambient_memory ? (
           <>
-            <p>Right now Blip only remembers the screens you ask it about. Turn this on and it also keeps a quiet history of what was where and what you did (window titles, focus and UI layout; no keystrokes, no pixels unless you allow them), so you can travel back or ask how you got somewhere. Private apps are never recorded, and it all stays on this computer.</p>
+            <p>Right now Pyxi only remembers the screens you ask it about. Turn this on and it also keeps a quiet history of what was where and what you did (window titles, focus and UI layout; no keystrokes, no pixels unless you allow them), so you can travel back or ask how you got somewhere. Private apps are never recorded, and it all stays on this computer.</p>
             <button className="primary optin" onClick={() => set("ambient_memory", true)}>Turn on the Memory Palace</button>
           </>
         ) : (
-          <p>Blip keeps a quiet history of your screen (what was where, and what you did), so you can travel back in time or ask how you got here. It all stays on this computer.</p>
+          <p>Pyxi keeps a quiet history of your screen (what was where, and what you did), so you can travel back in time or ask how you got here. It all stays on this computer.</p>
         )}
         <form className="travel" onSubmit={(e) => { e.preventDefault(); brain.send({ type: "time_travel", query, when }); }}>
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="What were you looking at? e.g. pricing page" />
@@ -304,7 +304,7 @@ export function Palace() {
       <div className="cols">
         <div>
           <h4>Moments</h4>
-          {!moments.length && <p className="muted">Nothing yet. Use your computer for a bit and Blip will build it up.</p>}
+          {!moments.length && <p className="muted">Nothing yet. Use your computer for a bit and Pyxi will build it up.</p>}
           {moments.map((m) => (
             <button key={m.id} className="moment-row" onClick={() => brain.send({ type: "palace_seek", snapshot_id: m.id })}>
               <span className="t">{new Date(m.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
@@ -324,7 +324,7 @@ export function Palace() {
         <div className="privacy-box">
           <label><input type="checkbox" checked={hello.ambient_memory} onChange={(e) => set("ambient_memory", e.target.checked)} /> Build my Memory Palace (window, focus and UI metadata)</label>
           <label><input type="checkbox" checked={hello.keep_screenshots} onChange={(e) => set("keep_screenshots", e.target.checked)} /> Also keep small screenshots, so time travel shows real pixels</label>
-          <button className="danger" onClick={() => confirm("Forget everything Blip remembers about your screen?") && set("forget_screen", true)}>Forget everything</button>
+          <button className="danger" onClick={() => confirm("Forget everything Pyxi remembers about your screen?") && set("forget_screen", true)}>Forget everything</button>
         </div>
       )}
     </div>
@@ -334,7 +334,7 @@ export function Palace() {
 // ---------------------------------------------------------------------------- gallery
 const BLURBS: Record<string, string> = {
   https: "Animated packets between browser, DNS, server and a certificate authority.",
-  blip: "A look inside Blip itself: ears, eyes, brain, voice and agents.",
+  pyxi: "A look inside Pyxi itself: ears, eyes, brain, voice and agents.",
   neural_net: "Layers of neurons, a forward pass, and learning from mistakes.",
   git: "Branches as lanes in time, merging back into main.",
 };
@@ -359,7 +359,7 @@ export function Gallery() {
 }
 
 // ---------------------------------------------------------------------------- settings
-/** Discord, OBS and Meet can show Blip (default), or never see it (privacy). */
+/** Discord, OBS and Meet can show Pyxi (default), or never see it (privacy). */
 function ShareToggle() {
   const [on, setOn] = useState(true);
   useEffect(() => {
@@ -368,7 +368,7 @@ function ShareToggle() {
   }, []);
   return (
     <label>
-      <input type="checkbox" checked={on} onChange={(e) => { setOn(e.target.checked); bridge.setShareVisible(e.target.checked); }} /> Show Blip in screen shares (Discord, OBS, Meet). Turn off to keep its drawings out of every capture.
+      <input type="checkbox" checked={on} onChange={(e) => { setOn(e.target.checked); bridge.setShareVisible(e.target.checked); }} /> Show Pyxi in screen shares (Discord, OBS, Meet). Turn off to keep its drawings out of every capture.
     </label>
   );
 }
@@ -380,7 +380,7 @@ export function Settings() {
     void bridge.hotkeys().then(setKeys);
   }, []);
   const k = (name: string) => keysOf(keys[name]).join("+") || "unavailable";
-  if (!hello) return <p className="muted">Waiting for Blip's brain…</p>;
+  if (!hello) return <p className="muted">Waiting for Pyxi's brain…</p>;
   const set = (key: string, value: unknown) => brain.send({ type: "set", key, value });
   return (
     <div className="settings">
@@ -396,13 +396,13 @@ export function Settings() {
       <Routines />
       <h4>Hotkeys</h4>
       {keys.hold && <div className="kv"><span>Talk (hold, release to send)</span><kbd>{k("hold")}</kbd></div>}
-      <div className="kv"><span>Type to Blip</span><kbd>Ctrl, Ctrl</kbd></div>
+      <div className="kv"><span>Type to Pyxi</span><kbd>Ctrl, Ctrl</kbd></div>
       <div className="kv"><span>Talk (press to start or stop)</span><kbd>{k("talk")}</kbd></div>
       <div className="kv"><span>Show or hide this panel</span><kbd>{k("panel")}</kbd></div>
       <div className="kv"><span>Dismiss drawings and scenes</span><kbd>{k("dismiss")}</kbd></div>
       <div className="kv"><span>Pause screen sharing</span><kbd>{k("privacy")}</kbd></div>
       <h4>Privacy</h4>
-      <p className="muted">Blip only looks at your screen when you talk to it, plus lightweight UI metadata for the Memory Palace. Password managers, banking and password fields are never captured. Everything is stored locally in <code>.blip/</code>. Blip v{hello.version}.</p>
+      <p className="muted">Pyxi only looks at your screen when you talk to it, plus lightweight UI metadata for the Memory Palace. Password managers, banking and password fields are never captured. Everything is stored locally in <code>.pyxi/</code>. Pyxi v{hello.version}.</p>
     </div>
   );
 }

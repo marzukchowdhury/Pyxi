@@ -1,6 +1,6 @@
-"""Replay everyday requests on real recorded screens and check Blip behaves, every time.
+"""Replay everyday requests on real recorded screens and check Pyxi behaves, every time.
 
-Rebuilds the screen Blip saw in a recorded turn (UI elements, OCR lines, the screenshot), runs
+Rebuilds the screen Pyxi saw in a recorded turn (UI elements, OCR lines, the screenshot), runs
 a request through the real chat model, and checks the rules: explanations get a full cue
 card that ends with an offer, 3D only when asked, account actions become errands, research
 goes to Scout, small talk stays short. Errands, browser jobs and 3D builds are intercepted,
@@ -24,14 +24,14 @@ from pathlib import Path
 from otto.config import load_dotenv
 from PIL import Image
 
-from blip import tidy
-from blip.companion.brain import Brain
-from blip.config import BlipSettings
-from blip.hub import Hub
-from blip.screen.context import ScreenContext, UIElement, WindowInfo
-from blip.screen.ocr import TextLine
+from pyxi import tidy
+from pyxi.companion.brain import Brain
+from pyxi.config import PyxiSettings
+from pyxi.hub import Hub
+from pyxi.screen.context import ScreenContext, UIElement, WindowInfo
+from pyxi.screen.ocr import TextLine
 
-DB = ".blip/blip.db"
+DB = ".pyxi/pyxi.db"
 EL = re.compile(r'^\s*\[(\d+)\] (\w+)(?: "(.*)")? @\((-?\d+),(-?\d+),(\d+)x(\d+)\)')
 OCR = re.compile(r'^\[(\d+)\] "(.*)" @\((-?\d+),(-?\d+),(\d+)x(\d+)\)')
 
@@ -104,7 +104,7 @@ SCENARIOS = [
         "Can this jet really hover in midair like a helicopter?",
         "visual",
     ),
-    ("small talk", "turn_49b75541", "Hey Blip, how's your day going?", "chat"),
+    ("small talk", "turn_49b75541", "Hey Pyxi, how's your day going?", "chat"),
     (
         "meeting",
         "turn_49b75541",
@@ -121,7 +121,7 @@ SCENARIOS = [
     (
         "song, quieter",
         "turn_57095984",
-        "Hey Blip, can you play a song on YouTube? Umm... Biddie Jean Michael Jackson and keep the "
+        "Hey Pyxi, can you play a song on YouTube? Umm... Biddie Jean Michael Jackson and keep the "
         "volume a bit lower.",
         "play+volume",
     ),
@@ -142,7 +142,7 @@ SCENARIOS = [
     (
         "three-way split",
         "turn_57095984",
-        "Hey Blip, can you keep my screen into three parts and in one part kept the Facebook right now "
+        "Hey Pyxi, can you keep my screen into three parts and in one part kept the Facebook right now "
         "I'm in in one part kept stake and in one part kept my gmail on",
         "arrange3",
     ),
@@ -165,7 +165,7 @@ SCENARIOS = [
 
 
 async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path) -> dict:
-    settings = BlipSettings(data_dir=tmp / name.replace(" ", "_"))
+    settings = PyxiSettings(data_dir=tmp / name.replace(" ", "_"))
     settings.voice.tts = "none"
     hub = Hub()
     events: list[dict] = []
@@ -245,7 +245,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     # Pretend an account is connected (without touching the real one), so errands can start.
     from otto.llm.base import ToolSpec
 
-    from blip.connectors import Tool
+    from pyxi.connectors import Tool
 
     async def _noop(args):
         return "ok"
@@ -357,7 +357,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append("arranged without panes")
     if expect == "tidy" and not any(b.startswith("tidy") for b in background):
         problems.append("no tidy plan")
-    from blip.companion.brain import drop_false_promises
+    from pyxi.companion.brain import drop_false_promises
 
     if drop_false_promises(said.split(". ")[-1])[1]:
         problems.append("ends promising a search")
@@ -381,7 +381,7 @@ async def main() -> None:
     load_dotenv()
     repeats = int(sys.argv[1]) if len(sys.argv) > 1 else 2
     only = sys.argv[2] if len(sys.argv) > 2 else ""  # run just the scenarios whose name has this
-    tmp = Path(tempfile.mkdtemp(prefix="blip_scen_"))
+    tmp = Path(tempfile.mkdtemp(prefix="pyxi_scen_"))
     results = []
     for r in range(repeats):
         for name, turn_id, q, expect in SCENARIOS:

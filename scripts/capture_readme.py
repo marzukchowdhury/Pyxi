@@ -5,8 +5,8 @@ events are injected the way the brain sends them, and 3D scenes come from a demo
 its own empty data folder. Nothing reads the real desktop.
 
     1. cd desktop && npx vite --config vite.web.config.ts          (the preview, port 5199)
-    2. BLIP_DATA_DIR=<empty folder> BLIP_MODELS_DIR=.blip/models blip serve --demo   (port 8766)
-       (and the same BLIP_DATA_DIR for this script, so the walkthrough's pictures can be served)
+    2. PYXI_DATA_DIR=<empty folder> PYXI_MODELS_DIR=.pyxi/models pyxi serve --demo   (port 8766)
+       (and the same PYXI_DATA_DIR for this script, so the walkthrough's pictures can be served)
     3. python scripts/capture_readme.py [only-these-names]
 
 The ghost walkthrough needs a real Scout run on Otto's local demo site, so it runs one first
@@ -26,7 +26,7 @@ from PIL import Image
 from playwright.async_api import Page, async_playwright
 
 OUT = Path("docs/images")
-TMP = Path(".blip/shots")
+TMP = Path(".pyxi/shots")
 URL = "http://localhost:5199"
 GL = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
 ONLY = set(sys.argv[1:])
@@ -45,7 +45,7 @@ async def overlay(b, events: list[dict] | None = None, mouse=(1010, 470)) -> Pag
     await pg.wait_for_timeout(1300)
     await pg.mouse.move(*mouse)
     for ev in events or []:
-        await pg.evaluate("(e) => window.__blip.inject(e)", ev)
+        await pg.evaluate("(e) => window.__pyxi.inject(e)", ev)
         await pg.wait_for_timeout(150)
     return pg
 
@@ -53,15 +53,15 @@ async def overlay(b, events: list[dict] | None = None, mouse=(1010, 470)) -> Pag
 async def show(pg: Page, name: str) -> None:
     """Open a gallery scene or 3D model as the brain sends it (no placement: the preview's one
     screen, rather than whichever real monitor the mouse is on)."""
-    from blip.scenes import get_scene
-    from blip.scenes.object_gallery import OBJECT_GALLERY
+    from pyxi.scenes import get_scene
+    from pyxi.scenes.object_gallery import OBJECT_GALLERY
 
     if name in OBJECT_GALLERY:
         model = OBJECT_GALLERY[name]().model_dump(mode="json")
         ev = {"type": "object", "scene": model, "audio_key": f"{name}:readme", "restart": True, "place": None}
     else:
         ev = {"type": "scene", "scene": get_scene(name).model_dump(by_alias=True, mode="json")}
-    await pg.evaluate("(e) => window.__blip.inject(e)", ev)
+    await pg.evaluate("(e) => window.__pyxi.inject(e)", ev)
 
 
 async def scene_step(pg: Page, name: str, step: int) -> None:
@@ -91,17 +91,17 @@ sys.path.insert(0, "tests")
 from conftest import FakeScreen
 from otto.demo_site import DemoSite
 from otto.demo_site.scripted_demo import demo_provider
-from blip.companion.brain import Brain
-from blip.config import BlipSettings
-from blip.demo import DemoLLM
-from blip.hub import Hub
-from blip.voice import make_tts
-from blip.walkthrough import build_walkthrough
+from pyxi.companion.brain import Brain
+from pyxi.config import PyxiSettings
+from pyxi.demo import DemoLLM
+from pyxi.hub import Hub
+from pyxi.voice import make_tts
+from pyxi.walkthrough import build_walkthrough
 
 async def main():
     # The demo brain's own folder, so it can serve the run's screenshots to the walkthrough.
     import os
-    s = BlipSettings(_env_file=None, data_dir=os.environ.get("BLIP_DATA_DIR") or tempfile.mkdtemp(prefix="blip_walk_"), voice={"tts": "client"})
+    s = PyxiSettings(_env_file=None, data_dir=os.environ.get("PYXI_DATA_DIR") or tempfile.mkdtemp(prefix="pyxi_walk_"), voice={"tts": "client"})
     with DemoSite() as site:
         brain = Brain(s, Hub(), llm=DemoLLM(), otto_llm=demo_provider(), screen=FakeScreen(), tts=make_tts(s.voice, s.models_dir))
         brain.jobs.headed = False
@@ -129,7 +129,7 @@ async def main() -> None:
                 {"type": "annotate", "annotations": [
                     {"id": "h1", "kind": "highlight", "rect": DARK, "at": None, "to": None, "label": "Dark mode", "ttl_s": 12},
                     {"id": "c1", "kind": "circle", "rect": APPEARANCE, "at": None, "to": None, "label": None, "ttl_s": 12}]},
-                {"type": "say", "agent": "Blip", "index": 0, "total": 1, "text": "Right here: hit Export when you're happy with the theme.", "audio": None, "duration_s": 2,
+                {"type": "say", "agent": "Pyxi", "index": 0, "total": 1, "text": "Right here: hit Export when you're happy with the theme.", "audio": None, "duration_s": 2,
                  "annotations": [{"id": "p1", "kind": "point", "at": [568, 426], "rect": EXPORT, "to": None, "label": "Export", "ttl_s": 9}]},
             ])
             await pg.wait_for_timeout(700)
@@ -148,7 +148,7 @@ async def main() -> None:
                         {"n": 4, "text": "Four menus for one toggle. Classic.", "kind": "point", "mark": "none", "rect": None}]}
             pg = await overlay(b, [{"type": "state", "state": "speaking"}, {"type": "notes", "card": card}])
             for n in (1, 2, 3, 4):
-                await pg.evaluate("(n) => window.__blip.inject({type: 'say', agent: 'Blip', index: n, total: 4, text: '', audio: null, duration_s: 0.1, notes: [n], annotations: []})", n)
+                await pg.evaluate("(n) => window.__pyxi.inject({type: 'say', agent: 'Pyxi', index: n, total: 4, text: '', audio: null, duration_s: 0.1, notes: [n], annotations: []})", n)
                 await pg.wait_for_timeout(450)
             await pg.wait_for_timeout(1500)
             await pg.screenshot(path=TMP / "field_notes.png")
@@ -227,7 +227,7 @@ async def main() -> None:
                 await pg.screenshot(path=OUT / "panel-chat.png")
             if wanted("panel-team"):
                 await pg.get_by_role("button", name="Team", exact=True).click()
-                await pg.evaluate("(now) => window.__blip.inject({type: 'job', job: {id: 'j1', agent_id: 'scout', agent_name: 'Scout', role: 'browser', task: 'Compare the pricing pages of Linear and Notion', status: 'running', summary: '', data: null, outputs: [], run_id: null, cost_usd: 0.012, steps: 4, parent: null, created_at: now}})", now)
+                await pg.evaluate("(now) => window.__pyxi.inject({type: 'job', job: {id: 'j1', agent_id: 'scout', agent_name: 'Scout', role: 'browser', task: 'Compare the pricing pages of Linear and Notion', status: 'running', summary: '', data: null, outputs: [], run_id: null, cost_usd: 0.012, steps: 4, parent: null, created_at: now}})", now)
                 await pg.wait_for_timeout(600)
                 await pg.screenshot(path=OUT / "panel-team.png")
             if wanted("panel-memory"):

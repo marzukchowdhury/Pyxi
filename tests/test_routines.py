@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from blip.routines import RoutineStore, parse_time
+from pyxi.routines import RoutineStore, parse_time
 from test_brain_and_server import make_brain
 from test_notes_and_guides import Scripted
 

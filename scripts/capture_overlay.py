@@ -38,7 +38,7 @@ async def main(kind: str, arg: str, steps: list[int], out: str):
                 await pg.screenshot(path=f"{out}_{st}.png")
         else:  # inject events (json list) and shoot
             for ev in json.loads(arg):
-                await pg.evaluate("(e) => window.__blip.inject(e)", ev)
+                await pg.evaluate("(e) => window.__pyxi.inject(e)", ev)
                 await pg.wait_for_timeout(150)
             await pg.mouse.move(1010, 470)
             await pg.wait_for_timeout(steps[0] if steps else 900)
@@ -57,6 +57,6 @@ asyncio.run(
         steps,
         sys.argv[4]
         if len(sys.argv) > 4
-        else ".blip/shots/" + (arg if kind == "scene" else "events"),
+        else ".pyxi/shots/" + (arg if kind == "scene" else "events"),
     )
 )

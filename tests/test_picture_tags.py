@@ -4,10 +4,10 @@ import time
 
 from PIL import Image
 
-from blip.companion.aim import Survey, gridded, match
-from blip.companion.notes import build_card, tag_size
-from blip.partial_json import picture_head
-from blip.screen.context import ScreenContext, WindowInfo
+from pyxi.companion.aim import Survey, gridded, match
+from pyxi.companion.notes import build_card, tag_size
+from pyxi.partial_json import picture_head
+from pyxi.screen.context import ScreenContext, WindowInfo
 
 HEART = {
     "Right atrium": (430, 500),

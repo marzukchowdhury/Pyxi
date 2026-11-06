@@ -1,9 +1,9 @@
 /**
- * The notch: a slim glass pill hanging from the top edge of the main screen. It is Blip's
+ * The notch: a slim glass pill hanging from the top edge of the main screen. It is Pyxi's
  * voice surface, so the chat window can stay closed.
  *
  *   hold Ctrl + Alt   it opens into "Listening" with a live waveform of your voice
- *   let go            "Thinking" (or "Looking at your screen"), then Blip's words stream in
+ *   let go            "Thinking" (or "Looking at your screen"), then Pyxi's words stream in
  *   hover it          it unfolds into a small chat: recent lines, a text box, the mic
  *   click it          it unfolds into everything: chat, team, memory, 3D, voice, settings
  *                     (also Ctrl+Alt+W or the tray icon); Escape or the close button folds it
@@ -219,7 +219,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   };
 
   const level = mode === "listening" ? micLevel : () => voice.level();
-  // Say exactly what Blip is reading, so you're never unsure what it sees.
+  // Say exactly what Pyxi is reading, so you're never unsure what it sees.
   const status = state === "looking" ? `Looking at ${seeing || "your screen"}` : state === "transcribing" ? "Got it" : "Thinking";
 
   return (
@@ -277,8 +277,8 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
             <div className="notch-row top">
               <Firefly live />
               <div className="notch-say">
-                {caption.agent !== "Blip" && <b>{caption.agent}</b>}
-                {captions ? caption.text : <span className="notch-text">{caption.agent === "Blip" ? "Speaking" : "Talking"}</span>}
+                {caption.agent !== "Pyxi" && <b>{caption.agent}</b>}
+                {captions ? caption.text : <span className="notch-text">{caption.agent === "Pyxi" ? "Speaking" : "Talking"}</span>}
               </div>
               <Wave level={level} small />
             </div>
@@ -297,7 +297,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
               {now - bornAt.current < WAKE_MS ? (
                 <span className="notch-text shimmer">Waking up</span>
               ) : (
-                <span className="notch-text">Can't reach Blip's brain. Run <kbd>blip serve</kbd></span>
+                <span className="notch-text">Can't reach Pyxi's brain. Run <kbd>pyxi serve</kbd></span>
               )}
             </div>
           )}
@@ -351,7 +351,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
             <div className="notch-full">
               <div className="notch-head">
                 <Firefly live={state === "listening" || state === "speaking"} spin={state === "thinking" || state === "looking" || state === "transcribing"} />
-                <b>Blip</b>
+                <b>Pyxi</b>
                 <span className={state === "idle" ? "" : "shimmer"}>
                   {state === "idle" ? (connected ? "Ready" : "Waiting for the brain") : state === "listening" ? "Listening" : state === "speaking" ? "Speaking" : status}
                 </span>
@@ -377,7 +377,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
             <div className="notch-open">
               <div className="notch-head">
                 <Firefly live={state === "listening" || state === "speaking"} spin={state === "thinking" || state === "looking" || state === "transcribing"} />
-                <b>Blip</b>
+                <b>Pyxi</b>
                 <span className={state === "idle" ? "" : "shimmer"}>
                   {state === "idle" ? (connected ? "Ready" : "Waiting for the brain") : state === "listening" ? "Listening" : state === "speaking" ? "Speaking" : status}
                 </span>
@@ -398,7 +398,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                 )}
                 {chat.slice(-8).map((l) => (
                   <div key={l.id} className={`nl ${l.who}`}>
-                    {l.who === "agent" && l.agent && l.agent !== "Blip" && <b>{l.agent}</b>}
+                    {l.who === "agent" && l.agent && l.agent !== "Pyxi" && <b>{l.agent}</b>}
                     {l.text}
                   </div>
                 ))}
@@ -407,9 +407,9 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                 <input
                   ref={input}
                   value={text}
-                  placeholder="Ask Blip anything"
+                  placeholder="Ask Pyxi anything"
                   onChange={(e) => {
-                    // The first key of a new message: Blip starts looking at the screen now, not after Enter.
+                    // The first key of a new message: Pyxi starts looking at the screen now, not after Enter.
                     if (!text && e.target.value) brain.send({ type: "look_ahead" });
                     setText(e.target.value);
                   }}
@@ -440,7 +440,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   );
 }
 
-/** The firefly in small: a warm dot with a halo that glows while Blip talks and flickers while it thinks. */
+/** The firefly in small: a warm dot with a halo that glows while Pyxi talks and flickers while it thinks. */
 function Firefly({ live = false, spin = false }: { live?: boolean; spin?: boolean }) {
   return (
     <svg className={`notch-mark ${live ? "live" : ""} ${spin ? "spin" : ""}`} width="14" height="14" viewBox="-7 -7 14 14">
@@ -450,7 +450,7 @@ function Firefly({ live = false, spin = false }: { live?: boolean; spin?: boolea
   );
 }
 
-const AGENT_COLORS: Record<string, string> = { Scout: "#7dd3fc", Quill: "#fcd34d", Sketch: "#f9a8d4", Blip: "#ffc861" };
+const AGENT_COLORS: Record<string, string> = { Scout: "#7dd3fc", Quill: "#fcd34d", Sketch: "#f9a8d4", Pyxi: "#ffc861" };
 
 function Marks({ jobs }: { jobs: string[] }) {
   return (

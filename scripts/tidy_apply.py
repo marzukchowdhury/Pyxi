@@ -1,7 +1,7 @@
 """Carry out the tidy plan saved by scripts/tidy_dry_run.py, exactly as approved.
 
-Re-checks every file is still there, then moves them with the same undo log Blip uses, so
-saying "undo that" to Blip (or scripts/tidy_apply.py --undo) puts everything back.
+Re-checks every file is still there, then moves them with the same undo log Pyxi uses, so
+saying "undo that" to Pyxi (or scripts/tidy_apply.py --undo) puts everything back.
 usage: python scripts/tidy_apply.py [--undo]
 """
 
@@ -11,15 +11,15 @@ import json
 import sys
 from pathlib import Path
 
-from blip import tidy
+from pyxi import tidy
 
-LOGS = Path(".blip/tidy")
+LOGS = Path(".pyxi/tidy")
 
 if "--undo" in sys.argv:
     print(tidy.undo_last(LOGS))
     raise SystemExit
 
-saved = json.loads(Path(".blip/tidy_plan.json").read_text())
+saved = json.loads(Path(".pyxi/tidy_plan.json").read_text())
 folder = Path(saved["folder"])
 groups: dict[str, list[str]] = {}
 for name, into in saved["moves"]:

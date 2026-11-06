@@ -2,7 +2,7 @@
 
 import pytest
 
-from blip import windows
+from pyxi import windows
 
 
 @pytest.fixture
@@ -36,10 +36,10 @@ def test_browser_flags_cover_the_common_browsers():
 
 
 def test_named_window_finds_the_app_the_request_names():
-    from blip.windows import named_window
+    from pyxi.windows import named_window
 
     open_now = [
-        (11, "Blip overlay", r"C:\x\electron.exe"),
+        (11, "Pyxi overlay", r"C:\x\electron.exe"),
         (12, "Claude", r"C:\x\claude.exe"),
         (13, "*notes - Notepad", r"C:\Windows\notepad.exe"),
         (14, "Vercel - Google Chrome", r"C:\x\chrome.exe"),
@@ -54,7 +54,7 @@ def test_named_window_finds_the_app_the_request_names():
 
 
 def test_panes_tile_the_screen_without_gaps():
-    from blip.windows import pane_rects
+    from pyxi.windows import pane_rects
 
     area = (0, 0, 1921, 1032)
     three = pane_rects(area, 3)
@@ -67,7 +67,7 @@ def test_panes_tile_the_screen_without_gaps():
 
 
 def test_open_windows_are_found_by_site_or_name():
-    from blip.windows import window_like
+    from pyxi.windows import window_like
 
     open_now = [
         (1, "Facebook - Mozilla Firefox", r"C:\x\firefox.exe"),
@@ -104,7 +104,7 @@ async def test_three_parts_in_one_call(settings, monkeypatch):
         return 9
 
     monkeypatch.setattr(windows, "open_new_window", fake_open)
-    monkeypatch.setattr("blip.companion.brain.asyncio.sleep", _no_sleep)
+    monkeypatch.setattr("pyxi.companion.brain.asyncio.sleep", _no_sleep)
     brain, _ = make_brain(settings)
     brain._ctx = type("C", (), {"window": type("W", (), {"hwnd": 7})()})()
     note = await brain._arrange_windows(

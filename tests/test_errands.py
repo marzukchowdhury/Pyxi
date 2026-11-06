@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from blip.companion.errands import said_by_user
-from blip.timecontext import now_block
+from pyxi.companion.errands import said_by_user
+from pyxi.timecontext import now_block
 from test_brain_and_server import make_brain
 from test_connectors_and_docs import Script
 
@@ -201,7 +201,7 @@ async def test_the_conversation_can_read_accounts_but_actions_are_errands(settin
 
 
 async def test_lookups_dont_chatter_and_errors_are_human(settings):
-    from blip.companion.brain import friendly_error, strip_filler
+    from pyxi.companion.brain import friendly_error, strip_filler
 
     llm = Script(
         [("say", {"text": "Let me check your calendar."}), ("calendar_list", {"days": 2})],
@@ -223,8 +223,8 @@ async def test_a_sent_email_finishes_the_errand_without_another_model_round():
     from otto.llm.base import ToolSpec
     from otto.types import ToolCall, Usage
 
-    from blip.companion.errands import run_errand
-    from blip.connectors import Outgoing, Tool
+    from pyxi.companion.errands import run_errand
+    from pyxi.connectors import Outgoing, Tool
 
     calls = 0
 

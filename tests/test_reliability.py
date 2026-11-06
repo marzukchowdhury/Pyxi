@@ -6,10 +6,10 @@ import asyncio
 
 from otto.types import LLMResponse, ToolCall, Usage
 
-from blip.companion.brain import visual_opener
-from blip.companion.errands import run_errand
-from blip.connectors import Outgoing
-from blip.screen.ocr import TextLine, find_text
+from pyxi.companion.brain import visual_opener
+from pyxi.companion.errands import run_errand
+from pyxi.connectors import Outgoing
+from pyxi.screen.ocr import TextLine, find_text
 from test_brain_and_server import make_brain
 from test_connectors_and_docs import Script
 from test_errands import connect, tomorrow_at

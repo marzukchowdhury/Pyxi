@@ -6,8 +6,8 @@ import asyncio
 
 from otto.types import LLMResponse, ToolCall, Usage
 
-from blip.companion.notes import build_card
 from conftest import fake_context
+from pyxi.companion.notes import build_card
 from test_brain_and_server import make_brain
 
 

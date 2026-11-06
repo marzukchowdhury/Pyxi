@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from blip.companion.actions import app_target, safe_url
 from conftest import fake_context
+from pyxi.companion.actions import app_target, safe_url
 from test_brain_and_server import make_brain
 from test_notes_and_guides import Scripted
 
@@ -69,4 +69,4 @@ async def test_what_do_you_know_and_forget(settings):
     await brain.turn("what do you know about me?")
     assert "- name: Marzuk" in llm.prompts[2]  # the lookup came back to the model
     await brain.turn("forget everything about me")
-    assert brain.memory.all("agent:blip") == []
+    assert brain.memory.all("agent:pyxi") == []

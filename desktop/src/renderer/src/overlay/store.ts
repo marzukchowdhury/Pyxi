@@ -9,7 +9,7 @@ import { brain } from "../shared/socket";
 export const display = currentDisplay();
 export const isPrimary = display.primary;
 // One voice: only the main screen's overlay plays sound. Other monitors' overlays hand their
-// clips (a model's narration, a drawing's steps) to it, so everything Blip says is one queue.
+// clips (a model's narration, a drawing's steps) to it, so everything Pyxi says is one queue.
 export const voice: Voice = isPrimary ? new AudioQueue() : new RemoteVoice();
 if (isPrimary) {
   bridge.onVoicePlay((c) => {
@@ -95,14 +95,14 @@ interface OverlayState {
   /** The notch's short conversation: the last few exchanges, sentences of one reply merged. */
   chat: ChatLine[];
   notice: { text: string; at: number } | null;
-  /** The app Blip last looked at ("Chrome"), shown while it reads the screen. */
+  /** The app Pyxi last looked at ("Chrome"), shown while it reads the screen. */
   seeing: string;
-  /** Show Blip's words in the notch while it talks (voice settings). */
+  /** Show Pyxi's words in the notch while it talks (voice settings). */
   captions: boolean;
   /** The note card on screen; `revealed` holds the point numbers written so far. */
   notes: { card: NoteCard; revealed: number[]; markers: boolean; at: number } | null;
   guide: { step: number; total: number | null; goal: string; label: string; action: string } | null;
-  /** What Blip's hands are doing right now ("Clicking Save"), while she has the mouse. */
+  /** What Pyxi's hands are doing right now ("Clicking Save"), while she has the mouse. */
   driving: string | null;
   /** A guide they finished themselves: a brief moment of light where they made the last move. */
   cheer: { x: number; y: number; at: number } | null;
@@ -210,11 +210,11 @@ export function prettyApp(app: string): string {
 }
 
 /** Write the next note point(s): the ones the sentence names, or (without markers) the next one. */
-// Blip starts talking before the cue card has finished arriving: points named in a sentence
+// Pyxi starts talking before the cue card has finished arriving: points named in a sentence
 // that's already playing are remembered and shown the moment the card lands.
 let earlyNotes: number[] = [];
 
-/** Clear the spoken caption once Blip has really finished talking (not at a fixed moment, which
+/** Clear the spoken caption once Pyxi has really finished talking (not at a fixed moment, which
  * left it stuck on screen whenever audio was still playing then). */
 let captionTimer: number | undefined;
 function clearCaptionWhenQuiet(): void {
@@ -346,7 +346,7 @@ brain.on((e: BrainEvent) => {
       addAnnotations(e.annotations);
       break;
     case "clear":
-      // The screen moved on (another window, or Blip was asked to clear): drop everything that
+      // The screen moved on (another window, or Pyxi was asked to clear): drop everything that
       // points at specific pixels.
       useOverlay.setState({ annotations: [], flyTo: null, notes: null, sketch: null });
       break;

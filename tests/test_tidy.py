@@ -1,6 +1,6 @@
 """Tidying a folder: only moves, never overwrites, never touches folders, and undoes exactly."""
 
-from blip import tidy
+from pyxi import tidy
 
 
 def mess(tmp_path):

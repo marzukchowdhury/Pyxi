@@ -1,4 +1,4 @@
-// TypeScript mirror of the brain's events (src/blip/*). Coordinates are physical screen px.
+// TypeScript mirror of the brain's events (src/pyxi/*). Coordinates are physical screen px.
 
 export type Rect = [number, number, number, number];
 export type BrainState = "idle" | "listening" | "transcribing" | "looking" | "thinking" | "speaking";
@@ -101,7 +101,7 @@ export interface SceneSpec {
   auto_play: boolean;
 }
 
-// ---- object scenes (src/blip/scenes/objects.py): models built from parts, animated on a timeline
+// ---- object scenes (src/pyxi/scenes/objects.py): models built from parts, animated on a timeline
 export type Vec3 = [number, number, number];
 export type PartShape =
   | "box" | "rounded_box" | "sphere" | "cylinder" | "cone" | "capsule" | "torus" | "ring" | "wedge"

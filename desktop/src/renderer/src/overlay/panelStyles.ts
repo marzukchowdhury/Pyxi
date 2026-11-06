@@ -53,7 +53,7 @@ export function installPanelStyles(): void {
   if (installed || typeof document === "undefined") return;
   installed = true;
   const style = document.createElement("style");
-  style.dataset.blip = "panel-in-notch";
+  style.dataset.pyxi = "panel-in-notch";
   style.textContent = scopePanelCss(raw);
   document.head.appendChild(style);
 }

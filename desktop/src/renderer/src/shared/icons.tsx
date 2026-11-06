@@ -24,7 +24,7 @@ export const Stop = (p: P) => <svg {...base(p)}><rect x="6" y="6" width="8" heig
 export const Minus = (p: P) => <svg {...base(p)}><path d="M5 10h10" /></svg>;
 export const Cube = (p: P) => <svg {...base(p)}><path d="M10 3 16 6.5v7L10 17l-6-3.5v-7Z" /><path d="M4 6.5 10 10l6-3.5M10 10v7" /></svg>;
 
-/** Blip's mark: the same little firefly as the on-screen presence. */
+/** Pyxi's mark: the same little firefly as the on-screen presence. */
 export const Mark = ({ size = 18, ...p }: P & { size?: number }) => (
   <svg width={size} height={size} viewBox="-12 -12 24 24" {...p}>
     <defs>

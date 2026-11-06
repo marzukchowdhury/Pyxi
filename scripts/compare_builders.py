@@ -1,7 +1,7 @@
 """Build the same 3D model with several builder models and compare time, cost and validity.
 
 usage: python scripts/compare_builders.py "<brief>" model1 model2 ...
-Writes each model to .blip/builds/<model>.json for viewing in the overlay preview.
+Writes each model to .pyxi/builds/<model>.json for viewing in the overlay preview.
 """
 
 from __future__ import annotations
@@ -13,9 +13,9 @@ from pathlib import Path
 
 from otto.llm import make_provider
 
-from blip.config import BlipSettings
-from blip.llm import otto_settings
-from blip.scenes.builder import build_model
+from pyxi.config import PyxiSettings
+from pyxi.llm import otto_settings
+from pyxi.scenes.builder import build_model
 
 
 async def main() -> None:
@@ -23,8 +23,8 @@ async def main() -> None:
 
     load_dotenv()  # the same .env the app uses (the key is never printed)
     brief, models = sys.argv[1], sys.argv[2:]
-    settings = BlipSettings()
-    out = Path(".blip/builds")
+    settings = PyxiSettings()
+    out = Path(".pyxi/builds")
     out.mkdir(parents=True, exist_ok=True)
 
     async def one(model: str):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from blip.scenes.model_examples import HEART
+from pyxi.scenes.model_examples import HEART
 from test_brain_and_server import make_brain
 from test_connectors_and_docs import Script
 
@@ -34,7 +34,7 @@ async def test_a_brief_is_built_in_the_background_and_shown(settings):
     assert obj["scene"]["title"] == "How your heart beats" and obj["restart"]
     assert "human heart" in brain._model_llm.prompts[0]  # the brief reached the modeller
     order = [e["type"] for e in rec.events if e["type"] in ("say", "object")]
-    assert order[0] == "say"  # Blip talks while the model is built, instead of a silent wait
+    assert order[0] == "say"  # Pyxi talks while the model is built, instead of a silent wait
 
 
 async def test_without_a_builder_the_chat_model_builds_it_itself(settings):

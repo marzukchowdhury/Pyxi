@@ -1,4 +1,4 @@
-"""What would Blip do with "my desktop is a mess, organise it"? Runs the real brain and model,
+"""What would Pyxi do with "my desktop is a mess, organise it"? Runs the real brain and model,
 stops at the plan (nothing is moved), and prints it. usage: python scripts/tidy_dry_run.py"""
 
 from __future__ import annotations
@@ -11,9 +11,9 @@ from pathlib import Path
 
 from otto.config import load_dotenv
 
-from blip.companion.brain import Brain
-from blip.config import BlipSettings
-from blip.hub import Hub
+from pyxi.companion.brain import Brain
+from pyxi.config import PyxiSettings
+from pyxi.hub import Hub
 
 sys.path.insert(0, str(Path(__file__).parent))
 from scenarios import Replay, screen_from
@@ -21,7 +21,7 @@ from scenarios import Replay, screen_from
 
 async def main() -> None:
     load_dotenv()
-    settings = BlipSettings(data_dir=Path(tempfile.mkdtemp()))
+    settings = PyxiSettings(data_dir=Path(tempfile.mkdtemp()))
     settings.voice.tts = "none"
     hub = Hub()
     said: list[str] = []
@@ -49,7 +49,7 @@ async def main() -> None:
     print("TOOLS:", [c["tool"] for c in brain._calls], f"${brain._usage.cost_usd:.4f}")
     for plan in plans:
         # Saved, so what gets approved is exactly what moves (scripts/tidy_apply.py).
-        Path(".blip/tidy_plan.json").write_text(
+        Path(".pyxi/tidy_plan.json").write_text(
             json.dumps({"folder": str(plan.folder), "moves": plan.moves}, indent=1)
         )
         print(plan.summary())

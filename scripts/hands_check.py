@@ -1,4 +1,4 @@
-"""Run one real desktop task through Blip's hands, on this PC, and report each step.
+"""Run one real desktop task through Pyxi's hands, on this PC, and report each step.
 
 Uses the real screen reader, the real model and real mouse and keyboard input, exactly as the
 app does after the user presses Allow. Risky steps (send, buy, delete) are always declined
@@ -16,11 +16,11 @@ import time
 
 from otto.config import load_dotenv
 
-from blip.companion.operator import Operator
-from blip.config import BlipSettings
-from blip.screen import ScreenReader
-from blip.screen.context import enable_dpi_awareness
-from blip.stream_llm import StreamingChat
+from pyxi.companion.operator import Operator
+from pyxi.config import PyxiSettings
+from pyxi.screen import ScreenReader
+from pyxi.screen.context import enable_dpi_awareness
+from pyxi.stream_llm import StreamingChat
 
 
 async def main() -> None:
@@ -28,13 +28,13 @@ async def main() -> None:
     import logging
 
     logging.basicConfig(level=logging.WARNING)
-    logging.getLogger("blip.companion.operator").setLevel(logging.INFO)
+    logging.getLogger("pyxi.companion.operator").setLevel(logging.INFO)
     enable_dpi_awareness()
     sys.argv = [a for a in sys.argv if a != "--come-back"] + (
         ["--come-back"] if "--come-back" in sys.argv else []
     )
     task = sys.argv[1]
-    settings = BlipSettings()
+    settings = PyxiSettings()
     reader = ScreenReader(settings.screen)
     model = (
         sys.argv[2]

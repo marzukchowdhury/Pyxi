@@ -63,6 +63,6 @@ class BrainSocket {
 export const brain = new BrainSocket();
 // The desktop app always connects. A plain browser preview only connects to a running brain
 // when asked (?live=1), so a forgotten preview tab can never talk over the real app.
-if (window.blipBridge || new URLSearchParams(location.search).get("live") === "1") brain.connect();
+if (window.pyxiBridge || new URLSearchParams(location.search).get("live") === "1") brain.connect();
 // Test hook: the browser preview and dev builds of the app can inject events (never in production).
-if (!window.blipBridge || import.meta.env.DEV) (window as unknown as { __blip: BrainSocket }).__blip = brain;
+if (!window.pyxiBridge || import.meta.env.DEV) (window as unknown as { __pyxi: BrainSocket }).__pyxi = brain;

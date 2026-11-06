@@ -151,7 +151,7 @@ export function Overlay() {
       <Presence micLevel={micLevel} />
       {isPrimary && <Notch micLevel={micLevel} />}
       {/* The main screen shows connection and privacy state in the notch. */}
-      {!isPrimary && !connected && <div className="notice">Waiting for Blip's brain <code>blip serve</code></div>}
+      {!isPrimary && !connected && <div className="notice">Waiting for Pyxi's brain <code>pyxi serve</code></div>}
     </div>
   );
 }

@@ -10,12 +10,12 @@ from fastapi.testclient import TestClient
 from otto.llm.base import TextPart
 from otto.types import LLMResponse, ToolCall, Usage
 
-from blip.companion.brain import Brain
-from blip.demo import DemoLLM
-from blip.hub import Hub
-from blip.server import create_app
-from blip.voice import make_tts
 from conftest import FakeScreen, Recorder
+from pyxi.companion.brain import Brain
+from pyxi.demo import DemoLLM
+from pyxi.hub import Hub
+from pyxi.server import create_app
+from pyxi.voice import make_tts
 
 
 def make_brain(settings, llm=None, otto_llm=None):
@@ -167,13 +167,13 @@ def test_server_websocket_round_trip(settings):
             seen.append(json.loads(ws.receive_text()))
             if seen[-1]["type"] == "turn_done":
                 break
-        assert any(e["type"] == "scene" and e["scene"]["title"] == "How Blip works" for e in seen)
+        assert any(e["type"] == "scene" and e["scene"]["title"] == "How Pyxi works" for e in seen)
         assert client.get("/file", params={"path": "C:/Windows/win.ini"}).status_code == 404
         assert client.get("/crops/..%2F..%2Fsecret.png").status_code == 404
 
 
 def test_openrouter_models_need_the_openrouter_key(settings, monkeypatch):
-    from blip.server import has_key, key_env
+    from pyxi.server import has_key, key_env
 
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     s = settings.model_copy(update={"model": "anthropic/claude-haiku-5.5"})
@@ -183,7 +183,7 @@ def test_openrouter_models_need_the_openrouter_key(settings, monkeypatch):
     assert key_env("claude-opus-5-5") == "ANTHROPIC_API_KEY"
 
 
-def test_only_blips_own_windows_can_reach_the_brain(settings):
+def test_only_pyxis_own_windows_can_reach_the_brain(settings):
     from starlette.websockets import WebSocketDisconnect as Closed
 
     brain = Brain(

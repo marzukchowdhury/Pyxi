@@ -1,8 +1,8 @@
-"""Explain a recorded picture the way Blip would, and draw where its tags landed.
+"""Explain a recorded picture the way Pyxi would, and draw where its tags landed.
 
 Replays a real screen through the real brain and models (speech off), times when the opener,
 the survey and each tag arrive, and saves the screenshot with the tags, leaders and routes
-drawn on, to .blip/crops/picture_<turn>.png.
+drawn on, to .pyxi/crops/picture_<turn>.png.
 
 usage: python scripts/picture_probe.py [turn_id] [question]
 """
@@ -19,9 +19,9 @@ from pathlib import Path
 from otto.config import load_dotenv
 from PIL import ImageDraw
 
-from blip.companion.brain import Brain
-from blip.config import BlipSettings
-from blip.hub import Hub
+from pyxi.companion.brain import Brain
+from pyxi.config import PyxiSettings
+from pyxi.hub import Hub
 
 sys.path.insert(0, str(Path(__file__).parent))
 from scenarios import Replay, screen_from
@@ -31,10 +31,10 @@ async def main() -> None:
     load_dotenv()
     turn_id = sys.argv[1] if len(sys.argv) > 1 else "turn_815fdfc6"
     question = (
-        sys.argv[2] if len(sys.argv) > 2 else "Hey Blip, can you explain this diagram of the heart?"
+        sys.argv[2] if len(sys.argv) > 2 else "Hey Pyxi, can you explain this diagram of the heart?"
     )
     tmp = Path(tempfile.mkdtemp())
-    settings = BlipSettings(data_dir=tmp)
+    settings = PyxiSettings(data_dir=tmp)
     settings.voice.tts = "none"
     hub = Hub()
     t0 = time.monotonic()
@@ -74,8 +74,8 @@ async def main() -> None:
             d.rounded_rectangle([tx - w / 2, ty - 12, tx + w / 2, ty + 12], 6, fill=(229, 56, 59))
             d.text((tx - w / 2 + 10, ty - 7), it["text"], fill="white")
         print(f"  {it['n']}. {it['text']!r:24} at {it.get('at')} | {it.get('say')}")
-    Path(f".blip/crops/picture_{turn_id}.json").write_text(json.dumps(card))
-    out = Path(f".blip/crops/picture_{turn_id}.png")
+    Path(f".pyxi/crops/picture_{turn_id}.json").write_text(json.dumps(card))
+    out = Path(f".pyxi/crops/picture_{turn_id}.png")
     img.save(out)
     print("saved", out)
 

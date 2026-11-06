@@ -2,7 +2,7 @@
 
 import pytest
 
-from blip import media
+from pyxi import media
 
 
 @pytest.mark.parametrize(

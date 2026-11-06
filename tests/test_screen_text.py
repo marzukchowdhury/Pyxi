@@ -7,12 +7,12 @@ import time
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
-from blip.companion.layout import Occupancy, Placed
-from blip.companion.notes import build_card, place_card, place_stage
-from blip.screen import ScreenContext, ocr
-from blip.screen.context import WindowInfo
-from blip.screen.ocr import TextLine, find_text
 from conftest import fake_context
+from pyxi.companion.layout import Occupancy, Placed
+from pyxi.companion.notes import build_card, place_card, place_stage
+from pyxi.screen import ScreenContext, ocr
+from pyxi.screen.context import WindowInfo
+from pyxi.screen.ocr import TextLine, find_text
 
 
 def line(text: str, x: int, y: int, word_w: int = 60, h: int = 20, id: int = 0) -> TextLine:

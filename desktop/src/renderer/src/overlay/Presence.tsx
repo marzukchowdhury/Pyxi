@@ -1,5 +1,5 @@
 /**
- * Blip's presence: a little firefly that lives beside the cursor.
+ * Pyxi's presence: a little firefly that lives beside the cursor.
  * A warm core, a soft halo and two faint wings; it hovers when you're still and leaves a
  * short trail of light when you move.
  *
@@ -8,7 +8,7 @@
  *   thinking   a quick flicker, with a mote of light circling it
  *   acting     wings buzzing and a dotted ring turning (speaking, teammates at work)
  *
- * When Blip targets something, a thin thread of light runs from the firefly to the target,
+ * When Pyxi targets something, a thin thread of light runs from the firefly to the target,
  * recomputed every frame so it stays attached while you move the mouse.
  */
 import { useEffect, useRef } from "react";
@@ -120,7 +120,7 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
   const mode = paused ? "paused" : state === "listening" ? "listening"
     : state === "thinking" || state === "looking" || state === "transcribing" ? "thinking"
     : state === "speaking" || working ? "acting" : "idle";
-  // While Blip has the mouse, the firefly rides with it and says what it's doing.
+  // While Pyxi has the mouse, the firefly rides with it and says what it's doing.
 
   return (
     <>
@@ -179,7 +179,7 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
         {/* The main screen speaks through the notch; other screens keep a caption by the cursor. */}
         {caption && !isPrimary && (
           <div className="caption" key={caption.text}>
-            {caption.agent !== "Blip" && <span className="caption-agent">{caption.agent}</span>}
+            {caption.agent !== "Pyxi" && <span className="caption-agent">{caption.agent}</span>}
             {caption.text}
           </div>
         )}

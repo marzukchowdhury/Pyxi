@@ -21,7 +21,7 @@ interface Entry {
 type Box = { left: number; top: number; right: number; bottom: number };
 
 const entries = new Set<Entry>();
-if (import.meta.env.DEV) (window as unknown as { __blipHits: Set<Entry> }).__blipHits = entries; // for debugging hover
+if (import.meta.env.DEV) (window as unknown as { __pyxiHits: Set<Entry> }).__pyxiHits = entries; // for debugging hover
 let interactive = false;
 const PAD = 2;
 

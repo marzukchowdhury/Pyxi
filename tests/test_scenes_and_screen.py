@@ -6,11 +6,11 @@ import json
 import pytest
 from PIL import Image
 
-from blip.config import ScreenConfig
-from blip.scenes import GALLERY, build_exploded_scene, parse_scene, tool_schema
-from blip.screen import ScreenReader, WindowInfo
-from blip.screen.context import pick_monitor
 from conftest import fake_context
+from pyxi.config import ScreenConfig
+from pyxi.scenes import GALLERY, build_exploded_scene, parse_scene, tool_schema
+from pyxi.screen import ScreenReader, WindowInfo
+from pyxi.screen.context import pick_monitor
 
 
 # ---------------------------------------------------------------- scenes
