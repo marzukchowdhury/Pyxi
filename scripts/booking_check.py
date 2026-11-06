@@ -21,14 +21,13 @@ from pathlib import Path
 from otto.config import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
-from conftest import FakeScreen  # noqa: E402
-
-from pyxi import booking  # noqa: E402
-from pyxi.companion.brain import Brain  # noqa: E402
-from pyxi.config import PyxiSettings  # noqa: E402
-from pyxi.demo_bookings import BookingSite  # noqa: E402
-from pyxi.hub import Hub  # noqa: E402
-from pyxi.voice import make_tts  # noqa: E402
+from conftest import FakeScreen
+from pyxi import booking
+from pyxi.companion.brain import Brain
+from pyxi.config import PyxiSettings
+from pyxi.demo_bookings import BookingSite
+from pyxi.hub import Hub
+from pyxi.voice import make_tts
 
 ALEX = {
     "first_name": "Alex",
