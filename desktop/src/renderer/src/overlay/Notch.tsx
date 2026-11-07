@@ -20,6 +20,7 @@ import { Activity } from "../panel/Activity";
 import { VoiceStudio } from "../panel/VoiceStudio";
 import { Close, Expand, Mic, Send } from "../shared/icons";
 import { brain } from "../shared/socket";
+import { FileReady } from "./FileReady";
 import { Interactive } from "./Interactive";
 import { useOverlay, voice } from "./store";
 
@@ -41,6 +42,8 @@ const WIDTH: Record<Mode, number> = {
 };
 
 const RESULT_MS = 10000; // how long a finished errand stays up (hovering pauses it)
+const FILE_RESULT_MS = 20000; // a new file stays longer: there's something to open or drag out
+const FILE_WIDTH = 520;
 
 installPanelStyles();
 
@@ -73,6 +76,8 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const toasts = useOverlay((s) => s.toasts);
   const dismissToast = useOverlay((s) => s.dismissToast);
   const result = toasts[0];
+  // A new file gets its own card: the file itself, Open file, Open file location, drag it out.
+  const fileResult = !!result && result.ok && result.files.length > 0 && !result.link && !result.actions.includes("update");
   const [left, setLeft] = useState(1); // share of the result's 10 seconds still to go
   const hold = useHoldKeys();
 
@@ -151,11 +156,12 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
       const t = performance.now();
       if (!over.current.handle && !over.current.body) shown += t - last;
       last = t;
-      setLeft(Math.max(0, 1 - shown / RESULT_MS));
-      if (shown >= RESULT_MS) dismissToast(result.job_id);
+      const limit = fileResult ? FILE_RESULT_MS : RESULT_MS;
+      setLeft(Math.max(0, 1 - shown / limit));
+      if (shown >= limit) dismissToast(result.job_id);
     }, 80);
     return () => window.clearInterval(id);
-  }, [result?.job_id, dismissToast]);
+  }, [result?.job_id, dismissToast, fileResult]);
 
   // The full notch: Ctrl+Alt+W / the tray icon toggle it; Escape folds it away.
   const openFull = (t?: Tab) => {
@@ -235,7 +241,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
         // Where the notch is growing to, plus a forgiving margin: while it animates wider, a
         // pointer heading for its far corner must not count as having left.
         hitRect={() => {
-          const w = WIDTH[mode] + 24;
+          const w = (mode === "result" && fileResult ? FILE_WIDTH : WIDTH[mode]) + 24;
           return { left: innerWidth / 2 - w / 2, right: innerWidth / 2 + w / 2, top: 0, bottom: height + 14 };
         }}
         onEnter={() => enter("body")}
@@ -243,7 +249,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
       >
       <div
         className={`notch mode-${mode}`}
-        style={{ width: mode === "speaking" && !captions ? 210 : WIDTH[mode], height }}
+        style={{ width: mode === "speaking" && !captions ? 210 : mode === "result" && fileResult ? FILE_WIDTH : WIDTH[mode], height }}
         onClick={() => mode !== "open" && mode !== "full" && openFull()}
       >
         <i className="ear left" />
@@ -324,7 +330,20 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
             </div>
           )}
 
-          {mode === "result" && result && (
+          {mode === "result" && result && fileResult && (
+            <div className="notch-result notch-file">
+              <button className="notch-btn file-close" title="Close" onClick={(e) => { e.stopPropagation(); dismissToast(result.job_id); }}><Close /></button>
+              <FileReady result={result} />
+              {result.actions.includes("send_back") && (
+                <div className="result-actions file-extra">
+                  <button onClick={(e) => { e.stopPropagation(); brain.send({ type: "text", text: "Send the fixed file back to the person who emailed me the original, as a reply." }); dismissToast(result.job_id); }}>Send it back</button>
+                </div>
+              )}
+              <i className="result-timer" style={{ transform: `scaleX(${left})` }} />
+            </div>
+          )}
+
+          {mode === "result" && result && !fileResult && (
             <div className={`notch-result ${result.ok ? "" : "failed"}`}>
               <div className="notch-head">
                 <i className="result-mark" />

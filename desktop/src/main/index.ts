@@ -9,8 +9,8 @@
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
 import { startUpdates } from "./updates";
@@ -535,13 +535,60 @@ ipcMain.on("action", async (_e, kind: string, value: string) => {
     setTimeout(() => clipboard.writeText(previous), 900);
   }
 });
-// Files Pyxi made: open them or show them in Explorer, but only inside Pyxi's own folders.
+// Files Pyxi made: open them, show them in Explorer or drag them out, but only inside Pyxi's own
+// folders, or listed by the brain in .pyxi/made.json (Pixel and Ledger save beside the original,
+// on the Desktop or in Downloads). A page can't name any other file on the PC.
+function madeByPyxi(full: string): boolean {
+  try {
+    const list = JSON.parse(readFileSync(join(HOME, ".pyxi", "made.json"), "utf-8"));
+    return Array.isArray(list) && list.some((p) => typeof p === "string" && resolve(p).toLowerCase() === full.toLowerCase());
+  } catch {
+    return false;
+  }
+}
 function pyxiFile(path: unknown): string | null {
   if (typeof path !== "string" || !path) return null;
   const full = resolve(path);
   const allowed = [join(app.getPath("documents"), "Pyxi"), join(HOME, ".pyxi", "outputs")].map((d) => resolve(d).toLowerCase());
-  return allowed.some((d) => full.toLowerCase().startsWith(d + "\\") || full.toLowerCase().startsWith(d + "/")) && existsSync(full) ? full : null;
+  const inside = allowed.some((d) => full.toLowerCase().startsWith(d + "\\") || full.toLowerCase().startsWith(d + "/"));
+  return (inside || madeByPyxi(full)) && existsSync(full) ? full : null;
 }
+// What a result card shows about a file: its name, size, folder, and Windows' own thumbnail (the
+// PDF's first page, the photo itself) or else its file-type icon.
+const dragIcons = new Map<string, Electron.NativeImage>();
+ipcMain.handle("file-info", async (_e, path: unknown) => {
+  const file = pyxiFile(path);
+  if (!file) return null;
+  let size = 0;
+  try {
+    size = statSync(file).size;
+  } catch {
+    return null;
+  }
+  let thumb: string | null = null;
+  try {
+    const img = await nativeImage.createThumbnailFromPath(file, { width: 220, height: 280 });
+    if (!img.isEmpty()) thumb = img.toDataURL();
+  } catch {
+    // no thumbnail handler for this kind of file
+  }
+  let icon: string | null = null;
+  try {
+    const ico = await app.getFileIcon(file, { size: "large" });
+    dragIcons.set(file.toLowerCase(), ico);
+    icon = ico.toDataURL();
+  } catch {
+    // no icon either: the card draws a badge
+  }
+  const folder = dirname(file);
+  return { name: basename(file), size, folder, folderName: basename(folder) || folder, thumb, icon };
+});
+// Drag the file out of the card into an email, a chat or a folder.
+ipcMain.on("drag-file", (e, path: unknown) => {
+  const file = pyxiFile(path);
+  if (!file) return;
+  e.sender.startDrag({ file, icon: dragIcons.get(file.toLowerCase()) ?? trayIcon() });
+});
 // Opening runs whatever Windows associates with the file, so programs and scripts are never
 // opened, even inside Pyxi's folders (a downloaded attachment could be one): shown in Explorer.
 const RUNNABLE = /\.(exe|com|bat|cmd|scr|pif|cpl|msi|msp|msc|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|hta|lnk|url|reg|jar|appx|appref-ms|application|gadget|scf|inf|chm|dll|sys)$/i;

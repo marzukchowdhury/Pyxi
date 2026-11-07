@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("pyxiBridge", {
   runAction: (kind: string, value: string) => ipcRenderer.send("action", kind, value),
   openFile: (path: string) => ipcRenderer.send("open-file", path),
   showInFolder: (path: string) => ipcRenderer.send("show-in-folder", path),
+  fileInfo: (path: string) => ipcRenderer.invoke("file-info", path),
+  dragFile: (path: string) => ipcRenderer.send("drag-file", path),
   notify: (title: string, body: string, file?: string) => ipcRenderer.send("notify", title, body, file),
   onDismiss: (fn: Listener<void>) => on("dismiss", fn),
   onPrivacyToggle: (fn: Listener<void>) => on("privacy-toggle", fn),

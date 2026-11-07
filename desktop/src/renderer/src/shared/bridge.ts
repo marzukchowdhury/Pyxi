@@ -10,6 +10,16 @@ export interface DisplayInfo {
   physSize: { width: number; height: number };
 }
 
+export interface FileInfo {
+  name: string;
+  size: number;
+  folder: string;
+  folderName: string;
+  /** Windows' thumbnail (a PDF's first page, the photo), as a data URL; null when there's none. */
+  thumb: string | null;
+  icon: string | null;
+}
+
 export interface Bridge {
   electron: boolean;
   /** The brain's launch key: every request to the brain must carry it (see pyxi/brainkey.py). */
@@ -30,6 +40,10 @@ export interface Bridge {
   /** Open a file Pyxi made, or show it in Explorer (only files in Pyxi's own folders). */
   openFile(path: string): void;
   showInFolder(path: string): void;
+  /** Name, size, folder and Windows' own thumbnail of a file Pyxi made (null for any other file). */
+  fileInfo(path: string): Promise<FileInfo | null>;
+  /** Start dragging a file Pyxi made out of the overlay (into an email, a chat, a folder). */
+  dragFile(path: string): void;
   /** A quiet Windows notification; clicking it opens the file. */
   notify(title: string, body: string, file?: string): void;
   focusOverlay(): void;
@@ -138,6 +152,16 @@ function mockBridge(): Bridge {
     },
     showInFolder(path) {
       console.info("show in folder", path);
+    },
+    async fileInfo(path) {
+      // Browser preview: a plausible file, no thumbnail (the card draws its badge).
+      const parts = path.split(/[\\/]/);
+      const name = parts.pop() || path;
+      const folder = parts.join("\\");
+      return { name, size: 248_000, folder, folderName: parts[parts.length - 1] || folder, thumb: null, icon: null };
+    },
+    dragFile(path) {
+      console.info("drag", path);
     },
     notify() {},
     runAction(kind, value) {

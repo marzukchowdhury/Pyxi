@@ -307,6 +307,12 @@ class JobManager:
             log.exception("job %s failed", job.id)
             job.status, job.summary = "failed", describe_failure(exc)
         job.ended_at = time.time()
+        if job.status == "done" and job.outputs:
+            # So the desktop app will open, reveal and drag these (and only files Pyxi made).
+            from pyxi import made
+
+            fixed = job.data.get("fixed", []) if isinstance(job.data, dict) else []
+            made.record(self.settings.data_dir, [*job.outputs, *fixed])
         await self._update(job)
         if job.status == "done" and job.then:
             context = f"Result from {job.agent_name}: {job.summary}\n\nData: {json.dumps(job.data, default=str)[:4000]}"
