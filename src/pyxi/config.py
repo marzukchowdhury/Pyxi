@@ -26,6 +26,12 @@ DEFAULT_EXCLUDED = [
     r"banking",
     r"credential",
     r"windows security",
+    # The lock and sign-in screens, and User Account Control prompts
+    r"lockapp",
+    r"logonui",
+    r"windows default lock screen",
+    r"\bconsent\.exe\b",
+    r"user account control",
 ]
 
 

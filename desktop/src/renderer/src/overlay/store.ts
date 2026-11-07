@@ -76,6 +76,8 @@ interface OverlayState {
   connected: boolean;
   state: BrainState;
   paused: boolean;
+  /** Background watching is on (the Memory Palace): a steady dot on the notch says so. */
+  watching: boolean;
   caption: { text: string; agent: string } | null;
   annotations: LiveAnnotation[];
   flyTo: { x: number; y: number; label: string | null; until: number } | null;
@@ -129,6 +131,7 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   connected: false,
   state: "idle",
   paused: false,
+  watching: false,
   caption: null,
   annotations: [],
   flyTo: null,
@@ -328,7 +331,7 @@ brain.on((e: BrainEvent) => {
   switch (e.type) {
     case "hello":
     case "settings":
-      useOverlay.setState({ state: e.state, paused: e.privacy_paused, captions: e.voice?.captions ?? true, jobs: Object.fromEntries(e.jobs.map((j) => [j.id, j])) });
+      useOverlay.setState({ state: e.state, paused: e.privacy_paused, watching: !!e.ambient_memory && !e.privacy_paused, captions: e.voice?.captions ?? true, jobs: Object.fromEntries(e.jobs.map((j) => [j.id, j])) });
       break;
     case "state":
       useOverlay.setState({ state: e.state });
@@ -342,6 +345,9 @@ brain.on((e: BrainEvent) => {
       break;
     case "turn_done":
       replyOpen = false;
+      break;
+    case "notice": // a heads-up (a private window, the voice is ready): shown, the reply goes on
+      useOverlay.setState({ notice: { text: e.message, at: performance.now() } });
       break;
     case "error":
       replyOpen = false;

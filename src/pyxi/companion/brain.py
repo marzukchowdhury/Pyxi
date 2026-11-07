@@ -142,6 +142,10 @@ class Brain:
         )
         self.stt = Transcriber(settings.voice)
         self.screen = screen or ScreenReader(settings.screen)
+        if hasattr(self.screen, "set_private_apps"):  # plus the apps they added in Settings
+            from pyxi.screen import private_apps
+
+            self.screen.set_private_apps(private_apps.load(settings.data_dir))
         db = settings.db_path
         self.registry = AgentRegistry(db)
         thumbs = settings.palace_dir if settings.screen.keep_screenshots else None
@@ -1364,6 +1368,10 @@ class Brain:
                 excluded=ctx.excluded,
                 elements=len(ctx.elements),
             )
+            if ctx.excluded and not self.screen.paused:  # said plainly, not left to the model
+                await self.hub.emit(
+                    "notice", message=f"{ctx.excluded} is private, so I can't see that window."
+                )
             if not ctx.excluded:
                 sid = self.spatial.record(ctx, force=True)
                 self.activity.log(

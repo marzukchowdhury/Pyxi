@@ -360,6 +360,17 @@ def create_app(
             await hub.emit("shopping", **pricecheck.load(settings.data_dir))
         elif kind == "shopping_save":
             await hub.emit("shopping", **pricecheck.save(settings.data_dir, msg))
+        elif kind in ("private_apps_get", "private_apps_save"):
+            from pyxi.screen import private_apps
+
+            apps = (
+                private_apps.save(settings.data_dir, msg.get("apps"))
+                if kind == "private_apps_save"
+                else private_apps.load(settings.data_dir)
+            )
+            if hasattr(brain.screen, "set_private_apps"):
+                brain.screen.set_private_apps(apps)
+            await hub.emit("private_apps", apps=apps, built_in=private_apps.BUILT_IN)
         elif kind == "file_access_get":
             await hub.emit("file_access", **files_access.load(settings.data_dir).public())
         elif kind == "file_access_save":

@@ -257,6 +257,16 @@ def open_windows(minimized: bool = False) -> list[tuple[int, str, str]]:
     return [(h, t, exe_of(h)) for h, t, _ in found]
 
 
+def rect_of(hwnd: int) -> tuple[int, int, int, int] | None:
+    """A window's x, y, w, h in screen pixels (None if Windows won't say)."""
+    if not available():
+        return None
+    r = wt.RECT()
+    if not _user32().GetWindowRect(hwnd, ctypes.byref(r)):
+        return None
+    return r.left, r.top, r.right - r.left, r.bottom - r.top
+
+
 def is_minimized(hwnd: int) -> bool:
     return bool(available() and _user32().IsIconic(hwnd))
 

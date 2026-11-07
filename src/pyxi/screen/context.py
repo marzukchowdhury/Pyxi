@@ -15,6 +15,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -257,12 +258,35 @@ class ScreenReader:
         self._next_id = 1
         enable_dpi_awareness()
 
+    def set_private_apps(self, names: list[str]) -> None:
+        """The built-in private list plus the user's own apps (Settings, screen/private_apps.py)."""
+        from pyxi.screen.private_apps import patterns
+
+        self._excluded = [
+            re.compile(p, re.IGNORECASE) for p in [*self.config.excluded_windows, *patterns(names)]
+        ]
+
     def is_excluded(self, window: WindowInfo) -> str | None:
         haystack = f"{window.title} {window.process}"
         for pattern in self._excluded:
             if pattern.search(haystack):
                 return window.app or "private window"
         return None
+
+    def private_rects(self, skip: int | None = None) -> list[tuple[int, int, int, int]]:
+        """Where private windows (password managers, banking...) are on screen right now, even
+        when they aren't the one in front: they're blacked out of every screenshot."""
+        from pyxi import windows
+
+        rects = []
+        for hwnd, title, exe in windows.open_windows():
+            if hwnd == skip:
+                continue
+            if self.is_excluded(WindowInfo(title, Path(exe).name if exe else "")):
+                r = windows.rect_of(hwnd)
+                if r and r[2] > 0 and r[3] > 0:
+                    rects.append(r)
+        return rects
 
     async def capture(
         self, *, pixels: bool = True, follow_mouse: bool = True, hwnd: int | None = None
@@ -299,6 +323,8 @@ class ScreenReader:
             self._grab(window.rect, follow_mouse and not hwnd) if pixels else (None, (0, 0))
         )
         if shot is not None:
+            self._black_out(shot, origin, self.private_rects(skip=window.hwnd))
+        if shot is not None:
             # The taskbar too (pinned apps, the clock): it's on screen and people ask about it.
             x0, y0, x1, y1 = origin[0], origin[1], origin[0] + shot.width, origin[1] + shot.height
             bar = [
@@ -319,6 +345,18 @@ class ScreenReader:
             origin=origin,
             text=text,
         )
+
+    @staticmethod
+    def _black_out(
+        shot: Image.Image, origin: tuple[int, int], rects: list[tuple[int, int, int, int]]
+    ) -> None:
+        """Private windows elsewhere on screen go black before OCR or the model sees them."""
+        if not rects:
+            return
+        draw = ImageDraw.Draw(shot)
+        for x, y, w, h in rects:
+            lx, ly = x - origin[0], y - origin[1]
+            draw.rectangle([lx, ly, lx + w, ly + h], fill=(0, 0, 0))
 
     @staticmethod
     def _hide_secrets(

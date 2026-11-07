@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { bridge, keysOf } from "../shared/bridge";
 import { trusted } from "../shared/trusted";
+import { PrivateApps } from "./PrivateApps";
 import { Close, Compass, Cube, Feather, FileStack, Grid, Mark, Mic, Minus, Plus, Replay, Send, Spark, Thread } from "../shared/icons";
 import type { Agent, Job } from "../shared/protocol";
 import { brain } from "../shared/socket";
@@ -498,6 +499,8 @@ export function Settings() {
       <BookingDetails />
       <h4>Your files</h4>
       <FileAccess />
+      <h4>Private apps</h4>
+      <PrivateApps />
       <h4>Shopping</h4>
       <PriceChecks />
       <h4>Connected accounts</h4>

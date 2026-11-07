@@ -324,6 +324,7 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .notch-mark .nm-core { fill: var(--fly-hi); filter: drop-shadow(0 0 3px #ffd27a) drop-shadow(0 0 6px rgba(255,190,80,.6)); }
 .notch-mark.live .nm-halo { animation: glow 1.2s ease-in-out infinite; fill: rgba(255,200,97,.45); }
 .notch-mark.spin .nm-core { animation: flicker .9s steps(1) infinite; }
+.notch-watching { position: absolute; right: 14px; top: 2px; width: 6px; height: 6px; border-radius: 50%; background: #7fe0a8; box-shadow: 0 0 6px #7fe0a8; pointer-events: auto; }
 .notch-paused { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--ink-3); }
 .notch-alert { flex: none; width: 7px; height: 7px; margin-top: 6px; border-radius: 2px; transform: rotate(45deg); background: #ffb38a; box-shadow: 0 0 10px #ffb38a; }
 .notch-wave { flex: none; display: flex; align-items: center; gap: 2.5px; height: 20px; }

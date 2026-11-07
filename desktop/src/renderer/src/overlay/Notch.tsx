@@ -63,6 +63,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const notice = useOverlay((s) => s.notice);
   const connected = useOverlay((s) => s.connected);
   const paused = useOverlay((s) => s.paused);
+  const watching = useOverlay((s) => s.watching);
   const seeing = useOverlay((s) => s.seeing);
   const captions = useOverlay((s) => s.captions);
   const chat = useOverlay((s) => s.chat);
@@ -246,6 +247,10 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
       >
         <i className="ear left" />
         <i className="ear right" />
+        {/* Looking (a turn, or the Memory Palace in the background) and listening are always
+            visible: the notch's own text says Listening / Looking at..., and this dot stays lit
+            while background watching is on. */}
+        {watching && <i className="notch-watching" title="Memory Palace is on: Pyxi notes which windows you use. Ctrl+Alt+P pauses it." aria-label="Memory Palace is on" />}
         <div ref={inner} className="notch-inner" key={mode}>
           {mode === "idle" && running.length > 0 && <Marks jobs={running.map((j) => j.agent_name)} />}
 

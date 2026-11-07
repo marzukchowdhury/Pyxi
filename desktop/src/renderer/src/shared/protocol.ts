@@ -365,6 +365,8 @@ export type BrainEvent =
   | { type: "routines"; routines: RoutineInfo[] }
   | { type: "voice_preview"; engine: string; voice: string; text: string; audio: string | null; error: string | null }
   | { type: "error"; message: string }
+  | { type: "notice"; message: string }
+  | { type: "private_apps"; apps: string[]; built_in: string[] }
   | { type: "beta"; ok: boolean; message: string }
   | { type: "profile"; profile: Record<string, string>; saved?: boolean }
   | ({ type: "file_access" } & FileAccessState)
@@ -409,6 +411,8 @@ export type ClientMessage =
   | { type: "profile_get" }
   | { type: "profile_save"; profile: Record<string, string> }
   | { type: "file_access_get" }
+  | { type: "private_apps_get" }
+  | { type: "private_apps_save"; apps: string[] }
   | { type: "libreoffice_get" }
   | { type: "libreoffice_set"; allowed: boolean }
   | { type: "shopping_get" }
