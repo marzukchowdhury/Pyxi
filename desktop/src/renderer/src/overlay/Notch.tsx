@@ -16,6 +16,7 @@ import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "re
 import { bridge, keysOf } from "../shared/bridge";
 import { installPanelStyles } from "./panelStyles";
 import { Chat, Gallery, Palace, Settings, type Tab, TABS, Team } from "../panel/Panel";
+import { Activity } from "../panel/Activity";
 import { VoiceStudio } from "../panel/VoiceStudio";
 import { Close, Expand, Mic, Send } from "../shared/icons";
 import { brain } from "../shared/socket";
@@ -377,6 +378,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                 {tab === "chat" && <Chat />}
                 {tab === "team" && <Team />}
                 {tab === "palace" && <Palace />}
+                {tab === "activity" && <Activity />}
                 {tab === "gallery" && <Gallery />}
                 {tab === "voice" && <VoiceStudio />}
                 {tab === "settings" && <Settings />}

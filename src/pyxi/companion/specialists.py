@@ -610,6 +610,13 @@ async def after_fix(brain: Brain, job: Job) -> bool:
         return False
     try:
         backup = await asyncio.to_thread(patch.apply, fix)
+        brain.audit.add(
+            "wrote",
+            f"Changed line {fix.line} of {name}",
+            agent=job.agent_name,
+            detail=fix.diff,
+            undo={"type": "patch", "path": fix.path, "backup": str(backup)},
+        )
     except (OSError, RuntimeError, UnicodeDecodeError) as exc:
         await brain._notify(job.id, ok=False, title=f"{name} wasn't changed", body=str(exc)[:200])
         return False
@@ -767,7 +774,15 @@ async def after_repeat(brain: Brain, job: Job) -> str:
     if plan.route == "files":
         moves = ditto.check_files(plan, folder)
         undo_dir = brain.settings.data_dir / "watch" / "undo"
-        done, _undo = await asyncio.to_thread(ditto.do_files, moves, undo_dir)
+        done, undo_log = await asyncio.to_thread(ditto.do_files, moves, undo_dir)
+        if done:
+            brain.audit.add(
+                "moved",
+                f"Renamed or moved {done} files in {folder.name}",
+                agent=job.agent_name,
+                detail=str(folder),
+                undo={"type": "ditto", "log": str(undo_log)},
+            )
         skipped = len(plan.items) - done
         body = f"{plan.summary} " if done else ""
         if skipped:

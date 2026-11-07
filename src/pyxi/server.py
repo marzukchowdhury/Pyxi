@@ -360,6 +360,11 @@ def create_app(
             await hub.emit("shopping", **pricecheck.load(settings.data_dir))
         elif kind == "shopping_save":
             await hub.emit("shopping", **pricecheck.save(settings.data_dir, msg))
+        elif kind in ("audit_get", "audit_undo"):
+            if kind == "audit_undo" and msg.get("id"):
+                done = await asyncio.to_thread(brain.audit.undo, str(msg["id"]))
+                await hub.emit("notice", message=done)
+            await hub.emit("audit", entries=brain.audit.recent(200))
         elif kind in ("grants_get", "grant_revoke"):
             from pyxi import grants
 

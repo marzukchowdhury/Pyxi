@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { bridge, keysOf } from "../shared/bridge";
 import { trusted } from "../shared/trusted";
+import { Activity } from "./Activity";
 import { Grants } from "./Grants";
 import { PrivateApps } from "./PrivateApps";
 import { Close, Compass, Cube, Feather, FileStack, Grid, Mark, Mic, Minus, Plus, Replay, Send, Spark, Thread } from "../shared/icons";
@@ -12,8 +13,8 @@ import { FileAccess } from "./FileAccess";
 import { PriceChecks } from "./PriceChecks";
 import { VoiceStudio } from "./VoiceStudio";
 
-export type Tab = "chat" | "team" | "palace" | "gallery" | "voice" | "settings";
-export const TABS: [Tab, string][] = [["chat", "Chat"], ["team", "Team"], ["palace", "Memory"], ["gallery", "3D"], ["voice", "Voice"], ["settings", "Settings"]];
+export type Tab = "chat" | "team" | "palace" | "activity" | "gallery" | "voice" | "settings";
+export const TABS: [Tab, string][] = [["chat", "Chat"], ["team", "Team"], ["palace", "Memory"], ["activity", "Activity"], ["gallery", "3D"], ["voice", "Voice"], ["settings", "Settings"]];
 const STATE_LABEL: Record<string, string> = {
   idle: "Ready when you are", listening: "Listening…", transcribing: "Catching that…", looking: "Taking a look…",
   thinking: "Thinking…", speaking: "Talking",
@@ -65,6 +66,7 @@ export function Panel() {
         {tab === "chat" && <Chat />}
         {tab === "team" && <Team />}
         {tab === "palace" && <Palace />}
+        {tab === "activity" && <Activity />}
         {tab === "gallery" && <Gallery />}
         {tab === "voice" && <VoiceStudio />}
         {tab === "settings" && <Settings />}

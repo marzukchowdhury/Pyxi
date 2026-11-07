@@ -155,7 +155,14 @@ def undo_last(log_dir: Path) -> str:
     logs = sorted(log_dir.glob("tidy-*.json"))
     if not logs:
         return "There's nothing of mine to undo."
-    record = json.loads(logs[-1].read_text())
+    return undo_log(logs[-1])
+
+
+def undo_log(log_path: Path) -> str:
+    """Put back the moves in one tidy's log (the activity log's Undo for that tidy)."""
+    if not log_path.exists():
+        return "That tidy was already undone."
+    record = json.loads(log_path.read_text())
     back, failed = 0, []
     for src, dst in reversed(record["moves"]):
         if not Path(dst).exists():
@@ -170,6 +177,6 @@ def undo_last(log_dir: Path) -> str:
             Path(d).rmdir()  # only if it's empty again: anything they added stays
         except OSError:
             pass
-    logs[-1].rename(logs[-1].with_suffix(".undone"))
+    log_path.rename(log_path.with_suffix(".undone"))
     tail = f" {len(failed)} couldn't move back: {'; '.join(failed[:3])}." if failed else ""
     return f"Put {back} files back where they were.{tail}"

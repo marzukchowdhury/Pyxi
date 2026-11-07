@@ -167,6 +167,11 @@ class Brain:
             otto_llm=otto_llm,
             on_done=self._job_done,
         )
+        # What Pyxi did on their behalf, with undo (pyxi/audit.py): the panel's Activity tab.
+        from pyxi.audit import AuditLog
+
+        self.audit = AuditLog(settings.data_dir / "audit.jsonl", settings.screen.turn_retention_days)
+        self.jobs.audit = self.audit
         self.history: list[tuple[str, str]] = []
         self.state: State = "idle"
         self._lock = asyncio.Lock()
@@ -268,9 +273,11 @@ class Brain:
         )
 
     async def _count_sent(self, out: Outgoing) -> None:
+        """Something went out: counted for the hourly limits, and kept in the activity log."""
         from pyxi.limits import Limits
 
         Limits(self.settings.data_dir, self.settings.limits).record(out.channel)
+        self.audit.add("sent", out.action, agent=out.agent, detail=out.payload or out.preview)
 
     async def _approve(self, out: Outgoing) -> None:
         """Show exactly what would go out; act only on Allow."""
@@ -335,8 +342,14 @@ class Brain:
         if not ok:
             await self.say_line("No problem, I left it as it is.")
             return
-        moved, failed, _ = await asyncio.to_thread(tidy.apply, plan, log_dir)
+        moved, failed, tidy_log = await asyncio.to_thread(tidy.apply, plan, log_dir)
         folders = len({into for _, into in plan.moves})
+        self.audit.add(
+            "moved",
+            f"Moved {moved} files into {folders} folders in {plan.folder.name}",
+            detail=str(plan.folder),
+            undo={"type": "tidy", "log": str(tidy_log)},
+        )
         tail = f" {len(failed)} were open somewhere, so I left those." if failed else ""
         self.history = [
             *self.history[-11:],
@@ -405,6 +418,7 @@ class Brain:
 
         async def report(doing: str, step: int) -> None:
             log.info("hands step %d: %s", step, doing)
+            self.audit.add("clicked", doing, agent="Pyxi (mouse and keyboard)", detail=task)
             await self.hub.emit("driving", doing=doing)  # rides beside the cursor
             await self.hub.emit(
                 "job_event", job_id=job.id, agent="Pyxi", event="status", data={"message": doing}
@@ -560,6 +574,7 @@ class Brain:
         from pyxi.limits import Limits
 
         Limits(self.settings.data_dir, self.settings.limits).record("booking")
+        self.audit.add("booked", f"Started booking {what}{place} (Scout asks before the final click)", detail=url)
         await self.jobs.start(
             "scout",
             booking.brief(args, profile, await self._now()),
@@ -2543,6 +2558,9 @@ class Brain:
             return
         fixed = data.get("fixed") or []
         files = [str(f) for f in (fixed or job.outputs)]
+        if job.status == "done":
+            for f in files:
+                self.audit.add("wrote", f"Saved {Path(f).name}", agent=job.agent_name, detail=f)
         booked = job.kind == "booking" and job.status == "done" and bool(data.get("booked"))
         if booked:
             what = str(data.get("what") or "Your booking")

@@ -302,3 +302,12 @@ button.ghost:hover { color: var(--ink); border-color: var(--hair-hi); }
 .file-access .folders code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .file-access .folder-add { display: flex; gap: 8px; }
 .file-access .folder-add input { flex: 1; height: 30px; font-size: 12.5px; }
+
+/* Activity tab: what Pyxi did, with Undo */
+.activity-log ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.act-row { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 8px; align-items: baseline; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--hair); background: rgba(255,255,255,.03); cursor: pointer; font-size: 12.5px; }
+.act-row button { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
+.act-kind { font-weight: 600; color: var(--ink-2); }
+.act-meta { grid-column: 1 / span 2; color: var(--ink-3); font-size: 11.5px; }
+.act.undone .act-what { text-decoration: line-through; opacity: .7; }
+.act-detail { margin: 4px 0 0; max-height: 200px; overflow: auto; white-space: pre-wrap; font-size: 11.5px; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.18); user-select: text; }

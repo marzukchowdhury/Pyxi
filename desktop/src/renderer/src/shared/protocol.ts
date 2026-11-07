@@ -331,6 +331,18 @@ export interface Grant {
   expires: number;
 }
 
+/** One line of the activity log (pyxi/audit.py). */
+export interface AuditEntry {
+  id: string;
+  ts: number;
+  kind: string;
+  agent: string;
+  what: string;
+  detail: string;
+  undone: boolean;
+  can_undo: boolean;
+}
+
 export type BrainEvent =
   | ({ type: "hello" } & Hello)
   | ({ type: "settings" } & Hello)
@@ -376,6 +388,7 @@ export type BrainEvent =
   | { type: "notice"; message: string }
   | { type: "private_apps"; apps: string[]; built_in: string[] }
   | { type: "grants"; grants: Grant[] }
+  | { type: "audit"; entries: AuditEntry[] }
   | { type: "beta"; ok: boolean; message: string }
   | { type: "profile"; profile: Record<string, string>; saved?: boolean }
   | ({ type: "file_access" } & FileAccessState)
@@ -422,6 +435,8 @@ export type ClientMessage =
   | { type: "file_access_get" }
   | { type: "private_apps_get" }
   | { type: "grants_get" }
+  | { type: "audit_get" }
+  | { type: "audit_undo"; id: string }
   | { type: "grant_revoke"; kind: string }
   | { type: "private_apps_save"; apps: string[] }
   | { type: "libreoffice_get" }

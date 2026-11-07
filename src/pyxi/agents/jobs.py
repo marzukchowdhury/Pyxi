@@ -335,6 +335,8 @@ class JobManager:
             answer = await self.hub.request(
                 "confirm", job_id=job.id, agent=agent.name, action=action, reason=reason
             )
+            if answer and getattr(self, "audit", None) is not None:
+                self.audit.add("clicked", f"Allowed: {action}", agent=agent.name, detail=reason)
             return bool(answer)
 
         async def ask(question: str) -> str | None:
