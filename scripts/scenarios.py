@@ -52,6 +52,8 @@ def bill_screen(name: str) -> ScreenContext:
 
 
 def screen_from(turn_id: str) -> ScreenContext:
+    if turn_id == SHOP_SCREEN:
+        return product_screen()
     if turn_id.startswith("bill:"):
         return bill_screen(turn_id[5:])
     c = sqlite3.connect(DB)
@@ -83,6 +85,54 @@ def screen_from(turn_id: str) -> ScreenContext:
     ctx = ScreenContext(
         time.time(), WindowInfo(window or "", f"{app}.exe", (0, 0, w, h)), elements, shot
     )
+    ctx.text = ocr
+    return ctx
+
+
+SHOP_SCREEN = "shop:headphones"
+SHOP_URL = "https://www.amazon.com/Sony-WH-1000XM5/dp/B09XS7JWHH"
+
+
+def product_screen() -> ScreenContext:
+    """A store's product page in Chrome (made up, drawn here): headphones at $399.99."""
+    from PIL import ImageDraw
+
+    w, h = 1920, 1080
+    shot = Image.new("RGB", (w, h), (255, 255, 255))
+    draw = ImageDraw.Draw(shot)
+    lines = [
+        ("amazon.com/Sony-WH-1000XM5/dp/B09XS7JWHH", (220, 52, 520, 22)),
+        ("Sony WH-1000XM5 Wireless Industry Leading Noise Canceling Headphones, Black", (760, 220, 900, 30)),
+        ("Visit the Sony Store", (760, 262, 180, 20)),
+        ("4.5 out of 5 stars 12,034 ratings", (760, 292, 300, 20)),
+        ("$399.99", (760, 340, 120, 36)),
+        ("FREE delivery Tuesday, November 10", (760, 400, 330, 20)),
+        ("Color: Black", (760, 440, 140, 20)),
+        ("Model: WH1000XM5/B", (760, 470, 200, 20)),
+        ("Add to Cart", (1500, 360, 240, 40)),
+        ("Buy Now", (1500, 420, 240, 40)),
+    ]
+    draw.rectangle((140, 200, 700, 760), fill=(235, 235, 240))  # the product photo
+    for text, (x, y, _w, _h) in lines:
+        draw.text((x, y), text, fill=(20, 20, 20))
+    ocr = []
+    for i, (text, rect) in enumerate(lines, start=40):
+        x, y, ww, hh = rect
+        per = max(1, ww // max(1, len(text)))
+        words, cx = [], x
+        for word in text.split():
+            words.append((word, (cx, y, per * len(word), hh)))
+            cx += per * (len(word) + 1)
+        ocr.append(TextLine(text, rect, words, i))
+    elements = [
+        UIElement(1, "Address and search bar", "Edit", (200, 44, 900, 36)),
+        UIElement(2, "Sony WH-1000XM5 Wireless Industry Leading Noise Canceling Headphones, Black", "Text", (760, 220, 900, 30)),
+        UIElement(3, "$399.99", "Text", (760, 340, 120, 36)),
+        UIElement(4, "Add to Cart", "Button", (1500, 360, 240, 40)),
+        UIElement(5, "Buy Now", "Button", (1500, 420, 240, 40)),
+    ]
+    title = "Amazon.com: Sony WH-1000XM5 Wireless Industry Leading Noise Canceling Headphones, Black : Electronics - Google Chrome"
+    ctx = ScreenContext(time.time(), WindowInfo(title, "chrome.exe", (0, 0, w, h)), elements, shot)
     ctx.text = ocr
     return ctx
 
@@ -289,6 +339,10 @@ SCENARIOS = [
     ('fill job form', 'turn_49b75541', 'Fill in the job application at http://127.0.0.1:8791/jobs/apply with my resume on my desktop.', 'fill_form'),
     ('check in ref', 'turn_49b75541', 'Check me in for my flight when it opens. Skyward Air SK 482, booking K7Q2ZP, leaving Vancouver on November 12 at 8:35 in the morning.', 'checkin'),
     ('check in mail', 'turn_49b75541', 'Check me in for my Skyward flight as soon as check-in opens.', 'checkin_mail'),
+    # Cheaper elsewhere (companion/pricecheck.py): Scout checks other stores, a tag by the price.
+    ('cheaper', SHOP_SCREEN, 'Is this cheaper anywhere?', 'price'),
+    ('for less', SHOP_SCREEN, 'Can I get these headphones for less somewhere else?', 'price'),
+    ('product question', SHOP_SCREEN, 'Do these headphones have a good battery life?', 'no_price'),
     ('thanks', 'turn_49b75541', "Thanks, that's all for now.", 'chat'),
     ('joke', 'turn_49b75541', 'Tell me a quick joke.', 'chat'),
     ('who are you', 'turn_49b75541', 'Who are you and what can you do?', 'nohands'),
@@ -372,6 +426,13 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         return J()
 
     brain._run_errand = fake_errand  # type: ignore[method-assign]
+    from pyxi.companion import pricecheck
+
+    async def fake_price_check(brain_, hint, url, **kw):  # never reads a real store
+        background.append(f"price: {json.dumps(hint)[:200]} at {url}")
+
+    pricecheck.run_check = fake_price_check  # type: ignore[assignment]
+    pricecheck.browser_url = lambda hwnd=None: SHOP_URL if turn_id == SHOP_SCREEN else ""  # type: ignore[assignment]
 
     async def fake_subs() -> None:  # never read the real receipts
         background.append("subscriptions: find")
@@ -641,6 +702,19 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("didn't remember it")
     if expect == "tidy_any" and not any(b.startswith("tidy") for b in background) and "tidy_folder" not in tools:
         problems.append("no tidy plan")
+    if expect in ("price", "no_price"):
+        checks = [b for b in background if b.startswith("price: ")]
+        if expect == "price":
+            if not checks:
+                problems.append("didn't check other stores")
+            elif not re.search(r"wh.?1000.?xm5", checks[0], re.I):
+                problems.append(f"lost the model number: {checks[0][:120]}")
+            if len(said) > 90:
+                problems.append("too chatty for a price check")
+            if re.search(r"\$\d", said):
+                problems.append("quoted a price before checking")
+        elif checks:
+            problems.append("checked prices nobody asked about")
     if expect == "careful":
         if "use_computer" in tools or any(b.startswith("hands") for b in background):
             problems.append("drove the mouse for a risky request")

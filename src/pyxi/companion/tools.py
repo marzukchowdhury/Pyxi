@@ -980,3 +980,8 @@ INFO_TOOLS = {
     "read_file",
     "show_file",
 }  # results come back to the model for another round
+
+# "Is this cheaper anywhere?": Scout checks other stores and pins a tag (companion/pricecheck.py).
+from pyxi.companion.pricecheck import TOOL as CHECK_PRICES  # noqa: E402
+
+COMPANION_TOOLS.append(CHECK_PRICES)

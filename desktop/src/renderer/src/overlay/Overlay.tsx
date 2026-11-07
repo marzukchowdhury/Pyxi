@@ -8,6 +8,7 @@ import { Notch } from "./Notch";
 import { ObjectPanel } from "./ObjectPanel";
 import { SketchBoard } from "./SketchBoard";
 import { Presence } from "./Presence";
+import { PriceTag } from "./PriceTag";
 import { Requests } from "./Requests";
 import { ScenePanel } from "./ScenePanel";
 import { isPrimary, useOverlay, voice } from "./store";
@@ -146,6 +147,7 @@ export function Overlay() {
       <ObjectPanel />
       <SketchBoard />
       <Walkthrough />
+      <PriceTag />
       <Team />
       <Requests />
       <Presence micLevel={micLevel} />

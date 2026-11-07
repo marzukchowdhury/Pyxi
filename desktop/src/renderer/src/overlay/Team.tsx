@@ -81,6 +81,11 @@ export function Team() {
               Boarding pass
             </button>
           )}
+          {shown.role === "shopping" && bestLink(shown.data) && (
+            <button className="tray-link" onClick={() => bridge.openExternal(bestLink(shown.data)!.url)}>
+              Open {bestLink(shown.data)!.store}
+            </button>
+          )}
           {(shown.status === "running" || shown.status === "queued") && (
             <button className="tray-stop" onClick={() => brain.send({ type: "job_control", job_id: shown.id, action: "stop" })}>Stop</button>
           )}
@@ -105,4 +110,10 @@ function chipTitle(task: string): string {
 function boardingPass(data: unknown): string | null {
   const url = (data as { boarding_pass?: unknown } | null)?.boarding_pass;
   return typeof url === "string" && /^https?:\/\//.test(url) ? url : null;
+}
+
+/** A finished price check's cheaper store, for the "Open Best Buy" link. */
+function bestLink(data: unknown): { url: string; store: string } | null {
+  const best = (data as { best?: { url?: string; store?: string } } | null)?.best;
+  return best?.url ? { url: best.url, store: best.store ?? "the store" } : null;
 }

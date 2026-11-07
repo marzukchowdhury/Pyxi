@@ -357,6 +357,8 @@ export type BrainEvent =
   | { type: "driving"; doing: string | null }
   | { type: "agents"; agents: Agent[] }
   | { type: "pins"; app: string; pins: Pin[] }
+  | { type: "price_tag"; tag: PriceTagInfo | null }
+  | { type: "shopping"; auto: boolean }
   | { type: "turn_done"; turn_id: string; cost_usd: number; tokens: number; spent_today: number; daily_budget: number }
   | { type: "voice_catalog"; catalog: Record<string, VoiceInfo[]>; voice: VoicePublic }
   | { type: "connectors"; connectors: ConnectorStatus[]; message?: string }
@@ -366,6 +368,19 @@ export type BrainEvent =
   | { type: "beta"; ok: boolean; message: string }
   | { type: "profile"; profile: Record<string, string>; saved?: boolean }
   | ({ type: "file_access" } & FileAccessState);
+
+/** A "cheaper elsewhere" tag: where it sits (physical screen px, beside the price) and what it says. */
+export interface PriceTagInfo {
+  id: string;
+  verdict: "cheaper" | "best_here" | "unverified";
+  headline: string;
+  detail: string;
+  url: string | null;
+  store: string | null;
+  product: string;
+  checked_at: number;
+  at: [number, number] | null;
+}
 
 /** "Let Pyxi search my files" (off until they allow it), and the folders it may look in. */
 export interface FileAccessState {
@@ -383,6 +398,8 @@ export type ClientMessage =
   | { type: "profile_get" }
   | { type: "profile_save"; profile: Record<string, string> }
   | { type: "file_access_get" }
+  | { type: "shopping_get" }
+  | { type: "shopping_save"; auto: boolean }
   | { type: "file_access_save"; enabled: boolean; folders: string[] }
   | { type: "ptt_cancel" }
   | { type: "audio"; data: string; mime: string }

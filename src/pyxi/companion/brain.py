@@ -39,7 +39,7 @@ from pydantic import ValidationError
 from pyxi import booking, hands, media, tidy, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
-from pyxi.companion import filework, paperwork, prompts
+from pyxi.companion import filework, paperwork, pricecheck, prompts
 from pyxi.companion.actions import app_target, open_app, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
@@ -2159,6 +2159,8 @@ class Brain:
             return await filework.handle(self, name, args)
         if name in PAPER_TOOLS:  # forms, flight check-in, showing a bill: companion/paperwork.py
             return await paperwork.handle(self, name, args)
+        if name in pricecheck.TOOLS:  # cheaper elsewhere: companion/pricecheck.py
+            return await pricecheck.handle(self, name, args)
         # Phrased as a problem note, so the model hears it and tries a real tool.
         return f"{name}: there's no tool by that name. Use one of the tools you have."
 

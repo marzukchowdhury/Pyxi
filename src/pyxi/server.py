@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse, JSONResponse
 
 from pyxi import __version__, booking, cloud, files_access
+from pyxi.companion import pricecheck
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
 from pyxi.hub import Hub
@@ -144,6 +145,10 @@ def create_app(
         except Exception as exc:  # offline, or the download host is down: try again next start
             log.warning("voice model download failed: %s", exc)
 
+    async def _on_window(app: str) -> None:
+        await brain.emit_pins(app)
+        await pricecheck.on_window(brain, app)  # tags go with their page; auto price checks
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal ambient
@@ -155,7 +160,7 @@ def create_app(
             brain.spatial,
             brain.activity,
             is_busy=lambda: brain.state != "idle",
-            on_window=brain.emit_pins,
+            on_window=_on_window,
         )
         ambient = asyncio.create_task(tracker.run())
         routines = asyncio.create_task(_routine_clock())
@@ -312,6 +317,10 @@ def create_app(
         elif kind == "profile_save" and isinstance(msg.get("profile"), dict):
             saved = booking.save(settings.data_dir, msg["profile"])
             await hub.emit("profile", profile=saved, saved=True)
+        elif kind == "shopping_get":
+            await hub.emit("shopping", **pricecheck.load(settings.data_dir))
+        elif kind == "shopping_save":
+            await hub.emit("shopping", **pricecheck.save(settings.data_dir, msg))
         elif kind == "file_access_get":
             await hub.emit("file_access", **files_access.load(settings.data_dir).public())
         elif kind == "file_access_save":

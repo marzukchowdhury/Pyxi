@@ -6,6 +6,7 @@ import { brain } from "../shared/socket";
 import { answer, getJson, usePanel } from "./store";
 import { Connections, Routines } from "./Connections";
 import { FileAccess } from "./FileAccess";
+import { PriceChecks } from "./PriceChecks";
 import { VoiceStudio } from "./VoiceStudio";
 
 export type Tab = "chat" | "team" | "palace" | "gallery" | "voice" | "settings";
@@ -496,6 +497,8 @@ export function Settings() {
       <BookingDetails />
       <h4>Your files</h4>
       <FileAccess />
+      <h4>Shopping</h4>
+      <PriceChecks />
       <h4>Connected accounts</h4>
       <Connections />
       <h4>Routines</h4>
