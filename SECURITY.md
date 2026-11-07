@@ -2,6 +2,8 @@
 
 Pyxi sees your screen, works in the accounts you connect and can use your mouse and keyboard, so we treat security problems as the most important bugs there are. This page says how to report one, what Pyxi stores and where, what never leaves your PC, and how Pyxi is protected. What Pyxi shares, and with whom, is in the [privacy policy](docs/PRIVACY.md).
 
+For builders: the [threat model](docs/THREAT_MODEL.md) and the [pre-release checklist](docs/RELEASE_CHECKLIST.md).
+
 ## Reporting a problem
 
 **Please don't open a public issue for a security problem.** Report it privately instead:

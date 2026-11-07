@@ -1,9 +1,11 @@
 """Ship a new Pyxi version with one command.
 
     python scripts/release.py 0.1.5 "What's new, in a sentence or two."  [--full] [--skip-tests]
+    python scripts/release.py --checklist      (the pre-release security checklist, nothing else)
 
 1. Sets the version everywhere (pyproject.toml, src/pyxi/__init__.py, desktop/package.json).
-2. Runs the tests (unless --skip-tests).
+2. Runs the tests: Python, the desktop app's typecheck and unit tests, and the beta server's
+   (unless --skip-tests). See docs/RELEASE_CHECKLIST.md.
 3. Builds the installer (only Pyxi's own code is refreshed in the bundled Python; --full rebuilds
    that Python too, for new dependencies).
 4. Checks the build holds no keys, tokens, invite codes or personal data, and that nothing it
@@ -57,9 +59,31 @@ PRIVATE_FILES = {
 }
 
 
+CHECKLIST = ROOT / "docs" / "RELEASE_CHECKLIST.md"
+
+
+def manual_checklist() -> str:
+    """The by-hand part of docs/RELEASE_CHECKLIST.md, to read before anything is published."""
+    text = CHECKLIST.read_text(encoding="utf-8")
+    part = text.split("## By hand", 1)[1] if "## By hand" in text else text
+    return "Before you publish, by hand (docs/RELEASE_CHECKLIST.md):\n" + part.strip()
+
+
+def automated_checks() -> None:
+    """The tests of everything that ships: Python, the desktop app and the beta server."""
+    import shutil
+
+    npm = shutil.which("npm") or shutil.which("npm.cmd") or "npm"
+    sh(sys.executable, "-m", "pytest", "-q")
+    sh(npm, "run", "typecheck", cwd=ROOT / "desktop")
+    sh(npm, "test", cwd=ROOT / "desktop")
+    sh(npm, "test", cwd=ROOT / "cloud")
+
+
 def sh(*cmd: str, **kw) -> subprocess.CompletedProcess:
     print("+", " ".join(cmd[:6]), "..." if len(cmd) > 6 else "")
-    return subprocess.run(cmd, cwd=ROOT, check=True, **kw)
+    kw.setdefault("cwd", ROOT)
+    return subprocess.run(cmd, check=True, **kw)
 
 
 def set_version(v: str) -> None:
@@ -178,6 +202,9 @@ def verify(v: str) -> None:
 
 
 def main() -> None:
+    if "--checklist" in sys.argv:
+        print(manual_checklist())
+        return
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args or not re.fullmatch(r"\d+\.\d+\.\d+", args[0]):
         raise SystemExit(__doc__)
@@ -191,7 +218,9 @@ def main() -> None:
     set_version(v)
     sh(sys.executable, "-m", "pip", "install", "-e", ".", "-q", "--no-deps")
     if "--skip-tests" not in sys.argv:
-        sh(sys.executable, "-m", "pytest", "-q")
+        automated_checks()
+    else:
+        print("WARNING: --skip-tests: no tests run. Only for re-publishing a build that passed them.")
     for name in ASSETS:  # never upload a leftover from an earlier build
         (DIST / name).unlink(missing_ok=True)
     for pack in DIST.glob(PACKS):
@@ -209,6 +238,7 @@ def main() -> None:
         raise SystemExit(f"STOP: the build didn't produce {missing}.")
     check_clean_build()
     sh(sys.executable, "scripts/security_check.py")  # stops on high or critical
+    print(manual_checklist())
     publish(v, notes)
     verify(v)
     sh("git", "add", "pyproject.toml", "src/pyxi/__init__.py", "desktop/package.json")
