@@ -15,7 +15,14 @@ def otto_settings(
     settings: PyxiSettings, *, model: str | None = None, **overrides: object
 ) -> OttoSettings:
     """Build Otto settings that mirror Pyxi's model choice (cloud or local)."""
-    base: dict[str, object] = {"effort": settings.effort, "data_dir": settings.data_dir / "otto"}
+    base: dict[str, object] = {
+        "effort": settings.effort,
+        "data_dir": settings.data_dir / "otto",
+        # Scout's browser: a profile of its own in Pyxi's data folder, never the user's Chrome or
+        # Edge profile, cookies or saved passwords, and never attached to a running browser.
+        "profile_dir": settings.data_dir / "browser",
+        "cdp_url": None,
+    }
     if settings.local_mode:
         base.update(
             model=model or settings.local_model,
