@@ -91,7 +91,13 @@ def serve(
 
 
 @app.command("setup-voice")
-def setup_voice() -> None:
+def setup_voice(
+    bengali: bool = typer.Option(
+        False,
+        "--bengali",
+        help="Also fetch the Bengali voice (108 MB) and offline Bengali listening (1.5 GB).",
+    ),
+) -> None:
     """Download Kokoro-82M (about 350 MB) for local text-to-speech."""
     from pyxi.voice.tts import download_kokoro
 
@@ -99,6 +105,15 @@ def setup_voice() -> None:
     console.print("Downloading Kokoro-82M voice model…")
     for path in asyncio.run(download_kokoro(s.models_dir)):
         console.print(f"  [green]✓[/] {path} ({path.stat().st_size / 1e6:.0f} MB)")
+    if bengali:
+        from huggingface_hub import snapshot_download
+
+        from pyxi.voice.bengali import download_bengali_voice
+
+        console.print("Downloading the Bengali voice…")
+        console.print(f"  [green]✓[/] {asyncio.run(download_bengali_voice(s.models_dir))}")
+        console.print("Downloading offline Bengali listening (about 1.5 GB)…")
+        console.print(f"  [green]✓[/] {snapshot_download(s.voice.stt_bengali_model)}")
 
 
 @app.command()

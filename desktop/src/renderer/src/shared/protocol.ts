@@ -282,7 +282,7 @@ export interface VoicePublic {
   speed: number;
   language: string;
   captions: boolean;
-  available: Record<"kokoro" | "elevenlabs" | "gemini", boolean>;
+  available: Record<"kokoro" | "elevenlabs" | "gemini", boolean> & { bengali?: boolean };
   languages: Record<string, string>;
   error: string | null;
 }

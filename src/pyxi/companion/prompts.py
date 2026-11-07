@@ -330,6 +330,18 @@ def system_prompt(persona: str, roster: str) -> str:
     return SYSTEM.format(persona=persona, roster=roster)
 
 
+# How to write a reply that is read aloud, for languages where the default goes wrong.
+LANGUAGE_NOTES = {
+    "Bengali": (
+        " Write natural, everyday Bengali the way friends talk (তুমি, not stiff textbook"
+        " phrasing), always in Bengali script, never in Latin letters (no 'ami tomake"
+        " bolchi'). Your words are read aloud by a Bengali voice that can only read Bengali"
+        " script, so write English loanwords and app names the way Bengalis write them"
+        " (এক্সেল, ডাউনলোডস ফোল্ডার, সেটিংস), and end sentences with । as usual."
+    ),
+}
+
+
 def turn_prompt(
     *,
     user_text: str,
@@ -360,6 +372,7 @@ def turn_prompt(
     if language:
         parts.append(
             f"# Language\nThe user is speaking {language}. Reply, and narrate any scene, in {language}."
+            + LANGUAGE_NOTES.get(language, "")
         )
     parts.append(f"# The user says\n{user_text}")
     return "\n\n".join(parts)

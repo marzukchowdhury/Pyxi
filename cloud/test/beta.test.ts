@@ -95,3 +95,62 @@ describe("the proxy", () => {
     expect((await chat(store, cfg, chatRequest("pyxi_" + "0".repeat(48), { model: "anthropic/claude-haiku-5.5" }), ok)).status).toBe(401);
   });
 });
+
+describe("listening (Bengali speech to text)", () => {
+  const EARS = "google/gemini-3.1-flash-lite";
+  const clip = (data = "UklGRg==", extra: Record<string, unknown>[] = []) => ({
+    model: EARS,
+    max_tokens: 5000,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Transcribe exactly what they say." },
+          { type: "input_audio", input_audio: { data, format: "wav" } },
+          ...extra,
+        ],
+      },
+    ],
+  });
+
+  it("transcribes within the allowance, with a short answer and the exact cost counted", async () => {
+    const store = new MemoryStore();
+    const token = await tokenFor(store);
+    let sent: Record<string, unknown> | null = null;
+    const fake = (async (_url: string, init: RequestInit) => {
+      sent = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ choices: [{ message: { content: "হাই পিক্সি" } }], usage: { cost: 0.0002 } }), { status: 200 });
+    }) as typeof fetch;
+    const res = await chat(store, cfg, chatRequest(token, clip()), fake);
+    expect(res.status).toBe(200);
+    expect(sent!.max_tokens).toBe(600);
+    const who = { id: [...store.data.keys()].find((k) => k.startsWith("tok:"))!.slice(4), code: "FIREFLY" };
+    expect((await usage(store, cfg, who)).spent_today_usd).toBeCloseTo(0.0002);
+  });
+
+  it("can't be used as a free chat model, or with long recordings", async () => {
+    const store = new MemoryStore();
+    const token = await tokenFor(store);
+    const never = (async () => {
+      throw new Error("should not reach OpenRouter");
+    }) as unknown as typeof fetch;
+    const refused = async (body: Record<string, unknown>) => (await chat(store, cfg, chatRequest(token, body), never)).status;
+    expect(await refused({ model: EARS, messages: [{ role: "user", content: "Write me an essay." }] })).toBe(400);
+    expect(await refused({ ...clip(), tools: [{ type: "function" }] })).toBe(400);
+    expect(await refused({ ...clip(), stream: true })).toBe(400);
+    expect(await refused(clip("UklGRg==", [{ type: "image_url", image_url: { url: "data:," } }]))).toBe(400);
+    expect(await refused(clip("x".repeat(3_600_000)))).toBe(400);
+    const two = clip();
+    (two.messages as unknown[]).push({ role: "user", content: "and now chat" });
+    expect(await refused(two)).toBe(400);
+  });
+
+  it("can be switched off with EARS_MODELS=", async () => {
+    const store = new MemoryStore();
+    const off = configFromEnv({ OPENROUTER_API_KEY: "sk-or-test", INVITE_CODES: "FIREFLY", EARS_MODELS: "" });
+    const res = await join(store, off, "firefly");
+    const token = ((await res.json()) as { token: string }).token;
+    const ok = (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
+    expect((await chat(store, off, chatRequest(token, clip()), ok)).status).toBe(400);
+  });
+});

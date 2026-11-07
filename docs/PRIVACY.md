@@ -38,6 +38,7 @@ You can pause all screen access at any time with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+
 | The booking details you saved (only the ones a form asks for) | The booking site you approved, typed in by Scout in a browser you can watch | To book the appointment, tickets or table you asked for. Each booking shows you which details it will use before it starts, and you approve the final booking click |
 | Emails, calendar events and documents you ask Pyxi to send or create | Google, Discord or LinkedIn, only for accounts you connected | To do the errand. Every email, post or message shows you an approval card first |
 | Optional premium voices | ElevenLabs or Google, only if you add your own key | To speak with that voice |
+| What you say aloud in Bengali (or in a language Pyxi can't place in Automatic) | Google's Gemini, through OpenRouter (during the beta, via the Pyxi beta server) | To turn Bengali speech into text, which no model on your computer does well. English never goes; with offline Bengali installed, nothing goes when you're offline |
 
 **AI providers.** OpenRouter passes your request to the model provider (Anthropic's Claude by default). They process it to produce the answer, under their own terms and privacy policies ([OpenRouter](https://openrouter.ai/privacy), [Anthropic](https://www.anthropic.com/legal/privacy)). **[Before launch: confirm and state the data-retention and training settings on your OpenRouter account.]** In local mode (Ollama), nothing goes to any AI provider.
 
@@ -49,7 +50,7 @@ You can pause all screen access at any time with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+
 
 It sends OpenRouter an anonymous per-user ID, not your name or email, so abuse can be spotted.
 
-**On your computer:** speech-to-text (Whisper) and the default voice (Kokoro) run on your computer. Your voice recordings aren't sent anywhere.
+**On your computer:** speech-to-text (Whisper) and the default voices (Kokoro, and Mitali for Bengali) run on your computer. Your voice recordings aren't sent anywhere, except Bengali speech as described above. The beta server passes those recordings straight through and doesn't keep them.
 
 ## What's stored on your computer
 

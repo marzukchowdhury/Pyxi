@@ -12,6 +12,11 @@ Pyxi's own lines use the chosen voice; teammates keep their own Kokoro voices so
 tell who's talking. If a cloud voice fails (no credit left, offline), that line falls back to
 Kokoro and the panel says why, instead of Pyxi going silent. Preferences persist in
 ``.pyxi/voice.json``.
+
+Bengali: Kokoro can't speak it, so any line written in Bengali script is read by Mitali, the
+on-device Bengali voice (voice/bengali.py), whoever says it and whatever engine is chosen. A
+cloud engine that can speak Bengali (ElevenLabs v4, Gemini) still speaks Pyxi's own lines when
+chosen, and falls back to Mitali, never to an English voice reading Bengali.
 """
 
 from __future__ import annotations
@@ -28,6 +33,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from pyxi.config import VoiceConfig
+from pyxi.voice.bengali import VOICE_ID as BENGALI_VOICE
+from pyxi.voice.bengali import BengaliVoice, is_bengali
 from pyxi.voice.tts import TAG, KokoroTTS, Speech, strip_tags
 
 log = logging.getLogger(__name__)
@@ -175,6 +182,16 @@ KOKORO_CATALOG: list[VoiceInfo] = [
         gender="m",
         sample="Once upon a time, there was a settings page. It had far too many toggles.",
     ),
+    VoiceInfo(
+        id=BENGALI_VOICE,
+        name="Mitali",
+        vibe="Friendly",
+        engine="kokoro",
+        accent="Bangla",
+        lang="bn",
+        gender="f",
+        sample="হাই, আমি পিক্সি। তোমার স্ক্রিনেই থাকি, আর এক ক্লিক করে করে সব দেখিয়ে দিই।",
+    ),
 ]
 
 # Google's prebuilt voices with the personalities Google gives them.
@@ -220,7 +237,7 @@ LANGUAGES: dict[str, str] = {
     "zh": "Chinese",
     "bn": "Bengali",
 }
-# Kokoro speaks these; for Bengali (and anything else) a cloud voice is needed.
+# Kokoro speaks these. Bengali has its own on-device voice (Mitali); anything else needs a cloud voice.
 KOKORO_LANG = {
     "en": "en-us",
     "es": "es",
@@ -292,10 +309,58 @@ class VoiceStudio:
         self.kokoro = KokoroTTS(config, models_dir)
         self.prefs_path = prefs_path
         self.prefs = self._load()
+        self.bengali = BengaliVoice(models_dir)
         self.last_error: str | None = None
-        self.detected_language: str = "en"
+        self._detected = "en"
+        self._prep: Any = None
         self._eleven_voices: list[VoiceInfo] | None = None
         self.name = "studio"
+
+    # ------------------------------------------------------------------ language
+    @property
+    def detected_language(self) -> str:
+        return self._detected
+
+    @detected_language.setter
+    def detected_language(self, code: str) -> None:
+        self._detected = code or "en"
+        if self._detected == "bn":
+            self.prepare_bengali()  # first Bengali heard in Automatic: fetch the voice now
+
+    def wants_bengali(self) -> bool:
+        lang = self.prefs.language
+        return lang == "bn" or (lang == "auto" and self._detected == "bn")
+
+    def prepare_bengali(self) -> None:
+        """Download and load the Bengali voice in the background, so the first answer is quick."""
+        import asyncio
+
+        if self.bengali._session is not None or (self._prep and not self._prep.done()):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # no event loop (a script or test): the first Bengali line loads it instead
+
+        async def run() -> None:
+            try:
+                await self.bengali.ensure()
+            except RuntimeError as exc:
+                log.warning("Bengali voice not ready: %s", exc)
+
+        self._prep = loop.create_task(run())
+
+    async def _bengali(self, text: str, speed: float) -> Speech:
+        """Mitali reads it. If she can't (no download yet, offline), the words still show as a
+        caption and the panel says why: never an English voice mangling Bengali."""
+        try:
+            return await self.bengali.synthesize(text, speed)
+        except RuntimeError as exc:
+            msg = f"{exc}. Pyxi will show its Bengali answers as text until the voice is ready."
+            if msg != self.last_error:
+                log.warning(msg)
+            self.last_error = msg
+            return Speech(text=strip_tags(text), wav=None)
 
     # ------------------------------------------------------------------ prefs
     def _load(self) -> VoicePrefs:
@@ -310,6 +375,8 @@ class VoiceStudio:
             data["voice"] = self.default_voice(data["engine"])
         self.prefs = VoicePrefs.model_validate(data)
         self.last_error = None
+        if self.prefs.language == "bn":
+            self.prepare_bengali()
         self.prefs_path.parent.mkdir(parents=True, exist_ok=True)
         self.prefs_path.write_text(self.prefs.model_dump_json(indent=2), encoding="utf-8")
         return self.prefs
@@ -323,6 +390,7 @@ class VoiceStudio:
             "kokoro": self.kokoro.installed(),
             "elevenlabs": bool(_key("ELEVENLABS_API_KEY", "XI_API_KEY")),
             "gemini": bool(_key("GEMINI_API_KEY", "GOOGLE_API_KEY")),
+            "bengali": self.bengali.installed(),
         }
 
     @property
@@ -380,7 +448,9 @@ class VoiceStudio:
     # ------------------------------------------------------------------ speaking
     async def synthesize(self, text: str, voice: str | None = None) -> Speech:
         tone, text = split_tone(text)
-        if voice:  # a teammate with its own Kokoro voice
+        if voice:  # a teammate with its own Kokoro voice (which can't read Bengali)
+            if is_bengali(text):
+                return await self._bengali(text, self.prefs.speed)
             return await self.kokoro.synthesize(text, voice)
         return await self.speak_as(self.prefs.engine, self.prefs.voice, text, tone=tone)
 
@@ -395,6 +465,9 @@ class VoiceStudio:
     ) -> Speech:
         speed = (speed or self.prefs.speed) * SPEED_BY_TONE.get(tone, 1.0)
         lang = self.prefs.language if self.prefs.language != "auto" else self.detected_language
+        bengali = is_bengali(text)
+        if bengali and (engine == "kokoro" or not self.available().get(engine)):
+            return await self._bengali(text, speed)
         try:
             if engine == "elevenlabs":
                 return await self._eleven(voice, text, speed)
@@ -406,9 +479,13 @@ class VoiceStudio:
                 log.warning(msg)
             self.last_error = msg
             voice = self.kokoro.config.voice
+            if bengali:
+                return await self._bengali(text, speed)
         return await self._kokoro(voice if engine == "kokoro" else "af_heart", text, speed, lang)
 
     async def _kokoro(self, voice: str, text: str, speed: float, lang: str) -> Speech:
+        if voice == BENGALI_VOICE:  # Mitali chosen, but this line isn't Bengali
+            voice, lang = "af_heart", "en" if lang == "bn" else lang
         code = KOKORO_LANG.get(lang, "en-us")
         if voice[:1] not in KOKORO_PREFIX.get(lang, "ab"):
             voice = KOKORO_VOICE_FOR.get(

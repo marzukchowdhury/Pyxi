@@ -34,7 +34,7 @@ For real work, Pyxi delegates to named teammates. Scout drives a real browser, Q
 | **Desktop chores** | "Play Billie Jean, a bit quieter" starts the song in a window behind yours in seconds, no clicking, and sets the volume. Lay out two, three or four windows in one go ("Facebook, Stake and Gmail side by side"), tidy a messy Desktop into folders (you approve the plan, nothing is deleted, and "undo that" puts it all back), pause or skip music, and find "coffee near me, open now" on Google Maps. |
 | **Pictures explained on the picture** | "Explain this diagram" pins short tags onto the actual parts of the picture and traces the flows across it, instead of opening a separate diagram. |
 | **The notch** | Hold <kbd>Ctrl</kbd>+<kbd>Alt</kbd> to talk; it shows Listening, then "Looking at Chrome", then streams Pyxi's words. Hover it for a small chat; double-tap <kbd>Ctrl</kbd> to type. Errors (mic blocked, no key) show up here instead of failing silently. |
-| **A voice studio** | Pick who Pyxi sounds like: free on-device Kokoro voices, or ElevenLabs and Gemini voices with your own key. Each voice has a drawn signature and an in-character preview; speed, language and captions are one tap away. Sentences can carry a tone that premium voices perform. |
+| **A voice studio** | Pick who Pyxi sounds like: free on-device Kokoro voices (and Mitali, who speaks Bengali), or ElevenLabs and Gemini voices with your own key. Each voice has a drawn signature and an in-character preview; speed, language and captions are one tap away. Sentences can carry a tone that premium voices perform. |
 | **Connected accounts** | Gmail, Google Calendar, Google Docs, Discord and LinkedIn. "Sam emailed my recommendation letter, fix it" finds the email, saves the attachment, has Quill fix it into a copy beside the original, and offers to reply with it. Anything that reaches other people waits for an approval card. See [docs/CONNECT.md](docs/CONNECT.md). |
 | **Quick actions** | Opens sites and apps, copies exact text, or drops a drafted reply straight into the box you're typing in. |
 | **Routines** | "Every weekday at 9, check my email for anything from my professor and tell me." Routines run while Pyxi is open, as ordinary turns inside your daily budget, and you can see or delete them in Settings. |
@@ -226,6 +226,8 @@ sequenceDiagram
 
 **Local voice.** Kokoro-82M runs faster than real time on CPU (about 0.35× real-time factor here), so it's the default. Chatterbox Turbo is an optional GPU provider for zero-shot voice cloning and tags like `[laugh]`. Kokoro doesn't clone, so the two are complementary. StyleTTS2 was considered and skipped: it's research code with fragile dependencies. If a voice can't load, Pyxi falls back to the OS voice rather than going silent.
 
+**Bengali.** Kokoro has no Bengali and Windows has no Bengali voice, so Bengali has its own path, chosen by measuring the options on real Bengali speech (`samples/bengali/`). Listening: stock Whisper models loop or mishear Bengali (small 168% character errors, large-v3 35%), so Bengali speech goes to Gemini 3.1 Flash-Lite through OpenRouter (14%, about $0.001 a minute, through the beta server in the beta), with a Bengali fine-tuned Whisper on the PC for offline use (`pyxi setup-voice --bengali`). In Automatic, Whisper first decides whether you spoke English, which it does reliably, so English stays local. Speaking: Mitali, a VITS voice trained on Bangladeshi speech (Apache 2.0), runs on ONNX Runtime, downloads once (108 MB) and reads anything written in Bengali script, whoever says it. OpenAI's audio models were rejected because they mispronounce common words (বৃহস্পতিবার is heard as "the 25th").
+
 ## Design language
 
 *Quiet luxury and precision.* Near-black glass, hairline borders, ice blue for what Pyxi draws and firefly gold for Pyxi itself, Inter with tight tracking, and fast spring motion (about 220 to 550 ms).
@@ -265,7 +267,7 @@ src/pyxi/
   palace/      activity.py · tracker.py · scenes.py (time travel, causal) · when.py
   agents/      registry.py (named agents) · jobs.py (Otto jobs, handoffs)
   memory/      spatial.py (snapshots, FTS5 recall)
-  voice/       stt.py (faster-whisper) · tts.py (Kokoro, Chatterbox, fallback)
+  voice/       stt.py (faster-whisper, cloud Bengali listening) · tts.py (Kokoro, Chatterbox, fallback) · bengali.py (Mitali, Bengali numbers)
   hands.py (real mouse and keyboard) · windows.py (snap, split, focus) · tidy.py (folders, with undo)
   walkthrough.py · demo.py · hub.py · server.py · cli.py
 desktop/

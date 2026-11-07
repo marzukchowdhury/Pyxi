@@ -130,9 +130,9 @@ export function VoiceStudio() {
       </label>
       <p className="studio-blurb">
         {live.language === "auto"
-          ? "Pyxi listens for the language you speak and answers in it. The first time, it downloads a multilingual listening model (about 480 MB)."
-          : live.language === "bn" && live.engine === "kokoro"
-            ? "Pyxi can read Bengali, but the on-device voice can't speak it yet. Pick ElevenLabs for a Bengali voice."
+          ? "Pyxi listens for the language you speak and answers in it. The first time, it downloads a multilingual listening model (about 480 MB). English is heard on this PC; Bengali is heard online and answered by Mitali, the Bengali voice."
+          : live.language === "bn"
+            ? `Pyxi listens in Bengali and answers in Bengali. Mitali, the Bengali voice, runs on this PC${live.available.bengali ? "" : " and downloads once (about 108 MB)"}${live.engine !== "kokoro" ? `, and takes over if ${ENGINES.find((e) => e.id === live.engine)?.name} can't speak` : ""}. Listening to Bengali needs the internet (the Pyxi beta or your OpenRouter key).`
             : "Pyxi listens and answers in this language."}
       </p>
 

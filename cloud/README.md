@@ -14,6 +14,8 @@ It stores no prompts or screen content. It keeps only token hashes and spend tot
 | `POST /api/v1/chat/completions` | OpenAI-style chat, forwarded to OpenRouter with the beta's limits. The cost is OpenRouter's own figure |
 | `GET /api/me` | Today's spend and what's left |
 
+The same chat route also accepts the listening model (`EARS_MODELS`, default `google/gemini-3.1-flash-lite`) for Bengali speech to text, but only as a transcription: one message with one audio clip (about 80 seconds at most), no tools, images or streaming, and a short answer. It costs about $0.001 per minute of speech and counts against the same daily allowance.
+
 ## Deploy (about 10 minutes)
 
 1. **Create the project:**
@@ -42,6 +44,8 @@ It stores no prompts or screen content. It keeps only token hashes and spend tot
    - `USES_PER_CODE=3`: devices per code.
    - `MAX_TOKENS=16000`: the longest reply allowed (a detailed 3D model asks for 12000).
    - `ALLOWED_MODELS`: comma-separated; defaults to Claude Haiku 5.5 and Sonnet 5.5.
+   - `EARS_MODELS`: models allowed only to transcribe speech; defaults to Gemini 3.1 Flash-Lite. Set it empty to turn Bengali listening off.
+   - `MAX_AUDIO_CHARS=3500000`: the largest audio clip, in base64 characters (about 80 seconds).
 
 5. **Deploy:**
 

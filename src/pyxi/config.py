@@ -42,6 +42,16 @@ class VoiceConfig(BaseModel):
         "small",
         description="faster-whisper model used when the language is Automatic or not English.",
     )
+    stt_cloud_model: str = Field(
+        "google/gemini-3.1-flash-lite",
+        description="OpenRouter model that transcribes Bengali (and speech the local model can't "
+        "place). Goes through the beta server in the beta. About $0.001 per minute of speech.",
+    )
+    stt_bengali_model: str = Field(
+        "IamSanjid/tugstugi_bengaliai-regional-asr_whisper-medium-ct2",
+        description="Offline Bengali listening (1.5 GB, `pyxi setup-voice --bengali`), used when "
+        "the cloud can't be reached.",
+    )
     speed: float = 1.0
     chatterbox_reference: Path | None = Field(
         None, description="Reference clip for Chatterbox voice cloning."

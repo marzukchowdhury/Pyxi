@@ -12,12 +12,18 @@ export interface Config {
   monthlyCapUsd: number;
   models: Set<string>;
   maxTokens: number;
+  /** Models allowed only to transcribe speech (Bengali listening), never to chat. */
+  earsModels: Set<string>;
+  maxAudioChars: number;
 }
 
 const DEFAULT_MODELS = [
   "anthropic/claude-haiku-5.5",
   "anthropic/claude-sonnet-5.5",
 ];
+// Hears Bengali far better than any Whisper model on the PC, for about $0.001 a minute.
+const DEFAULT_EARS_MODELS = ["google/gemini-3.1-flash-lite"];
+const EARS_MAX_TOKENS = 600; // a transcript of a spoken question, never an essay
 
 export function configFromEnv(env: Record<string, string | undefined> = process.env): Config {
   const list = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -29,6 +35,9 @@ export function configFromEnv(env: Record<string, string | undefined> = process.
     monthlyCapUsd: Number(env.MONTHLY_CAP_USD ?? 20),
     models: new Set(list(env.ALLOWED_MODELS).length ? list(env.ALLOWED_MODELS) : DEFAULT_MODELS),
     maxTokens: Number(env.MAX_TOKENS ?? 16000), // detailed 3D models ask for 12000
+    earsModels: new Set(env.EARS_MODELS !== undefined ? list(env.EARS_MODELS) : DEFAULT_EARS_MODELS),
+    // base64 of about 80 seconds of 16 kHz mono WAV; also keeps requests under Vercel's 4.5 MB
+    maxAudioChars: Number(env.MAX_AUDIO_CHARS ?? 3_500_000),
   };
 }
 
@@ -89,6 +98,29 @@ async function record(store: Store, who: Who, cost: number): Promise<void> {
   await store.incr(`spend:all:${month()}`, cost, MONTH_TTL);
 }
 
+/** Why a request to a listening-only model isn't a plain transcription request ("" if it is):
+ * one user message of text and audio, at most ~80 seconds of audio, no tools or images. */
+export function earsProblem(body: Record<string, unknown>, cfg: Config): string {
+  const messages = body.messages;
+  if (!Array.isArray(messages) || messages.length !== 1) return "Send one message with the audio.";
+  const msg = messages[0] as { role?: unknown; content?: unknown };
+  if (msg.role !== "user" || !Array.isArray(msg.content)) return "Send one message with the audio.";
+  if (body.tools || body.tool_choice || body.stream) return "This model only transcribes speech.";
+  let audio = 0;
+  let chars = 0;
+  for (const part of msg.content as { type?: unknown; text?: unknown; input_audio?: { data?: unknown } }[]) {
+    if (part?.type === "input_audio") {
+      audio += 1;
+      chars += String(part.input_audio?.data ?? "").length;
+    } else if (part?.type === "text") {
+      if (String(part.text ?? "").length > 2000) return "This model only transcribes speech.";
+    } else return "This model only transcribes speech.";
+  }
+  if (audio !== 1) return "Send exactly one audio clip.";
+  if (chars > cfg.maxAudioChars) return "That recording is too long. Keep it under a minute or so.";
+  return "";
+}
+
 /** OpenAI-style chat completions, passed through to OpenRouter with the beta's limits. */
 export async function chat(
   store: Store,
@@ -112,8 +144,15 @@ export async function chat(
   } catch {
     return json({ error: { message: "Bad request body." } }, 400);
   }
-  if (!cfg.models.has(String(body.model))) return json({ error: { message: `Model ${String(body.model)} isn't part of the beta.` } }, 400);
-  body.max_tokens = Math.min(Number(body.max_tokens ?? cfg.maxTokens), cfg.maxTokens);
+  const model = String(body.model);
+  const ears = !cfg.models.has(model) && cfg.earsModels.has(model);
+  if (!cfg.models.has(model) && !ears) return json({ error: { message: `Model ${model} isn't part of the beta.` } }, 400);
+  if (ears) {
+    const problem = earsProblem(body, cfg);
+    if (problem) return json({ error: { message: problem } }, 400);
+  }
+  const ceiling = ears ? EARS_MAX_TOKENS : cfg.maxTokens;
+  body.max_tokens = Math.min(Number(body.max_tokens ?? ceiling), ceiling);
   body.usage = { include: true }; // OpenRouter reports the exact cost, which is what gets counted
 
   const upstream = await fetchImpl("https://openrouter.ai/api/v1/chat/completions", {

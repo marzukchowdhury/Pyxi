@@ -107,6 +107,8 @@ def create_app(
     async def _warm_ears() -> None:
         try:
             studio = brain.studio
+            if studio and studio.wants_bengali():
+                studio.prepare_bengali()  # the Bengali voice, downloaded once (108 MB)
             await brain.stt.self_test(studio.prefs.language if studio else "en")
         except Exception as exc:  # never block startup on the microphone model
             log.warning("speech model warm-up failed: %s", exc)

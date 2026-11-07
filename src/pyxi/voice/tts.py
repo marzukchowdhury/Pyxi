@@ -32,7 +32,8 @@ log = logging.getLogger(__name__)
 TAG = re.compile(
     r"\[(laugh|chuckle|sigh|gasp|cough|clear throat|sniff|groan|shush)\]", re.IGNORECASE
 )
-_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(\[{])")
+# Sentence ends: English (a capital follows), and Bengali, which ends sentences with the dari (।).
+_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(\[{])|(?<=।)\s+|(?<=[!?])\s+(?=[ঀ-৿])")
 
 KOKORO_MODEL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
 KOKORO_VOICES = (
