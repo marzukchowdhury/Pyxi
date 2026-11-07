@@ -208,7 +208,7 @@ input[type="checkbox"] { height: auto; accent-color: #9ecbff; margin-top: 2px; }
 .s-explode .scene-art { color: #ffe1b8; background: radial-gradient(circle at 30% 25%, rgba(255,213,158,.26), rgba(255,213,158,.04) 70%); border-color: rgba(255,213,158,.2); }
 
 /* settings */
-.settings { display: grid; gap: 12px; font-size: 13px; }
+.settings { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; font-size: 13px; }
 .settings h4 { margin: 14px 0 0; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
 .kv { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .kv span { color: var(--ink-2); }
@@ -311,3 +311,11 @@ button.ghost:hover { color: var(--ink); border-color: var(--hair-hi); }
 .act-meta { grid-column: 1 / span 2; color: var(--ink-3); font-size: 11.5px; }
 .act.undone .act-what { text-decoration: line-through; opacity: .7; }
 .act-detail { margin: 4px 0 0; max-height: 200px; overflow: auto; white-space: pre-wrap; font-size: 11.5px; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.18); user-select: text; }
+
+/* Grids in the panel never grow past it: a long line that doesn't wrap (a connection's status, a
+   folder path, a model name) gets "..." instead of stretching the whole tab sideways. */
+.beta-card, .booking-details, .file-access, .file-access .folders, .connections { grid-template-columns: minmax(0, 1fr); }
+.booking-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.booking-grid input, .beta-row input, .file-access .folder-add input { min-width: 0; }
+.file-access .folders code { min-width: 0; }
+.kv b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

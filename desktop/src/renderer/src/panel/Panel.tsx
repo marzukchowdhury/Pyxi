@@ -413,6 +413,8 @@ function BetaCard() {
       .catch(() => setLeft(null));
   }, [joined]);
   if (!hello?.beta || (!joined && !hello.beta.can_join)) return null;
+  // The developer version (Pyxi Dev, run from the code) uses the developer's own key: no invite.
+  if (import.meta.env.DEV && !joined) return null;
   if (joined)
     return (
       <div className="beta-card joined">
