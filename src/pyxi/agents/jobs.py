@@ -144,7 +144,9 @@ class JobManager:
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._controls: dict[str, RunControls] = {}
         self.memory = MemoryStore(settings.db_path)
-        self.headed = True  # watching the browser is half the fun
+        # Teammates work out of sight so nothing pops up over what you're doing; the task tray shows
+        # their live view on request. Bookings stay visible: you may need to pay in that window.
+        self.headed = False
 
     # ------------------------------------------------------------------ public api
     async def start(

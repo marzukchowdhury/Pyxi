@@ -516,6 +516,10 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("no tidy plan")
     from pyxi.companion.brain import drop_false_promises
 
+    # Background work is quiet: a short "On it", not a running commentary.
+    busy = any(b.startswith(("book", "delegate", "errand", "hands", "play", "tidy", "arrange")) for b in background)
+    if busy and len(re.findall(r"[.!?](\s|$)", said)) > 2:
+        problems.append(f"talks too much while working ({len(said)} chars)")
     # "I'll look for a slot" is a kept promise when a teammate or booking really is off doing it.
     working = any(b.startswith(("book", "delegate", "errand", "hands", "tidy")) for b in background)
     if drop_false_promises(said.split(". ")[-1])[1] and not working:

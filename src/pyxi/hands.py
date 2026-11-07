@@ -170,6 +170,34 @@ class Hands:
         if self.interrupted():
             raise Interrupted
 
+    def idle_seconds(self) -> float:
+        """How long since the user last touched the mouse or keyboard (Windows' own count)."""
+
+        class _LastInput(ctypes.Structure):
+            _fields_ = [("cbSize", wt.UINT), ("dwTime", wt.DWORD)]
+
+        info = _LastInput(ctypes.sizeof(_LastInput), 0)
+        if not self._u.GetLastInputInfo(ctypes.byref(info)):
+            return 0.0
+        return max(0, ctypes.windll.kernel32.GetTickCount() - info.dwTime) / 1000  # type: ignore[attr-defined]
+
+    def wait_idle(self, quiet_s: float = 3.0, timeout_s: float = 300.0) -> bool:
+        """Wait until the user has left the mouse and keyboard alone for ``quiet_s``. False if
+        they pressed Esc (stop for good) or it never got quiet."""
+        import time
+
+        end = time.monotonic() + timeout_s
+        self._u.GetAsyncKeyState(VK_ESCAPE)
+        while time.monotonic() < end:
+            if self._u.GetAsyncKeyState(VK_ESCAPE) & 0x8001:
+                self.reason = "esc"
+                return False
+            if self.idle_seconds() >= quiet_s:
+                self._trail.clear()  # where they left the mouse isn't a new grab
+                return True
+            time.sleep(0.2)
+        return False
+
     # ----------------------------------------------------------------- the mouse
     def _send(self, *inputs: _Input) -> None:
         arr = (_Input * len(inputs))(*inputs)

@@ -266,9 +266,9 @@ class Operator:
         last_look: Image.Image | None = None
         still = 0  # looks in a row where nothing on screen changed
         for n in range(1, self.max_steps + 1):
-            if self.cancelled or h.interrupted():
+            if self.cancelled or (h.interrupted() and not await self._yield(h, window)):
                 log.info("hands stopped: %s", h.reason or "cancelled")
-                return Outcome(False, "You took over, so I stopped.", steps, stopped=True)
+                return Outcome(False, "Stopped, as you asked.", steps, stopped=True)
             ctx = await self.capture()
             if ctx.excluded:
                 return Outcome(False, "That's a private app, so I won't touch it.", steps)
@@ -340,8 +340,11 @@ class Operator:
                 try:
                     line, note = await self._do(h, ctx, a, n)
                 except hands.Interrupted:
-                    log.info("hands stopped: %s", h.reason or "cancelled")
-                    return Outcome(False, "You took over, so I stopped.", steps, stopped=True)
+                    if self.cancelled or not await self._yield(h, window):
+                        log.info("hands stopped: %s", h.reason or "cancelled")
+                        return Outcome(False, "Stopped, as you asked.", steps, stopped=True)
+                    notes.append("paused while they used the mouse; look again before acting")
+                    break
                 except Exception as exc:  # a bad target, an unknown key
                     line, note = f"{a.get('do')}", f"failed: {exc}"
                 done_here.append(line)
@@ -358,6 +361,23 @@ class Operator:
         )
 
     # ------------------------------------------------------------------ thinking
+    async def _yield(self, h: Any, window: int | None) -> bool:
+        """They touched the mouse or keyboard mid-task: don't fight them and don't give up. Wait
+        until they've left both alone for a few seconds, then pick up where it was. Esc (or Stop)
+        ends it for good."""
+        if self.cancelled or getattr(h, "reason", "") == "esc" or not hasattr(h, "wait_idle"):
+            return False
+        log.info("hands paused: %s", h.reason)
+        await self.report("Paused while you use the mouse. I'll carry on when you stop.", 0)
+        ok = await asyncio.to_thread(h.wait_idle)
+        if ok and not self.cancelled:
+            if window:
+                await asyncio.to_thread(windows.focus, window)
+                await asyncio.sleep(0.25)
+            await self.report("Carrying on", 0)
+            return True
+        return False
+
     async def _decide(self, task: str, steps: list[Step], ctx: ScreenContext):
         image = ctx.model_image(self.image_width)
         history = "\n".join(

@@ -236,6 +236,7 @@ export interface Job {
   steps: number;
   parent: string | null;
   created_at: number;
+  ended_at?: number | null;
 }
 
 export interface GhostStep {

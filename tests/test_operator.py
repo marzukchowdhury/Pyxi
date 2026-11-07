@@ -145,3 +145,38 @@ async def test_a_finished_task_reports_what_it_did():
     out = await op.run("type hello in the subject")
     assert out.ok and out.summary.startswith("I typed")
     assert ("type", "Hello") in box[0].did and ("press", "enter") in box[0].did
+
+
+async def test_touching_the_mouse_pauses_it_and_it_carries_on():
+    """The user grabbed the mouse mid-task: it waits until they let go, then finishes."""
+    from pyxi import hands as hands_mod
+
+    class Grabbed(PretendHands):
+        def __init__(self) -> None:
+            super().__init__()
+            self.waited = 0
+            self.grabbed = True
+
+        def type(self, text):
+            if self.grabbed:  # the user is on the mouse the first time it tries
+                self.grabbed = False
+                self.reason = "mouse at (5, 5)"
+                raise hands_mod.Interrupted
+            super().type(text)
+
+        def wait_idle(self, quiet_s=3.0, timeout_s=300.0):
+            self.waited += 1
+            return True
+
+    box: list = []
+    op = operator(
+        Scripted(
+            ("act", {"actions": [{"do": "type", "element_id": 3, "text": "Hello"}]}),
+            ("act", {"actions": [{"do": "type", "element_id": 3, "text": "Hello"}]}),
+        ),
+        box,
+    )
+    op.make_hands = lambda: box.append(Grabbed()) or box[-1]
+    out = await op.run("type hello")
+    assert box[-1].waited == 1 and ("type", "Hello") in box[-1].did
+    assert out.ok and not out.stopped

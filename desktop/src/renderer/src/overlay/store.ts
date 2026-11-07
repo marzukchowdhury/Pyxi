@@ -88,6 +88,7 @@ interface OverlayState {
   walkAudio: Record<number, Clip>;
   jobs: Record<string, Job>;
   jobStatus: Record<string, string>;
+  jobFrames: Record<string, string>; // the latest look at each teammate's browser
   handoff: { source: string; target: string; at: number } | null;
   requests: Request[];
   pins: Pin[];
@@ -139,6 +140,7 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   walkAudio: {},
   jobs: {},
   jobStatus: {},
+  jobFrames: {},
   handoff: null,
   requests: [],
   pins: [],
@@ -433,6 +435,9 @@ brain.on((e: BrainEvent) => {
     case "job_event":
       if (e.event === "status" && typeof e.data.message === "string")
         useOverlay.setState((s) => ({ jobStatus: { ...s.jobStatus, [e.job_id]: e.data.message as string } }));
+      break;
+    case "job_frame":
+      useOverlay.setState((s) => ({ jobFrames: { ...s.jobFrames, [e.job_id]: e.image } }));
       break;
     case "handoff":
       useOverlay.setState({ handoff: { source: e.source, target: e.target, at: performance.now() } });

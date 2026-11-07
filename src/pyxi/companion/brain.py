@@ -407,7 +407,8 @@ class Brain:
             len(out.steps),
             cost,
         )
-        await self.say_line(out.summary)
+        # One short line out loud; the whole story is in the tray and the notification.
+        await self.say_line(split_sentences(out.summary)[0][:140] if out.summary else "Done.")
 
     async def _arrange_windows(self, args: dict[str, Any]) -> str | None:
         """Lay windows out (two, three or four panes), or snap, maximize, minimize or restore the

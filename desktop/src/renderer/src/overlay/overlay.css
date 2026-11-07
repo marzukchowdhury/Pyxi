@@ -541,3 +541,20 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
   background: rgba(16,18,24,.86); border: 1px solid rgba(158,203,255,.4); color: #eaf3ff; font: 600 13px/1.2 "Inter", ui-sans-serif, system-ui, sans-serif;
   box-shadow: 0 8px 24px rgba(0,0,0,.35); animation: cheer-pill 2.6s ease forwards; }
 @keyframes cheer-pill { 0% { opacity: 0; transform: translate(-50%, 6px); } 12%, 78% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; } }
+/* the task tray: background work, small, top-right */
+.tray { position: fixed; right: 18px; top: 54px; z-index: 60; width: 300px; display: grid; gap: 6px; padding: 8px; border-radius: 16px; background: var(--glass-strong); border: 1px solid var(--hair); box-shadow: 0 16px 50px rgba(0,0,0,.35); backdrop-filter: blur(18px); animation: rise .3s var(--spring); pointer-events: auto; }
+.tray.mini { width: auto; padding: 0; background: none; border: 0; box-shadow: none; }
+.tray-mini { display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--hair); background: var(--glass-strong); color: var(--ink); font-size: 12px; }
+.tray-mini i, .tray-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c, #ffc861); box-shadow: 0 0 8px var(--c, #ffc861); flex: none; }
+.tray-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px; font-size: 11px; color: var(--ink-3); }
+.tray-head button { border: 0; background: none; color: var(--ink-3); font-size: 15px; line-height: 1; padding: 0 4px; }
+.tray-chip { display: flex; align-items: flex-start; gap: 9px; padding: 8px 10px; border-radius: 11px; border: 1px solid var(--hair); background: rgba(255,255,255,.03); color: var(--ink); text-align: left; font-size: 12px; }
+.tray-chip.open { border-color: color-mix(in srgb, var(--c) 45%, transparent); }
+.tray-chip.working .tray-dot { animation: breathe 1.2s ease-in-out infinite; }
+.tray-chip .tray-dot { margin-top: 4px; }
+.tray-text { display: grid; gap: 2px; min-width: 0; } .tray-text b { font-weight: 600; }
+.tray-text small { color: var(--ink-3); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tray-chip.failed .tray-dot { background: #ff9ea0; box-shadow: none; }
+.tray-view { display: grid; gap: 6px; } .tray-view img { width: 100%; border-radius: 10px; border: 1px solid var(--hair); }
+.tray-view p { margin: 0; font-size: 12px; color: var(--ink-2); padding: 4px; }
+.tray-stop { justify-self: end; height: 26px; padding: 0 12px; border-radius: 8px; border: 1px solid rgba(255,158,160,.4); background: rgba(255,158,160,.1); color: #ffc9ca; font-size: 12px; }
