@@ -25,15 +25,24 @@ so the object itself has to look right at a glance: someone should recognise it 
 label appears.
 
 How good models are built:
-- Real silhouettes. Any flat outline (fuselage side view, wing or fin from above, hull, blade, \
-circuit board, phone body, key, gun frame) is ONE extrude with its true outline as `profile` \
-(8-16 points, traced like a technical drawing). Never capsules or boxes for bodies or wings.
-- Scale and proportion: the whole thing 8-12 units across, centred near the origin, y up; parts \
-in realistic proportion to each other (a jet's wingspan is about its length; a heart is taller \
-than wide).
+- Real silhouettes. Anything round in cross-section (fuselage, rocket, missile, bottle, \
+piston, nose cone, lens barrel, vase, bullet) is ONE lathe: `profile` is [[along, radius], ...] \
+from one end to the other along `axis` (6-12 points, a smooth outline). Any flat outline (wing \
+or fin from above, hull side, blade, circuit board, phone body, key, gun frame) is ONE extrude \
+with its true outline as `profile` (8-16 points, traced like a technical drawing). Never \
+capsules or boxes for bodies or wings.
+- Scale and proportion: the whole thing 8-12 units across, centred near the origin, y up. Think \
+of the real dimensions first (an F-16 is 15 m long with a 10 m span; a piston is about as tall \
+as it is wide) and keep every part in that ratio; a heart is taller than wide.
+- Detail sells it: after the main parts, add the small things that make it read as real, as \
+children of the part they sit on: bolts and rivets, rims, lips and flanges, vents and intakes, \
+rails, handles, seams, a hex nut, a nozzle ring, wingtip missiles, a pitot tube. Three or four \
+of these on the hero part do more than ten more big pieces.
+- Materials: real ones, in contrast (painted body, dark_metal workings, brushed_metal moving \
+parts, rubber seals, glass); give painted and plastic parts a real colour, not default grey.
 - Inside and outside: outer shells get casing=true and the model gets cutaway=true when the \
 inside is the point, so the shell becomes a see-through ghost and the workings show.
-- 10-24 parts: enough to be convincing, each one meaningful. Group assemblies with `parent`.
+- 16-36 parts: enough to be convincing, each one meaningful. Group assemblies with `parent`.
 - Alive: fans, rotors, turbines, wheels and gears spin; beating or pumping parts oscillate on \
 scale; latches, pistons, triggers and slides move with keyframes; whatever travels (air, \
 blood, fuel, water, current, data) gets `arrow` parts along its route.

@@ -138,12 +138,22 @@ JET = {
         },
         {
             "id": "engine",
-            "shape": "cylinder",
+            "shape": "lathe",
             "axis": "x",
             "size": [2.4, 0.8, 0.8],
             "position": [-2.9, 0.05, 0],
+            "profile": [[-1.2, 0.3], [-0.9, 0.4], [0.7, 0.4], [1.0, 0.36], [1.2, 0.26]],
             "material": "dark_metal",
             "label": "Engine",
+        },
+        {
+            "id": "engine_flange",
+            "parent": "engine",
+            "shape": "ring",
+            "axis": "x",
+            "size": [0.08, 0.86, 0.86],
+            "position": [0.7, 0, 0],
+            "material": "brushed_metal",
         },
         {
             "id": "nozzle",

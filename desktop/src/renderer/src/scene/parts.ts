@@ -4,6 +4,7 @@
  * lay a cylinder on its side.
  */
 import * as THREE from "three";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Axis, Material, Part } from "../shared/protocol";
 
@@ -83,6 +84,20 @@ function axisPoint(v: number[], axis: Axis): number[] {
   return axis === "x" ? [d, 0, 0] : axis === "z" ? [0, 0, d] : [0, d, 0];
 }
 
+/** A unit cylinder (radius 0.5 at most, height 1) whose rims are softened by a small bevel. */
+function beveledCylinder(top: number, bottom: number): THREE.BufferGeometry {
+  const e = 0.035;
+  const pts = [
+    new THREE.Vector2(0, -0.5),
+    new THREE.Vector2(Math.max(0, bottom - e), -0.5),
+    new THREE.Vector2(bottom, -0.5 + e),
+    new THREE.Vector2(top, 0.5 - e),
+    new THREE.Vector2(Math.max(0, top - e), 0.5),
+    new THREE.Vector2(0, 0.5),
+  ];
+  return new THREE.LatheGeometry(pts, 48);
+}
+
 export function buildGeometry(p: Part): Built {
   const [sx, sy, sz] = p.size;
   const unit: [number, number, number] = [sx, sy, sz];
@@ -94,7 +109,7 @@ export function buildGeometry(p: Part): Built {
       const t = p.taper ?? 1;
       const top = 0.5 * Math.min(1, t);
       const bottom = 0.5 * Math.min(1, t > 0 ? 1 / t : 1);
-      return { geometry: alongAxis(new THREE.CylinderGeometry(top, bottom, 1, 48, 1), p.axis), scale: unit };
+      return { geometry: alongAxis(beveledCylinder(top, bottom), p.axis), scale: unit };
     }
     case "cone":
       return { geometry: alongAxis(new THREE.ConeGeometry(0.5, 1, 48, 1), p.axis), scale: unit };
@@ -161,14 +176,30 @@ export function buildGeometry(p: Part): Built {
       g.translate(0, 0, -depth / 2 + bevel);
       return { geometry: fromZ(g, p.axis), scale: [1, 1, 1] };
     }
+    case "lathe": {
+      // [[along, radius], ...] turned round the axis, closed at both ends, at true size.
+      const prof = (p.profile ?? [[-0.5, 0.5], [0.5, 0.5]]).map(([a, r]) => new THREE.Vector2(Math.max(0, r), a));
+      if (prof[0].x > 0) prof.unshift(new THREE.Vector2(0, prof[0].y));
+      if (prof[prof.length - 1].x > 0) prof.push(new THREE.Vector2(0, prof[prof.length - 1].y));
+      // A turned profile needs a smooth outline: resample it as a curve unless it's very short.
+      const pts = prof.length >= 4 ? new THREE.SplineCurve(prof).getSpacedPoints(Math.min(96, prof.length * 8)) : prof;
+      pts[0].x = 0;
+      pts[pts.length - 1].x = 0;
+      const g = new THREE.LatheGeometry(pts, 64);
+      return { geometry: alongAxis(g, p.axis), scale: [1, 1, 1] };
+    }
     case "arrow":
       return { geometry: arrowGeometry(p), scale: [1, 1, 1] };
     case "plane":
       return { geometry: new THREE.BoxGeometry(1, 1, 1), scale: [sx, Math.max(0.004, sy), sz] };
     case "rounded_box":
     case "box":
-    default:
-      return { geometry: new THREE.BoxGeometry(1, 1, 1), scale: unit };
+    default: {
+      // Real parts are never razor-edged: a hairline bevel (built at true size, so it stays
+      // even) catches a highlight along every edge.
+      const r = Math.min(sx, sy, sz) * 0.06;
+      return { geometry: new RoundedBoxGeometry(sx, sy, sz, 2, r), scale: [1, 1, 1] };
+    }
   }
 }
 
@@ -183,20 +214,47 @@ interface Preset {
 }
 
 export const MATERIALS: Record<Material, Preset> = {
-  metal: { color: "#c9ced6", metalness: 1, roughness: 0.26 },
-  brushed_metal: { color: "#b4b9c1", metalness: 0.9, roughness: 0.46 },
-  dark_metal: { color: "#3d424b", metalness: 0.85, roughness: 0.38 },
-  gold: { color: "#d8ae55", metalness: 1, roughness: 0.24 },
-  plastic: { color: "#dde1e7", metalness: 0, roughness: 0.42, clearcoat: 0.3 },
-  rubber: { color: "#24272c", metalness: 0, roughness: 0.92 },
-  glass: { color: "#d3e8ff", metalness: 0.1, roughness: 0.05, clearcoat: 1, opacity: 0.45 },
-  painted: { color: "#9aa5b2", metalness: 0.2, roughness: 0.34, clearcoat: 0.7 },
-  fabric: { color: "#8b8f7a", metalness: 0, roughness: 1, sheen: 1 },
-  wood: { color: "#a4743f", metalness: 0, roughness: 0.72 },
-  ceramic: { color: "#f2f0ea", metalness: 0, roughness: 0.22, clearcoat: 0.5 },
-  skin: { color: "#e2b08e", metalness: 0, roughness: 0.6, sheen: 0.4 },
+  metal: { color: "#c9ced6", metalness: 1, roughness: 0.22 },
+  brushed_metal: { color: "#b4b9c1", metalness: 0.92, roughness: 0.4 },
+  dark_metal: { color: "#474c56", metalness: 0.85, roughness: 0.34, clearcoat: 0.2 },
+  gold: { color: "#e0b25a", metalness: 1, roughness: 0.2 },
+  plastic: { color: "#dde1e7", metalness: 0, roughness: 0.38, clearcoat: 0.35 },
+  rubber: { color: "#2a2d33", metalness: 0, roughness: 0.88, sheen: 0.4 },
+  glass: { color: "#d3e8ff", metalness: 0.1, roughness: 0.04, clearcoat: 1, opacity: 0.42 },
+  painted: { color: "#9aa5b2", metalness: 0.25, roughness: 0.3, clearcoat: 0.85 },
+  fabric: { color: "#8b8f7a", metalness: 0, roughness: 0.95, sheen: 1 },
+  wood: { color: "#a4743f", metalness: 0, roughness: 0.64, clearcoat: 0.15 },
+  ceramic: { color: "#f2f0ea", metalness: 0, roughness: 0.18, clearcoat: 0.7 },
+  skin: { color: "#e2b08e", metalness: 0, roughness: 0.55, sheen: 0.5 },
   emissive: { color: "#ffb347", metalness: 0, roughness: 1, emissive: true },
 };
+
+/**
+ * Edge light: a thin cool fresnel rim on every surface, so silhouettes and curvature read on any
+ * wallpaper, light or dark, the way a product shot's rim light does. Done in the material (one
+ * shared program, no extra pass), so it costs next to nothing.
+ */
+const RIM = new THREE.Color("#9ecbff");
+function addRim(m: THREE.MeshPhysicalMaterial, strength: number) {
+  const rim = { value: strength };
+  m.userData.rim = rim;
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.rimStrength = rim;
+    shader.uniforms.rimColor = { value: RIM };
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform float rimStrength;\nuniform vec3 rimColor;")
+      .replace(
+        "#include <emissivemap_fragment>",
+        `#include <emissivemap_fragment>
+        {
+          float facing = clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0);
+          float rim = pow(1.0 - facing, 3.2);
+          totalEmissiveRadiance += rimColor * rim * rimStrength;
+        }`,
+      );
+  };
+  m.customProgramCacheKey = () => "pyxi-rim";
+}
 
 export function makeMaterial(p: Part, style: string): THREE.MeshPhysicalMaterial {
   const preset = MATERIALS[p.material] ?? MATERIALS.plastic;
@@ -206,11 +264,12 @@ export function makeMaterial(p: Part, style: string): THREE.MeshPhysicalMaterial
     metalness: preset.metalness,
     roughness: preset.roughness,
     clearcoat: preset.clearcoat ?? 0,
-    clearcoatRoughness: 0.2,
+    clearcoatRoughness: 0.12,
     sheen: preset.sheen ?? 0,
+    sheenRoughness: 0.6,
     sheenColor: color.clone().lerp(new THREE.Color("#ffffff"), 0.4),
-    envMapIntensity: p.material === "glass" ? 2.2 : 1.1,
-    specularIntensity: p.material === "glass" ? 1 : 0.5,
+    envMapIntensity: p.material === "glass" ? 2.2 : preset.metalness > 0.5 ? 1.25 : 1,
+    specularIntensity: p.material === "glass" ? 1 : 0.8,
     side: p.shape === "plane" || p.shape === "extrude" ? THREE.DoubleSide : THREE.FrontSide,
   });
   if (preset.emissive) {
@@ -226,6 +285,8 @@ export function makeMaterial(p: Part, style: string): THREE.MeshPhysicalMaterial
     m.clearcoat = 0;
     m.sheen = 0;
   }
+  // Flows and glowing parts are light already; everything else gets the edge light.
+  if (!preset.emissive && p.shape !== "arrow") addRim(m, style === "blueprint" ? 0.9 : style === "xray" ? 0.7 : preset.metalness > 0.5 ? 0.28 : 0.2);
   // The part's own opacity (and its motions) multiply this: glass stays glassy when it fades.
   m.userData.factor = (preset.opacity ?? 1) * (style === "xray" ? 0.28 : style === "blueprint" ? 0.55 : 1);
   m.userData.baseEmissive = m.emissiveIntensity;

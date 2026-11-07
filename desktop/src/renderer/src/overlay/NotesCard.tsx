@@ -2,17 +2,29 @@
  * Field notes: a glass notebook card beside what Pyxi is explaining. Each point writes itself
  * in ink the moment Pyxi says it, frames the exact thing it's about with a hand-drawn dashed
  * outline numbered to match, and a thread of light ties the two together, so you never have to
- * guess which paragraph a point means. Sketches draw straight onto the real content.
+ * guess which paragraph a point means. Sketches draw straight onto the real content. When the
+ * answer is a process or a structure, a small hand-drawn diagram builds inside the card, each
+ * stroke inking in with the point it belongs to.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { rectToLocal, toLocal } from "../shared/bridge";
 import { Close } from "../shared/icons";
-import type { NoteItem, Sketch } from "../shared/protocol";
+import type { NoteCard, NoteItem, Sketch, SketchShape } from "../shared/protocol";
+import { drawShape, fitView, placeText, timeline } from "../scene/sketchPaths";
 import { Interactive } from "./Interactive";
+import "./notesCard.css";
 import { useOverlay, voice } from "./store";
 
-const CARD_W = 300;
-const MIN_W = 230;
+const CARD_W = 372; // keep in step with CARD_W in src/pyxi/companion/notes.py
+const MIN_W = 290;
+const PAD_X = 24; // the card's side padding (notesCard.css)
+
+/** A process or structure drawn small inside the card (src/pyxi/companion/notes.py NoteDiagram). */
+interface Diagram {
+  caption: string | null;
+  shapes: SketchShape[];
+}
+type CardWithDiagram = NoteCard & { diagram?: Diagram | null };
 
 type Pt = [number, number];
 
@@ -143,7 +155,7 @@ export function NotesCard() {
     const gap = 26;
     const roomLeft = region.x - gap - 12;
     const roomRight = innerWidth - (region.x + region.w) - gap - 12;
-    const top = Math.min(Math.max(70, region.y - 10), innerHeight - 380);
+    const top = Math.min(Math.max(70, region.y - 10), innerHeight - 460);
     const best = Math.max(roomLeft, roomRight);
     if (best >= MIN_W) {
       const width = Math.min(CARD_W, best);
@@ -154,7 +166,7 @@ export function NotesCard() {
     const below = region.y + region.h + gap;
     const left = Math.min(Math.max(16, region.x), innerWidth - CARD_W - 16);
     if (innerHeight - below > 240) return { left, top: below, width: CARD_W };
-    if (region.y - gap > 260) return { left, top: Math.max(16, region.y - gap - 300), width: CARD_W };
+    if (region.y - gap > 300) return { left, top: Math.max(16, region.y - gap - 360), width: CARD_W };
     return { left: innerWidth - CARD_W - 16, top, width: CARD_W };
   }, [notes?.card.id]);
 
@@ -166,7 +178,7 @@ export function NotesCard() {
       const el = rows.current.get(n);
       if (!el) continue;
       const r = el.getBoundingClientRect();
-      next[n] = [r.left + 9, r.top + 15];
+      next[n] = [r.left + 10, r.top + 18];
     }
     setAnchors(next);
   }, [notes?.revealed.join(","), notes?.card.id, cardH]);
@@ -188,7 +200,7 @@ export function NotesCard() {
         {sketches.map((s, i) => <SketchMark key={`${card.id}-s${i}`} sketch={s} seed={hash(card.id) + 97 * i} />)}
       </svg>
       <Interactive
-        className={`notes-card ${leaving ? "leaving" : ""}`}
+        className={`notes-card notes-lg ${leaving ? "leaving" : ""}`}
         style={{ left: placed.left, top, width: placed.width, maxHeight: innerHeight - 24 }}
         onEnter={() => setReading(true)}
         onLeave={() => setReading(false)}
@@ -197,6 +209,9 @@ export function NotesCard() {
         <button className="notes-close" onClick={close} aria-label="Close notes"><Close /></button>
         <div className="notes-title">{card.title}</div>
         <div className="notes-rule" />
+        {(card as CardWithDiagram).diagram?.shapes.length ? (
+          <NoteDiagram key={card.id} diagram={(card as CardWithDiagram).diagram!} revealed={revealed} width={placed.width - PAD_X * 2} />
+        ) : null}
         {card.items.map((item) => (
           <div
             key={item.n}
@@ -205,7 +220,7 @@ export function NotesCard() {
           >
             <span className="note-bullet">
               {item.kind === "step" ? <b>{item.n}</b> : (
-                <svg width="10" height="16" viewBox="0 0 12 22"><path d="M1.5 11a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0 -9 0Z" pathLength={1} /></svg>
+                <svg width="12" height="19" viewBox="0 0 12 22"><path d="M1.5 11a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0 -9 0Z" pathLength={1} /></svg>
               )}
             </span>
             <span className="note-text">{item.text}</span>
@@ -215,6 +230,89 @@ export function NotesCard() {
         </div>
       </Interactive>
     </>
+  );
+}
+
+const WEIGHT = { thin: 1.3, normal: 2, bold: 2.9 };
+const SHAPE_DEFAULTS: Omit<SketchShape, "kind"> = {
+  points: [], at: null, size: null, text: null, color: "ink", fill: false, weight: "normal", dashed: false, flow: false, step: 0, ask: null,
+};
+
+/**
+ * The card's diagram: sketchboard shapes, cropped to what was drawn. A shape appears with its
+ * point (step 0 is there from the start); shapes that arrive together ink in one after another.
+ */
+function NoteDiagram({ diagram, revealed, width }: { diagram: Diagram; revealed: number[]; width: number }) {
+  const scale = width / 100; // grid units to px, before the crop zooms in
+  // A missing field must never take the whole overlay down with it.
+  const shapes = useMemo(() => diagram.shapes.map((s) => ({ ...SHAPE_DEFAULTS, ...s, points: s.points ?? [] })), [diagram]);
+  // As tall as the drawing needs (a row of boxes is a short strip, a hierarchy is taller).
+  const height = useMemo(() => {
+    const [w, h] = extent(shapes);
+    return Math.round(width * Math.min(0.56, Math.max(0.3, (h + 10) / (w + 10))));
+  }, [shapes, width]);
+  const view = useMemo(() => fitView(shapes, scale, width, height, 1.5), [shapes, scale, width, height]);
+  const viewW = Number(view.split(" ")[2]) || width;
+  const minText = (13 * viewW) / width; // labels never below 13 px on screen
+  const delays = useMemo(() => {
+    const out = new Map<number, number>();
+    for (const step of new Set(shapes.map((s) => s.step))) {
+      for (const [i, d] of timeline(shapes, step, scale).delays) out.set(i, d + (step === 0 ? 0.3 : 0.15));
+    }
+    return out;
+  }, [shapes, scale]);
+  const shown = (s: SketchShape) => s.step === 0 || revealed.includes(s.step);
+  return (
+    <div className="note-diagram">
+      <svg className="note-diagram-art" width={width} height={height} viewBox={view}>
+        {shapes.map((s, i) => (shown(s) ? <DiagramStroke key={i} shape={s} index={i} scale={scale} delay={delays.get(i) ?? 0} minText={minText} /> : null))}
+      </svg>
+      {diagram.caption && <div className="note-diagram-caption">{diagram.caption}</div>}
+    </div>
+  );
+}
+
+/** Width and height of what the shapes cover, in grid units. */
+function extent(shapes: SketchShape[]): [number, number] {
+  let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+  const add = (x: number, y: number) => {
+    [x0, y0, x1, y1] = [Math.min(x0, x), Math.min(y0, y), Math.max(x1, x), Math.max(y1, y)];
+  };
+  for (const s of shapes) {
+    s.points.forEach(([x, y]) => add(x, y));
+    if (s.at) add(s.at[0], s.at[1]);
+    if (s.at && s.size) add(s.at[0] + s.size[0], s.at[1] + s.size[1]);
+  }
+  return Number.isFinite(x0) ? [x1 - x0, y1 - y0] : [100, 64];
+}
+
+function DiagramStroke({ shape, index, scale, delay, minText }: { shape: SketchShape; index: number; scale: number; delay: number; minText: number }) {
+  const ink = `var(--sk-${shape.color})`;
+  const t = (extra = 0) => ({ animationDelay: `${(delay + extra).toFixed(2)}s` });
+  const w = WEIGHT[shape.weight] * Math.max(0.8, scale / 4.2);
+  if (shape.kind === "text" || shape.kind === "equation") {
+    const p = placeText(shape, scale);
+    if (!p) return null;
+    const eq = shape.kind === "equation";
+    return (
+      <g className={`sk-text ${eq ? "eq" : ""}`}>
+        <text x={p.x} y={p.y} style={{ ...t(), fontSize: Math.max(p.size, minText), fill: eq ? "var(--sk-amber)" : ink }}>{shape.text}</text>
+      </g>
+    );
+  }
+  const drawn = drawShape(shape, scale, index * 7919 + 17);
+  if (!drawn) return null;
+  const dur = `${Math.min(1.2, 0.45 + drawn.length / scale / 110).toFixed(2)}s`;
+  return (
+    <g className="sk-shape">
+      {shape.fill && drawn.closed && <path className="sk-fill" d={drawn.d} style={{ ...t(0.5), fill: ink }} />}
+      <path className={`sk-line ${shape.dashed ? "dashed" : ""}`} d={drawn.d} pathLength={1} style={{ ...t(), animationDuration: dur, stroke: ink, strokeWidth: w }} />
+      {drawn.head && <path className="sk-line" d={drawn.head} pathLength={1} style={{ ...t(0.45), stroke: ink, strokeWidth: w }} />}
+      {shape.flow && (
+        <path className="sk-flow" d={drawn.d}
+          style={{ ...t(0.6), stroke: ink, color: ink, strokeWidth: w * 1.4, strokeDasharray: `${(scale * 1.2).toFixed(1)} ${(scale * 3.2).toFixed(1)}`, ["--period" as string]: `${(scale * 4.4).toFixed(1)}px` }} />
+      )}
+    </g>
   );
 }
 

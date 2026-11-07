@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from otto.llm.base import ToolSpec
 
+from pyxi.companion.notes import DIAGRAM_SCHEMA
 from pyxi.scenes import TITLES, tool_schema
 from pyxi.scenes.object_gallery import OBJECT_TITLES
 from pyxi.scenes.objects import build_tool_schema, edit_tool_schema
@@ -149,6 +150,7 @@ COMPANION_TOOLS: list[ToolSpec] = [
                 "'so that's why'), then ONE specific offer of what to show next, e.g. 'Want me to sketch how "
                 "the money burns, or a fun fact about what training one model costs?'",
             },
+            "diagram": DIAGRAM_SCHEMA,
             "items": {
                 "type": "array",
                 "items": {

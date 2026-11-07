@@ -6,6 +6,9 @@ paragraph, row or control it is about with a hand-drawn dashed outline numbered 
 thread of light joins the two. Sketches add freehand marks on top of real content: the rise and
 run on a chart, a tick next to the right answer, an arrow from cause to effect.
 
+When the answer is a process or a structure, the card can carry a small diagram of it, drawn
+with the same hand-drawn shapes as a sketchboard; each shape inks in with the point it belongs to.
+
 Guides are the interactive version: Pyxi marks the one control to click next, waits for your
 real click on it, looks at the new screen and gives the next step.
 """
@@ -21,6 +24,8 @@ from pydantic import BaseModel, Field
 from pyxi.companion.aim import Survey
 from pyxi.companion.annotations import resolve_point, resolve_rect
 from pyxi.companion.layout import Occupancy
+from pyxi.scenes.sketch import SKETCH_TOOL_SCHEMA, Sketchboard
+from pyxi.scenes.sketch import Shape as DiagramShape
 from pyxi.screen import ScreenContext
 
 ItemKind = Literal["point", "step", "formula", "aside"]
@@ -48,6 +53,63 @@ class Sketch(BaseModel):
     after: int = 0  # appears with note item N (0 = straight away)
 
 
+MAX_DIAGRAM_SHAPES = 24
+
+
+class NoteDiagram(BaseModel):
+    """A small diagram inside the card: sketchboard shapes on the same 100 x 64 grid, where a
+    shape's ``step`` is the note point it inks in with (0 = with the card)."""
+
+    caption: str | None = None
+    shapes: list[DiagramShape] = Field(default_factory=list)
+
+
+def build_diagram(raw: Any, points: int) -> NoteDiagram | None:
+    """The model's diagram, repaired the way a sketchboard is (shapes with no position or too
+    few points are dropped, everything clamped onto the grid); None if nothing drawable is left."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("shapes"), list):
+        return None
+    try:
+        board = Sketchboard.model_validate(
+            {
+                "title": "diagram",
+                "shapes": raw["shapes"][:MAX_DIAGRAM_SHAPES],
+                # One step per point (plus 0), so a shape's step survives as its point number.
+                "steps": [{"narration": "."}] * (max(0, points) + 1),
+            }
+        )
+    except Exception:
+        return None
+    caption = " ".join(str(raw.get("caption") or "").split())[:48] or None
+    return NoteDiagram(caption=caption, shapes=board.shapes)
+
+
+_DIAGRAM_SHAPE = dict(SKETCH_TOOL_SCHEMA["properties"]["shapes"]["items"])
+_DIAGRAM_SHAPE["properties"] = {
+    **_DIAGRAM_SHAPE["properties"],
+    "step": {
+        "type": "integer",
+        "description": "The point number this shape appears with (0 = straight away).",
+    },
+}
+
+DIAGRAM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Optional small hand-drawn diagram inside the card. Only when the answer is a "
+    "process (steps in order, a cycle, cause and effect, a request going through systems) or a "
+    "structure (layers, parts of a whole, a hierarchy) and a picture makes it click; leave it out "
+    "for opinions, summaries and jokes. 100 wide x 64 tall grid, y down, ~6 units of margin. 4-14 "
+    "shapes: rect or ellipse boxes with 1-2 word text labels inside, arrows between them (flow: "
+    "true on what moves), colour ice for the key path and amber for the one thing to notice. "
+    "Give each shape the `step` of the point it belongs to, so it builds as you talk.",
+    "properties": {
+        "caption": {"type": "string", "description": "Optional, under 6 words."},
+        "shapes": {"type": "array", "items": _DIAGRAM_SHAPE},
+    },
+    "required": ["shapes"],
+}
+
+
 class NoteCard(BaseModel):
     id: str = Field(default_factory=lambda: "notes_" + secrets.token_hex(3))
     title: str
@@ -60,6 +122,7 @@ class NoteCard(BaseModel):
     closing: str | None = None  # said after the last point: a related fact and an offer
     style: Literal["card", "picture"] = "card"  # picture: tags pinned onto it, no card
     picture: tuple[int, int, int, int] | None = None
+    diagram: NoteDiagram | None = None  # a process or structure, drawn small inside the card
 
 
 def _union(rects: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int] | None:
@@ -169,8 +232,11 @@ def build_card(
         items=items,
         sketches=sketches,
         region=region,
+        diagram=build_diagram(args.get("diagram"), len(items)),
     )
-    card.place = place_card(ctx, region, [it.text for it in items], card.title, avoid)
+    card.place = place_card(
+        ctx, region, [it.text for it in items], card.title, avoid, diagram=card.diagram is not None
+    )
     return card
 
 
@@ -306,13 +372,17 @@ def _overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
     return max(0, w) * max(0, h)
 
 
-def card_size(texts: list[str], title: str = "") -> tuple[int, int]:
-    """The note card's size in screen px (15 px Inter fits ~34 characters a line; the 22 px serif
-    title ~22)."""
+CARD_W = 372  # CSS px; NotesCard.tsx draws it at this width
+
+
+def card_size(texts: list[str], title: str = "", diagram: bool = False) -> tuple[int, int]:
+    """The note card's size in screen px (18 px Inter fits ~34 characters a line; the 27 px serif
+    title ~22). A diagram adds its drawing and caption."""
     k = _dpi_scale()
     lines = sum(max(1, -(-len(t) // 34)) for t in texts)
     title_lines = max(1, -(-len(title) // 22))
-    return int(300 * k), int((58 + 28 * title_lines + 22 * lines + 10 * len(texts)) * k)
+    h = 70 + 34 * title_lines + 26 * lines + 12 * len(texts) + (204 if diagram else 0)
+    return int(CARD_W * k), int(h * k)
 
 
 def place_card(
@@ -321,13 +391,14 @@ def place_card(
     texts: list[str],
     title: str = "",
     avoid: list[tuple[int, int, int, int]] | None = None,
+    diagram: bool = False,
 ) -> tuple[int, int] | None:
     """The spot near what's being explained that hides the least: no text (OCR'd too, so text
     in images counts), no busy pixels, never the notch or Pyxi's other things on screen."""
     if ctx is None or region is None or ctx.screenshot is None:
         return None
     k = _dpi_scale()
-    w, h = card_size(texts, title)
+    w, h = card_size(texts, title, diagram)
     rx, ry, rw, rh = region
     gap = int(26 * k)
     occ = Occupancy(ctx, [*(avoid or []), (rx - gap // 2, ry - gap // 2, rw + gap, rh + gap)], k=k)

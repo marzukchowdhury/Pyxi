@@ -105,7 +105,7 @@ export interface SceneSpec {
 export type Vec3 = [number, number, number];
 export type PartShape =
   | "box" | "rounded_box" | "sphere" | "cylinder" | "cone" | "capsule" | "torus" | "ring" | "wedge"
-  | "tube" | "extrude" | "gear" | "spring" | "plane" | "arrow";
+  | "tube" | "extrude" | "lathe" | "gear" | "spring" | "plane" | "arrow";
 export type Material =
   | "metal" | "brushed_metal" | "dark_metal" | "gold" | "plastic" | "rubber" | "glass" | "painted"
   | "fabric" | "wood" | "ceramic" | "skin" | "emissive";

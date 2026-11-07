@@ -8,12 +8,13 @@
  * Everything per-frame (motions, camera, callouts) is written straight to three.js objects and
  * DOM refs, so playback never re-renders React.
  */
-import { ContactShadows, Edges, Environment, Lightformer, OrbitControls, Outlines, RoundedBox } from "@react-three/drei";
+import { ContactShadows, Edges, Environment, Lightformer, OrbitControls, Outlines, PerformanceMonitor, RoundedBox } from "@react-three/drei";
 import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import { type MutableRefObject, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { Beat, ObjectScene, Part } from "../shared/protocol";
+import { fromOrbit, orbitSpring, type OrbitSpring, smoothDamp, stepOrbit, toOrbit } from "./camera";
 import { children, evaluate } from "./motion";
 import { buildGeometry, makeMaterial } from "./parts";
 
@@ -46,6 +47,9 @@ interface Registered {
 }
 
 const FOV = 32;
+/** Remembered for the rest of the session once the GPU has shown it can't keep up. */
+const quality: { tier: "high" | "low" } = { tier: "high" };
+const SWING = 0.75; // seconds a camera move takes to mostly settle
 const TAGS = ["#ffe36e", "#ff9bb5", "#7fe0b0", "#8fc7ff", "#c5a8ff", "#ffb36b"]; // sticky-note colours
 const ICE = new THREE.Color("#9ecbff");
 const GHOST = new THREE.Color("#dfe7f2"); // cutaway shells
@@ -65,12 +69,23 @@ export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, heig
   const registry = useRef(new Map<string, Registered>());
   const callouts = useRef(new Map<string, { el: HTMLDivElement | null; line: SVGPathElement | null; dot: SVGCircleElement | null }>());
   const labelled = scene.parts.filter((p) => p.label);
+  // Full quality (soft self-shadows, 2x pixels) unless the GPU can't keep up: then
+  // it steps down once and stays down, rather than flickering between the two.
+  const [tier, setTier] = useState<"high" | "low">(() => quality.tier);
+  const lower = () => {
+    quality.tier = "low";
+    setTier("low");
+  };
+  const high = tier === "high";
+  const bounds = useRef<Measured | null>(null);
 
   return (
     <div className="object-view" style={{ width, height }}>
       <Canvas
-        gl={{ alpha: true, antialias: true, premultipliedAlpha: false }}
-        dpr={[1, 2]}
+        key={tier}
+        gl={{ alpha: true, antialias: true, premultipliedAlpha: false, powerPreference: "high-performance" }}
+        dpr={high ? [1, 2] : [1, 1.25]}
+        shadows={high ? "percentage" : false}
         camera={{ fov: FOV, near: 0.02, far: 500, position: [0, 2, 14] }}
         onCreated={({ gl }) => {
           gl.setClearColor(0x000000, 0);
@@ -79,11 +94,13 @@ export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, heig
         }}
         style={{ background: "transparent" }}
       >
-        <Studio style={scene.style} />
+        {high && <PerformanceMonitor ms={500} iterations={6} threshold={0.7} bounds={() => [40, 120]} onDecline={lower} onFallback={lower} />}
+        <Measure registry={registry} sceneId={scene.id} out={bounds} />
+        <Studio style={scene.style} bounds={bounds} sceneId={scene.id} shadows={high} />
         <Model scene={scene} clock={clock} beat={beat} cutaway={cutaway} registry={registry} onPick={onPick} />
         <Rig registry={registry} beat={beat} beatIndex={beatIndex} sceneId={scene.id} />
         <CalloutDriver registry={registry} callouts={callouts} beat={beat} width={width} height={height} />
-        <Shadow registry={registry} sceneId={scene.id} style={scene.style} />
+        <Shadow bounds={bounds} sceneId={scene.id} style={scene.style} />
       </Canvas>
       <svg className="callout-lines" width={width} height={height}>
         {labelled.map((p) => (
@@ -108,19 +125,76 @@ function slot(map: Map<string, { el: HTMLDivElement | null; line: SVGPathElement
   return s;
 }
 
-/** Soft studio light, generated locally (no HDR downloads): a key, two strips and a rim. */
-function Studio({ style }: { style: ObjectScene["style"] }) {
+/** The model's resting size and place, measured once it's built (lights, shadows and AO scale to it). */
+interface Measured {
+  id: string;
+  center: THREE.Vector3;
+  radius: number;
+  floor: number;
+  footprint: number;
+  height: number;
+}
+
+function Measure({ registry, sceneId, out }: { registry: MutableRefObject<Map<string, Registered>>; sceneId: string; out: MutableRefObject<Measured | null> }) {
+  const box = useMemo(() => new THREE.Box3(), []);
+  const [, force] = useState(0);
+  useFrame(() => {
+    if (out.current?.id === sceneId) return;
+    boundsOf(registry.current, null, box);
+    if (box.isEmpty()) return;
+    const size = box.getSize(new THREE.Vector3());
+    out.current = {
+      id: sceneId,
+      center: box.getCenter(new THREE.Vector3()),
+      radius: Math.max(0.5, size.length() / 2),
+      floor: box.min.y,
+      footprint: Math.max(size.x, size.z),
+      height: size.y,
+    };
+    force((n) => n + 1); // the light, shadow and AO re-fit to it
+  });
+  return null;
+}
+
+/**
+ * A photographer's studio, generated locally (no HDR downloads): a big overhead softbox, two
+ * tall strips that draw clean highlight lines down metal and paint, a warm kicker, an ice-blue
+ * rim behind and a soft floor bounce. The key light casts soft shadows fitted to the model, so
+ * parts shade each other.
+ */
+function Studio({ style, bounds, sceneId, shadows }: { style: ObjectScene["style"]; bounds: MutableRefObject<Measured | null>; sceneId: string; shadows: boolean }) {
+  const key = useRef<THREE.DirectionalLight>(null);
+  const m = bounds.current?.id === sceneId ? bounds.current : null;
+  useEffect(() => {
+    const l = key.current;
+    if (!l || !m) return;
+    const r = m.radius;
+    l.position.copy(m.center).add(new THREE.Vector3(0.45, 1, 0.6).normalize().multiplyScalar(r * 3));
+    l.target.position.copy(m.center);
+    l.target.updateMatrixWorld();
+    const cam = l.shadow.camera;
+    cam.left = cam.bottom = -r * 1.15;
+    cam.right = cam.top = r * 1.15;
+    cam.near = r * 0.5;
+    cam.far = r * 5.5;
+    cam.updateProjectionMatrix();
+    l.shadow.bias = -0.0004;
+    l.shadow.normalBias = r * 0.012;
+    l.shadow.needsUpdate = true;
+  }, [m, shadows]);
   return (
     <>
-      <ambientLight intensity={style === "blueprint" ? 1.4 : 0.25} />
-      <directionalLight position={[4, 8, 6]} intensity={1.6} />
-      <directionalLight position={[-6, 3, -4]} intensity={0.5} color="#cfe0ff" />
-      <Environment resolution={256} frames={1}>
-        <Lightformer form="rect" intensity={2.2} position={[0, 6, 2]} rotation-x={Math.PI / 2} scale={[10, 6, 1]} />
-        <Lightformer form="rect" intensity={1.3} position={[-6, 1, 1]} rotation-y={Math.PI / 2} scale={[8, 2, 1]} />
-        <Lightformer form="rect" intensity={1.3} position={[6, 1, 1]} rotation-y={-Math.PI / 2} scale={[8, 2, 1]} />
-        <Lightformer form="ring" intensity={1.6} color="#bcd7ff" position={[0, 2, -7]} scale={4} />
-        <Lightformer form="rect" intensity={0.5} position={[0, -4, 0]} rotation-x={-Math.PI / 2} scale={[10, 10, 1]} />
+      <ambientLight intensity={style === "blueprint" ? 1.4 : 0.12} />
+      <hemisphereLight args={["#eef4ff", "#1a1d24", style === "blueprint" ? 0 : 0.35]} />
+      <directionalLight ref={key} position={[4, 8, 6]} intensity={1.9} castShadow={shadows} shadow-mapSize={[1024, 1024]} shadow-radius={4} />
+      <directionalLight position={[-6, 3, -4]} intensity={0.55} color="#cfe0ff" />
+      <Environment resolution={256} frames={1} environmentIntensity={0.95}>
+        <Lightformer form="rect" intensity={2.4} position={[0, 7, 1]} rotation-x={Math.PI / 2} scale={[12, 7, 1]} />
+        <Lightformer form="rect" intensity={2.6} position={[-6.5, 1.5, 2]} rotation-y={Math.PI / 2.4} scale={[1.6, 9, 1]} />
+        <Lightformer form="rect" intensity={1.6} position={[6.5, 1.5, 2]} rotation-y={-Math.PI / 2.4} scale={[1.2, 9, 1]} />
+        <Lightformer form="rect" intensity={0.9} color="#ffe6c4" position={[4, 0.5, 6]} rotation-y={-Math.PI / 5} scale={[4, 3, 1]} />
+        <Lightformer form="ring" intensity={2.2} color="#9ecbff" position={[0, 2, -7]} scale={4.5} />
+        <Lightformer form="rect" intensity={0.35} color="#d8dde6" position={[0, -4, 0]} rotation-x={-Math.PI / 2} scale={[14, 14, 1]} />
       </Environment>
     </>
   );
@@ -199,6 +273,9 @@ function Model({ scene, clock, beat, cutaway, registry, onPick }: {
         reg.mat.needsUpdate = true;
       }
       reg.mat.depthWrite = !transparent || shown > 0.6;
+      // A see-through shell would still black out the parts it's meant to reveal.
+      reg.mesh.userData.casts ??= reg.mesh.castShadow;
+      reg.mesh.castShadow = (reg.mesh.userData.casts as boolean) && shown > 0.6;
       reg.mesh.visible = shown > 0.004;
       // Ghosts (cutaway casing, or a part faded out of the way) keep their outline.
       if (reg.edges) reg.edges.visible = ((ghost || f < 0.5) && op > 0.05) || ((scene.style === "blueprint" || scene.style === "xray") && op > 0.05);
@@ -289,6 +366,8 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
     };
   }, [part, built, mat, registry]);
   useEffect(() => () => { built.geometry.dispose(); mat.dispose(); }, [built, mat]);
+  // Flows and glowing parts are light, not matter: they never throw a shadow.
+  const casts = part.shape !== "arrow" && part.material !== "emissive" && part.material !== "glass";
 
   const click = onPick ? (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onPick(part); } : undefined;
   const hover = onPick ? (on: boolean) => (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); document.body.style.cursor = on ? "pointer" : ""; } : undefined;
@@ -298,12 +377,12 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
   return (
     <group ref={group}>
       {rounded ? (
-        <RoundedBox ref={mesh as never} args={part.size} radius={radius} smoothness={3} material={mat} onClick={click} onPointerOver={hover?.(true)} onPointerOut={hover?.(false)}>
+        <RoundedBox ref={mesh as never} args={part.size} radius={radius} smoothness={3} material={mat} castShadow={casts} receiveShadow onClick={click} onPointerOver={hover?.(true)} onPointerOut={hover?.(false)}>
           <Edges ref={edges as never} threshold={25} color={lineColor} visible={false} />
           {style === "sticker" && <Outlines thickness={2.5} screenspace color="#ffffff" />}
         </RoundedBox>
       ) : (
-        <mesh ref={mesh} geometry={built.geometry} material={mat} scale={built.scale} onClick={click} onPointerOver={hover?.(true)} onPointerOut={hover?.(false)}>
+        <mesh ref={mesh} geometry={built.geometry} material={mat} scale={built.scale} castShadow={casts} receiveShadow onClick={click} onPointerOver={hover?.(true)} onPointerOut={hover?.(false)}>
           <Edges ref={edges as never} threshold={25} color={lineColor} visible={false} />
           {style === "sticker" && <Outlines thickness={2.5} screenspace color="#ffffff" />}
         </mesh>
@@ -367,6 +446,8 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
   const { camera, size } = useThree();
   const manual = useRef(false);
   const first = useRef(true);
+  const spring = useRef<OrbitSpring | null>(null);
+  const targetVel = useRef([{ v: 0 }, { v: 0 }, { v: 0 }]);
   const box = useMemo(() => new THREE.Box3(), []);
   // The frame only grows during a beat: it covers the whole range of motion instead of bobbing
   // along with a piston, and widens to keep a rising seat in view.
@@ -481,15 +562,31 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
     }
     goal.pos.copy(sphere.center).addScaledVector(dir, Math.max(dist, 0.5));
     if (first.current) {
-      // Arrive from a little further out, like the model is settling into place.
-      camera.position.copy(sphere.center).addScaledVector(dir, dist * 1.7);
+      // Arrive from further out and a little round to the side, so the model turns into view
+      // as it settles, like a product reveal.
+      const o = toOrbit(dir.x, dir.y, dir.z);
+      o.radius = dist * 1.8;
+      o.theta -= 0.55;
+      o.phi = Math.max(0.2, o.phi - 0.12);
+      camera.position.copy(sphere.center).add(tmp.set(...fromOrbit(o)));
       c.target.copy(sphere.center);
       first.current = false;
+      spring.current = null;
     }
-    if (!manual.current) {
-      const k = 1 - Math.exp(-dt * 2.4);
-      camera.position.lerp(goal.pos, k);
-      c.target.lerp(goal.target, k);
+    if (manual.current) spring.current = null; // pick up from wherever they leave it
+    else {
+      const step = Math.min(dt, 0.05);
+      // The look-at point and the orbit both follow critically damped springs: the camera
+      // swings round the subject between beats instead of cutting a straight line through it.
+      const s = (spring.current ??= orbitSpring(toOrbit(...camera.position.clone().sub(c.target).toArray())));
+      c.target.set(
+        smoothDamp(c.target.x, goal.target.x, targetVel.current[0], SWING, step),
+        smoothDamp(c.target.y, goal.target.y, targetVel.current[1], SWING, step),
+        smoothDamp(c.target.z, goal.target.z, targetVel.current[2], SWING, step),
+      );
+      const g = goal.pos.clone().sub(goal.target);
+      const o = stepOrbit(s, toOrbit(g.x, g.y, g.z), SWING, step);
+      camera.position.copy(c.target).add(tmp.set(...fromOrbit(o)));
     }
     c.update();
   });
@@ -589,19 +686,16 @@ function hide(s: { el: HTMLDivElement | null; line: SVGPathElement | null; dot: 
   s.dot?.style.setProperty("opacity", "0");
 }
 
-/** A soft contact shadow under where the model starts, so it sits on something. Measured once
- * per model: its size follows the footprint and it only catches what's near the floor. */
-function Shadow({ registry, sceneId, style }: { registry: MutableRefObject<Map<string, Registered>>; sceneId: string; style: ObjectScene["style"] }) {
-  const [spot, setSpot] = useState<{ id: string; pos: [number, number, number]; scale: number; far: number } | null>(null);
-  const box = useMemo(() => new THREE.Box3(), []);
-  useFrame(() => {
-    if (spot?.id === sceneId) return;
-    boundsOf(registry.current, null, box);
-    if (box.isEmpty()) return;
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    setSpot({ id: sceneId, pos: [center.x, box.min.y - 0.01, center.z], scale: Math.max(size.x, size.z) * 1.4, far: Math.max(0.2, size.y * 0.35) });
-  });
-  if (style === "blueprint" || !spot || spot.id !== sceneId) return null;
-  return <ContactShadows key={sceneId} position={spot.pos} scale={spot.scale} far={spot.far} blur={2.4} opacity={0.38} resolution={512} color="#0b1020" />;
+/** A soft contact shadow under where the model starts, so it sits on something: a wide faint
+ * penumbra plus a tight dark core where it touches. Sized to the footprint, measured once. */
+function Shadow({ bounds, sceneId, style }: { bounds: MutableRefObject<Measured | null>; sceneId: string; style: ObjectScene["style"] }) {
+  const m = bounds.current?.id === sceneId ? bounds.current : null;
+  if (style === "blueprint" || !m) return null;
+  const pos: [number, number, number] = [m.center.x, m.floor - 0.01, m.center.z];
+  return (
+    <>
+      <ContactShadows key={`${sceneId}-wide`} position={pos} scale={m.footprint * 1.6} far={Math.max(0.3, m.height * 0.5)} blur={3.2} opacity={0.3} resolution={256} color="#0b1020" />
+      <ContactShadows key={`${sceneId}-core`} position={[pos[0], pos[1] + 0.005, pos[2]]} scale={m.footprint * 1.25} far={Math.max(0.12, m.height * 0.1)} blur={1.1} opacity={0.42} resolution={256} color="#05070c" />
+    </>
+  );
 }

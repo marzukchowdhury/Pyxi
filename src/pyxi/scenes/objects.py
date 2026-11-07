@@ -2,7 +2,7 @@
 
 Where a :class:`~pyxi.scenes.spec.SceneSpec` explains *ideas* (boxes and arrows), an
 :class:`ObjectScene` explains *things*: a jet ejection seat, an engine, a lock, a heart. The
-model describes parts (boxes, cylinders, tubes, gears, springs, extruded profiles...) with
+model describes parts (boxes, cylinders, tubes, gears, springs, extruded and turned profiles...) with
 materials, callouts that point at the parts that matter, motions on a timeline, and narrated
 beats that play like a short video. Follow-ups ("show the inside", "remove the casing",
 "make that part move") are :class:`ObjectEdit` patches applied to the same model.
@@ -32,6 +32,7 @@ PartShape = Literal[
     "wedge",
     "tube",
     "extrude",
+    "lathe",
     "gear",
     "spring",
     "plane",
@@ -131,7 +132,9 @@ class Part(BaseModel):
     radius: float | None = Field(None, gt=0, le=10, description="tube: pipe radius.")
     profile: list[list[float]] | None = Field(
         None,
-        description="extrude: [[x,y], ...] outline in the x-y plane, extruded along z by size[2].",
+        description="extrude: [[x,y], ...] outline in the x-y plane, extruded along z by size[2]. "
+        "lathe: [[along, radius], ...] from one end to the other, spun round `axis` (a fuselage, "
+        "rocket, bottle, piston, nose cone, vase: anything round in cross-section).",
     )
     teeth: int | None = Field(
         None, ge=3, le=80, description="gear: number of teeth (or fan blades)."
@@ -315,6 +318,9 @@ class ObjectScene(BaseModel):
             if p.shape == "arrow" and p.color is None:
                 # Flows read best as one glowing colour, set apart from the machine.
                 p = p.model_copy(update={"color": "#7fbaff", "material": "emissive"})
+            if p.shape == "lathe" and not p.profile:
+                notes.append(f"{pid}: lathe without profile became a cylinder")
+                p = p.model_copy(update={"shape": "cylinder"})
             if p.shape == "extrude" and not p.profile:
                 notes.append(f"{pid}: extrude without profile became a box")
                 p = p.model_copy(update={"shape": "box"})
