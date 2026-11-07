@@ -78,6 +78,8 @@ export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, heig
   };
   const high = tier === "high";
   const bounds = useRef<Measured | null>(null);
+  // Light, shadow and ground are fitted again whenever parts arrive (a model assembling itself).
+  const fit = `${scene.id}:${scene.parts.length}`;
 
   return (
     <div className="object-view" style={{ width, height }}>
@@ -95,12 +97,12 @@ export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, heig
         style={{ background: "transparent" }}
       >
         {high && <PerformanceMonitor ms={500} iterations={6} threshold={0.7} bounds={() => [40, 120]} onDecline={lower} onFallback={lower} />}
-        <Measure registry={registry} sceneId={scene.id} out={bounds} />
-        <Studio style={scene.style} bounds={bounds} sceneId={scene.id} shadows={high} />
+        <Measure registry={registry} sceneId={fit} out={bounds} />
+        <Studio style={scene.style} bounds={bounds} sceneId={fit} shadows={high} />
         <Model scene={scene} clock={clock} beat={beat} cutaway={cutaway} registry={registry} onPick={onPick} />
         <Rig registry={registry} beat={beat} beatIndex={beatIndex} sceneId={scene.id} />
         <CalloutDriver registry={registry} callouts={callouts} beat={beat} width={width} height={height} />
-        <Shadow bounds={bounds} sceneId={scene.id} style={scene.style} />
+        <Shadow bounds={bounds} sceneId={fit} style={scene.style} />
       </Canvas>
       <svg className="callout-lines" width={width} height={height}>
         {labelled.map((p) => (
@@ -224,6 +226,12 @@ function Model({ scene, clock, beat, cutaway, registry, onPick }: {
   const ray = useMemo(() => new THREE.Raycaster(), []);
 
   useFrame((state, dt) => {
+    if (import.meta.env.DEV && registry.current.size) {
+      // For scripts/first_frame_3d.py: when each model (and each new part count) first drew.
+      const w = window as unknown as { __pyxi3d?: Record<string, number> };
+      const k = `${scene.id}:${registry.current.size}`;
+      (w.__pyxi3d ??= {})[k] ??= performance.now();
+    }
     const c = clock.current;
     if (c.playing) {
       const step = Math.min(dt, 0.1);
@@ -355,8 +363,13 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
   const group = useRef<THREE.Group>(null);
   const mesh = useRef<THREE.Mesh>(null);
   const edges = useRef<THREE.Object3D>(null);
-  const built = useMemo(() => buildGeometry(part), [part]);
-  const mat = useMemo(() => makeMaterial(part, style), [part, style]);
+  // Keyed on what the part is, not the object: a model that arrives part by part is re-sent
+  // whole each time, and the parts already on screen must keep their geometry.
+  const sig = useMemo(() => JSON.stringify(part), [part]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const built = useMemo(() => buildGeometry(part), [sig]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const mat = useMemo(() => makeMaterial(part, style), [sig, style]);
   useEffect(() => {
     built.geometry.computeBoundingBox();
     const center = built.geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3();

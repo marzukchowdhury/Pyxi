@@ -890,15 +890,12 @@ class Brain:
         return tools
 
     def _builder_llm(self) -> LLMProvider:
+        """Streamed, so the model can be on screen assembling itself while the rest arrives (a
+        detailed model is a minute of JSON), and its long instructions are prompt-cached."""
         if getattr(self, "_model_llm", None) is None:
-            from otto.llm import make_provider
-
-            from pyxi.llm import otto_settings
-
-            self._model_llm = make_provider(
-                otto_settings(
-                    self.settings, model=self.settings.model_3d, effort=self.settings.effort_3d
-                )
+            self._model_llm = StreamingChat(
+                self.settings.model_3d or self.settings.model,
+                reasoning={"effort": self.settings.effort_3d},
             )
         return self._model_llm
 
@@ -925,8 +922,18 @@ class Brain:
             event="status",
             data={"message": f"is building {subject} in 3D"},
         )
+        shown_partial = False
+
+        async def assembling(partial: ObjectScene) -> None:
+            # The model so far, silent and still: parts appear as they arrive.
+            nonlocal shown_partial
+            if self._object is not None and self._object.id != partial.id and shown_partial:
+                return  # something else took the stage meanwhile
+            await self.show_object(partial, restart=False, background=True, keep_place=shown_partial)
+            shown_partial = True
+
         try:
-            result = await build_model(self._builder_llm(), brief, context)
+            result = await build_model(self._builder_llm(), brief, context, on_parts=assembling)
         except Exception:
             log.exception("3D build failed")
             await self.jobs.settle(job, ok=False, summary="The model wouldn't come together.")
@@ -1584,6 +1591,7 @@ class Brain:
 
             head = {"text": ""}  # the first sentence(s) of `say`, already being spoken
             live_items = {"n": 0}
+            scene_preview = {"shown": False}
 
             held = {"say": None}  # a later round's reply, waiting to go just before its card
 
@@ -1626,6 +1634,12 @@ class Brain:
                         }
                         self._pending_say = ""
                         self._speak(strip_filler(first))
+                elif name == "explain_in_3d" and not scene_preview["shown"]:
+                    # Nodes and edges are in once the steps begin: show the scene now, and let
+                    # its narration (half of the JSON) finish arriving while it flies in.
+                    if '"steps"' in raw and (scene := self._scene_preview(raw)) is not None:
+                        scene_preview["shown"] = True
+                        await self.show_scene(scene)
                 elif name in ("explain_on_screen", "explain_on_picture"):
                     if held["say"] is not None and held["say"].id not in early:
                         # This round's reply came first: say it before the points.
@@ -2047,11 +2061,7 @@ class Brain:
                     return "explain_in_3d failed twice; explain in words instead."
                 self._scene_retry = True
                 return f"SCENE_INVALID: fix these and call explain_in_3d again: {exc.errors()[:6]}"
-            if scene.anchor and scene.anchor.element_id is not None:
-                rect = resolve_rect(ctx, scene.anchor.element_id, None)
-                scene.anchor = SceneAnchor(
-                    element_id=scene.anchor.element_id, rect=list(rect) if rect else None
-                )
+            self._anchor_scene(scene)
             await self.show_scene(scene)
             return f"Showing 3D scene '{scene.title}' ({len(scene.nodes)} nodes, {len(scene.steps)} steps)."
         if name == "sketch_diagram":
@@ -2438,6 +2448,38 @@ class Brain:
             self._talking_until = max(self._talking_until, now) + speech.duration_s
 
     # ================================================================== scenes & walkthroughs
+    def _anchor_scene(self, scene: SceneSpec) -> None:
+        if scene.anchor and scene.anchor.element_id is not None:
+            rect = resolve_rect(self._ctx, scene.anchor.element_id, None)
+            scene.anchor = SceneAnchor(
+                element_id=scene.anchor.element_id, rect=list(rect) if rect else None
+            )
+
+    def _scene_preview(self, raw: str) -> SceneSpec | None:
+        """An explain_in_3d scene from its streaming JSON once its nodes and edges are complete:
+        one silent step until the real steps arrive (under its own id, so the full scene that
+        replaces it is narrated from the top)."""
+        data: dict[str, Any] = {"nodes": complete_items(raw, "nodes"), "edges": complete_items(raw, "edges")}
+        for key in ("title", "subtitle", "layout", "mode", "theme"):
+            got = partial_string(raw, key)
+            if got and got[1]:
+                data[key] = got[0]
+        if m := re.search(r'"anchor"\s*:\s*(\{[^{}]*\})', raw):
+            try:
+                data["anchor"] = json.loads(m.group(1))
+            except ValueError:
+                pass
+        if not data["nodes"] or "title" not in data:
+            return None
+        data["steps"] = [{"title": data["title"], "narration": "", "focus": []}]
+        try:
+            scene = parse_scene(data)
+        except ValidationError:
+            return None
+        scene.id += "_preview"
+        self._anchor_scene(scene)
+        return scene
+
     async def show_scene(self, scene: SceneSpec) -> None:
         self._visual_turn = True
         place = (
@@ -2477,15 +2519,24 @@ class Brain:
         self._spawn(self._narrate_beats(audio_key, [s.narration for s in board.steps]))
 
     async def show_object(
-        self, model: ObjectScene, *, restart: bool, background: bool = False
+        self,
+        model: ObjectScene,
+        *,
+        restart: bool,
+        background: bool = False,
+        keep_place: bool = False,
     ) -> None:
         """Put a 3D model on screen. Edits keep the id (the view keeps its camera); new beats get
-        a new audio key so old narration can't play over the new explanation."""
+        a new audio key so old narration can't play over the new explanation. ``keep_place``:
+        the same stage as last time (a model still assembling), without re-reading the screen."""
         self._object = model
         if not background:  # a finished background build mustn't reshape the turn in progress
             self._visual_turn = True
-        place = place_stage(self._ctx, self._placed.others("stage"))
-        self._placed.put("stage", place, 90.0)
+        place = getattr(self, "_object_place", None) if keep_place else None
+        if place is None:
+            place = place_stage(self._ctx, self._placed.others("stage"))
+            self._placed.put("stage", place, 90.0)
+        self._object_place = place
         audio_key = (
             f"{model.id}:{secrets.token_hex(3)}"
             if restart

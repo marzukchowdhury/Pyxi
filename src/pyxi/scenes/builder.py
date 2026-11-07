@@ -8,15 +8,20 @@ the fast model that keeps the conversation snappy.
 
 from __future__ import annotations
 
+import inspect
 import json
+import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from otto.llm.base import LLMProvider, Message, ToolSpec
 from pydantic import ValidationError
 
+from pyxi.partial_json import complete_items, partial_string
 from pyxi.scenes.model_examples import EXAMPLES
-from pyxi.scenes.objects import ObjectScene, build_tool_schema
+from pyxi.scenes.objects import Beat, ObjectScene, Part, build_tool_schema
 
 SYSTEM = """\
 You are Pyxi's 3D modeller. You build one model per request with the build_3d_model tool. It \
@@ -79,8 +84,65 @@ def builder_tool() -> ToolSpec:
     )
 
 
-async def build_model(llm: LLMProvider, brief: str, context: str = "") -> BuildResult:
-    """Build a model from a brief; one repair attempt if the first try doesn't validate."""
+OnParts = Callable[[ObjectScene], Awaitable[None]]
+_CUTAWAY = re.compile(r'"cutaway"\s*:\s*true')
+PARTIAL_EVERY_S = 0.3  # at most ~3 partial models a second: each one is the whole model so far
+
+
+class PartialModel:
+    """Builds the model so far from the builder's streaming JSON: every part that has fully
+    arrived, standing still and silent (motions and beats come last), so the model can be on
+    screen assembling itself a few seconds in instead of appearing all at once a minute later.
+    A part whose parent hasn't arrived yet waits for it, so nothing lands in the wrong place."""
+
+    def __init__(self, scene_id: str, fallback_title: str) -> None:
+        self.scene_id = scene_id
+        self.fallback_title = fallback_title
+        self.shown = 0
+        self.last = 0.0
+
+    def update(self, raw: str, *, force: bool = False) -> ObjectScene | None:
+        items = complete_items(raw, "parts")
+        if len(items) <= self.shown:
+            return None
+        now = time.monotonic()
+        if not force and now - self.last < PARTIAL_EVERY_S and self.shown:
+            return None
+        parts: list[Part] = []
+        ids: set[str] = set()
+        for raw_part in items:
+            try:
+                part = Part.model_validate(raw_part)
+            except ValidationError:
+                continue
+            if part.parent and part.parent not in ids:
+                continue
+            parts.append(part)
+            ids.add(part.id)
+        if not parts or len(parts) <= self.shown:
+            return None
+        title = partial_string(raw, "title")
+        try:
+            scene = ObjectScene(
+                id=self.scene_id,
+                title=(title[0] if title and title[1] else "") or self.fallback_title,
+                parts=parts,
+                cutaway=bool(_CUTAWAY.search(raw.split('"parts"', 1)[0])),
+                beats=[Beat(title="Building", narration="", camera="iso")],
+            )
+        except ValidationError:
+            return None
+        self.shown, self.last = len(parts), now
+        return scene
+
+
+async def build_model(
+    llm: LLMProvider, brief: str, context: str = "", on_parts: OnParts | None = None
+) -> BuildResult:
+    """Build a model from a brief; one repair attempt if the first try doesn't validate.
+
+    ``on_parts``: called with the model so far as its parts stream in (only for a streaming
+    model). The finished model keeps the same id, so the view carries straight on from it."""
     system = SYSTEM.format(
         examples="\n".join(json.dumps(e, separators=(",", ":")) for e in EXAMPLES)
     )
@@ -90,10 +152,22 @@ async def build_model(llm: LLMProvider, brief: str, context: str = "") -> BuildR
     result = BuildResult(model=None)
     started = time.monotonic()
     messages = [Message.user(ask)]
+    scene_id = ObjectScene(title="x", parts=[Part(id="x")]).id
+    params = inspect.signature(llm.complete).parameters
+    streams = on_parts is not None and "on_partial" in params
     for _ in range(2):
         result.attempts += 1
+        extra: dict[str, Any] = {}
+        if streams:
+            partial = PartialModel(scene_id, brief.split(".")[0][:60] or "Model")
+
+            async def as_it_streams(i: int, name: str, raw: str, partial=partial) -> None:
+                if name == "build_3d_model" and (scene := partial.update(raw)) is not None:
+                    await on_parts(scene)  # type: ignore[misc]
+
+            extra["on_partial"] = as_it_streams
         response = await llm.complete(
-            system=system, messages=messages, tools=[builder_tool()], max_tokens=12000
+            system=system, messages=messages, tools=[builder_tool()], max_tokens=12000, **extra
         )
         result.cost_usd += response.usage.cost_usd
         call = next((c for c in response.tool_calls if c.name == "build_3d_model"), None)
@@ -102,7 +176,7 @@ async def build_model(llm: LLMProvider, brief: str, context: str = "") -> BuildR
             messages = [Message.user(ask + "\n\nCall build_3d_model now.")]
             continue
         try:
-            result.model = ObjectScene.model_validate(dict(call.arguments))
+            result.model = ObjectScene.model_validate({**dict(call.arguments), "id": scene_id})
             break
         except ValidationError as exc:
             errors = exc.errors()[:8]

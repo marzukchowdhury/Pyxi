@@ -36,8 +36,11 @@ OnPartial = Callable[[int, str, str], Awaitable[None]]  # (index, tool name, arg
 class StreamingChat:
     """OpenRouter chat completions, streamed, with the system prompt cached."""
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, reasoning: dict[str, Any] | None = None) -> None:
+        """``reasoning``: OpenRouter's reasoning setting, e.g. {"effort": "low"} (models that
+        always think, like the 3D builder's, otherwise think at length before answering)."""
         self.model = model
+        self.reasoning = reasoning
         self.client = openai.AsyncOpenAI(
             api_key=os.getenv("OPENROUTER_API_KEY") or "missing-openrouter-key",
             # The beta routes through its own server (pyxi.cloud); otherwise straight to OpenRouter.
@@ -70,7 +73,10 @@ class StreamingChat:
                 },
                 *[_to_openai(m) for m in messages],
             ],
-            "extra_body": {"usage": {"include": True}},
+            "extra_body": {
+                "usage": {"include": True},
+                **({"reasoning": self.reasoning} if getattr(self, "reasoning", None) else {}),
+            },
         }
         if tools:
             req["tools"] = [
@@ -88,6 +94,7 @@ class StreamingChat:
 
         text = ""
         slots: dict[int, dict[str, Any]] = {}
+        remap: dict[int, int] = {}  # a provider index that was reused for a later call -> its slot
         fired: set[int] = set()
         usage = Usage()
         stop: str | None = None
@@ -95,7 +102,7 @@ class StreamingChat:
         async def fire(i: int) -> None:
             if i in fired or on_call is None:
                 return
-            call = _parse(slots[i], i)
+            call = _parsed(slots[i], i)
             if call is not None:
                 fired.add(i)
                 await on_call(call)
@@ -111,9 +118,14 @@ class StreamingChat:
                     continue
                 text += delta.content or ""
                 for tc in delta.tool_calls or []:
-                    i = tc.index if tc.index is not None else max(slots, default=0)
-                    if tc.index is None and tc.id and slots.get(i, {}).get("id") not in ("", tc.id):
-                        i += 1  # a provider without indexes: a new id starts a new call
+                    key = tc.index if tc.index is not None else -1
+                    i = remap.get(key, tc.index if tc.index is not None else max(slots, default=0))
+                    if tc.id and slots.get(i, {}).get("id") not in (None, "", tc.id):
+                        # A new id is a new call, even when the provider sends it under the same
+                        # index as the last one (or none): glued together, two calls' arguments
+                        # read as one broken JSON, and the whole round has to be asked again.
+                        i = max(slots) + 1
+                        remap[key] = i
                     # A new call starting means the ones before it are complete.
                     for j in list(slots):
                         if j < i:
@@ -131,7 +143,9 @@ class StreamingChat:
                         await fire(i)
         for i in sorted(slots):
             await fire(i)
-        calls = [c for i in sorted(slots) if (c := _parse(slots[i], i)) is not None]
+        if stop == "length":
+            log.warning("reply hit max_tokens (%s)", req["max_tokens"])
+        calls = [c for i in sorted(slots) if (c := _parsed(slots[i], i)) is not None]
         return LLMResponse(
             text=text,
             tool_calls=calls,
@@ -149,13 +163,36 @@ def _complete_json(s: str) -> bool:
         return False
 
 
+def _parsed(slot: dict[str, Any], i: int) -> ToolCall | None:
+    """Parse a finished call once (it's asked for when it fires and again at the end)."""
+    if "call" not in slot or slot.get("parsed_len") != len(slot["args"]):
+        slot["call"], slot["parsed_len"] = _parse(slot, i), len(slot["args"])
+    return slot["call"]
+
+
 def _parse(slot: dict[str, Any], i: int) -> ToolCall | None:
     if not slot["name"]:
         return None
     try:
         args = json.loads(slot["args"] or "{}")
-    except ValueError:
-        log.warning("tool %s sent unparseable arguments", slot["name"])
+    except ValueError as exc:
+        raw = slot["args"]
+        try:
+            # A complete call with something after it (a second call's arguments, a stray
+            # brace): keep the call rather than ask for the whole round again.
+            first, _ = json.JSONDecoder().raw_decode(raw.lstrip())
+        except ValueError:
+            first = None
+        if isinstance(first, dict) and first:
+            log.warning("tool %s: kept the complete call, dropped what followed it", slot["name"])
+            return ToolCall(id=slot["id"] or f"call_{i}", name=slot["name"], arguments=first)
+        log.warning(
+            "tool %s sent unparseable arguments (%d chars, %s, ends %r)",
+            slot["name"],
+            len(raw),
+            exc,
+            raw[-60:],
+        )
         # Flag it rather than drop it, so the brain asks for the call again.
         return ToolCall(
             id=slot["id"] or f"call_{i}", name=slot["name"], arguments={"__unparseable__": True}
