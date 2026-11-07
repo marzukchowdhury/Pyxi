@@ -470,7 +470,10 @@ for t in sorted(tops):
     except Exception as e:
         bad.append(f"{t}: {type(e).__name__}: {e}")
 print("zipped packages that don't import:", bad or "none")
-print("bundle ok:", len(tops), "zipped top-level names")
+print("bundle ok:", len(tops), "zipped top-level names", flush=True)
+# Leave the way the brain does (os._exit): with uiautomation's COM and winrt's both loaded,
+# Python's own shutdown crashes tearing them down, after everything above has passed.
+import os; os._exit(0)
 """
 
 
