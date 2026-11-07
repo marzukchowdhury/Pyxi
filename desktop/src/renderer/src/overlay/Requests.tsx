@@ -1,6 +1,7 @@
 // Approval and question toasts from teammates: "Can Scout click Submit?" right on screen.
 import { useState } from "react";
 import { Interactive } from "./Interactive";
+import { trusted } from "../shared/trusted";
 import { useOverlay } from "./store";
 
 export function Requests() {
@@ -17,9 +18,9 @@ export function Requests() {
               <div className="req-action">{r.action}</div>
               <div className="req-reason">{r.reason}</div>
               <div className="req-buttons">
-                <button className="yes" onClick={() => answer(r.request_id, true)}>Allow</button>
-                {r.always && <button onClick={() => answer(r.request_id, "always")}>{r.always}</button>}
-                <button onClick={() => answer(r.request_id, false)}>Don't</button>
+                <button className="yes" onClick={trusted(() => answer(r.request_id, true))}>Allow</button>
+                {r.always && <button onClick={trusted(() => answer(r.request_id, "always"))}>{r.always}</button>}
+                <button onClick={trusted(() => answer(r.request_id, false))}>Don't</button>
               </div>
             </>
           ) : r.handover ? (
@@ -28,8 +29,8 @@ export function Requests() {
               <div className="req-action">{r.question}</div>
               <div className="req-reason">{r.agent} has the browser window open for you and will read the confirmation once you're done.</div>
               <div className="req-buttons">
-                <button className="yes" onClick={() => answer(r.request_id, "done")}>Done</button>
-                <button onClick={() => answer(r.request_id, null)}>Cancel</button>
+                <button className="yes" onClick={trusted(() => answer(r.request_id, "done"))}>Done</button>
+                <button onClick={trusted(() => answer(r.request_id, null))}>Cancel</button>
               </div>
             </>
           ) : (
@@ -48,7 +49,7 @@ function Ask({ id, agent, question, secret, onAnswer }: { id: string; agent: str
       <div className="req-title">{secret ? `${agent} needs a password` : `${agent} has a question`}</div>
       <div className="req-action">{question}</div>
       {secret && <div className="req-reason">It goes straight to {agent} on this PC. Pyxi's model never sees it, and it isn't saved.</div>}
-      <form className="req-buttons" onSubmit={(e) => { e.preventDefault(); onAnswer(id, text); setText(""); }}>
+      <form className="req-buttons" onSubmit={(e) => { e.preventDefault(); if (!e.nativeEvent.isTrusted) return; onAnswer(id, text); setText(""); }}>
         <input
           autoFocus
           type={secret ? "password" : "text"}

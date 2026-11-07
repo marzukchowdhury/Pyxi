@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { bridge, keysOf } from "../shared/bridge";
+import { trusted } from "../shared/trusted";
 import { Close, Compass, Cube, Feather, FileStack, Grid, Mark, Mic, Minus, Plus, Replay, Send, Spark, Thread } from "../shared/icons";
 import type { Agent, Job } from "../shared/protocol";
 import { brain } from "../shared/socket";
@@ -47,8 +48,8 @@ export function Panel() {
         <div key={r.request_id} className="approval">
           <b>{r.agent}</b> {r.kind === "confirm" ? "wants to" : "asks"}: {r.text}
           <div>
-            <button className="primary" onClick={() => answer(r.request_id, r.kind === "confirm" ? true : prompt(r.text) ?? "")}>{r.kind === "confirm" ? "Allow" : "Answer"}</button>
-            <button onClick={() => answer(r.request_id, r.kind === "confirm" ? false : null)}>{r.kind === "confirm" ? "Don't" : "Skip"}</button>
+            <button className="primary" onClick={trusted(() => answer(r.request_id, r.kind === "confirm" ? true : prompt(r.text) ?? ""))}>{r.kind === "confirm" ? "Allow" : "Answer"}</button>
+            <button onClick={trusted(() => answer(r.request_id, r.kind === "confirm" ? false : null))}>{r.kind === "confirm" ? "Don't" : "Skip"}</button>
           </div>
         </div>
       ))}

@@ -6,12 +6,14 @@
 //
 //   npm run build && node e2e/security.mjs
 import { _electron as electron } from "playwright-core";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const PORT = process.env.PYXI_E2E_PORT ?? "8799";
 const BACKEND = `http://127.0.0.1:${PORT}`;
+const PY = join(process.cwd(), "..", ".venv", "Scripts", "python.exe"); // the brain's own code, for the hands probe
 const data = mkdtempSync(join(tmpdir(), "pyxi-e2e-"));
 const profile = mkdtempSync(join(tmpdir(), "pyxi-e2e-profile-"));
 const checks = [];
@@ -159,7 +161,13 @@ try {
   const cardShown = (await card.count()) > 0;
   check("Allow card shown in the overlay", cardShown, cardShown ? await overlay.locator(".request .req-action").first().innerText() : "");
   if (cardShown) {
-    await card.first().dispatchEvent("click"); // the overlay is click-through; click the button itself
+    // A script's click (dispatchEvent, element.click()) never answers a card.
+    await card.first().dispatchEvent("click");
+    await card.first().evaluate((b) => b.click());
+    await new Promise((r) => setTimeout(r, 1200));
+    check("a script's click doesn't answer the card", answers.length === 0 && (await card.count()) > 0, JSON.stringify(answers));
+    // Real input does (Playwright sends it through Chromium's input pipeline, like a mouse).
+    await card.first().click({ force: true });
     for (let i = 0; i < 50 && !answers.length; i++) await new Promise((r) => setTimeout(r, 200));
     check("Allow reached the brain", answers[0] === true, JSON.stringify(answers));
     check("card closed", (await overlay.locator(".request").count()) === 0);
@@ -175,6 +183,51 @@ try {
   const took = `${Math.round((Date.now() - asked) / 1000)}s`;
   check("3D scene renders under the CSP (WebGL canvas)", scene.canvas && scene.gl, JSON.stringify({ scene, took, events: [...new Set(seenTypes)] }));
   tool.close();
+  // Pyxi's hands (pyxi/hands.py) treat a point as "Pyxi's own" by the window under it. The
+  // full-screen overlay is click-through, so it must not count; the panel, and the overlay
+  // while a card makes it clickable, must.
+  const appPid = await app.evaluate(() => process.pid);
+  const probe = (pt) => {
+    const code =
+      "import ctypes, sys; ctypes.windll.shcore.SetProcessDpiAwareness(2); from pyxi import hands; " +
+      "w = hands.window_at(int(sys.argv[1]), int(sys.argv[2])); print(hands._pid_of(w), hands.is_own(w))";
+    const out = execFileSync(PY, ["-c", code, String(pt.x), String(pt.y)], { env: { ...process.env, PYXI_APP_PID: String(appPid) } });
+    const [pid, own] = out.toString().trim().split(" ");
+    return { ours: Number(pid) === appPid, own: own === "True" };
+  };
+  const spots = await app.evaluate(({ BrowserWindow, screen }) => {
+    const all = BrowserWindow.getAllWindows();
+    const panelWin = all.find((w) => w.webContents.getURL().includes("panel.html"));
+    const d = screen.getPrimaryDisplay();
+    const middle = screen.dipToScreenPoint({ x: Math.round(d.bounds.x + d.bounds.width / 2), y: Math.round(d.bounds.y + d.bounds.height / 2) });
+    panelWin.showInactive();
+    panelWin.setAlwaysOnTop(true, "pop-up-menu");
+    const b = panelWin.getBounds();
+    return { middle, panel: screen.dipToScreenPoint({ x: b.x + Math.round(b.width / 2), y: b.y + 80 }) };
+  });
+  await new Promise((r) => setTimeout(r, 500));
+  const onPanel = probe(spots.panel);
+  check("hands refuse Pyxi's panel", onPanel.ours && onPanel.own, JSON.stringify(onPanel));
+  await app.evaluate(({ BrowserWindow }) => {
+    const p = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().includes("panel.html"));
+    p.setAlwaysOnTop(false);
+    p.hide();
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  const throughOverlay = probe(spots.middle);
+  check("hands still reach other apps through the click-through overlay", !throughOverlay.ours, JSON.stringify(throughOverlay));
+  await app.evaluate(({ BrowserWindow, screen }) => {
+    const id = screen.getPrimaryDisplay().id;
+    const o = BrowserWindow.getAllWindows().find((w) => decodeURIComponent(w.webContents.getURL()).includes(`"id":${id},`));
+    o?.setIgnoreMouseEvents(false); // what hovering a card does
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  const onCard = probe(spots.middle);
+  check("hands refuse the overlay while a card is clickable", onCard.ours && onCard.own, JSON.stringify(onCard));
+  await app.evaluate(({ BrowserWindow }) => {
+    for (const w of BrowserWindow.getAllWindows()) if (w.webContents.getURL().includes("overlay")) w.setIgnoreMouseEvents(true, { forward: true });
+  });
+
   // Last, as Playwright then waits on the refused navigation: a page can't take the window away.
   const urls = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.webContents.getURL().split("?")[0]));
   const before = await urls();

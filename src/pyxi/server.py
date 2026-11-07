@@ -393,6 +393,18 @@ def create_app(
         elif kind == "interrupt":
             brain.interrupt()
         elif kind == "answer":
+            from pyxi import hands
+
+            if hands.recently_acted():
+                # Pyxi's own hands were moving: this "click" may be its own. Pyxi never
+                # approves its own cards, so the card stays until the user answers it.
+                log.warning("ignored a card answer during Pyxi's own mouse or keyboard input")
+                await hub.emit(
+                    "error",
+                    message="Pyxi was using the mouse just then, so that didn't count. "
+                    "Answer the card yourself.",
+                )
+                return
             hub.resolve(msg.get("request_id", ""), msg.get("value"))
         elif kind == "job_control":
             brain.jobs.control(msg.get("job_id", ""), msg.get("action", ""), msg.get("text", ""))

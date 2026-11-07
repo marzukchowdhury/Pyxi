@@ -6,12 +6,19 @@ to where it's going rather than teleporting, so the user can see what Pyxi is do
 moment they touch the mouse or press Esc, ``Hands`` notices and stops.
 
 Never types into password fields: the caller checks the focused field first.
+
+Never touches Pyxi's own windows (the overlay, its Allow cards, the panel, the notch): a click,
+drag or scroll that would land on one, or a key press while one is in front, is refused
+(:class:`OwnWindow`). And every input Pyxi sends is timed (:func:`recently_acted`), so the brain
+can refuse a card answer that arrives while Pyxi's own hands are moving: Pyxi never approves
+its own cards.
 """
 
 from __future__ import annotations
 
 import ctypes
 import ctypes.wintypes as wt
+import os
 import sys
 import time
 from collections import deque
@@ -117,6 +124,78 @@ class Interrupted(Exception):
     """The user moved the mouse or pressed Esc: they're taking over."""
 
 
+class OwnWindow(Exception):
+    """The action would land on one of Pyxi's own windows (an Allow card, the panel)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "that's one of Pyxi's own windows (a card or the panel): Pyxi never clicks or types "
+            "there. The user answers cards themselves"
+        )
+
+
+_last_input = 0.0  # time.monotonic() of the last input Pyxi sent
+
+
+def recently_acted(within_s: float = 1.5) -> bool:
+    """Did Pyxi's own hands send any input in the last ``within_s`` seconds?"""
+    return _last_input > 0 and time.monotonic() - _last_input < within_s
+
+
+def own_pids() -> set[int]:
+    """The processes whose windows are Pyxi's: the desktop app (PYXI_APP_PID) and the brain."""
+    pids = {os.getpid()}
+    app = os.environ.get("PYXI_APP_PID", "")
+    if app.isdigit():
+        pids.add(int(app))
+    return pids
+
+
+def _pid_of(hwnd: int) -> int:
+    pid = wt.DWORD()
+    ctypes.windll.user32.GetWindowThreadProcessId(wt.HWND(hwnd), ctypes.byref(pid))  # type: ignore[attr-defined]
+    return pid.value
+
+
+def _exe_of(pid: int) -> str:
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        size = wt.DWORD(1024)
+        ok = kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size))
+        return os.path.basename(buf.value).lower() if ok else ""
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def is_own(hwnd: int) -> bool:
+    """Is this top-level window one of Pyxi's?"""
+    if not hwnd:
+        return False
+    pid = _pid_of(hwnd)
+    return pid in own_pids() or _exe_of(pid) == "pyxi.exe"
+
+
+def window_at(x: int, y: int) -> int:
+    """The top-level window under a screen point (click-through layers don't count)."""
+    u = ctypes.windll.user32  # type: ignore[attr-defined]
+    u.WindowFromPoint.restype = wt.HWND
+    u.WindowFromPoint.argtypes = [wt.POINT]
+    u.GetAncestor.restype = wt.HWND
+    u.GetAncestor.argtypes = [wt.HWND, wt.UINT]
+    hwnd = u.WindowFromPoint(wt.POINT(x, y))
+    return int(u.GetAncestor(hwnd, 2) or 0) if hwnd else 0  # GA_ROOT
+
+
+def foreground_window() -> int:
+    u = ctypes.windll.user32  # type: ignore[attr-defined]
+    u.GetForegroundWindow.restype = wt.HWND
+    return int(u.GetForegroundWindow() or 0)
+
+
 def available() -> bool:
     return sys.platform == "win32"
 
@@ -198,8 +277,21 @@ class Hands:
             time.sleep(0.2)
         return False
 
+    # ----------------------------------------------------------------- Pyxi's own windows
+    def guard_point(self, x: int, y: int) -> None:
+        """Refuse to press a button over one of Pyxi's own windows."""
+        if is_own(window_at(x, y)):
+            raise OwnWindow
+
+    def guard_keys(self) -> None:
+        """Refuse to type or press keys while one of Pyxi's own windows has the keyboard."""
+        if is_own(foreground_window()):
+            raise OwnWindow
+
     # ----------------------------------------------------------------- the mouse
     def _send(self, *inputs: _Input) -> None:
+        global _last_input
+        _last_input = time.monotonic()
         arr = (_Input * len(inputs))(*inputs)
         self._u.SendInput(len(inputs), arr, ctypes.sizeof(_Input))
 
@@ -241,6 +333,7 @@ class Hands:
             else (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP)
         )
         time.sleep(0.06)  # rest on it first: menus only arm an item once the pointer is over it
+        self.guard_point(x, y)  # checked last: a card that just became clickable counts too
         for i in range(count):
             self._send(self._mouse(down))
             time.sleep(0.045)  # a real click lasts a few hundredths of a second
@@ -249,7 +342,9 @@ class Hands:
                 time.sleep(0.06)
 
     def drag(self, x0: int, y0: int, x1: int, y1: int) -> None:
+        self.guard_point(x1, y1)
         self.move(x0, y0)
+        self.guard_point(x0, y0)
         self._send(self._mouse(MOUSEEVENTF_LEFTDOWN))
         try:
             time.sleep(0.12)
@@ -264,6 +359,7 @@ class Hands:
 
     def scroll(self, x: int, y: int, direction: str = "down", notches: int = 5) -> None:
         self.move(x, y)
+        self.guard_point(x, y)
         horizontal = direction in ("left", "right")
         sign = 1 if direction in ("up", "right") else -1
         for _ in range(max(1, min(notches, 30))):
@@ -283,6 +379,7 @@ class Hands:
     def press(self, combo: str) -> None:
         """A key or chord: 'enter', 'ctrl+s', 'alt+tab', 'ctrl+shift+esc'."""
         self.check()
+        self.guard_keys()
         keys = parse_keys(combo)
         self._send(
             *[self._key(k, False) for k in keys], *[self._key(k, True) for k in reversed(keys)]
@@ -300,6 +397,7 @@ class Hands:
         for i, ch in enumerate(text):
             if i % 8 == 0:
                 self.check()
+                self.guard_keys()
             if ch in "\n\t":
                 self.press("enter" if ch == "\n" else "tab")
                 time.sleep(settle_s)
