@@ -1,6 +1,8 @@
 """Ship a new Pyxi version with one command.
 
     python scripts/release.py 0.1.5 "What's new, in a sentence or two."  [--full] [--skip-tests]
+        [--build-only]       build and check everything, publish nothing (then install and try it)
+        [--publish-built]    publish what --build-only built, without rebuilding
     python scripts/release.py --checklist      (the pre-release security checklist, nothing else)
 
 1. Sets the version everywhere (pyproject.toml, src/pyxi/__init__.py, desktop/package.json).
@@ -130,6 +132,48 @@ def check_clean_build() -> None:
     print("build is clean: no keys, tokens or personal files")
 
 
+def check_app_packages() -> None:
+    """Every package the app needs at runtime, its dependencies' dependencies included, must be in
+    the built app. 0.1.6 shipped without node-gyp-build (uiohook-napi needs it) and crashed on
+    start, because desktop/node_modules was a link the builder didn't follow all the way."""
+    import shutil
+
+    npm = shutil.which("npm") or shutil.which("npm.cmd") or "npm"
+    tree = json.loads(
+        sh(npm, "ls", "--omit=dev", "--all", "--json", cwd=ROOT / "desktop", capture_output=True, text=True).stdout
+    )
+    needed: set[str] = set()
+
+    def walk(deps: dict) -> None:
+        for name, info in (deps or {}).items():
+            needed.add(name)
+            walk(info.get("dependencies", {}))
+
+    walk(tree.get("dependencies", {}))
+    resources = DIST / "win-unpacked" / "resources"
+    listing = sh(
+        "node",
+        "-e",
+        "for (const p of require('@electron/asar').listPackage(process.argv[1])) console.log(p)",
+        str(resources / "app.asar"),
+        cwd=ROOT / "desktop",
+        capture_output=True,
+        text=True,
+    ).stdout
+    shipped = set()
+    for line in listing.splitlines():
+        parts = re.split(r"[\\/]", line)
+        if len(parts) > 2 and parts[1] == "node_modules" and parts[2]:
+            shipped.add(parts[2] + "/" + parts[3] if parts[2].startswith("@") and len(parts) > 3 else parts[2])
+    unpacked = resources / "app.asar.unpacked" / "node_modules"
+    if unpacked.is_dir():
+        shipped |= {p.name for p in unpacked.iterdir()}
+    missing = sorted(n for n in needed if n not in shipped)
+    if missing:
+        raise SystemExit(f"STOP: the app would crash on start, these packages aren't in it: {missing}")
+    print(f"app has all {len(needed)} runtime packages")
+
+
 def github() -> httpx.Client:
     cred = sh(
         "git",
@@ -216,29 +260,39 @@ def main() -> None:
         '"Restart to update" in the notch.'
     )
     set_version(v)
-    sh(sys.executable, "-m", "pip", "install", "-e", ".", "-q", "--no-deps")
-    if "--skip-tests" not in sys.argv:
-        automated_checks()
-    else:
-        print("WARNING: --skip-tests: no tests run. Only for re-publishing a build that passed them.")
-    for name in ASSETS:  # never upload a leftover from an earlier build
-        (DIST / name).unlink(missing_ok=True)
-    for pack in DIST.glob(PACKS):
-        pack.unlink()
-    built = ROOT / "desktop/build"
-    full = "--full" in sys.argv or not (
-        (built / "python-full/python.exe").exists()
-        or (built / "python/Lib/site-packages/pip").is_dir()
-    )
-    sh(sys.executable, "scripts/build_installer.py", *([] if full else ["--update-pyxi"]))
+    # --publish-built: publish the build an earlier --build-only run made (and that was installed
+    # and tried by hand), without rebuilding it.
+    if "--publish-built" not in sys.argv:
+        sh(sys.executable, "-m", "pip", "install", "-e", ".", "-q", "--no-deps")
+        if "--skip-tests" not in sys.argv:
+            automated_checks()
+        else:
+            print("WARNING: --skip-tests: no tests run. Only for re-publishing a build that passed them.")
+        for name in ASSETS:  # never upload a leftover from an earlier build
+            (DIST / name).unlink(missing_ok=True)
+        for pack in DIST.glob(PACKS):
+            pack.unlink()
+        built = ROOT / "desktop/build"
+        full = "--full" in sys.argv or not (
+            (built / "python-full/python.exe").exists()
+            or (built / "python/Lib/site-packages/pip").is_dir()
+        )
+        sh(sys.executable, "scripts/build_installer.py", *([] if full else ["--update-pyxi"]))
     missing = [n for n in ASSETS if not (DIST / n).exists()] + (
         [] if any(DIST.glob(PACKS)) else [PACKS]
     )
     if missing:
         raise SystemExit(f"STOP: the build didn't produce {missing}.")
+    if f"version: {v}" not in (DIST / "latest.yml").read_text(encoding="utf-8"):
+        raise SystemExit(f"STOP: the build in {DIST} isn't {v}.")
+    check_app_packages()
     check_clean_build()
     sh(sys.executable, "scripts/security_check.py")  # stops on high or critical
     print(manual_checklist())
+    if "--build-only" in sys.argv:
+        print(f"built {v}, not published: install {DIST / 'Pyxi-Setup.exe'} and try it, then run "
+              f"release.py {v} \"notes\" --publish-built")
+        return
     publish(v, notes)
     verify(v)
     sh("git", "add", "pyproject.toml", "src/pyxi/__init__.py", "desktop/package.json")
