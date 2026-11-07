@@ -484,7 +484,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     paperwork._check_in = fake_checkin  # type: ignore[assignment]
     paperwork.open_path = fake_open  # type: ignore[assignment]
 
-    async def fake_drive(task, window, come_back=False):  # never touch the real mouse
+    async def fake_drive(task, window, come_back=False, **kw):  # never touch the real mouse
         background.append(f"hands: {task[:70]}")
 
     async def fake_tidy(plan, log_dir):  # never move real files
@@ -916,7 +916,7 @@ async def main() -> None:
         tmp = Path(tempfile.mkdtemp(prefix="pyxi_errands_"))
         results = []
         for name, said, expect in ERRANDS:
-            if only not in name:
+            if only and not re.search(only, name):
                 continue
             res = await run_errand_case(name, said, expect, tmp)
             results.append(res)
@@ -927,12 +927,12 @@ async def main() -> None:
         print(f"\n{passed}/{len(results)} passed, total ${sum(r['cost'] for r in results):.3f}")
         return
     repeats = int(sys.argv[1]) if len(sys.argv) > 1 else 2
-    only = sys.argv[2] if len(sys.argv) > 2 else ""  # run just the scenarios whose name has this
+    only = sys.argv[2] if len(sys.argv) > 2 else ""  # run just the scenarios whose name matches this (a regex)
     tmp = Path(tempfile.mkdtemp(prefix="pyxi_scen_"))
     results = []
     for r in range(repeats):
         for name, turn_id, q, expect in SCENARIOS:
-            if only not in name:
+            if only and not re.search(only, name):
                 continue
             res = await run_one(f"{name} {r}", turn_id, q, expect, tmp)
             results.append(res)
