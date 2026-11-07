@@ -103,7 +103,9 @@ export async function join(store: Store, cfg: Config, code: unknown): Promise<Re
   const c = String(code ?? "").trim().toUpperCase();
   if (!c || !cfg.inviteCodes.has(c) || (await codeRevoked(store, cfg, c)))
     return json({ error: "That invite code isn't valid." }, 403);
-  const uses = await store.incr(`code:${c}`, 1);
+  // After "revoke all", each code's device count starts again, so testers can join once more.
+  const gen = Number((await store.get("revoked-before")) ?? 0);
+  const uses = await store.incr(gen ? `code:${c}:${gen}` : `code:${c}`, 1);
   if (uses > cfg.usesPerCode) return json({ error: "That invite code has been used on too many devices." }, 403);
   const token = randomToken();
   await store.set(`tok:${await sha256(token)}`, JSON.stringify({ code: c, created: Date.now() }));
@@ -126,8 +128,11 @@ export async function identify(store: Store, req: Request, cfg?: Config): Promis
   const id = await sha256(token);
   const raw = await store.get(`tok:${id}`);
   if (!raw) return null;
-  const who = { id, code: (JSON.parse(raw) as { code: string }).code };
+  const rec = JSON.parse(raw) as { code: string; created?: number };
+  const who = { id, code: rec.code };
   if ((await store.get(`revoked:${userId(who)}`)) !== null) return null;
+  const before = Number((await store.get("revoked-before")) ?? 0);
+  if (before && Number(rec.created ?? 0) <= before) return null; // "revoke all" happened since
   if (cfg && (await codeRevoked(store, cfg, who.code))) return null;
   return who;
 }
@@ -150,19 +155,25 @@ export async function me(store: Store, cfg: Config, req: Request): Promise<Respo
   return who ? json(await usage(store, cfg, who)) : json({ error: "not signed in" }, 401);
 }
 
-/** POST /api/admin/revoke (Bearer ADMIN_TOKEN), for the founder:
+/** POST /api/admin/revoke (Bearer ADMIN_TOKEN), for the founder (cloud/admin.ts calls it):
  * {"user": "<16 hex from /api/me or OpenRouter's X-User>"} stops one device;
- * {"code": "FIREFLY-ANNA"} stops the code and every device that joined with it.
+ * {"code": "FIREFLY-ANNA"} stops the code and every device that joined with it;
+ * {"all": true} stops every device that has joined so far (they can join again with their code).
  * Add "restore": true to undo. Without ADMIN_TOKEN set, the route doesn't exist. */
 export async function revoke(store: Store, cfg: Config, req: Request): Promise<Response> {
   if (!cfg.adminToken) return json({ error: "not found" }, 404);
   const given = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
   if ((await sha256(given)) !== (await sha256(cfg.adminToken))) return json({ error: "not allowed" }, 403);
-  const body = ((await req.json().catch(() => ({}))) ?? {}) as { user?: unknown; code?: unknown; restore?: unknown };
+  const body = ((await req.json().catch(() => ({}))) ?? {}) as { user?: unknown; code?: unknown; all?: unknown; restore?: unknown };
+  if (body.all === true) {
+    if (body.restore === true) await store.del("revoked-before");
+    else await store.set("revoked-before", String(Date.now()));
+    return json({ ok: true, all: true, revoked: body.restore !== true });
+  }
   const user = String(body.user ?? "").trim().toLowerCase();
   const code = String(body.code ?? "").trim().toUpperCase();
   const key = /^[0-9a-f]{16}$/.test(user) ? `revoked:${user}` : code ? `revoked-code:${code}` : "";
-  if (!key) return json({ error: 'Send {"user": "<16 hex>"} or {"code": "..."}.' }, 400);
+  if (!key) return json({ error: 'Send {"user": "<16 hex>"}, {"code": "..."} or {"all": true}.' }, 400);
   const restore = body.restore === true;
   if (restore) await store.del(key);
   else await store.set(key, String(Date.now()));

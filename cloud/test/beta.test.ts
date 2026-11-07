@@ -289,3 +289,48 @@ describe("the beta server keeps nothing it doesn't need", () => {
     }
   });
 });
+
+describe("incidents: revoke every device at once", () => {
+  const admin = configFromEnv({ ...envOf(cfg), ADMIN_TOKEN: "founder-secret" });
+  const ok = (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
+
+  it("stops every device so far, lets testers join again, and can be undone", async () => {
+    const store = new MemoryStore();
+    const a = await tokenFor(store, "firefly");
+    const b = await tokenFor(store, "lamp");
+    const all = (body: unknown) =>
+      revoke(store, admin, new Request("https://x/api/admin/revoke", { method: "POST", headers: { Authorization: "Bearer founder-secret" }, body: JSON.stringify(body) }));
+    const status = async (t: string) => (await chat(store, admin, chatRequest(t, { model: "anthropic/claude-haiku-5.5" }), ok)).status;
+    await new Promise((r) => setTimeout(r, 5));
+    expect((await all({ all: true })).status).toBe(200);
+    expect(await status(a)).toBe(401);
+    expect(await status(b)).toBe(401);
+    await new Promise((r) => setTimeout(r, 5));
+    const again = await tokenFor(store, "firefly"); // the device count starts again
+    await tokenFor(store, "firefly");
+    expect(await status(again)).toBe(200);
+    await all({ all: true, restore: true });
+    expect(await status(a)).toBe(200);
+  });
+
+  it("the admin command sends the right request, with the secret only in the header", async () => {
+    const { bodyFor, run } = await import("../admin");
+    expect(bodyFor("revoke-all")).toEqual({ all: true });
+    expect(bodyFor("revoke-user", "0123456789abcdef")).toEqual({ user: "0123456789abcdef" });
+    expect(bodyFor("restore-code", "LAMP")).toEqual({ code: "LAMP", restore: true });
+    expect(bodyFor("revoke-user")).toBeNull();
+    expect(bodyFor("delete-everything")).toBeNull();
+    const sent: { url: string; init: RequestInit }[] = [];
+    const fake = (async (url: string, init: RequestInit) => {
+      sent.push({ url, init });
+      return new Response('{"ok":true}', { status: 200 });
+    }) as unknown as typeof fetch;
+    const lines: string[] = [];
+    expect(await run(["revoke-all"], { ADMIN_TOKEN: "s3cret", PYXI_BETA_URL: "http://127.0.0.1:8790/" }, fake, (l) => lines.push(l))).toBe(0);
+    expect(sent[0].url).toBe("http://127.0.0.1:8790/api/admin/revoke");
+    expect((sent[0].init.headers as Record<string, string>).Authorization).toBe("Bearer s3cret");
+    expect(lines.join(" ")).not.toContain("s3cret");
+    expect(await run(["revoke-all"], {}, fake, (l) => lines.push(l))).toBe(2); // no secret, no request
+    expect(sent.length).toBe(1);
+  });
+});

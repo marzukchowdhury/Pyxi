@@ -73,6 +73,23 @@ Everything is on your PC. Pyxi has no server of its own except the beta server, 
 
 Pyxi moves files but never deletes them, and every tidy can be undone.
 
+**Cards you can trust:**
+
+- A card shows exactly what will go out: every address, the whole message (it scrolls), the full link. What's sent is what the card showed, byte for byte.
+- Pyxi never answers its own cards. Its mouse and keyboard refuse Pyxi's own windows, a card ignores a click that arrives while Pyxi's hands are moving, and card buttons only take real input, not a script's.
+- "Always allow" lasts 30 days, and Settings lists it with a Revoke button.
+- At most 10 emails, 5 posts, 10 invites and 3 bookings an hour. At the limit Pyxi stops and asks you.
+
+**You stay in charge:**
+
+- *Stop everything* (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Pause</kbd>, the tray, or Settings) halts every teammate, the mouse and keyboard, Scout's browser and anything waiting to go out, at once.
+- The **Activity** tab lists everything Pyxi did for you (sent, booked, clicked, moved, written), with the time and the teammate. You can undo a tidy, Ditto's renames and Patch's fixes from there. It's kept on your PC for 30 days.
+- Private apps are never looked at. Password managers, banking, sign-in and UAC prompts, the lock screen, and any app you add in Settings are skipped when in front and blacked out anywhere else on screen.
+- The notch shows when Pyxi is listening or looking, and a dot stays lit while the Memory Palace is on.
+- Memory never keeps passwords, card numbers, ID numbers or keys. The Memory tab has "Forget this" on each memory and "Wipe everything".
+- Scout browses in a profile of its own in Pyxi's data folder, never your Chrome or Edge profile, cookies or saved passwords.
+- Logs leave out emails, phone numbers, your name in paths, and tokens.
+
 **Only its own windows reach the brain.** The brain listens on `127.0.0.1` only, and two checks guard every request:
 
 - Every request must carry a random key that the desktop app makes at each launch, so other programs on the PC can't send requests or answer an Allow card.
@@ -98,15 +115,16 @@ The approval cards don't depend on the model behaving: `tests/test_prompt_inject
 **The beta server:**
 
 - It holds the founder's model key, never your PC.
-- It stores only hashed tokens and daily spend totals, never what you ask or see.
+- It stores only hashed tokens, counts and costs, never what you ask, see or say (`cloud/README.md` lists every key).
 - Each tester sees only their own usage.
-- Tokens can be revoked at once, and joining is rate-limited per IP address.
+- One device, one invite code, or every device can be revoked at once, and joining is rate-limited per IP address.
 - Every user has a daily allowance, and the whole beta has a monthly cap.
 
 **Releases:**
 
 - The release script stops if the build contains anything that looks like a key, a token, an invite code or a personal file.
 - It also stops if a dependency that ships has a known high or critical vulnerability (`scripts/security_check.py`).
+- The installer's Python packages are pinned by version and hash (`requirements/installer.txt`), so a package changed on PyPI stops the build.
 
 ## Known limits
 
@@ -114,5 +132,53 @@ We'd rather you know these than find them:
 
 - **Malware on your PC.** Anything already running as your Windows user can read what you can, including Pyxi's data. DPAPI protects the tokens from being copied elsewhere, not from that.
 - **Scout's browsing.** Scout reads the pages it visits. A page could try to steer it to another site, carrying what it knows about the task. Scout is told to ignore page instructions and asks before anything it can't undo, but it doesn't ask before simply opening a page.
-- **"Always allow" for the mouse and keyboard.** After you choose Always allow, Pyxi doesn't ask again before taking control, though sending, paying, booking, deleting and posting still ask.
+- **"Always allow" for the mouse and keyboard.** For 30 days after you choose it, Pyxi doesn't ask before taking control for a task you asked for. It still asks after reading an email, a page or a document, and sending, paying, booking, deleting and posting always ask. Settings, Always allowed, revokes it.
 - **The installer isn't code-signed yet** during the beta, so Windows SmartScreen warns about an unknown publisher. Only download Pyxi from the official website or GitHub releases.
+
+## If something leaks: the incident plan
+
+For the founder. Keep notes as you go: what happened, when you noticed, and what you did, with times.
+
+**Every device has to stop at once** (the beta server's data may be exposed, many tokens leaked, or a tester's account was misused). From `cloud/`, with the admin secret that's set in Vercel:
+
+```bash
+ADMIN_TOKEN=... node admin.ts revoke-all
+```
+
+Every device that has joined stops working at once; testers join again with their invite code. `revoke-user <id>` stops one device (the id from OpenRouter's activity, `X-User`, or the tester's `/api/me`), and `revoke-code <CODE>` stops a code and its devices. Use `restore-...` to undo any of these.
+
+**The OpenRouter key leaked**, or might have (in a log, a screenshot, a commit, a shared screen):
+
+1. Rotate it now, as `cloud/README.md` "Rotating it" describes:
+   - create a new key with a credit limit;
+   - replace `OPENROUTER_API_KEY` in Vercel and redeploy (`npx vercel --prod`);
+   - then delete the old key in OpenRouter.
+2. Look at the old key's activity in OpenRouter for spending you don't recognise.
+3. If the leak came with access to Vercel or Upstash, also:
+   - `node admin.ts revoke-all`;
+   - rotate `ADMIN_TOKEN` and the Upstash token;
+   - replace `INVITE_CODES`, and send testers their new codes.
+
+**A security bug in the app:**
+
+1. Fix it, with a test.
+2. Publish an emergency release with the usual script. It runs the tests, the key scan and the dependency audit before anything goes out:
+
+   ```bash
+   python scripts/release.py 0.1.7 "Security fix: what was wrong, in a sentence."
+   ```
+
+3. Installed copies check for updates when they start and every four hours, download in the background and offer "Restart to update". Tell testers to restart Pyxi when they see it.
+4. If the bug can be abused through the beta server, `node admin.ts revoke-all` until the fix is out.
+
+**Google's OAuth client secret leaked** (it ships in the installer):
+
+1. Create a new client secret in Google Cloud Console (Credentials) and delete the old one.
+2. Put the new client in `desktop/build-secrets`, then publish a release.
+3. Testers press Connect again.
+
+**Afterwards:**
+
+- Tell testers what happened, what it means for them and what they should do, in plain words, as soon as you know.
+- Report to whoever must be told: for personal data, the privacy commissioner, under British Columbia's PIPA. Check with a lawyer.
+- Then fix whatever let it happen.
