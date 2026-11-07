@@ -349,7 +349,10 @@ def slim(version: str) -> None:
             continue
         files = [f for f in files if wanted(f) and (full_site / f).is_file()]
         native = any(f.suffix.lower() in NATIVE for f in files)
-        where = "voice" if name in voice else "disk" if native or name in STAY_ON_DISK else "zip"
+        # winrt 4 reads each namespace's projection table (_table.pywinrt) from a real folder:
+        # zipped, Windows OCR fails to load and cue cards lose their underlines and lines.
+        stay = name in STAY_ON_DISK or name.startswith("winrt-")
+        where = "voice" if name in voice else "disk" if native or stay else "zip"
         plan[name] = (where, files)
 
     # A regular package (one with __init__.py) can't be split between the zip and a folder:
@@ -453,6 +456,8 @@ from playwright._impl._driver import compute_driver_executable, get_driver_env
 assert compute_driver_executable()[0].endswith("Pyxi.exe"), compute_driver_executable()
 assert get_driver_env()["ELECTRON_RUN_AS_NODE"] == "1"
 zoneinfo.ZoneInfo("Europe/London")
+import pyxi.screen.ocr  # Windows OCR: how cue cards find the quoted words to underline
+assert pyxi.screen.ocr.available(), "Windows OCR doesn't load in the bundle"
 md.version("pydantic"), md.version("langgraph"), md.version("anthropic")
 here = Path(sys.executable).parent
 tops = {n.split("/")[0].removesuffix(".pyc") for n in zipfile.ZipFile(here / "python-packages.zip").namelist()}
