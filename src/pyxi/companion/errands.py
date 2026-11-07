@@ -138,7 +138,12 @@ async def run_errand(
     tools: list[Tool],
     approve: Callable[[Outgoing], Awaitable[bool]],
     progress: Callable[[str], Awaitable[None]] | None = None,
+    reads: safety.Reads | None = None,
 ) -> ErrandResult:
+    """``reads``: mail, pages or documents the turn that asked for this errand had already read.
+    Once anything like that has been read, every outward action asks on a fresh card (no invite
+    goes out on its own), and the card says what came from that content."""
+    reads = list(reads or [])
     by_name = {t.spec.name: t for t in tools}
     steps: list[str] = []
     links: dict[str, str] = {}
@@ -217,13 +222,16 @@ async def run_errand(
                 # can never quietly send the same thing twice.
                 allowed = (
                     not sent
+                    and not reads  # after reading mail or a page, everything asks
                     and result.kind == "invite"
                     and said_by_user(result.recipients, user_text)
                 )
                 # Mail that talks to an AI, and a recipient they never named: the card says so.
                 warning = safety.card_warning(result.recipients, user_text, "\n".join(seen[2:]))
-                if warning:
-                    result = dataclasses.replace(result, preview=f"{warning}\n\n{result.preview}")
+                origin = safety.provenance(result.recipients, result.preview, user_text, reads)
+                notes = "\n\n".join(n for n in (warning, origin) if n)
+                if notes:
+                    result = dataclasses.replace(result, preview=f"{notes}\n\n{result.preview}")
                 if not allowed and not await approve(result):
                     steps.append(
                         f"{call.name}: the user said no to '{result.action}'. Don't retry it."
@@ -257,6 +265,8 @@ async def run_errand(
                     )
             text = str(result)
             seen.append(text)
+            if call.name in safety.SOURCE_LABEL:
+                reads.append((safety.SOURCE_LABEL[call.name], text))
             for kind, url in LINK.findall(text):
                 links.setdefault(kind, url)
             # What was found is kept whole enough to use: six search results, or a read email.

@@ -428,7 +428,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     brain = Brain(settings, hub, screen=Replay(screen_from(turn_id)))
     background: list[str] = []
 
-    async def fake_errand(task: str, user_text: str) -> None:
+    async def fake_errand(task: str, user_text: str, **kw) -> None:
         background.append(f"errand: {task[:70]}")
 
     async def fake_build(args: dict) -> None:

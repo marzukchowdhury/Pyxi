@@ -451,6 +451,7 @@ async def test_a_document_that_says_email_someone_reaches_the_chat_fenced_and_th
     await brain.turn("summarize the minutes in my Docs folder")
     [card] = await until(rec, "confirm")
     assert card["reason"].startswith(f"Careful: you didn't name {EVIL}")
+    assert f"- {EVIL} (from the document you read)" in card["reason"]
     brain.hub.resolve(card["request_id"], False)
     await asyncio.sleep(0.1)
     assert fake.sent == []

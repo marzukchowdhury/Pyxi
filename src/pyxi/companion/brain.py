@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import io
 import json
 import logging
@@ -336,20 +337,34 @@ class Brain:
                 "use_computer: you're already using the mouse for another task; finish that first."
             )
         window = self._ctx.window.hwnd if self._ctx and self._ctx.window.hwnd else None
-        self._spawn(self._drive(task, window, bool(args.get("come_back"))))
+        read = sorted({label for label, _ in getattr(self, "_turn_reads", [])})
+        self._spawn(self._drive(task, window, bool(args.get("come_back")), after_reading=read))
         return None
 
-    async def _drive(self, task: str, window: int | None, come_back: bool = False) -> None:
-        if not self._hands_always():
+    async def _drive(
+        self,
+        task: str,
+        window: int | None,
+        come_back: bool = False,
+        after_reading: list[str] | None = None,
+    ) -> None:
+        # After reading mail, a page or a document, "Always allow" doesn't apply: the task may
+        # have come from that content, so it asks on a fresh card.
+        if after_reading or not self._hands_always():
+            fresh = (
+                f"This asks again because Pyxi just read {', '.join(after_reading)}.\n"
+                if after_reading
+                else ""
+            )
             ok = await self.hub.request(
                 "confirm",
                 timeout=300,
                 job_id="",
                 agent="Pyxi",
                 action=f"Use your mouse and keyboard to: {task}",
-                reason="Move the mouse or press Esc to stop me. Anything that sends, buys, posts "
-                "or deletes asks you again.",
-                always="Always allow",
+                reason=fresh + "Move the mouse or press Esc to stop me. Anything that sends, buys, "
+                "posts or deletes asks you again.",
+                **({} if after_reading else {"always": "Always allow"}),
             )
             if ok == "always":
                 (self.settings.data_dir / "hands.json").write_text(json.dumps({"always": True}))
@@ -893,7 +908,9 @@ class Brain:
             return self._job_llm
         return self.llm
 
-    async def _run_errand(self, task: str, user_text: str) -> None:
+    async def _run_errand(
+        self, task: str, user_text: str, reads: safety.Reads | None = None
+    ) -> None:
         """Do it quietly, then tell the user once, in the notch."""
         job = await self.jobs.track("Pyxi", task)
 
@@ -922,6 +939,7 @@ class Brain:
                 tools=self.connectors.tools(),
                 approve=approve,
                 progress=progress,
+                reads=reads,
             )
         except Exception as exc:
             log.exception("errand failed")
@@ -1278,6 +1296,9 @@ class Brain:
             if not synthetic:
                 self._guide_fresh = True  # a new request: a guide in it counts from step 1
             self._pending_say = ""  # an answer held back during a lookup round
+            # Mail, pages and documents this turn read: after any, every outward action asks on
+            # a fresh card, and its card says what came from them (pyxi/safety.py).
+            self._turn_reads: safety.Reads = []
             self._narrated_items: set[int] = set()  # cue-card points already said as they arrived
             self._survey: asyncio.Task | None = None  # finding the parts of a picture
             self._searches = 0
@@ -1599,6 +1620,8 @@ class Brain:
                     log.exception("tool %s failed", call.name)
                     note = f"{call.name} failed: {exc}"
                 if note and call.name in safety.UNTRUSTED_TOOLS:
+                    if call.name in safety.SOURCE_LABEL:
+                        self._turn_reads.append((safety.SOURCE_LABEL[call.name], note))
                     note = safety.fence(call.name, note)  # the web, files, mail: data only
                 if lookup:
                     self._looked[key] = note or ""
@@ -2045,6 +2068,11 @@ class Brain:
         if (connector_tool := self.connectors.find(name)) is not None:
             result = await connector_tool.handler(args)
             if isinstance(result, Outgoing):
+                reads = list(getattr(self, "_turn_reads", []))
+                if origin := safety.provenance(
+                    result.recipients, result.preview, getattr(self, "_user_text", ""), reads
+                ):
+                    result = dataclasses.replace(result, preview=f"{origin}\n\n{result.preview}")
                 self._spawn(self._approve(result))
                 return f"Waiting for the user to approve: {result.action}. Tell them it's ready to check; don't say it's done."
             return result
@@ -2083,7 +2111,8 @@ class Brain:
             if self.turns.spent_today() >= self.settings.budget.daily_cost_usd:
                 return "errand: today's budget is used up, so I can't start it. Tell the user."
             words = "" if getattr(self, "_synthetic", False) else self._user_text
-            self._spawn(self._run_errand(task, words))
+            reads = list(getattr(self, "_turn_reads", []))
+            self._spawn(self._run_errand(task, words, **({"reads": reads} if reads else {})))
             return None
         if name in ("subscriptions", "returns"):
             if not self.connectors.google.connected():

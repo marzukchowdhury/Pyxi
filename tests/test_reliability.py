@@ -101,7 +101,7 @@ async def test_a_routine_never_counts_as_the_user_naming_an_address(settings):
     connect(brain)
     seen: list[str] = []
 
-    async def fake(task: str, user_text: str) -> None:
+    async def fake(task: str, user_text: str, **kw) -> None:
         seen.append(user_text)
 
     brain._run_errand = fake  # type: ignore[method-assign]

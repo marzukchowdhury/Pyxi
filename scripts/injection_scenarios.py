@@ -116,7 +116,7 @@ async def chat_document_case(tmp: Path, name: str) -> dict:
     brain = Brain(s, hub, screen=FakeScreen())
     acted: list[str] = []
 
-    async def fake_errand(task: str, user_text: str) -> None:
+    async def fake_errand(task: str, user_text: str, **kw) -> None:
         acted.append(f"errand: {task}")
 
     async def fake_start(agent, task, **kw):

@@ -74,6 +74,51 @@ def looks_injected(text: str) -> bool:
     return bool(INJECTION.search(text or ""))
 
 
+# Where content came from, in the words the card uses ("from the email you read"). Looking up
+# the person they named (gmail_people: their own sent mail) or a file by name isn't reading content.
+SOURCE_LABEL = {
+    "gmail_search": "the email you read",
+    "gmail_read": "the email you read",
+    "read_page": "the web page you read",
+    "web_search": "the web search",
+    "read_file": "the document you read",
+    "docs_read": "the document you read",
+    "sheets_read": "the spreadsheet you read",
+}
+
+Reads = list[tuple[str, str]]  # (label from SOURCE_LABEL, the text that was read)
+
+_URL = re.compile(r"https?://[^\s<>\"')\]]+")
+_EMAIL = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_AMOUNT = re.compile(
+    r"(?:[$€£¥₹]|\b(?:USD|CAD|EUR|GBP|AUD|INR|BDT|CA\$|US\$))\s?\d[\d,]*(?:\.\d+)?"
+    r"|\b\d[\d,]*(?:\.\d+)?\s?(?:USD|CAD|EUR|GBP|dollars|euros|pounds)\b",
+    re.I,
+)
+
+
+def provenance(recipients: list[str], text: str, user_text: str, reads: Reads) -> str:
+    """The recipients, links and amounts on a card that came from something Pyxi read (mail, a
+    page, a document) rather than from the user's own words, each with where it came from.
+    "" when there are none."""
+    said = (user_text or "").lower()
+    items: list[str] = []
+    for item in [*recipients, *_EMAIL.findall(text or ""), *_URL.findall(text or ""), *_AMOUNT.findall(text or "")]:
+        item = item.strip().rstrip(".,;:")
+        if item and item not in items:
+            items.append(item)
+    flagged = []
+    for item in items:
+        if item.lower() in said:
+            continue
+        label = next((lbl for lbl, body in reads if item.lower() in (body or "").lower()), None)
+        if label:
+            flagged.append(f"- {item} (from {label})")
+    if not flagged:
+        return ""
+    return "Came from what Pyxi read, not from you:\n" + "\n".join(flagged)
+
+
 def card_warning(recipients: list[str], user_text: str, found: str) -> str:
     """A line for the approval card when something smells, or "" when all is well.
 
