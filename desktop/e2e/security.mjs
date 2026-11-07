@@ -126,16 +126,33 @@ try {
 
   // The real app's way in still works: an Allow card, answered in the overlay. A keyed local
   // tool (this script, with the key the page holds) asks the demo brain for a test card.
-  await panel.locator('input[placeholder="Ask Pyxi anything"]').fill("how do you work?");
-  await panel.keyboard.press("Enter");
+  // The scene may open and close while the card is being answered: note any WebGL canvas
+  // (and whether it got a context) the moment it appears, on every screen's overlay (a scene
+  // opens on the screen Pyxi looked at, which may not be the main one).
+  const allOverlays = app.windows().filter((w) => w.url().includes("overlay"));
+  for (const w of allOverlays) await w.evaluate(() => {
+    window.__scene = { canvas: false, gl: false };
+    const look = () => {
+      const c = document.querySelector("canvas");
+      if (!c) return;
+      window.__scene.canvas = true;
+      window.__scene.gl ||= !!(c.getContext("webgl2") || c.getContext("webgl"));
+    };
+    new MutationObserver(look).observe(document.body, { childList: true, subtree: true });
+    look();
+  });
   const tool = new WebSocket(`${BACKEND.replace("http", "ws")}/ws?key=${encodeURIComponent(key)}`);
   const answers = [];
+  const seenTypes = [];
   tool.onmessage = (m) => {
     const e = JSON.parse(m.data);
+    seenTypes.push(e.type);
     if (e.type === "e2e_answer") answers.push(e.value);
   };
   await new Promise((r) => (tool.onopen = r));
   check("a local tool with the key connects", tool.readyState === WebSocket.OPEN);
+  await panel.locator('input[placeholder="Ask Pyxi anything"]').fill("how do you work?");
+  await panel.keyboard.press("Enter");
   tool.send(JSON.stringify({ type: "e2e_card" }));
   const card = overlay.locator(".request button.yes");
   await card.first().waitFor({ state: "attached", timeout: 30000 }).catch(() => undefined);
@@ -147,10 +164,17 @@ try {
     check("Allow reached the brain", answers[0] === true, JSON.stringify(answers));
     check("card closed", (await overlay.locator(".request").count()) === 0);
   }
-  tool.close();
   // The demo answer to "how do you work?" is a 3D scene: WebGL still renders under the strict CSP.
-  await overlay.locator("canvas").first().waitFor({ state: "attached", timeout: 30000 }).catch(() => undefined);
-  check("3D scene renders under the CSP", (await overlay.locator("canvas").count()) > 0);
+  // The turn starts with a real screenshot of this PC (and its accessibility tree), which can
+  // take a while on a busy desktop: wait for the turn itself.
+  const asked = Date.now();
+  for (let i = 0; i < 600 && !seenTypes.includes("turn_done"); i++) await new Promise((r) => setTimeout(r, 200));
+  await new Promise((r) => setTimeout(r, 3000));
+  const scenes = await Promise.all(allOverlays.map((w) => w.evaluate(() => window.__scene).catch(() => null)));
+  const scene = { canvas: scenes.some((s) => s?.canvas), gl: scenes.some((s) => s?.gl), overlays: allOverlays.length };
+  const took = `${Math.round((Date.now() - asked) / 1000)}s`;
+  check("3D scene renders under the CSP (WebGL canvas)", scene.canvas && scene.gl, JSON.stringify({ scene, took, events: [...new Set(seenTypes)] }));
+  tool.close();
   // Last, as Playwright then waits on the refused navigation: a page can't take the window away.
   const urls = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.webContents.getURL().split("?")[0]));
   const before = await urls();
