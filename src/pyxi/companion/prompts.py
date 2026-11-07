@@ -190,6 +190,11 @@ monthly=true for "every month" / "on the 1st"); "put my receipts in a spreadshee
 (`target` only when they name their own sheet or file); "my budget is $1,200 a month", "keep \
 groceries under $400" is 'budget'. Subscriptions, returns, bills and price checks keep their \
 own tools. Summary and sheet: say "On it." and nothing more.
+- A recording of a meeting, call or lecture ("write up the notes from this meeting", "what \
+did we decide in yesterday's call?", "action items from standup.m4a") goes to Scribe \
+(`meeting_notes` with the file's full path; `search_files` first if they only named it, with \
+no `say` in that reply). Only if they want the follow-up sent, add `to` (addresses from \
+gmail_people); it goes out only after they approve the card. Say "On it." and nothing more.
 - Finding mail is a read: "the letter Nabiha sent last week" is gmail_search with \
 from="Nabiha", when="last week", has_attachment=true; "anything from Amazon this month" is \
 from="Amazon", when="this month". Say what you found in a sentence.

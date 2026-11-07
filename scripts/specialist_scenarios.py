@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from pyxi.agents.penny import month_range
@@ -37,6 +38,20 @@ SCENARIOS = [
     ("money over", HOME, "Am I over budget this month?", "money:summary"),
     ("money budget", HOME, "Set my monthly budget to $1,500.", "money:budget"),
     ("money sheet", HOME, "Put my October receipts in a spreadsheet.", "money:sheet"),
+    # Scribe, meetings: a recording into notes, a follow-up only through the card.
+    (
+        "meeting notes",
+        HOME,
+        "Write up the notes from the team standup recording on my desktop.",
+        "meeting",
+    ),
+    (
+        "meeting follow up",
+        HOME,
+        "Get the action items from the team standup recording on my desktop and email the "
+        "follow-up to sam.rahman@uni.edu.",
+        "meeting_to",
+    ),
 ]
 
 
@@ -54,7 +69,18 @@ def install(brain: Any, background: list[str]) -> None:
             return "money: Monthly budget set. Say that in a few words."
         return "Started job_x: Penny is reading their receipts. Say one short line ('On it.')."
 
+    async def fake_meeting(brain_: Any, args: dict[str, Any]) -> str:
+        background.append("meeting: " + json.dumps(args)[:240])
+        return "Started job_x: Scribe is listening to it. Say one short line ('On it.')."
+
+    # A recording on the sample Desktop (the only folder file search may look in).
+    from pyxi import files_access
+
+    for folder in files_access.load(brain.settings.data_dir).folders[:1]:
+        (Path(folder) / "Team standup Nov 6.m4a").write_bytes(b"\x00" * 64)
+
     specialists._travel = fake_travel  # type: ignore[assignment]
+    specialists._meeting = fake_meeting  # type: ignore[assignment]
     specialists._money = fake_money  # type: ignore[assignment]
 
 
@@ -100,6 +126,22 @@ def problems(expect: str, tools: list[str], said: str, background: list[str]) ->
             out.append("lost the month")
         if "use_computer" in tools:
             out.append("drove the mouse for money")
+        if sentences(said) > 2:
+            out.append(f"talks too much ({len(said)} chars)")
+    if expect in ("meeting", "meeting_to"):
+        calls = [json.loads(b[len("meeting: ") :]) for b in background if b.startswith("meeting: ")]
+        if not calls:
+            out.append("didn't hand the recording to Scribe")
+        elif not str(calls[0].get("file", "")).endswith("Team standup Nov 6.m4a"):
+            out.append(f"wrong file: {calls[0].get('file')}")
+        elif expect == "meeting_to" and "sam.rahman@uni.edu" not in json.dumps(calls[0].get("to")):
+            out.append("lost who the follow-up goes to")
+        elif expect == "meeting" and calls[0].get("to"):
+            out.append("set a follow-up nobody asked to send")
+        if re.search(r"\b(sent|emailed)\b", said, re.I):
+            out.append("claimed the follow-up was sent")
+        if "use_computer" in tools or "gmail_send" in tools:
+            out.append("sent or clicked instead of the card")
         if sentences(said) > 2:
             out.append(f"talks too much ({len(said)} chars)")
     return out

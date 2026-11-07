@@ -7,6 +7,8 @@ the result arrives as a notification and a chip in the task tray.
 * ``travel``: Atlas builds the itinerary of a trip from the confirmations in Gmail.
 * ``money``: Penny's monthly spending summary from receipts, budgets, and receipts into a
   spreadsheet (a new one, or theirs through Ledger).
+* ``meeting_notes``: Scribe transcribes a recording (local faster-whisper) into notes,
+  decisions and action items, and drafts a follow-up email that goes only through a card.
 
 :func:`after_job` runs when any specialist's job ends (the brain calls it from ``_job_done``),
 so a job started by a routine or a hand-off gets the same follow-up as one started here.
@@ -81,8 +83,29 @@ MONEY = ToolSpec(
     },
 )
 
+MEETING = ToolSpec(
+    "meeting_notes",
+    "Scribe, the meetings teammate: transcribes a recording of a meeting, lecture or call on "
+    "this PC (audio or video: .m4a, .mp3, .wav, .mp4, .webm...) right here, then writes notes, "
+    "decisions and action items, and drafts a follow-up email. Runs in the background; the "
+    "notes arrive as a notification. `file` is the recording's full path (search_files first "
+    "if they only named it). `to`: the other people's email addresses, only if they want the "
+    "follow-up sent (look them up with gmail_people first); they approve it on a card before "
+    "anything is sent. Say one short line ('On it.').",
+    {
+        "type": "object",
+        "properties": {
+            "file": {"type": "string"},
+            "to": {"type": "array", "items": {"type": "string"}},
+            "about": {"type": "string", "description": "What the meeting was about, if they said."},
+            "language": {"type": "string", "description": "'en', or 'auto' for another language."},
+        },
+        "required": ["file"],
+    },
+)
+
 ROLES = set(RUNNERS)  # their jobs' notifications come from job.data (title, body)
-SPECS: list[ToolSpec] = [TRAVEL, MONEY]
+SPECS: list[ToolSpec] = [TRAVEL, MONEY, MEETING]
 TOOLS = {s.name for s in SPECS}
 INFO: set[str] = set()  # tools whose result goes back to the model for another round
 
@@ -92,6 +115,8 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         return await _travel(brain, args)
     if name == "money":
         return await _money(brain, args)
+    if name == "meeting_notes":
+        return await _meeting(brain, args)
     return None
 
 
@@ -102,6 +127,8 @@ async def after_job(brain: Brain, job: Job) -> None:
             await after_trip(brain, job)
         elif job.role == "money":
             await after_money(brain, job)
+        elif job.role == "meetings":  # the card can wait half an hour: not inside the job
+            brain._spawn(after_meeting(brain, job))
     except Exception:
         log.exception("after %s's job", job.agent_name)
 
@@ -251,3 +278,72 @@ async def after_money(brain: Brain, job: Job) -> None:
     """A monthly summary books the next one (it also starts the series the first time)."""
     if job.params.get("monthly") and schedule_monthly(brain):
         await brain.hub.emit("routines", routines=brain.routines.public())
+
+
+# ---------------------------------------------------------------------------------- Scribe
+async def _meeting(brain: Brain, args: dict[str, Any]) -> str:
+    from pyxi.agents import scribe
+
+    raw = str(args.get("file") or "").strip().strip('"')
+    path = Path(raw).expanduser() if raw else None
+    if path is None or not path.is_file():
+        return (
+            f"meeting_notes: there's no recording at {raw or '(no path)'}. Find it with "
+            "search_files (kind audio or video) first, or ask them where it is."
+        )
+    if path.suffix.lower() not in scribe.AUDIO:
+        return f"meeting_notes: {path.name} isn't an audio or video file."
+    to = args.get("to") or []
+    to = [str(t).strip() for t in (to if isinstance(to, list) else [to]) if str(t).strip()]
+    brain.jobs.stt = brain.stt  # the warm model push-to-talk already uses
+    job = await brain.jobs.start(
+        "scribe",
+        f"Meeting notes: {path.name}",
+        files=[str(path)],
+        params={
+            "to": to,
+            "about": str(args.get("about") or ""),
+            "language": str(args.get("language") or "en"),
+        },
+    )
+    return (
+        f"Started {job.id}: {job.agent_name} is listening to {path.name} in the background. "
+        "Say one short line ('On it.'); the notes come as a notification."
+    )
+
+
+async def after_meeting(brain: Brain, job: Job) -> bool:
+    """The follow-up email, on an approval card. Sent only on Allow; True if it was sent."""
+    data = job.data if isinstance(job.data, dict) else {}
+    draft = data.get("follow_up") or {}
+    to = [str(t) for t in job.params.get("to") or []]
+    if job.status != "done" or not draft.get("body") or not to:
+        return False
+    if not brain.connectors.google.connected():
+        return False
+    out = await brain.connectors.google.gmail_send(
+        {"to": ", ".join(to), "subject": draft.get("subject") or "Follow-up", "body": draft["body"]}
+    )
+    if isinstance(out, str):  # a problem with the addresses: say so on the card's place
+        await brain._notify(job.id, ok=False, title="The follow-up wasn't sent", body=out[:200])
+        return False
+    ok = await brain.hub.request(
+        "confirm",
+        timeout=1800,
+        job_id=job.id,
+        agent=job.agent_name,
+        action=out.action,
+        reason=out.preview,
+    )
+    if not ok:
+        return False
+    try:
+        line = await out.run()
+    except Exception as exc:
+        log.exception("follow-up email failed")
+        await brain._notify(
+            job.id, ok=False, title="The follow-up didn't send", body=str(exc)[:200]
+        )
+        return False
+    await brain._notify(job.id, ok=True, title="Follow-up sent", body=line[:200])
+    return True

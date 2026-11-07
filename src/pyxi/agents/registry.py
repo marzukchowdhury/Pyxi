@@ -10,6 +10,7 @@ Each agent has a *role* that decides what it can do:
 * ``documents`` edits Excel, Word and PowerPoint files and Google Sheets and Docs (Ledger).
 * ``travel`` builds trip itineraries from the confirmations in the user's mail (Atlas).
 * ``money`` sums up spending from receipts, keeps budgets, puts receipts in a sheet (Penny).
+* ``meetings`` turns a recording into notes, decisions, action items and a follow-up (Scribe).
 
 Agents keep their own long-term memory (Otto's FTS5 memory store, scoped per agent), and
 any agent can hand its result to another (Scout researches, then Quill writes).
@@ -29,7 +30,15 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Role = Literal[
-    "companion", "browser", "writer", "explainer", "files", "documents", "travel", "money"
+    "companion",
+    "browser",
+    "writer",
+    "explainer",
+    "files",
+    "documents",
+    "travel",
+    "money",
+    "meetings",
 ]
 
 
@@ -152,6 +161,18 @@ DEFAULT_ROSTER = [
             "subscriptions & bills",
         ],
         max_cost_usd=0.1,
+    ),
+    AgentProfile(
+        id="scribe",
+        name="Scribe",
+        role="meetings",
+        voice="bf_isabella",
+        color="#a0d8ef",
+        builtin=True,
+        persona="Attentive note-taker. Listens to the whole recording, writes down what was "
+        "decided and who does what by when, and drafts the follow-up for you to check.",
+        skills=["transcripts", "decisions & action items", "follow-up emails"],
+        max_cost_usd=0.15,
     ),
 ]
 

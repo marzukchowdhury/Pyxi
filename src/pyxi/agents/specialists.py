@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 RUNNERS = {
     "travel": "pyxi.agents.atlas",
     "money": "pyxi.agents.penny",
+    "meetings": "pyxi.agents.scribe",
 }
 
 
