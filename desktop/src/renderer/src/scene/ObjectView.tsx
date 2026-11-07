@@ -16,6 +16,7 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { Beat, ObjectScene, Part } from "../shared/protocol";
 import { fromOrbit, orbitSpring, type OrbitSpring, smoothDamp, stepOrbit, toOrbit } from "./camera";
 import { children, evaluate } from "./motion";
+import { usePace } from "./pace";
 import { buildGeometry, makeMaterial } from "./parts";
 
 export interface Clock {
@@ -85,6 +86,7 @@ export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, heig
     <div className="object-view" style={{ width, height }}>
       <Canvas
         key={tier}
+        frameloop="demand"
         gl={{ alpha: true, antialias: true, premultipliedAlpha: false, powerPreference: "high-performance" }}
         dpr={high ? [1, 2] : [1, 1.25]}
         shadows={high ? "percentage" : false}
@@ -96,6 +98,7 @@ export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, heig
         }}
         style={{ background: "transparent" }}
       >
+        <Pace clock={clock} deps={[scene, beatIndex, cutaway, width, height]} />
         {high && <PerformanceMonitor ms={500} iterations={6} threshold={0.7} bounds={() => [40, 120]} onDecline={lower} onFallback={lower} />}
         <Measure registry={registry} sceneId={fit} out={bounds} />
         <Studio style={scene.style} bounds={bounds} sceneId={fit} shadows={high} />
@@ -454,9 +457,26 @@ function samplePoints(registry: Map<string, Registered>, ids: Set<string> | null
 }
 
 /** Frames the beat's subject from the beat's angle and follows it; hands over when you drag. */
+/** Frames on demand: every frame while the model plays, a few seconds after anything changes
+ * (fades, ghosting, a part arriving), and nothing once it's paused or done. */
+function Pace({ clock, deps }: { clock: MutableRefObject<Clock>; deps: unknown[] }) {
+  const wake = usePace(() => clock.current.playing, deps);
+  // The panel flips `playing` on the clock without re-rendering us: notice it.
+  useEffect(() => {
+    let was = clock.current.playing;
+    const id = window.setInterval(() => {
+      const now = clock.current.playing;
+      if (now !== was) wake();
+      was = now;
+    }, 100);
+    return () => window.clearInterval(id);
+  }, [clock, wake]);
+  return null;
+}
+
 function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObject<Map<string, Registered>>; beat: Beat; beatIndex: number; sceneId: string }) {
   const controls = useRef<OrbitControlsImpl>(null);
-  const { camera, size } = useThree();
+  const { camera, size, invalidate } = useThree();
   const manual = useRef(false);
   const first = useRef(true);
   const spring = useRef<OrbitSpring | null>(null);
@@ -600,6 +620,9 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
       const g = goal.pos.clone().sub(goal.target);
       const o = stepOrbit(s, toOrbit(g.x, g.y, g.z), SWING, step);
       camera.position.copy(c.target).add(tmp.set(...fromOrbit(o)));
+      // Still on its way: keep drawing until it arrives (on-demand frames would freeze it).
+      const near = Math.max(1e-3, goal.pos.distanceTo(goal.target) * 1e-3);
+      if (camera.position.distanceTo(goal.pos) > near || c.target.distanceTo(goal.target) > near) invalidate();
     }
     c.update();
   });

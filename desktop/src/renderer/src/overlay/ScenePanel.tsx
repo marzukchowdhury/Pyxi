@@ -138,7 +138,7 @@ export function ScenePanel() {
     return (
       <Interactive className={`holo ${flatStart ? "flat" : ""}`} always onEnter={linger.onEnter} onLeave={linger.onLeave}>
         <div className="holo-canvas">
-          <SceneView scene={spec} step={step} hologram viewport={screenViewport} cropsBase={backendUrl} onHover={setHover} />
+          <SceneView scene={spec} step={step} hologram viewport={screenViewport} cropsBase={backendUrl} onHover={setHover} playing={playing} />
         </div>
         <div className="holo-head">{header}</div>
         {hover && <Tip node={hover} />}
@@ -157,7 +157,7 @@ export function ScenePanel() {
         <div className="plate" />
         <div className="horizon" style={{ top: PLATE.h - PLATE.text - 34 }} />
         <div className="explain-canvas" style={{ top: -PLATE.rise, height: canvasH }}>
-          <SceneView scene={spec} step={step} hologram={false} viewport={{ ...screenViewport, width: PLATE.w, height: canvasH }}
+          <SceneView scene={spec} step={step} hologram={false} playing={playing} viewport={{ ...screenViewport, width: PLATE.w, height: canvasH }}
             cropsBase={backendUrl} onHover={setHover} />
         </div>
         {hover && <Tip node={hover} />}

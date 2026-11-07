@@ -12,6 +12,7 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { SceneNode, SceneSpec } from "../shared/protocol";
 import { brainUrl } from "../shared/bridge";
 import { computeLayout, fitDistance, focusBounds, type Layout, type Placed, type Vec3 } from "./layout";
+import { PaceContext, usePace, useWake } from "./pace";
 import { nodeColor, type Theme, THEMES } from "./themes";
 
 export interface Viewport {
@@ -28,12 +29,14 @@ interface Props {
   viewport: Viewport;
   cropsBase: string;
   onHover?: (node: SceneNode | null) => void;
+  /** Narrating (flows run, nodes bob). Paused or done, the canvas stops drawing until something changes. */
+  playing?: boolean;
 }
 
 const FOV = 34; // a longer lens: calmer perspective, objects read larger
 const ease = (t: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
 
-export function SceneView({ scene, step, hologram, viewport, cropsBase, onHover }: Props) {
+export function SceneView({ scene, step, hologram, viewport, cropsBase, onHover, playing = true }: Props) {
   const layout = useMemo(() => computeLayout(scene, viewport), [scene, viewport]);
   const theme = THEMES[scene.theme] ?? THEMES.aurora;
   const current = scene.steps[Math.min(step, scene.steps.length - 1)];
@@ -48,12 +51,14 @@ export function SceneView({ scene, step, hologram, viewport, cropsBase, onHover 
 
   return (
     <Canvas
+      frameloop="demand"
       gl={{ alpha: true, antialias: true, premultipliedAlpha: false }}
       dpr={[1, 2]}
       camera={{ fov: FOV, near: 0.05, far: 400, position: [0, 0, 14] }}
       onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
       style={{ background: "transparent" }}
     >
+      <Pace playing={playing} deps={[scene, step, hologram, viewport, playing]}>
       <ambientLight intensity={0.45} />
       <hemisphereLight args={["#dbe8ff", "#0a0c12", 0.32]} />
       <directionalLight position={[5, 9, 7]} intensity={1.35} />
@@ -95,8 +100,18 @@ export function SceneView({ scene, step, hologram, viewport, cropsBase, onHover 
       </Suspense>
       <CameraRig layout={layout} scene={scene} step={step} hologram={hologram} viewport={viewport} />
       <OrbitControls makeDefault enableDamping dampingFactor={0.08} rotateSpeed={0.7} zoomSpeed={0.8} />
+      </Pace>
     </Canvas>
   );
+}
+
+/** Frames on demand: all the time while it plays (flows travel, nodes bob), a few seconds after
+ * anything changes (fly-ins, fades, the camera move), and none once it's paused or done. */
+function Pace({ playing, deps, children }: { playing: boolean; deps: unknown[]; children: React.ReactNode }) {
+  const live = useRef(playing);
+  live.current = playing;
+  const wake = usePace(() => live.current, deps);
+  return <PaceContext.Provider value={wake}>{children}</PaceContext.Provider>;
 }
 
 // ---------------------------------------------------------------------------- camera
@@ -196,12 +211,15 @@ function Node3D(props: {
     });
   });
 
+  const wake = useWake();
   const enter = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
+    wake(800); // the hover grow/shrink
     setHover(true);
     onHover?.(node);
   };
   const leave = () => {
+    wake(800);
     setHover(false);
     onHover?.(null);
   };
