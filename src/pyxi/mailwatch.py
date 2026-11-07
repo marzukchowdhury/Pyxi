@@ -25,11 +25,20 @@ from typing import Any
 
 # ------------------------------------------------------------------ reading money
 
+# European receipts write "19,99 €" and "1.234,56 €": a comma and exactly two digits, last.
+EU_NUMBER = r"\d{1,3}(?:\.\d{3})*,\d{2}(?![\d.,])"
 MONEY = re.compile(
     r"(?P<cur>US\$|CA\$|C\$|A\$|AU\$|NZ\$|\$|€|£|USD|CAD|AUD|EUR|GBP)\s?"
-    r"(?P<n>\d{1,5}(?:,\d{3})*(?:\.\d{2})?)"
-    r"|(?P<n2>\d{1,5}(?:,\d{3})*\.\d{2})\s?(?P<cur2>USD|CAD|AUD|EUR|GBP)\b"
+    rf"(?P<n>{EU_NUMBER}|\d{{1,5}}(?:,\d{{3}})*(?:\.\d{{2}})?)"
+    rf"|(?P<n2>{EU_NUMBER}|\d{{1,5}}(?:,\d{{3}})*\.\d{{2}})\s?(?P<cur2>USD|CAD|AUD|EUR|GBP|€|£)(?![A-Za-z])"
 )
+
+
+def parse_amount(text: str) -> float:
+    """'1,234.56' or '1.234,56' -> 1234.56."""
+    if re.fullmatch(EU_NUMBER, text):
+        return float(text.replace(".", "").replace(",", "."))
+    return float(text.replace(",", ""))
 # A plain "$" and "US$" are added up together: receipts mix them for the same dollars.
 CURRENCY = {"US$": "$", "USD": "$", "$": "$", "CA$": "CAD", "C$": "CAD", "A$": "AUD", "AU$": "AUD",
             "NZ$": "NZD", "€": "EUR", "£": "GBP"}  # fmt: skip
@@ -122,9 +131,8 @@ def amount_in(text: str) -> tuple[float, str] | None:
     def pick(line: str) -> tuple[float, str]:
         m = MONEY.search(line)
         assert m
-        num = (m.group("n") or m.group("n2")).replace(",", "")
         cur = m.group("cur") or m.group("cur2")
-        return float(num), CURRENCY.get(cur, cur)
+        return parse_amount(m.group("n") or m.group("n2")), CURRENCY.get(cur, cur)
 
     totals = [
         ln

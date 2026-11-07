@@ -464,3 +464,15 @@ async def test_without_gmail_it_says_so(settings):
     brain, _, _ = make_brain(settings, llm=llm), None, None
     await brain[0].turn("what can I still return?")
     assert "Gmail isn't connected" in llm.prompts[1]
+
+
+def test_european_amounts_are_read_with_a_comma_decimal():
+    from pyxi.mailwatch import amount_in
+
+    assert amount_in("Steam purchase\nTotal: 19,99€") == (19.99, "EUR")
+    assert amount_in("Total 1.234,56 €") == (1234.56, "EUR")
+    assert amount_in("Total: €19,99") == (19.99, "EUR")
+    # US and UK formats still read as before
+    assert amount_in("Order total: $1,234.56") == (1234.56, "$")
+    assert amount_in("Total: £1,200") == (1200.0, "GBP")
+    assert amount_in("Total 45.00 EUR") == (45.0, "EUR")
