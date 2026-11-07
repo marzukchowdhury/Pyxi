@@ -126,3 +126,5 @@ mark.todo { padding: 1px 6px; border-radius: 5px; background: rgba(255, 125, 147
   .prose td:first-child { padding-top: 14px; }
   .prose td:last-child { padding-bottom: 14px; }
 }
+
+.dl-legal { grid-column: 1 / -1; margin: -6px 0 0; font-size: 13px; line-height: 1.5; color: var(--ink-3); text-align: center; }

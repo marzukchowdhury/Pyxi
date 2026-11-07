@@ -1,89 +1,133 @@
 # Pyxi privacy policy
 
-*Draft for the Pyxi beta, last updated 6 November 2026. Have a lawyer review this before launch; it describes how the software works today, not legal advice.*
+*Draft for the Pyxi beta, last updated 7 November 2026. It describes how the software works today. It isn't legal advice: have a lawyer review it before the public launch.*
 
-Pyxi is a desktop assistant that can see your screen, so privacy is the core of the product, not a footnote. This page says plainly what Pyxi looks at, what leaves your computer, what is kept, and how to delete it.
+Pyxi is a desktop assistant that can see your screen, read the files you point it at and work in the accounts you connect, so privacy is the core of the product, not a footnote. This page says plainly what Pyxi looks at, what leaves your computer, what is kept, and how to delete it.
 
-**Who we are.** Pyxi is made by Marzuk Haider Chowdhury, British Columbia, Canada. Contact: **[privacy contact email]**.
+**Who we are.** Pyxi is made by Marzuk Haider Chowdhury, British Columbia, Canada ("we"). Contact: **[contact email]**.
 
 ## The short version
 
-- Pyxi looks at your screen **only when you talk or type to it**, unless you turn on the Memory Palace yourself.
+- Pyxi looks at your screen **only when you talk or type to it**, unless you turn on a feature that watches for you (the Memory Palace, price checks while you shop, or Ditto while you show it a task).
 - Passwords, password fields, password managers, banking apps and anything that looks like an API key or token are **blacked out before anything is sent**.
-- What you ask, plus the screenshot and on-screen text it needs to answer, goes to an AI model to work out the reply. **We don't sell it, and we don't use it to train models.**
+- What you ask, plus the screenshot, on-screen text and the parts of files or emails it needs to answer, goes to an AI model to work out the reply. **We don't sell it, and we don't use it to train models.**
 - Your history stays **on your computer**. Conversations are deleted after 30 days; Memory Palace history after 72 hours.
-- Pyxi uses your mouse and keyboard **only after you press Allow**, and anything that sends, buys, deletes or posts asks again.
+- Your speech is turned into text **on your computer**. The one exception is Bengali, which is sent to a cloud model to be understood (see below).
+- Pyxi uses your mouse and keyboard **only after you press Allow**. Anything that sends, books, buys, deletes or posts asks again. Pyxi never types passwords, card numbers or government ID numbers, and **never pays for anything**.
 
 ## What Pyxi looks at
 
-**When you talk or type to Pyxi**, it captures the screen you're on: a screenshot, the names and positions of buttons and other controls (Windows UI Automation), and the text on screen (Windows' own offline text recognition). It doesn't capture your screen in the background unless you turn on the Memory Palace.
+**When you talk or type to Pyxi**, it captures the screen you're on: a screenshot, the names and positions of buttons and other controls (Windows UI Automation), and the text on screen (Windows' own offline text recognition). It doesn't capture your screen in the background unless you turn on one of the features below.
 
-**The Memory Palace (off by default).** If you turn it on, Pyxi keeps a running record of window titles, what you clicked or focused, and where controls were, so you can ask "how did I get here?" or go back in time. It records no keystrokes. Small screenshots are kept only if you also turn on "keep small screenshots". This history stays on your computer and is deleted after 72 hours.
+**The Memory Palace (off by default).** If you turn it on, Pyxi keeps a running record of window titles, what you clicked or focused, and where controls were, so you can ask "how did I get here?", go back in time, or have Trace find "where did I see that?". It records no keystrokes. Small screenshots are kept only if you also turn on "keep small screenshots". This history stays on your computer and is deleted after 72 hours.
+
+**Ditto (only while you show it a task).** When you ask Ditto to watch you do something once, it records the windows you switch to, the buttons and fields that take focus, what ended up in each field when you left it (never a password field), a small screenshot at each window change, and the list of files in the folder you name. The recording stays on your computer, in Pyxi's data folder, until you delete it.
+
+**Price checks while you shop (off by default).** With "Check prices while I shop" on, Pyxi reads a store's product page when one comes up in your browser, to look for the same item elsewhere.
 
 **Never captured:**
 
 - password fields;
-- password managers, banking apps and credential windows (a list you can change);
+- password managers, banking apps and credential windows (a list you can change in settings);
 - text that looks like a credential, such as API keys, access tokens, private keys and `KEY=value` lines. It's removed from the text and blacked out of the screenshot pixels.
 
 You can pause all screen access at any time with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd>.
+
+## Your files
+
+**Searching your files is off until you allow it.** The first time Pyxi wants to look, it asks with a card, and you can switch "Let Pyxi search my files" on or off in Settings. It only looks inside the folders you allow (Documents, Desktop, Downloads and Pictures to start with), using the Windows Search index or a quick look through those folders.
+
+**Files you hand to a teammate** are read on your computer. What happens next depends on the job:
+
+| Teammate | What it does with the file | Sent to the AI model? |
+|---|---|---|
+| Pixel | Converts, merges, compresses, fills and compares documents | No, it all happens on your computer |
+| Ledger | Edits Excel, Word and PowerPoint files, and Google Sheets and Docs | An outline of the file, to decide the edits |
+| Sage | Makes flashcards and quizzes from slides and notes | The text of the file |
+| Scribe | Turns a meeting recording into notes | The recording is transcribed on your computer; only the transcript is sent |
+| Patch | Explains an error in a script and proposes a small fix | The error and the lines around it |
+| Forms | Fills a job or government form from a CV or document you name | The parts the form needs. Passwords, card numbers and government ID numbers are cut out first |
+
+Results are saved as new files beside the original, or in `Documents\Pyxi`. Originals are never overwritten, with two exceptions you approve: Patch changes a script only after you press Allow on a card that shows the change (and keeps a backup), and Google Docs and Sheets are edited in place, where Google keeps every earlier version.
+
+**LibreOffice (optional).** For exact Office layouts and old .doc, .xls and .ppt files, Pyxi can download LibreOffice from The Document Foundation, after a card asks you first. It's installed in Pyxi's own folder and changes nothing else on your PC.
+
+## Your email and accounts
+
+Connecting an account is optional. Until you connect one, Pyxi can't see it. You can connect Gmail, Google Calendar, Google Docs, Google Sheets, Discord and LinkedIn. Google and LinkedIn sign you in on their own websites; Pyxi never sees your password.
+
+**What Pyxi asks Google for:** reading, drafting and sending email (Gmail); your calendar events; your Docs and Sheets; the Drive files Pyxi creates or you open with it; and the names of your Drive files, so you can say "my sales sheet".
+
+**What reads your mail, and why:**
+
+- **Atlas** finds airline and hotel confirmations to build your trips. It reads them on your computer; only a confirmation it can't read is sent to the AI model.
+- **Penny** and the money features read receipts, billing and order emails to total your spending, find subscriptions and catch return deadlines. This is all worked out on your computer, with no AI model.
+- **Trace** searches your mail, along with your screen history and files, when you ask where you saw something.
+- **Errands you ask for** ("fix the letter Sam emailed me") read the emails involved and send what's needed to the AI model.
+
+Pyxi never sends an email, posts, messages, invites someone or cancels anything without showing you an approval card first.
+
+**Google user data.** Pyxi's use of information received from Google APIs follows the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), including the Limited Use requirements. We use Google data only to do what you ask Pyxi to do. We don't sell it, use it for advertising or use it to train models, and it isn't stored on our servers.
+
+**Sign-in tokens** for connected accounts, and your beta token, are stored on your computer, encrypted with Windows' own data protection (DPAPI), so they can't be used if the files are copied to another PC or Windows account.
 
 ## What leaves your computer
 
 | What | Where it goes | Why |
 |---|---|---|
-| Your request, the masked screenshot and on-screen text, and recent conversation | The AI model, through OpenRouter (during the beta, via the Pyxi beta server) | To understand your screen and answer |
-| Web searches you ask for | DuckDuckGo or Bing | To look things up |
-| Pages a teammate opens | Those websites, in a browser on your computer | To do the research or task you asked for |
-| The booking details you saved (only the ones a form asks for) | The booking site you approved, typed in by Scout in a browser you can watch | To book the appointment, tickets or table you asked for. Each booking shows you which details it will use before it starts, and you approve the final booking click |
-| Emails, calendar events and documents you ask Pyxi to send or create | Google, Discord or LinkedIn, only for accounts you connected | To do the errand. Every email, post or message shows you an approval card first |
+| Your request, the masked screenshot and on-screen text, recent conversation, and the parts of files or emails a job needs | The AI model, through OpenRouter (during the beta, through the Pyxi beta server), or the provider of your own key if you added one | To understand your screen and answer |
+| Bengali speech | Google's Gemini model, through OpenRouter (during the beta, through the Pyxi beta server) | To turn Bengali speech into text. Other languages stay on your computer |
+| Web searches you ask for, and price checks | DuckDuckGo or Bing, then the store websites that come up | To look things up and compare prices |
+| Pages a teammate opens | Those websites, in a browser on your computer | To do the research, booking or form you asked for |
+| Emails, calendar events, documents and posts you ask Pyxi to send or change | Google, Discord or LinkedIn, only for accounts you connected | To do the errand, after an approval card |
+| Bookings and forms | The website you're booking with or filling in, with the details you saved | To make the booking. You approve the final step; you pay yourself |
 | Optional premium voices | ElevenLabs or Google, only if you add your own key | To speak with that voice |
+| Update checks | GitHub | Pyxi checks for a new version when it starts and every four hours, and downloads updates from GitHub |
+| Voice and speech models | GitHub and Hugging Face | Downloaded once, the first time they're needed |
 
-**AI providers.** OpenRouter passes your request to the model provider (Anthropic's Claude by default). They process it to produce the answer, under their own terms and privacy policies ([OpenRouter](https://openrouter.ai/privacy), [Anthropic](https://www.anthropic.com/legal/privacy)). **[Before launch: confirm and state the data-retention and training settings on your OpenRouter account.]** In local mode (Ollama), nothing goes to any AI provider.
+**AI providers.** OpenRouter passes your request to the model provider: Anthropic's Claude for answers and teammates, and Google's Gemini for Bengali speech. They process it to produce the answer, under their own terms and privacy policies ([OpenRouter](https://openrouter.ai/privacy), [Anthropic](https://www.anthropic.com/legal/privacy), [Google](https://policies.google.com/privacy)). **[Before launch: confirm and state the data-retention and training settings on your OpenRouter account.]** In local mode (Ollama), nothing goes to any AI provider.
 
-**The Pyxi beta server** forwards your requests to OpenRouter with our key, so you don't need one. It **doesn't store what you ask or what's on your screen**. It keeps only:
+**The Pyxi beta server** forwards your requests to OpenRouter with our key, so you don't need one. It **doesn't store what you ask, what's on your screen, or your voice**. It keeps only:
 
-- a scrambled (hashed) form of your beta token;
-- which invite code you used;
-- running totals of what you spent today and what the whole beta spent this month, to enforce the free allowance.
+- a scrambled (hashed) form of your beta token, with the invite code you used and the date you joined;
+- how many devices have used each invite code;
+- what you spent each day (kept 3 days) and what the whole beta spent each month (kept about 40 days), to enforce the free allowance.
 
-It sends OpenRouter an anonymous per-user ID, not your name or email, so abuse can be spotted.
-
-**On your computer:** speech-to-text (Whisper) and the default voice (Kokoro) run on your computer. Your voice recordings aren't sent anywhere.
+It sends OpenRouter an anonymous per-user ID, not your name or email, so abuse can be spotted. The server runs on Vercel and keeps its data in Upstash. Like any web host, they may keep standard technical logs, such as IP addresses and times, under their own policies.
 
 ## What's stored on your computer
 
 Everything lives in `%APPDATA%\Pyxi\.pyxi`:
 
-- your booking details (name, email, phone, date of birth, city and preferences, as you entered them in Settings). Health card, insurance, SIN and passport numbers are never saved; if a form needs one, Pyxi asks you to type it yourself;
-
 - conversations, with the masked screenshot each answer used (deleted after 30 days);
 - things you asked Pyxi to remember;
 - Memory Palace history, if it's on (deleted after 72 hours);
-- teammates' task records;
-- your settings;
-- sign-in tokens for accounts you connected;
-- your beta token.
+- Ditto's recordings, until you delete them;
+- teammates' task records, flashcard decks and budgets;
+- the booking details you saved (name, email, phone, date of birth, city and preferences). Health card, passport and other ID numbers are never saved;
+- your settings, including which folders Pyxi may search;
+- encrypted sign-in tokens for accounts you connected, and your beta token.
 
-Files Pyxi makes for you go to `Documents\Pyxi`.
-
-## Bookings and payments
-
-Pyxi never pays for anything and never types card numbers. When a booking reaches a payment page, Scout stops and hands the browser window to you; you pay, then press Done. Final booking buttons ("Book appointment", "Reserve", "Confirm") always need your approval first.
+Files Pyxi makes for you go to `Documents\Pyxi`, or beside the file they came from. LibreOffice, if you allow it, goes to `%LOCALAPPDATA%\Pyxi\LibreOffice`.
 
 ## Using your mouse and keyboard
 
-Pyxi controls your mouse and keyboard only after you press **Allow** on its request card, once or "always". Moving the mouse or pressing <kbd>Esc</kbd> stops it instantly. Sending, paying, buying, deleting, posting, signing in or out, and closing tabs or apps always ask again. It never types into password fields.
+Pyxi controls your mouse and keyboard only after you press **Allow** on its request card, once or "always". Moving the mouse or pressing <kbd>Esc</kbd> stops it instantly. Sending, paying, booking, buying, deleting, posting, signing in or out, and closing tabs or apps always ask again. Pyxi never types into password fields, never types card numbers or government ID numbers, and never completes a payment: when a booking reaches payment, Pyxi hands the browser window to you.
 
 ## Your choices
 
-- **See it:** the Memory tab shows what Pyxi remembers. Settings shows what's connected.
+- **See it:** the Memory tab shows what Pyxi remembers. Settings shows what's connected and which folders Pyxi may search.
 - **Delete it:**
   - "Forget everything" in the Memory tab wipes the Memory Palace.
   - "Forget …" removes a memory.
   - Disconnect an account in Settings to remove its tokens.
+  - Turn off "Let Pyxi search my files" in Settings.
   - Uninstalling Pyxi and deleting `%APPDATA%\Pyxi` removes everything.
-- **Beta data:** email **[privacy contact email]** to have your beta token and spend totals deleted.
+- **Beta data:** email **[contact email]** to have your beta token and spend totals deleted.
+
+## This website
+
+The Pyxi website uses no cookies, no analytics and no trackers. It's hosted on Vercel, which keeps standard request logs, and the installer downloads from GitHub.
 
 ## Children
 
