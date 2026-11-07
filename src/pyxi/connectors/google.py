@@ -763,6 +763,7 @@ class GoogleConnector(Connector):
             run=send,
             recipients=[a for _, a in names],
             payload=body,
+            channel="email",
         )
 
     # ------------------------------------------------------------------ calendar
@@ -903,6 +904,7 @@ class GoogleConnector(Connector):
             kind="invite",
             recipients=guests,
             payload=str(event.get("description") or ""),
+            channel="invite",
         )
 
     # ------------------------------------------------------------------ docs

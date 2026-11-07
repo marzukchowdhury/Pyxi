@@ -452,6 +452,8 @@ async def after_meeting(brain: Brain, job: Job) -> bool:
     if isinstance(out, str):  # a problem with the addresses: say so on the card's place
         await brain._notify(job.id, ok=False, title="The follow-up wasn't sent", body=out[:200])
         return False
+    if not await brain._within_limits(out.channel, out.action):  # the hourly email limit
+        return False
     ok = await brain.hub.request(
         "confirm",
         timeout=1800,
@@ -464,6 +466,7 @@ async def after_meeting(brain: Brain, job: Job) -> bool:
         return False
     try:
         line = await out.run()
+        await brain._count_sent(out)
     except Exception as exc:
         log.exception("follow-up email failed")
         await brain._notify(

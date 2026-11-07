@@ -183,7 +183,7 @@ class LinkedInConnector(Connector):
             return "Posted on LinkedIn."
 
         return Outgoing(
-            action=f"Post on LinkedIn ({visibility.lower()})", preview=text, run=publish, payload=text
+            action=f"Post on LinkedIn ({visibility.lower()})", preview=text, run=publish, payload=text, channel="post"
         )
 
     def tools(self) -> list[Tool]:

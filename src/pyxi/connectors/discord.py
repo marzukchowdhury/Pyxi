@@ -115,6 +115,7 @@ class DiscordConnector(Connector):
             preview=text,
             run=post,
             payload=text,
+            channel="post",
         )
 
     def tools(self) -> list[Tool]:

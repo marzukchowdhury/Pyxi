@@ -103,6 +103,15 @@ class ScreenConfig(BaseModel):
         return [p.strip() for p in v.split(",") if p.strip()] if isinstance(v, str) else v
 
 
+class ActionLimits(BaseModel):
+    """Outward actions per hour (pyxi/limits.py). At a limit Pyxi stops and asks the user."""
+
+    emails_per_hour: int = Field(10, ge=0)
+    posts_per_hour: int = Field(5, ge=0)
+    invites_per_hour: int = Field(10, ge=0)
+    bookings_per_hour: int = Field(3, ge=0)
+
+
 class TurnBudget(BaseModel):
     max_tool_rounds: int = Field(6, ge=1, description="Think/act rounds per user turn.")
     max_cost_usd: float = Field(
@@ -159,6 +168,7 @@ class PyxiSettings(BaseSettings):
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     screen: ScreenConfig = Field(default_factory=ScreenConfig)
     budget: TurnBudget = Field(default_factory=TurnBudget)
+    limits: ActionLimits = Field(default_factory=ActionLimits)
 
     @classmethod
     def settings_customise_sources(

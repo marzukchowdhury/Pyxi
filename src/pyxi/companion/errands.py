@@ -139,10 +139,15 @@ async def run_errand(
     approve: Callable[[Outgoing], Awaitable[bool]],
     progress: Callable[[str], Awaitable[None]] | None = None,
     reads: safety.Reads | None = None,
+    gate: Callable[[Outgoing], Awaitable[bool]] | None = None,
+    on_sent: Callable[[Outgoing], Awaitable[None]] | None = None,
 ) -> ErrandResult:
     """``reads``: mail, pages or documents the turn that asked for this errand had already read.
     Once anything like that has been read, every outward action asks on a fresh card (no invite
-    goes out on its own), and the card says what came from that content."""
+    goes out on its own), and the card says what came from that content.
+
+    ``gate``: asked before anything goes out (the hourly limits); False stops the errand.
+    ``on_sent``: told after something went out (counts, the activity log)."""
     reads = list(reads or [])
     by_name = {t.spec.name: t for t in tools}
     steps: list[str] = []
@@ -217,6 +222,16 @@ async def run_errand(
                         "nothing was sent. Find the person with gmail_people, or ask the user."
                     )
                     continue
+                if gate is not None and not await gate(result):
+                    return ErrandResult(
+                        ok=False,
+                        title="Stopped at the hourly limit",
+                        summary=f"I stopped before '{result.action}': that's the most Pyxi sends "
+                        "in an hour without checking. Ask me again when you're ready.",
+                        links=links,
+                        cost_usd=cost,
+                        steps=steps,
+                    )
                 # An invite to people the user named themselves goes ahead; anything else asks.
                 # Only the first one: a second invite or email always asks, so a "fix it" retry
                 # can never quietly send the same thing twice.
@@ -241,6 +256,8 @@ async def run_errand(
                 try:
                     result = await result.run()
                     sent += 1
+                    if on_sent is not None:
+                        await on_sent(outgoing)
                 except Exception as exc:
                     steps.append(f"{call.name}({_short(args)}) failed: {str(exc)[:200]}")
                     continue

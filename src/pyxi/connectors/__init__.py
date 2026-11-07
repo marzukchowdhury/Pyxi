@@ -31,6 +31,8 @@ class Outgoing:
     # The exact text that goes out (an email's body, a post). The card shows it in full, byte for
     # byte, inside ``preview``: nothing is cut on the card that would go out anyway.
     payload: str = ""
+    # What it counts as for the hourly limits (pyxi/limits.py): email, post or invite.
+    channel: str = ""
 
 
 Result = str | Outgoing

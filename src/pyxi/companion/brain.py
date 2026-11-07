@@ -249,8 +249,34 @@ class Brain:
             return
         await self.turn(text)
 
+    async def _within_limits(self, kind: str, next_action: str) -> bool:
+        """At an hourly limit (pyxi/limits.py), stop and ask before doing more."""
+        from pyxi.limits import Limits
+
+        reached = Limits(self.settings.data_dir, self.settings.limits).reached(kind)
+        if not reached:
+            return True
+        return bool(
+            await self.hub.request(
+                "confirm",
+                timeout=900,
+                job_id="",
+                agent="Pyxi",
+                action="Keep going past the hourly limit?",
+                reason=f"{reached}\n\nNext: {next_action}",
+            )
+        )
+
+    async def _count_sent(self, out: Outgoing) -> None:
+        from pyxi.limits import Limits
+
+        Limits(self.settings.data_dir, self.settings.limits).record(out.channel)
+
     async def _approve(self, out: Outgoing) -> None:
         """Show exactly what would go out; act only on Allow."""
+        if not await self._within_limits(out.channel, out.action):
+            await self.say_line("Okay, I'll stop there for now.")
+            return
         ok = await self.hub.request(
             "confirm",
             timeout=900,
@@ -264,6 +290,7 @@ class Brain:
             return
         try:
             line = await out.run()
+            await self._count_sent(out)
         except Exception as exc:
             log.exception("approved action failed")
             await self.say_line(f"That didn't go through. {friendly_error(exc)}")
@@ -515,6 +542,8 @@ class Brain:
         where = str(args.get("where") or "").strip()
         url = str(args.get("url") or "").strip()
         place = f" at {where}" if where else ""
+        if not await self._within_limits("booking", f"Book {what}{place}"):
+            return "book: they stopped at the hourly limit for bookings, so nothing was booked. Say so, briefly."
         allowed = await self.hub.request(
             "confirm",
             agent="Pyxi",
@@ -528,6 +557,9 @@ class Brain:
         )
         if not allowed:
             return "book: they said no, so nothing was booked. Say that's fine, briefly."
+        from pyxi.limits import Limits
+
+        Limits(self.settings.data_dir, self.settings.limits).record("booking")
         await self.jobs.start(
             "scout",
             booking.brief(args, profile, await self._now()),
@@ -944,6 +976,8 @@ class Brain:
                 approve=approve,
                 progress=progress,
                 reads=reads,
+                gate=lambda out: self._within_limits(out.channel, out.action),
+                on_sent=self._count_sent,
             )
         except Exception as exc:
             log.exception("errand failed")
