@@ -7,7 +7,9 @@
 3. Builds the installer (only Pyxi's own code is refreshed in the bundled Python; --full rebuilds
    that Python too, for new dependencies).
 4. Checks the build holds no keys, tokens, invite codes or personal data.
-5. Publishes GitHub release v<version> with Pyxi-Setup.exe, its blockmap and latest.yml.
+5. Publishes GitHub release v<version> with Pyxi-Setup.exe, its blockmap, latest.yml and the
+   voice pack (pyxi-voice-pack-<hash>.zip: the speech libraries, which installed copies download
+   from this release on first use).
    The website's download button points at GitHub's "latest release" link, so it serves the new
    version straight away, and installed copies of Pyxi find it, download it in the background
    and offer "Restart to update".
@@ -22,6 +24,7 @@ import json
 import re
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import httpx
@@ -30,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO = "marzukchowdhury/Pyxi"
 DIST = ROOT / "desktop" / "dist"
 ASSETS = ["Pyxi-Setup.exe", "Pyxi-Setup.exe.blockmap", "latest.yml"]
+PACKS = "pyxi-*-pack-*.zip"  # first-use downloads the installer points at (build_installer.py)
 AUTHOR = [
     "-c",
     "user.name=Marzuk Haider Chowdhury",
@@ -70,15 +74,31 @@ def set_version(v: str) -> None:
 
 
 def check_clean_build() -> None:
-    """Scan everything that ships (the app archive and the bundled Python's Pyxi code)."""
+    """Scan everything that ships (the app archive, the bundled Python and the packs, zips
+    included)."""
     resources = DIST / "win-unpacked" / "resources"
-    for path in [resources / "app.asar", *(resources / "python").rglob("*")]:
+    text_like = {".py", ".json", ".txt", ".asar", ".env", ".yml"}
+    for path in [resources / "app.asar", *(resources / "python").rglob("*"), *DIST.glob(PACKS)]:
         if not path.is_file():
             continue
         if path.name in PRIVATE_FILES:
             raise SystemExit(f"STOP: {path} must not ship.")
-        text_like = path.suffix in {".py", ".json", ".txt", ".asar", ".env", ".yml"}
-        if text_like and path.stat().st_size < 200_000_000 and SECRET.search(path.read_bytes()):
+        if path.suffix == ".zip":
+            with zipfile.ZipFile(path) as z:
+                for member in z.namelist():
+                    name = member.rsplit("/", 1)[-1]
+                    if name in PRIVATE_FILES:
+                        raise SystemExit(f"STOP: {path}/{member} must not ship.")
+                    if Path(name).suffix in text_like | {".pyc"} and SECRET.search(z.read(member)):
+                        raise SystemExit(
+                            f"STOP: something that looks like a key is in {path}/{member}."
+                        )
+            continue
+        if (
+            path.suffix in text_like
+            and path.stat().st_size < 200_000_000
+            and SECRET.search(path.read_bytes())
+        ):
             raise SystemExit(f"STOP: something that looks like a key is inside {path}.")
     print("build is clean: no keys, tokens or personal files")
 
@@ -118,7 +138,7 @@ def publish(v: str, notes: str) -> None:
             raise SystemExit(f"STOP: release v{v} already exists. Pick a new version number.")
         r.raise_for_status()
         rel = r.json()
-        for name in ASSETS:
+        for name in ASSETS + [p.name for p in sorted(DIST.glob(PACKS))]:
             f = DIST / name
             print(f"uploading {name} ({f.stat().st_size / 2**20:.0f} MB)")
             with f.open("rb") as body:
@@ -171,9 +191,17 @@ def main() -> None:
         sh(sys.executable, "-m", "pytest", "-q")
     for name in ASSETS:  # never upload a leftover from an earlier build
         (DIST / name).unlink(missing_ok=True)
-    full = "--full" in sys.argv or not (ROOT / "desktop/build/python/python.exe").exists()
+    for pack in DIST.glob(PACKS):
+        pack.unlink()
+    built = ROOT / "desktop/build"
+    full = "--full" in sys.argv or not (
+        (built / "python-full/python.exe").exists()
+        or (built / "python/Lib/site-packages/pip").is_dir()
+    )
     sh(sys.executable, "scripts/build_installer.py", *([] if full else ["--update-pyxi"]))
-    missing = [n for n in ASSETS if not (DIST / n).exists()]
+    missing = [n for n in ASSETS if not (DIST / n).exists()] + (
+        [] if any(DIST.glob(PACKS)) else [PACKS]
+    )
     if missing:
         raise SystemExit(f"STOP: the build didn't produce {missing}.")
     check_clean_build()

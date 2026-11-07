@@ -16,6 +16,10 @@
     "dist": "electron-builder --win nsis --publish never"
   },
   "dependencies": {
+    "electron-updater": "^6.8.11",
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
     "@fontsource/caveat": "^5.3.0",
     "@fontsource/fraunces": "^5.3.0",
     "@fontsource/inter": "^5.3.0",
@@ -23,14 +27,6 @@
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
     "@react-three/postprocessing": "^3.2.2",
-    "electron-updater": "^6.8.11",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "three": "^0.187.0",
-    "uiohook-napi": "^1.5.5",
-    "zustand": "^5.0.16"
-  },
-  "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -40,9 +36,13 @@
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "playwright-core": "^1.64.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "three": "^0.187.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.0",
+    "zustand": "^5.0.16"
   },
   "productName": "Pyxi",
   "build": {
@@ -75,12 +75,14 @@
       "signAndEditExecutable": false
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
       "artifactName": "Pyxi-Setup.exe",
       "shortcutName": "Pyxi",
       "uninstallDisplayName": "Pyxi",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "include": "resources/installer.nsh"
     },
     "npmRebuild": false,
     "publish": [
@@ -90,6 +92,10 @@
         "repo": "Pyxi",
         "releaseType": "release"
       }
+    ],
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US"
     ]
   }
 }
