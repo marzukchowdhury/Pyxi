@@ -351,7 +351,7 @@ def _date(text: str, ref: datetime) -> datetime | None:
 
 def _city(text: str, code: str) -> str:
     m = re.search(
-        rf"([A-Z][a-zA-Z.'-]+(?:[ -][A-Z][a-zA-Z.'-]+){{0,3}})\s*(?:[,-]\s*[\w ]{{0,25}})?\(\s*{code}\s*\)",
+        rf"([A-ZÀ-Þ][a-zA-ZÀ-ÿ.'-]+(?:[ -][A-ZÀ-Þ][a-zA-ZÀ-ÿ.'-]+){{0,3}})\s*(?:[,-]\s*[\w ]{{0,25}})?\(\s*{code}\s*\)",
         text,
     )
     if not m:
@@ -437,6 +437,7 @@ def read_flights(mail: dict[str, Any]) -> list[Flight]:
             continue
         times: dict[str, tuple[int, int]] = {}
         order: list[tuple[int, int]] = []
+        ends: list[int] = []  # where each time ends in the window
         for t in TIME.finditer(window):
             hm = _time(t)
             if hm is None:
@@ -450,14 +451,24 @@ def read_flights(mail: dict[str, Any]) -> list[Flight]:
             elif re.search(r"arriv|land", before) and "arrive" not in times:
                 times["arrive"] = hm
             order.append(hm)
+            ends.append(t.end())
         dep = times.get("depart") or (order[0] if order else None)
         arr = times.get("arrive") or next((t for t in order if t != dep), None)
         if dep is None:
             continue
-        day = _date(window, sent)
-        if day is None:  # the date is on a line above the flight number ("Mon, Nov 16")
-            lead = text[max(0, m.start() - 220) : m.start()]
-            dates = list(DATE_RE.finditer(lead))
+        # The date is on the flight's own lines, or on a heading line above the flight number
+        # ("Thu, Nov 19" then "AC 870  YVR 6:45 PM -> CDG"). A date after this flight's times,
+        # when it has such a heading, is the next flight's heading, not this one's.
+        lead = text[max(hits[i - 1].end() if i else 0, m.start() - 220) : m.start()]
+        dates = list(DATE_RE.finditer(lead))
+        own = DATE_RE.search(window)
+        if own and dates and ends and own.start() >= ends[min(1, len(ends) - 1)]:
+            d = dates[-1]
+            line = lead[lead.rfind("\n", 0, d.start()) + 1 : d.start()] + lead[d.end() :]
+            if not any(_time(t) for t in TIME.finditer(line.split("\n")[0])):
+                own = None  # a heading line of its own, with no times on it
+        day = _date(own.group(0), sent) if own else None
+        if day is None:
             day = _date(dates[-1].group(0), sent) if dates else None
         if day is None:
             continue
@@ -698,19 +709,59 @@ def trips(flights: list[Flight], stays: list[Stay], now: datetime, gap_days: int
     return [t for t in groups if t.end >= now]
 
 
-def pick(found: list[Trip], want: str) -> Trip | None:
-    want = want.strip().lower()
+def _plain(s: str) -> str:
+    """Lower case without accents, so "Zürich" finds "Zurich" and "hôtel" finds "hotel"."""
+    import unicodedata
+
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", s.lower()) if not unicodedata.combining(c)
+    )
+
+
+MONTH_WORDS = {
+    m: i
+    for i, names in enumerate(
+        [
+            ("jan", "january"), ("feb", "february"), ("mar", "march"), ("apr", "april"),
+            ("may",), ("jun", "june"), ("jul", "july"), ("aug", "august"),
+            ("sep", "sept", "september"), ("oct", "october"), ("nov", "november"),
+            ("dec", "december"),
+        ],
+        start=1,
+    )
+    for m in names
+}  # fmt: skip
+PICK_STOP = {
+    "trip", "trips", "the", "next", "flight", "flights", "hotel", "hotels", "stay", "staying",
+    "upcoming", "and", "for", "my", "our", "when", "where", "what", "which", "whats", "wheres",
+    "itinerary", "plan", "this", "that", "coming", "soon", "from", "with", "back", "home", "there",
+    "booking", "bookings",
+}  # fmt: skip
+
+
+def pick(found: list[Trip], want: str, *, strict: bool = False) -> Trip | None:
+    """The trip they named (a city, a hotel, a booking reference or a month), else the next
+    one. ``strict``: None when they named something no trip matches."""
+    want = _plain(want.strip())
     if not found:
         return None
     if want:
-        words = [
-            w
-            for w in re.findall(r"[a-z]{3,}", want)
-            if w not in {"trip", "my", "the", "next", "flight", "hotel", "upcoming"}
-        ]
+        words = [w for w in re.findall(r"[a-z0-9]{3,}", want) if w not in PICK_STOP]
+        months = {MONTH_WORDS[w] for w in words if w in MONTH_WORDS}
+        words = [w for w in words if w not in MONTH_WORDS]
         for t in found:
-            if words and any(w in t.text() or w in t.destination.lower() for w in words):
+            text = _plain(f"{t.text()} {t.destination}")
+            if words and not any(w in text for w in words):
+                continue
+            if months and not any(
+                (t.start + timedelta(days=d)).month in months
+                for d in range((t.end - t.start).days + 1)
+            ):
+                continue
+            if words or months:
                 return t
+        if strict and (words or months):
+            return None
     return found[0]
 
 
@@ -872,7 +923,12 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     found = trips(
         sorted(flights, key=lambda f: f.depart), sorted(stays, key=lambda s: s.check_in), now
     )
-    trip = pick(found, str(job.params.get("trip") or ""))
+    want = str(job.params.get("trip") or "").strip()
+    trip = pick(found, want, strict=True)
+    missed = ""
+    if trip is None and found:  # "Tokyo", and the only trips are Paris and Lisbon: say so
+        trip = found[0]
+        missed = f"I didn't find a trip matching {want!r} in your mail; this is your next one. "
     if trip is None:
         job.status = "failed"
         job.summary = "I didn't find any upcoming flights or hotel bookings in your mail."
@@ -880,10 +936,10 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         return
     rem = reminders(trip, now)
     rep = report(trip, [t for t in found if t is not trip], len(rem))
-    job.summary = rep["summary"]
+    job.summary = missed + rep["summary"]
     job.data = {
         "title": rep["title"],
-        "body": rep["body"],
+        "body": missed + rep["body"],
         "changes": rep["changes"],
         "card": rep["card"],
         "reminders": rem,

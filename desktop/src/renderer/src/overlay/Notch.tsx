@@ -393,7 +393,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                 <div key={j.id} className="notch-job">
                   <Marks jobs={[j.agent_name]} />
                   <b>{j.agent_name}</b>
-                  <span>{jobStatus[j.id] ?? j.task}</span>
+                  <span>{jobStatus[j.id] ?? j.task.split("\n")[0]}</span>
                 </div>
               ))}
               <div ref={lines} className="notch-lines">

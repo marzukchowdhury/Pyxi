@@ -286,3 +286,33 @@ async def test_refunds_read_as_refunds():
     rep = penny.summarise(rs, {}, october()[0], NOW)
     assert "Refunds: -CA$25.00 (1 refund)" in rep["changes"]
     assert rep["card"]["sections"][-1]["heading"] == "Refunds -CA$25.00"
+
+
+# ---------------------------------------------------------------- found in the beta QA pass
+def test_odd_months_and_one_receipt():
+    import pytest
+
+    assert penny.month_range("next month", NOW)[0] == datetime(2026, 12, 1)
+    with pytest.raises(ValueError, match="no month 13"):
+        penny.month_range("2026-13", NOW)
+    one = [penny.receipts(
+        [{"from": "Starbucks <r@starbucks.example>", "subject": "Your receipt",
+          "text": "Thanks for your order\nTotal: $6.45", "date": on(11, 2)}]
+    )[0]]  # fmt: skip
+    assert penny.summarise(one, {}, datetime(2026, 11, 1), NOW)["body"].startswith("1 receipt.")
+
+
+async def test_the_tray_keeps_their_words_while_ledger_works(settings, monkeypatch, tmp_path):
+    monkeypatch.setattr(penny, "clock", lambda: NOW)
+    own = tmp_path / "mine.xlsx"
+    wb = Workbook()
+    wb.active.append(["Date", "Merchant", "Amount"])
+    wb.save(own)
+    edit = {"file": 0, "op": "append_row", "values": ["2026-10-03", "Uber Eats", 34.2]}
+    brain, rec, _ = connected(settings, mails(), llm=Script(json.dumps({"edits": [edit]})))
+    await specialists.handle(
+        brain, "money", {"action": "sheet", "month": "October", "target": str(own)}
+    )
+    await until(rec, "job_ready")
+    tasks = {e["job"]["task"] for e in rec.of("job") if e["job"]["agent_id"] == "penny"}
+    assert tasks == {"Receipts to a spreadsheet: October"}

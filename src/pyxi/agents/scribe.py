@@ -157,7 +157,12 @@ async def transcribe(stt: Any, path: Path, language: str, progress: Any = None) 
 
     model = await stt.warm_up(language)
     name = stt.model_for(language)
-    audio = await asyncio.to_thread(decode_audio, path.read_bytes())
+    try:  # read from the file itself: a two-hour video never sits in memory twice
+        audio = await asyncio.to_thread(decode_audio, path)
+    except Exception:  # damaged, empty, or a video with no sound: never PyAV's own words
+        raise RuntimeError(
+            f"I couldn't read the sound in {path.name}. It may be damaged, or have no audio."
+        ) from None
     total = len(audio) / 16000
     loop = asyncio.get_running_loop()
 
@@ -254,7 +259,11 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     job.summary = (
         f"Notes for {notes.title} ({minutes} min), saved to {note_path}. "
         + " ".join(notes.summary)
-        + (" Decisions: " + "; ".join(notes.decisions) + "." if notes.decisions else "")
+        + (
+            " Decisions: " + "; ".join(d.rstrip(".") for d in notes.decisions) + "."
+            if notes.decisions
+            else ""
+        )
         + (
             " Actions: " + "; ".join(notes.action_line(a) for a in notes.actions) + "."
             if notes.actions

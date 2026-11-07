@@ -68,6 +68,82 @@ def fonts() -> tuple[str, str, str, str]:
     return _FONTS
 
 
+# Windows fonts for the scripts Arial and Segoe UI don't have (Chinese, Japanese, Korean,
+# Indian scripts), so a name like 李雷 comes out as itself instead of empty boxes.
+FALLBACK_FONTS = (
+    ("PyxiYaHei", "msyh.ttc"),
+    ("PyxiMalgun", "malgun.ttf"),
+    ("PyxiYuGothic", "YuGothR.ttc"),
+    ("PyxiNirmala", "Nirmala.ttc"),
+)
+_FALLBACKS: list[tuple[str, Any]] | None = None
+
+
+def _glyphs(name: str) -> Any:
+    from reportlab.pdfbase import pdfmetrics
+
+    try:
+        return pdfmetrics.getFont(name).face.charToGlyph
+    except Exception:
+        return None
+
+
+def fallbacks() -> list[tuple[str, Any]]:
+    """(font name, its characters) for each fallback font found on this PC, registered once."""
+    global _FALLBACKS
+    if _FALLBACKS is None:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+
+        _FALLBACKS = []
+        for name, file in FALLBACK_FONTS:
+            path = Path(r"C:\Windows\Fonts") / file
+            if not path.is_file():
+                continue
+            try:
+                pdfmetrics.registerFont(TTFont(name, str(path), subfontIndex=0))
+            except Exception:
+                continue
+            if (chars := _glyphs(name)) is not None:
+                _FALLBACKS.append((name, chars))
+    return _FALLBACKS
+
+
+def font_for(text: str, preferred: str) -> str:
+    """``preferred`` when it has every character of ``text``, else a fallback font that does."""
+    have = _glyphs(preferred)
+    if have is None or all(ord(c) in have or c.isspace() for c in text):
+        return preferred
+    for name, chars in fallbacks():
+        if all(ord(c) in chars or c.isspace() for c in text):
+            return name
+    return preferred
+
+
+def with_fallback(markup: str) -> str:
+    """Paragraph markup with each run of characters the main font lacks set in a fallback font."""
+    have = _glyphs(fonts()[0])
+    if have is None or all(ord(c) in have or c.isspace() for c in markup):
+        return markup
+    out = []
+    for piece in re.split(r"(<[^>]*>|&#?\w+;)", markup):
+        if piece.startswith(("<", "&")):
+            out.append(piece)
+            continue
+        run_font, run = None, ""
+        for c in piece:
+            font = None
+            if not (ord(c) in have or c.isspace()):
+                font = next((n for n, chars in fallbacks() if ord(c) in chars), None)
+            if font != run_font and run:
+                out.append(f'<font name="{run_font}">{run}</font>' if run_font else run)
+                run = ""
+            run_font, run = font, run + c
+        if run:
+            out.append(f'<font name="{run_font}">{run}</font>' if run_font else run)
+    return "".join(out)
+
+
 def _styles() -> dict[str, Any]:
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 
@@ -136,11 +212,12 @@ def render(
         if b.kind == "h":
             story.append(
                 Paragraph(
-                    b.text, st["title"] if b.level == 0 else st[f"h{min(max(b.level, 1), 6)}"]
+                    with_fallback(b.text),
+                    st["title"] if b.level == 0 else st[f"h{min(max(b.level, 1), 6)}"],
                 )
             )
         elif b.kind == "p":
-            story.append(Paragraph(b.text, st["p"]))
+            story.append(Paragraph(with_fallback(b.text), st["p"]))
         elif b.kind == "li":
             marker = f"{b.number}." if b.number is not None else BULLET
             indent = 14 * max(1, b.level)
@@ -153,13 +230,16 @@ def render(
                 spaceAfter=2,
                 bulletFontName=regular,
             )
-            story.append(Paragraph(b.text, style, bulletText=marker))
+            story.append(Paragraph(with_fallback(b.text), style, bulletText=marker))
         elif b.kind == "pre":
             story.append(Preformatted(b.text, st["pre"], maxLineLength=110))
             story.append(Spacer(1, 6))
         elif b.kind == "table" and b.rows:
             cols = max(len(r) for r in b.rows)
-            rows = [[Paragraph(c, st["cell"]) for c in r] + [""] * (cols - len(r)) for r in b.rows]
+            rows = [
+                [Paragraph(with_fallback(c), st["cell"]) for c in r] + [""] * (cols - len(r))
+                for r in b.rows
+            ]
             t = Table(rows, repeatRows=1, colWidths=[width / cols] * cols, hAlign="LEFT")
             t.setStyle(
                 TableStyle(

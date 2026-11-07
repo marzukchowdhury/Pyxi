@@ -44,9 +44,11 @@ def _col_index(ws, ref: str | int | None, header_row: int) -> int | None:
         v = ws.cell(header_row, c).value
         if v is not None and str(v).strip().lower() == s.lower():
             return c
-    if re.fullmatch(r"[A-Za-z]{1,3}", s):
+    # A letter or number only for a column the sheet has: a header that isn't there ("Tax")
+    # must not become column TAX, 13,000 columns to the right.
+    if re.fullmatch(r"[A-Za-z]{1,3}", s) and column_index_from_string(s.upper()) <= ws.max_column:
         return column_index_from_string(s.upper())
-    if s.isdigit():
+    if s.isdigit() and 1 <= int(s) <= ws.max_column:
         return int(s)
     raise LedgerError(f"There's no column called {s!r}.")
 
@@ -74,6 +76,12 @@ def _is_number(v: Any) -> bool:
 
 def _is_numberish(v: Any) -> bool:
     return _is_number(v) or (isinstance(v, str) and v.startswith("="))
+
+
+def _shown(x: float) -> str:
+    """1850.0 as "1,850", 296.517 as "296.52": for the summary they read."""
+    x = round(float(x), 2)
+    return f"{int(x):,}" if x.is_integer() else f"{x:,}"
 
 
 def _is_total_label(v: Any) -> bool:
@@ -225,7 +233,7 @@ class Workbook:
                     "MIN": min(nums),
                 }[fn]
                 head_name = ws.cell(head, c).value or L
-                shown.append(f"{head_name} {round(result, 2):,}")
+                shown.append(f"{head_name} {_shown(result)}")
         tail = f": {', '.join(shown)}" if shown else ""
         return f"Added a {label.value} row (row {r}) on {ws.title}{tail}"
 
@@ -332,7 +340,7 @@ class Workbook:
             return sum(xs) / len(xs) if xs else 0.0
 
         top = sorted(keys, key=result, reverse=True)[:3]
-        best = ", ".join(f"{k} {round(result(k), 2):,}" for k in top)
+        best = ", ".join(f"{k} {_shown(result(k))}" for k in top)
         return f"Made a pivot on sheet {name}: {agg} of {v_name} by {g_name}, {len(keys)} groups (top: {best})"
 
     def op_format(self, op: dict[str, Any]) -> str:
@@ -734,6 +742,12 @@ def open_local(path: Path) -> Workbook | WordDoc | Deck:
     ext = path.suffix.lower()
     if not path.is_file():
         raise LedgerError(f"I can't find {path.name} at {path.parent}.")
+    try:
+        path.open("rb").close()
+    except PermissionError:  # open in Excel or Word with a lock
+        raise LedgerError(
+            f"{path.name} is locked by another app. Close it there and try again."
+        ) from None
     if ext in (".xlsx", ".xlsm"):
         return Workbook(path)
     if ext == ".docx":
@@ -762,13 +776,19 @@ def _open_old(path: Path) -> Workbook | WordDoc | Deck:
             "is set up (Settings, under Your files)."
         )
     tmp = Path(tempfile.mkdtemp(prefix="pyxi_old_"))
-    subprocess.run(
-        command(soffice, "--convert-to", new_ext[1:], "--outdir", str(tmp), str(path)),
-        check=True,
-        capture_output=True,
-        timeout=180,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
+    try:
+        subprocess.run(
+            command(soffice, "--convert-to", new_ext[1:], "--outdir", str(tmp), str(path)),
+            check=True,
+            capture_output=True,
+            timeout=180,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):  # never the command line
+        raise LedgerError(
+            f"LibreOffice couldn't open {path.name}. If it's open in another app, close it and "
+            "try again."
+        ) from None
     made = tmp / f"{path.stem}{new_ext}"
     if not made.is_file():
         raise LedgerError(f"LibreOffice couldn't open {path.name}.")
@@ -906,7 +926,7 @@ class GoogleSheet:
                 nums = [n for r in rows[head + 1 :] if c < len(r) and (n := _num(r[c])) is not None]
                 if nums:
                     sums.append(
-                        f"{rows[head][c] if c < len(rows[head]) else get_column_letter(c + 1)} {round(sum(nums), 2):,}"
+                        f"{rows[head][c] if c < len(rows[head]) else get_column_letter(c + 1)} {_shown(sum(nums))}"
                     )
             return f"Added a Total row (row {last + 1}) on {title}" + (
                 f": {', '.join(sums)}" if sums else ""
@@ -1253,6 +1273,7 @@ async def run_ledger(
     system = SYSTEM.replace("{name}", name).replace("{persona}", persona)
     result = LedgerResult()
     changed: set[int] = set()
+    tried = False
     pending = prompt
     for attempt in range(2):
         text, cost = await ask(system, pending)
@@ -1263,13 +1284,16 @@ async def run_ledger(
             break  # nothing more it can do: keep the first round's problems
         if data.get("summary") and attempt == 0:
             result.summary = str(data["summary"]).strip()
-        failed: list[str] = []
+        tried = tried or bool(edits)
+        failed: list[str] = []  # for the model: the edit itself and why
+        reasons: list[str] = []  # for the user's card: just why
         for e in edits:
             try:
                 index = int(e.get("file") or 0)
                 target = targets[index]
             except (ValueError, IndexError):
                 failed.append(f"{json.dumps(e)[:200]}: there's no file {e.get('file')}")
+                reasons.append(f"There's no file {e.get('file')}.")
                 continue
             if progress:
                 await progress(f"{e.get('op', 'edit').replace('_', ' ')}")
@@ -1278,9 +1302,12 @@ async def run_ledger(
                 changed.add(index)
             except LedgerError as exc:
                 failed.append(f"{json.dumps(e)[:200]}: {exc}")
+                reasons.append(str(exc))
             except Exception as exc:  # a bad cell address, a style the file lacks...
                 failed.append(f"{json.dumps(e)[:200]}: {type(exc).__name__}: {str(exc)[:160]}")
-        result.problems = failed
+                what = str(e.get("op") or "edit").replace("_", " ")
+                reasons.append(f"The {what} didn't work ({str(exc)[:120]}).")
+        result.problems = reasons
         if not failed:
             break
         if attempt == 0:
@@ -1297,6 +1324,9 @@ async def run_ledger(
             result.outputs.append(str(await asyncio.to_thread(t.save)))
         else:
             result.links.append(t.url)
-    if not result.changes and not result.summary:
-        result.summary = "I couldn't make that change."
+    if not result.changes and (tried or not result.summary):
+        # The model's summary was written before its edits ran ("Added a total row"): when
+        # none of them worked, say why instead.
+        why = f" {result.problems[0]}" if result.problems else ""
+        result.summary = f"I couldn't make that change.{why}"
     return result

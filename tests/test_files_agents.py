@@ -640,3 +640,67 @@ async def test_registry_adds_new_teammates_for_existing_users(tmp_path):
     reg = AgentRegistry(tmp_path / "a.db")
     assert reg.get("Pixel").role == "files" and reg.get("ledger").name == "Ledger"
     assert not reg.delete("pixel")  # built in
+
+
+# ---------------------------------------------------------------- found in the beta QA pass
+async def test_ledger_never_claims_edits_that_all_failed(tmp_path):
+    async def ask(system, prompt):
+        if "These edits failed" in prompt:
+            return '{"edits": []}', 0.0
+        return (
+            '{"edits": [{"file": 0, "op": "set_cells", "sheet": "Nope", "cells": {"A1": 1}}], '
+            '"summary": "Set A1 on Nope."}'
+        ), 0.0
+
+    r = await run_ledger("put 1 in A1", files=[str(budget(tmp_path / "b.xlsx"))], ask=ask)
+    assert not r.changes and r.outputs == []
+    assert r.summary.startswith("I couldn't make that change. There's no sheet called 'Nope'")
+    assert r.problems and not any("{" in p for p in r.problems)  # the card shows these
+
+
+def test_a_missing_header_is_not_a_far_away_column(tmp_path):
+    book = LedgerBook(budget(tmp_path / "b.xlsx"))
+    with pytest.raises(LedgerError, match="no column called 'Tax'"):
+        book.apply({"op": "totals_row", "columns": ["Tax"]})
+    assert "Total row" in book.apply({"op": "totals_row", "columns": ["C"]})
+    assert book.wb.active.max_column == 4
+
+
+async def test_a_file_named_budget_is_not_the_spending_limit(settings, tmp_path):
+    from pyxi.agents.jobs import describe_failure
+
+    assert describe_failure(LedgerError("Budget 2026.xlsx is locked by another app.")) == (
+        "Budget 2026.xlsx is locked by another app."
+    )
+    assert "spending limit" in describe_failure(RuntimeError("budget_exceeded: cost limit"))
+    brain, _ = make_brain(settings)
+    src = tmp_path / "Budget 2026.pdf"
+    src.write_bytes(b"not a pdf")
+    job = await brain.jobs.start(
+        "pixel", "split", files=[str(src)], params={"operation": "split_pdf"}
+    )
+    job = await brain.jobs.wait(job.id)
+    assert job.status == "failed" and "doesn't open as a PDF" in job.summary
+
+
+def test_model_key_and_rate_limit_failures_read_plainly():
+    from pyxi.agents.jobs import describe_failure
+
+    auth = RuntimeError("OpenRouter API error: Error code: 401 - Missing Authentication header")
+    assert describe_failure(auth).startswith("The AI model turned the key down.")
+    assert "busy" in describe_failure(RuntimeError("Error code: 429 - rate limited"))
+
+
+async def test_a_writers_draft_has_no_em_dashes(settings):
+    brain, _ = make_brain(
+        settings, llm=Script("Hi Dana — thanks for Tuesday. We meet 9–5 – see you.")
+    )
+    job = await brain.jobs.wait((await brain.jobs.start("quill", "Thank Dana")).id)
+    assert job.summary == "Hi Dana, thanks for Tuesday. We meet 9–5, see you."
+    assert Path(job.outputs[0]).read_text(encoding="utf-8") == job.summary
+
+
+def test_summaries_show_whole_amounts_without_a_trailing_zero(tmp_path):
+    book = LedgerBook(budget(tmp_path / "b.xlsx"))
+    said = book.apply({"op": "pivot", "group_by": "Category", "value": "Amount", "agg": "sum"})
+    assert "Home 1,200" in said and "1,200.0" not in said and "Living 455.5" in said

@@ -1,9 +1,9 @@
 """Sage, study: lecture slides, PDFs and notes into flashcards and a quiz, and a quiz out loud.
 
 * **Flashcards and a quiz from the file.** The slides (.pptx), PDF, Word file or notes are read
-  here (:func:`pyxi.files_access.read_text`), and one small model call per part writes
-  question-and-answer cards and multiple-choice questions, each pointing back at its slide or
-  page. Nothing is invented: a card has to come from the file.
+  here (:func:`read_notes`: tables and speaker notes too, scanned pages with OCR), and one
+  small model call per part writes question-and-answer cards and multiple-choice questions,
+  each pointing back at its slide or page. Nothing is invented: a card has to come from the file.
 * **Saved where they can use them.** ``Documents\\Pyxi\\Study\\<name> flashcards.csv`` (Anki
   and Quizlet import it as front/back), ``<name> quiz.md`` (questions first, answers at the
   end), and the deck itself in ``.pyxi/study`` for the spoken quiz.
@@ -70,7 +70,9 @@ class Deck:
 
     @property
     def slug(self) -> str:
-        return re.sub(r"[^a-z0-9]+", "-", Path(self.source).stem.lower()).strip("-")[:60] or "deck"
+        # Unicode letters keep two decks apart (生物学, Économie): they share a file only if
+        # their names do.
+        return re.sub(r"[\W_]+", "-", Path(self.source).stem.lower()).strip("-")[:60] or "deck"
 
 
 def clean(text: Any) -> str:
@@ -112,6 +114,22 @@ def parse(raw: str) -> tuple[str, list[Card], list[Question]]:
         if str(q.get("q") or "").strip() and len(choices) >= 2 and 0 <= ans < len(choices):
             quiz.append(Question(clean(q["q"]), choices, ans, clean(q.get("why"))))
     return clean(data.get("title"))[:80], cards, quiz
+
+
+def spread(quiz: list[Question], seed: int = 0) -> list[Question]:
+    """Models put most right answers in the same place (every one a B). Each question's right
+    answer goes to a letter from a shuffled round of A, B, C, D, so they're spread evenly."""
+    rng = random.Random(seed)
+    out, letters = [], []
+    for q in quiz:
+        if not letters:
+            letters = list(range(4))
+            rng.shuffle(letters)
+        at = letters.pop() % len(q.choices)
+        rest = [c for j, c in enumerate(q.choices) if j != q.answer]
+        rest.insert(at, q.choices[q.answer])
+        out.append(Question(q.q, rest, at, q.why))
+    return out
 
 
 def parts(text: str, size: int = PART_CHARS, most: int = MAX_PARTS) -> list[str]:
@@ -251,7 +269,7 @@ class Quiz:
         c = self.current()
         return (
             f"Question {self.at + 1} of {len(self.order)}: {c.q}\n"
-            f"(The answer, for you only until they reply: {c.a}"
+            f"(The answer, for you only until they reply: {c.a.rstrip('.') if c.where else c.a}"
             + (f", from {c.where}" if c.where else "")
             + ")"
         )
@@ -269,13 +287,53 @@ class Quiz:
         return f"{self.right} of {len(self.order)}"
 
 
+# ------------------------------------------------------------------------------ reading
+def _plain(markup: str) -> str:
+    import html
+
+    return html.unescape(re.sub(r"<[^>]+>", "", markup.replace("<br/>", "\n"))).strip()
+
+
+def read_notes(path: Path, max_chars: int = 80000) -> str:
+    """What to study from: slides with their tables and speaker notes, Word files with their
+    tables, PDFs page by page (scanned pages read with OCR), anything else as text."""
+    ext = path.suffix.lower()
+    if ext in (".pptx", ".docx"):
+        from pyxi.agents import pixel_render
+
+        slides = ext == ".pptx"
+        blocks = pixel_render.pptx_blocks(path) if slides else pixel_render.docx_blocks(path)[0]
+        lines, n = (["[slide 1]"] if slides else []), 1
+        for b in blocks:
+            if b.kind == "br" and slides:
+                n += 1
+                lines.append(f"[slide {n}]")
+            elif b.kind in ("h", "p", "pre"):
+                lines.append(_plain(b.text))
+            elif b.kind == "li":
+                lines.append("- " + _plain(b.text))
+            elif b.kind == "table":
+                lines += [" | ".join(_plain(c) for c in row) for row in b.rows]
+        text = "\n".join(line for line in lines if line.strip())
+    elif ext == ".pdf":
+        from pyxi.agents import pixel_pdf
+
+        texts, _ = pixel_pdf.page_texts(path, ocr=True)
+        text = f"PDF, {len(texts)} pages.\n" + "\n".join(
+            f"[page {i}] {t}" for i, t in enumerate(texts, 1)
+        )
+    else:
+        from pyxi import files_access
+
+        text = files_access.read_text(path, max_chars)
+    return text[:max_chars]
+
+
 # ------------------------------------------------------------------------------ the job
 async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     import asyncio
 
     from otto.llm.base import Message
-
-    from pyxi import files_access
 
     paths = [Path(f) for f in job.files if Path(f).is_file()]
     if not paths:
@@ -287,9 +345,10 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     outputs: list[str] = []
     decks: list[Deck] = []
+    unread = 0  # files with notes in them that the model's reply had no cards for
     for path in paths:
         await manager._status(job, f"Reading {path.name}")
-        text = await asyncio.to_thread(files_access.read_text, path, 80000)
+        text = await asyncio.to_thread(read_notes, path, 80000)
         chunks = parts(text)
         if not chunks or len(text.strip()) < 40:
             continue
@@ -314,12 +373,21 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
             if not c:
                 log.warning("sage: no cards in the reply for %s: %r", path.name, resp.text[:300])
             title, cards, quiz = title or t, cards + c, quiz + q
-        deck = Deck(title or path.stem, str(path), merge(cards)[: max(want, 4) + 10], quiz[:15])
+        quiz = spread(quiz[:15], seed=len(path.name))
+        deck = Deck(title or path.stem, str(path), merge(cards)[: max(want, 4) + 10], quiz)
         if not deck.cards:
+            unread += 1
             continue
-        outputs += [str(write_quiz(deck, folder)), str(write_csv(deck, folder))]
+        if deck.quiz:  # no empty quiz file when the reply had no questions
+            outputs.append(str(write_quiz(deck, folder)))
+        outputs.append(str(write_csv(deck, folder)))
         save_deck(manager.settings.data_dir, deck)
         decks.append(deck)
+    if not decks and unread:
+        job.status = "failed"
+        job.summary = "The flashcards didn't come out right. Try again in a moment."
+        job.data = {"title": "No flashcards this time", "body": job.summary}
+        return
     if not decks:
         job.status, job.summary = "failed", "I couldn't find anything to study in those files."
         job.data = {"title": "Nothing to make cards from", "body": job.summary}
@@ -328,13 +396,13 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     n_cards = sum(len(d.cards) for d in decks)
     n_quiz = sum(len(d.quiz) for d in decks)
     title = decks[0].title if len(decks) == 1 else f"{len(decks)} decks"
-    job.summary = (
-        f"Made {n_cards} flashcards and a {n_quiz}-question quiz on {title}, saved in {folder}. "
-        + " ".join(f"Q: {c.q} A: {c.a}" for c in decks[0].cards[:5])
+    quiz = f" and a {n_quiz}-question quiz" if n_quiz else ""
+    job.summary = f"Made {n_cards} flashcards{quiz} on {title}, saved in {folder}. " + " ".join(
+        f"Q: {c.q} A: {c.a}" for c in decks[0].cards[:5]
     )
     job.data = {
         "title": f"Flashcards: {title}"[:70],
-        "body": f'{n_cards} cards and a {n_quiz}-question quiz. Say "quiz me" and I\'ll ask you out loud.',
+        "body": f'{n_cards} cards{quiz}. Say "quiz me" and I\'ll ask you out loud.',
         "changes": [c.q for c in decks[0].cards[:5]],
         "card": {
             "title": title,

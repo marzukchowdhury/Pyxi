@@ -206,3 +206,28 @@ async def test_a_spoken_meeting_is_really_transcribed(tmp_path):
     text = " ".join(s.text for s in segments).lower()
     assert "beta" in text and "friday" in text and "release notes" in text
     assert segments[0].line().startswith("[00:00:0")
+
+
+# ---------------------------------------------------------------- found in the beta QA pass
+@pytest.mark.parametrize("data", [b"", b"ID3\x03\x00 not audio at all" * 40])
+async def test_a_damaged_recording_is_said_plainly(settings, tmp_path, monkeypatch, data):
+    monkeypatch.setattr(scribe, "out_dir", lambda: tmp_path / "Meetings")
+    bad = tmp_path / "call.mp3"
+    bad.write_bytes(data)
+    brain, rec, _ = connected(settings, [], llm=Script(json.dumps(NOTES)))
+    brain.stt = FakeSTT()
+    await specialists.handle(brain, "meeting_notes", {"file": str(bad)})
+    [ready] = await until(rec, "job_ready")
+    assert not ready["ok"] and ready["body"] == (
+        "I couldn't read the sound in call.mp3. It may be damaged, or have no audio."
+    )
+
+
+async def test_the_summary_has_no_double_full_stops(settings, tmp_path, monkeypatch):
+    monkeypatch.setattr(scribe, "out_dir", lambda: tmp_path / "Meetings")
+    brain, rec, _ = connected(settings, [], llm=Script(json.dumps(NOTES)))
+    brain.stt = FakeSTT()
+    await specialists.handle(brain, "meeting_notes", {"file": str(recording(tmp_path / "a.wav"))})
+    await until(rec, "job_ready")
+    job = next(iter(brain.jobs.jobs.values()))
+    assert "Decisions: Ship the beta on Friday." in job.summary and ".." not in job.summary

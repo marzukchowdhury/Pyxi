@@ -204,7 +204,7 @@ class SpatialMemory:
         terms = [
             t
             for t in "".join(ch if ch.isalnum() else " " for ch in query.lower()).split()
-            if len(t) > 2
+            if len(t) > 2 or not t.isascii()  # 李雷 is a whole name in two characters
         ][:12]
         where, params = ["1=1"], []
         if start is not None:

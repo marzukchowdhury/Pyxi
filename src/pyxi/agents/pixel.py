@@ -171,6 +171,8 @@ def resize_image(
     files = need(files, IMAGE_EXTS, "image", many=True)
     if not (width or height or percent):
         raise PixelError("How big? Give a width, a height or a percent.")
+    if any(v is not None and v < 0 for v in (width, height, percent)):
+        raise PixelError("The new size has to be bigger than zero.")
     outputs, sizes = [], []
     for p in files:
         img = open_image(p)
@@ -185,6 +187,8 @@ def resize_image(
         else:
             w, h = round(w0 * height / h0), height  # type: ignore[operator]
         w, h = max(1, w), max(1, h)
+        if w * h > 150_000_000:  # past ~12000 x 12000 Pillow runs out of memory
+            raise PixelError(f"{w}x{h} is too big for a picture. Try a smaller size.")
         small = img.resize((w, h), Image.LANCZOS)
         suffix = ".jpg" if p.suffix.lower() in (".heic", ".heif") else p.suffix
         target = unique_path(out or out_dir_for(p), f"{p.stem} ({w}x{h}){suffix}")
@@ -442,13 +446,21 @@ def _soffice_pdf(soffice: str, src: Path, target: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         from pyxi.agents.libreoffice import command
 
-        subprocess.run(
-            command(soffice, "--convert-to", "pdf", "--outdir", tmp, str(src)),
-            check=True,
-            capture_output=True,
-            timeout=180,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        try:
+            subprocess.run(
+                command(soffice, "--convert-to", "pdf", "--outdir", tmp, str(src)),
+                check=True,
+                capture_output=True,
+                timeout=180,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except subprocess.TimeoutExpired:
+            raise PixelError(f"LibreOffice took too long with {src.name}.") from None
+        except subprocess.CalledProcessError:  # never the command line on the card
+            raise PixelError(
+                f"LibreOffice couldn't convert {src.name}. If it's open in another app, close "
+                "it and try again."
+            ) from None
         made = Path(tmp) / f"{src.stem}.pdf"
         if not made.is_file():
             raise PixelError(f"LibreOffice couldn't convert {src.name}.")
@@ -485,6 +497,8 @@ def csv_to_excel(files: list[Path], out: Path | None = None) -> PixelResult:
     outputs = []
     for src in files:
         rows = read_csv(src)
+        if not any(any(c.strip() for c in r) for r in rows):
+            raise PixelError(f"{src.name} is empty, so there's nothing to put in a spreadsheet.")
         wb = Workbook()
         ws = wb.active
         ws.title = re.sub(r"[\[\]:*?/\\]", "_", src.stem)[:31] or "Sheet1"
@@ -531,10 +545,47 @@ def excel_to_csv(files: list[Path], sheet: str = "", out: Path | None = None) ->
 
 
 # ---------------------------------------------------------------------------- one entry point
+# Operations that work on one file: given several ("compress these three PDFs"), each is done
+# in turn instead of quietly doing only the first.
+ONE_FILE = {
+    "split_pdf",
+    "extract_pages",
+    "delete_pages",
+    "rotate_pages",
+    "reorder_pages",
+    "compress_pdf",
+    "add_page_numbers",
+    "add_watermark",
+    "protect_pdf",
+    "unlock_pdf",
+    "fill_form",
+    "extract_text",
+    "pdf_to_word",
+    "pdf_to_images",
+    "excel_to_csv",
+}
+
+
 def run(
     operation: str, files: list[str | Path], options: dict[str, Any] | None = None
 ) -> PixelResult:
     """Do one operation. Blocking (call it in a thread); raises PixelError for a bad request."""
+    if operation in ONE_FILE and len(files) > 1:
+        for f in files:  # a missing or wrong file is said before any work is done
+            p = Path(str(f)).expanduser()
+            if not p.is_file():
+                need([p], {p.suffix.lower()}, "file")
+        results = [_run_one(operation, [f], options) for f in files]
+        outputs = [o for r in results for o in r.outputs]
+        return PixelResult(
+            outputs, " ".join(r.summary for r in results), {"each": [r.details for r in results]}
+        )
+    return _run_one(operation, files, options)
+
+
+def _run_one(
+    operation: str, files: list[str | Path], options: dict[str, Any] | None = None
+) -> PixelResult:
     o = dict(options or {})
     paths = [Path(str(f)).expanduser() for f in files]
     out = Path(str(o["out_dir"])) if o.get("out_dir") else None

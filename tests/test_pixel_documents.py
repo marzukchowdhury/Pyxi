@@ -466,3 +466,63 @@ async def test_quill_job_routes_by_the_task(settings, tmp_path):
     assert "$1,450" in job.summary
     [ready] = rec.of("job_ready")
     assert ready["title"] == "Your draft is ready"  # not "Your document is fixed"
+
+
+# ---------------------------------------------------------------- found in the beta QA pass
+def test_several_pdfs_for_a_one_file_operation_are_each_done(tmp_path):
+    a = text_pdf(tmp_path / "a.pdf", ["one", "two"])
+    b = text_pdf(tmp_path / "b.pdf", ["three"])
+    r = pixel.run("add_page_numbers", [a, b])
+    assert [p.name for p in r.outputs] == ["a (numbered).pdf", "b (numbered).pdf"]
+    with pytest.raises(PixelError, match=r"can't find nope.pdf"):
+        pixel.run("compress_pdf", [a, tmp_path / "nope.pdf"])  # said before any work is done
+
+
+def test_page_ranges_quote_what_was_said(tmp_path):
+    src = text_pdf(tmp_path / "a.pdf", ["1", "2", "3"])
+    with pytest.raises(PixelError, match="'the last one'"):
+        pixel.run("extract_pages", [src], {"pages": "the last one"})
+    r = pixel.run("extract_pages", [src], {"pages": "first and last page"})
+    assert len(PdfReader(str(r.outputs[0])).pages) == 2
+
+
+def test_bad_sizes_folders_and_empty_csvs_say_so(tmp_path):
+    img = tmp_path / "p.png"
+    Image.new("RGB", (40, 30), "white").save(img)
+    with pytest.raises(PixelError, match="bigger than zero"):
+        pixel.run("resize_image", [img], {"percent": -5})
+    with pytest.raises(PixelError, match="too big"):
+        pixel.run("resize_image", [img], {"percent": 10_000_000})
+    with pytest.raises(PixelError, match="is a folder"):
+        pixel.run("compress_pdf", [tmp_path])
+    (tmp_path / "empty.csv").write_text("", encoding="utf-8")
+    with pytest.raises(PixelError, match="empty"):
+        pixel.run("csv_to_excel", [tmp_path / "empty.csv"])
+    assert not (tmp_path / "empty.xlsx").exists()
+
+
+def test_a_libreoffice_failure_is_said_plainly(tmp_path, monkeypatch):
+    import subprocess
+
+    src = tmp_path / "a.docx"
+    Document().save(src)
+
+    def fail(*a, **k):
+        raise subprocess.CalledProcessError(1, ["soffice.exe", "--convert-to", "pdf"])
+
+    monkeypatch.setattr(pixel, "libreoffice", lambda: "soffice.exe")
+    monkeypatch.setattr(subprocess, "run", fail)
+    with pytest.raises(PixelError) as err:
+        pixel.run("to_pdf", [src])
+    assert "couldn't convert a.docx" in str(err.value) and "soffice" not in str(err.value)
+
+
+@pytest.mark.skipif(not Path(r"C:\Windows\Fonts\msyh.ttc").is_file(), reason="no YaHei font")
+def test_chinese_names_and_watermarks_are_not_empty_boxes(tmp_path):
+    src = tmp_path / "contacts.csv"
+    src.write_text("Name,Email\nZoë Martín,zoe@example.com\n李雷,lilei@example.com\n", "utf-8")
+    [pdf] = pixel.run("to_pdf", [src]).outputs
+    text = PdfReader(str(pdf)).pages[0].extract_text()
+    assert "李雷" in text and "Zoë Martín" in text
+    [marked] = pixel.run("add_watermark", [pdf], {"text": "機密"}).outputs
+    assert "機密" in PdfReader(str(marked)).pages[0].extract_text()

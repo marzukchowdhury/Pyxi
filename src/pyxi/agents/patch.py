@@ -92,7 +92,9 @@ def locations(error: str, cwd: Path | None = None) -> list[Location]:
             if NOT_THEIRS.search(raw):
                 continue
             p = Path(raw)
-            if not p.is_absolute() and cwd is not None:
+            if not p.is_absolute():
+                if cwd is None:  # relative to Pyxi's own folder is never their script
+                    continue
                 p = cwd / p
             try:
                 p = p.resolve()
@@ -190,11 +192,19 @@ def make_diff(path: Path, old: str, new: str) -> str:
     )
 
 
+def decode(data: bytes) -> tuple[str, str]:
+    """A script's text and its encoding: UTF-8, or the Windows code page older editors save."""
+    try:
+        return data.decode("utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        return data.decode("cp1252", errors="replace"), "cp1252"
+
+
 def apply(fix: Fix) -> Path:
     """Write the fix, keeping a backup beside the file. Refuses if the file changed since."""
     path = Path(fix.path)
     data = path.read_bytes()
-    text = data.decode("utf-8")
+    text, encoding = decode(data)
     crlf = "\r\n" in text
     body = text.replace("\r\n", "\n")
     if body.count(fix.find) != 1:
@@ -204,9 +214,19 @@ def apply(fix: Fix) -> Path:
     while backup.exists():
         backup = path.with_name(f"{path.name}.bak{n}")
         n += 1
-    backup.write_bytes(data)
     new = fix.apply_to(body)
-    path.write_bytes((new.replace("\n", "\r\n") if crlf else new).encode("utf-8"))
+    try:
+        out = (new.replace("\n", "\r\n") if crlf else new).encode(encoding)
+    except UnicodeEncodeError:
+        raise RuntimeError(f"The fix has characters {path.name} can't hold.") from None
+    backup.write_bytes(data)
+    try:
+        path.write_bytes(out)
+    except OSError:  # read-only, or locked by an editor: no stray backup, and plain words
+        backup.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"I couldn't save {path.name}: it's read-only or open in another program."
+        ) from None
     return backup
 
 
@@ -226,7 +246,7 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         raise RuntimeError(f"I can't find {path.name} on this PC.")
     if path.suffix.lower() not in CODE or path.stat().st_size > MAX_BYTES:
         raise RuntimeError(f"{path.name} isn't a script I can safely edit.")
-    raw = path.read_bytes().decode("utf-8", errors="replace").replace("\r\n", "\n")
+    raw = decode(path.read_bytes())[0].replace("\r\n", "\n")
     numbered, _ = excerpt(raw, loc.line or 1)
     await manager._status(
         job, f"Reading {path.name}" + (f" around line {loc.line}" if loc.line else "")

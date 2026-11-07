@@ -177,3 +177,38 @@ async def test_unknown_files_answer_straight_away(settings, tmp_path):
         brain, "fix_code", {"error": "x", "file": str(pic)}
     )
     assert not brain.jobs.jobs
+
+
+# ---------------------------------------------------------------- found in the beta QA pass
+def test_a_read_only_script_is_said_plainly_and_leaves_no_backup(tmp_path):
+    import os
+    import stat
+
+    import pytest
+
+    src = tmp_path / "s.py"
+    src.write_text("x = 1 +\n", encoding="utf-8")
+    fix = patch.Fix(str(src), 1, "", "x = 1 +", "x = 1 + 1")
+    os.chmod(src, stat.S_IREAD)
+    try:
+        with pytest.raises(RuntimeError, match="read-only or open in another program"):
+            patch.apply(fix)
+    finally:
+        os.chmod(src, stat.S_IREAD | stat.S_IWRITE)
+    assert [p.name for p in tmp_path.iterdir()] == ["s.py"]
+
+
+def test_an_old_windows_encoded_script_keeps_its_encoding(tmp_path):
+    src = tmp_path / "café.py"
+    src.write_bytes('name = "café"\r\nprint(name + 1)\r\n'.encode("cp1252"))
+    backup = patch.apply(patch.Fix(str(src), 2, "", "print(name + 1)", "print(name + str(1))"))
+    assert src.read_bytes() == 'name = "café"\r\nprint(name + str(1))\r\n'.encode("cp1252")
+    assert backup.read_bytes().startswith(b'name = "caf\xe9"')
+
+
+def test_relative_paths_never_point_into_pyxis_own_folder(tmp_path, monkeypatch):
+    (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    err = 'Traceback (most recent call last):\n  File "main.py", line 1, in <module>\n'
+    assert patch.locations(err) == []
+    assert [Path(f.path).name for f in patch.locations(err, cwd=tmp_path)] == ["main.py"]

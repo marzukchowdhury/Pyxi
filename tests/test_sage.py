@@ -190,3 +190,50 @@ def test_a_reply_cut_off_part_way_keeps_the_whole_cards():
     raw = json.dumps(DECK)[:-200]  # ran out of tokens inside the quiz
     title, cards, quiz = sage.parse(raw)
     assert title == "The heart" and len(cards) == 5 and quiz == []
+
+
+# ---------------------------------------------------------------- found in the beta QA pass
+def test_slides_are_read_with_their_tables_and_speaker_notes(tmp_path):
+    from pptx.util import Inches
+
+    path = lecture(tmp_path / "heart.pptx")
+    prs = Presentation(str(path))
+    slide = prs.slides[1]
+    slide.notes_slide.notes_text_frame.text = "Exam tip: the left ventricle wall is thickest."
+    table = slide.shapes.add_table(2, 2, Inches(1), Inches(4), Inches(4), Inches(1)).table
+    for r, (a, b) in enumerate([("Chamber", "Job"), ("Left atrium", "Receives oxygenated blood")]):
+        table.cell(r, 0).text, table.cell(r, 1).text = a, b
+    prs.save(str(path))
+    text = sage.read_notes(path)
+    assert "[slide 2]\nFour chambers" in text
+    assert "Left atrium | Receives oxygenated blood" in text
+    assert "Exam tip: the left ventricle wall is thickest." in text
+
+
+def test_right_answers_are_spread_over_the_letters():
+    same = [sage.Question(f"Q{i}", ["w", "RIGHT", "x", "y"], 1) for i in range(8)]
+    spread = sage.spread(same)
+    assert all(q.choices[q.answer] == "RIGHT" for q in spread)
+    assert sorted(q.answer for q in spread) == [0, 0, 1, 1, 2, 2, 3, 3]
+
+
+async def test_no_quiz_or_no_cards_is_said_right(settings, tmp_path, monkeypatch):
+    monkeypatch.setattr(sage, "out_dir", lambda: tmp_path / "Study")
+    cards_only = json.dumps({**DECK, "quiz": []})
+    brain, rec, _ = connected(settings, [], llm=Script(cards_only, "Sorry, I can't."))
+    await specialists.handle(
+        brain, "make_flashcards", {"files": [str(lecture(tmp_path / "a.pptx"))]}
+    )
+    [ready] = await until(rec, "job_ready")
+    assert ready["body"].startswith("4 cards. Say") and "quiz" not in ready["body"].split(".")[0]
+    assert [Path(f).suffix for f in ready["files"]] == [".csv"]  # no empty quiz file
+    await specialists.handle(
+        brain, "make_flashcards", {"files": [str(lecture(tmp_path / "b.pptx"))]}
+    )
+    ready = (await until(rec, "job_ready", 2))[-1]
+    assert not ready["ok"] and "didn't come out right" in ready["body"]
+
+
+def test_decks_with_unicode_names_keep_their_own_files():
+    a, b = sage.Deck("x", r"C:\notes\生物学.pdf"), sage.Deck("x", r"C:\notes\化学.pdf")
+    assert a.slug != b.slug and a.slug != "deck"

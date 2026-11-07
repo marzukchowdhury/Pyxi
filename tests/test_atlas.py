@@ -384,3 +384,37 @@ def test_promotions_and_postcodes_are_not_bookings():
         "date": sent(11, 1),
     }
     assert atlas.read_flights(addr) == []
+
+
+# ---------------------------------------------------------------- found in the beta QA pass
+def test_a_date_heading_above_each_flight_belongs_to_that_flight():
+    mail = {
+        "from": "Air Canada <confirmation@aircanada.example>",
+        "subject": "Booking Confirmation - QZ8K2L",
+        "date": sent(10, 25),
+        "text": "Booking Reference: QZ8K2L\n\nThu, Nov 19\nAC 870   YVR 6:45 PM → CDG 1:55 PM +1\n"
+        "Seat 32A\n\nMon, Nov 30\nAC 871   CDG 3:40 PM → YVR 5:15 PM\n",
+    }
+    got = [(f.flight, f.depart, f.arrive) for f in atlas.read_flights(mail)]
+    assert got == [
+        ("AC 870", datetime(2026, 11, 19, 18, 45), datetime(2026, 11, 20, 13, 55)),
+        ("AC 871", datetime(2026, 11, 30, 15, 40), datetime(2026, 11, 30, 17, 15)),
+    ]
+    zrh = {"subject": "Your flight", "date": sent(11, 1), "text": "Booking reference: LX4T7Q\n"
+           "Flight LX 2017 on Wed 25 Nov 2026\nDepart: Paris (CDG) 07:15\nArrive: Málaga (AGP) 08:30"}  # fmt: skip
+    assert atlas.read_flights(zrh)[0].dest_city == "Málaga"
+
+
+async def test_a_trip_they_named_that_isnt_there_is_said(settings, monkeypatch):
+    monkeypatch.setattr(atlas, "clock", lambda: NOW)
+    flights, stays, _ = atlas.read_mail(await fetched(mails()))
+    found = atlas.trips(flights, stays, NOW)
+    assert atlas.pick(found, "Tokyo", strict=True) is None
+    assert atlas.pick(found, "Tokyo").destination == "Toronto"  # the next one, when not strict
+    assert atlas.pick(found, "my trip in december", strict=True).destination == "Lisbon"
+    assert atlas.pick(found, "Lisbon in December", strict=True).destination == "Lisbon"
+    assert atlas.pick(found, "when's my flight", strict=True).destination == "Toronto"
+    brain, rec, _ = connected(settings, mails())
+    await specialists.handle(brain, "travel", {"trip": "Tokyo"})
+    [ready] = await until(rec, "job_ready")
+    assert ready["ok"] and ready["body"].startswith("I didn't find a trip matching 'Tokyo'")

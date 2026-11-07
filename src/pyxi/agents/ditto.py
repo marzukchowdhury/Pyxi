@@ -470,6 +470,15 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     resp = await llm.complete(system=SYSTEM, messages=[Message.user(prompt)], max_tokens=3000)
     job.cost_usd = resp.usage.cost_usd
     plan = parse_plan(resp.text, items)
+    if plan is not None and plan.route == "files" and folder is not None:
+        # The card shows (and counts) only what will really happen: a name that clashes, or
+        # one outside the folder, is left out now, and "Initech" shows as "Initech.pdf".
+        safe = dict(check_files(plan, folder))
+        plan.items = [
+            {"item": it["item"], "to": safe[folder / it["item"]].relative_to(folder).as_posix()}
+            for it in plan.items
+            if folder / it["item"] in safe
+        ]
     if plan is None or not plan.items:
         job.status = "failed"
         job.summary = "I couldn't work out how to repeat that. Show me once more, a little slower?"

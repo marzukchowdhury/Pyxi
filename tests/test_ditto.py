@@ -242,3 +242,31 @@ async def test_nothing_to_watch_or_repeat(settings, tmp_path):
     assert "no folder" in await specialists.handle(
         brain, "watch_me", {"action": "start", "folder": "Nowhere Land"}
     )
+
+
+# ---------------------------------------------------------------- found in the beta QA pass
+async def test_the_card_counts_and_shows_only_what_will_really_happen(
+    settings, tmp_path, monkeypatch
+):
+    folder = invoices(tmp_path / "Invoices")
+    seen = iter([explorer("invoice-1182.pdf", "ListItem"), explorer("Name", "Edit", "x")])
+    monkeypatch.setattr(ditto, "read_focus", lambda: next(seen, None))
+    plan = {
+        **PLAN,
+        "items": [
+            *PLAN["items"],
+            {"item": "invoice-1182.pdf", "to": "2026-10-09 Contoso Ltd.pdf"},  # a clash
+            {"item": "notes.txt", "to": "../escape.txt"},  # outside the folder
+        ],
+    }
+    brain, rec, _ = connected(settings, [], llm=Script(json.dumps(plan)))
+    await specialists.handle(brain, "watch_me", {"action": "start", "folder": str(folder)})
+    brain.ditto_recorder._task.cancel()
+    for _ in range(2):
+        await brain.ditto_recorder.tick()
+    await specialists.handle(brain, "watch_me", {"action": "stop"})
+    [card] = await until(rec, "confirm")
+    assert card["action"] == "Do the other 3 the same way?"
+    assert "invoice-1185.pdf  ->  2026-10-21 Litware.pdf" in card["reason"]  # as it will be named
+    assert "escape" not in card["reason"] and "invoice-1182" not in card["reason"]
+    brain.hub.resolve(card["request_id"], False)

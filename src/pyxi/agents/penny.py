@@ -207,7 +207,11 @@ def month_range(said: str, now: datetime) -> tuple[datetime, datetime]:
     first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     if "last" in s or "previous" in s:
         first = (first - timedelta(days=1)).replace(day=1)
+    elif "next" in s:  # nothing is spent yet, but it's that month they asked about
+        first = (first + timedelta(days=32)).replace(day=1)
     elif m := re.search(r"(\d{4})-(\d{1,2})", s):
+        if not 1 <= int(m.group(2)) <= 12:
+            raise ValueError(f"There's no month {m.group(2)}. Say a month like October.")
         first = first.replace(year=int(m.group(1)), month=int(m.group(2)))
     else:
         for name, n in MONTHS.items():
@@ -351,7 +355,7 @@ def summarise(
         lines.append(line)
     end = (start + timedelta(days=32)).replace(day=1)
     ongoing = start <= now < end
-    bits = [f"{len(main)} receipts."]
+    bits = [f"{len(main)} receipt{'s' if len(main) != 1 else ''}."]
     top = [c for c in order if c != "Refunds"][:3]
     if top:
         bits.append(
@@ -517,6 +521,7 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         return
     # Their own spreadsheet or Google Sheet: Ledger adds the rows.
     ledger = manager.registry.get("ledger") or agent
+    asked = job.task  # the tray chip keeps saying what they asked, not Ledger's instructions
     job.task = (
         f"Add these {len(rs)} receipts from {label} as new rows at the end of the receipts table "
         "(columns Date, Merchant, Category, Amount, Currency; add a header row first if the "
@@ -530,7 +535,10 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         job.files, job.params["google"] = [str(local)], []
     else:
         job.files, job.params["google"] = [], [target]
-    await manager._run_documents(job, ledger)
+    try:
+        await manager._run_documents(job, ledger)
+    finally:
+        job.task = asked
     if job.status == "done":
         where = Path(job.outputs[0]).name if job.outputs else "your Google Sheet"
         job.data = {

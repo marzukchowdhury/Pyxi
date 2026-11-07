@@ -37,6 +37,17 @@ FILLER = {
     "can", "could", "please", "place", "there", "somewhere", "back",
 }  # fmt: skip
 BROWSERS = {"chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "arc"}
+APP_NAMES = {  # what they call the app, not its process ("winword")
+    "winword": "Word", "excel": "Excel", "powerpnt": "PowerPoint", "acrobat": "Adobe Acrobat",
+    "acrord32": "Adobe Acrobat", "olk": "Outlook", "outlook": "Outlook", "explorer": "File Explorer",
+    "code": "VS Code", "notepad": "Notepad", "figma": "Figma", "teams": "Teams", "ms-teams": "Teams",
+}  # fmt: skip
+APP_SUFFIX = re.compile(
+    r"\s+[-\u2013\u2014]\s+(Adobe Acrobat( Reader)?( \(\d+-bit\))?|Adobe Reader|Word|Excel|"
+    r"PowerPoint|Notepad|Visual Studio Code|File Explorer|Outlook|Figma|Paint|Photos|"
+    r"Microsoft (Word|Excel|PowerPoint|Outlook))$",
+    re.I,
+)
 
 
 @dataclass
@@ -62,7 +73,9 @@ class Hit:
 def words(query: str) -> list[str]:
     q = strip_when(query.lower())
     q = re.sub(r"\b(last|this|next) (week|month)\b", " ", q)
-    return [w for w in re.findall(r"[a-z0-9][a-z0-9'.-]*", q) if w not in FILLER and len(w) > 1][:8]
+    # Any letters, so "café", "Zürich" and 李雷 are words too
+    found = re.findall(r"[^\W_][\w'.-]*", q)
+    return [w for w in found if w not in FILLER and (len(w) > 1 or not w.isascii())][:8]
 
 
 def window(query: str, when: str, now: datetime) -> tuple[float, float] | None:
@@ -106,11 +119,14 @@ def short(title: str) -> str:
         title,
     )
     t = re.sub(r"\s+and \d+ more pages?$", "", t)
-    return t.strip()[:90]
+    t = re.sub(APP_SUFFIX, "", t)  # "Quote.pdf - Adobe Acrobat" is the file's name
+    return re.sub(r"\s+[\u2013\u2014]\s+", " - ", t).strip()[:90]  # no dashes in what they read
 
 
 # ------------------------------------------------------------------------------ the three places
 def from_screen(spatial: Any, terms: list[str], span: tuple[float, float] | None) -> list[Hit]:
+    if not any(len(t) > 2 or not t.isascii() for t in terms):
+        return []  # nothing it can search on: every recent screen would come back
     query = " ".join(terms)
     found = spatial.find_snapshots(
         query, start=span[0] if span else None, end=span[1] if span else None, k=6
@@ -121,7 +137,8 @@ def from_screen(spatial: Any, terms: list[str], span: tuple[float, float] | None
     for s in found:
         app = str(s.get("app") or "")
         title = short(str(s.get("title") or ""))
-        what = "your browser" if app.lower().removesuffix(".exe") in BROWSERS else app or "a window"
+        exe = app.lower().removesuffix(".exe")
+        what = "your browser" if exe in BROWSERS else APP_NAMES.get(exe, app) or "a window"
         score = 0.8 + overlap(terms, title) + (0.3 if span and span[0] <= s["ts"] <= span[1] else 0)
         hits.append(
             Hit(
@@ -163,9 +180,10 @@ def from_mail(
             if terms and overlap(terms, f"{text} {url}") >= 0.5 and str(url).startswith("http"):
                 inside = str(url)
                 break
-        score = (
-            overlap(terms, subject) + 0.5 * overlap(terms, str(m.get("text") or "")[:2000]) + 0.3
-        )
+        about = overlap(terms, subject) + 0.5 * overlap(terms, str(m.get("text") or "")[:2000])
+        if not about and not inside and not overlap(terms, sender):
+            continue  # in the right week, but not about it
+        score = about + 0.3
         if span and span[0] <= ts <= span[1]:
             score += 0.3
         where = f'In your mail: "{subject[:80]}" from {sender or "someone"}'

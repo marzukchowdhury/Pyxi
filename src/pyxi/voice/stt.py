@@ -16,14 +16,16 @@ import io
 import logging
 import re
 import time
+from pathlib import Path
 
 from pyxi.config import VoiceConfig
 
 log = logging.getLogger(__name__)
 
 
-def decode_audio(data: bytes, rate: int = 16000):
-    """webm/opus (or any container FFmpeg reads) -> 16 kHz mono float32 samples.
+def decode_audio(data: bytes | str | Path, rate: int = 16000):
+    """webm/opus (or any container FFmpeg reads), as bytes or a file's path -> 16 kHz mono
+    float32 samples.
 
     Decoded here with PyAV's current API rather than inside faster-whisper, whose decoder
     breaks on newer PyAV releases (they removed an argument it passes).
@@ -32,7 +34,8 @@ def decode_audio(data: bytes, rate: int = 16000):
     import numpy as np
 
     chunks = []
-    with av.open(io.BytesIO(data), mode="r") as container:
+    source = io.BytesIO(data) if isinstance(data, bytes | bytearray) else str(data)
+    with av.open(source, mode="r") as container:
         stream = next(s for s in container.streams if s.type == "audio")
         resampler = av.AudioResampler(format="s16", layout="mono", rate=rate)
         for frame in container.decode(stream):

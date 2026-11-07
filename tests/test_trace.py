@@ -179,3 +179,34 @@ async def test_no_words_to_look_for(settings, q):
     await specialists.handle(brain, "find_again", {"query": q})
     [ready] = await until(rec, "job_ready")
     assert ready["title"] == "What should I look for?"
+
+
+# ---------------------------------------------------------------- found in the beta QA pass
+def test_words_in_any_language_and_titles_without_dashes():
+    assert trace.words("where did I see 李雷 合同?") == ["李雷", "合同"]
+    assert trace.words("that café in Zürich") == ["café", "zürich"]
+    assert trace.short("Quote Q-2291.pdf - Adobe Acrobat") == "Quote Q-2291.pdf"
+    assert trace.short("Menu – Café Olé - Google Chrome") == "Menu - Café Olé"
+
+
+async def test_a_chinese_name_finds_the_screen_and_not_every_screen(
+    settings, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(trace, "clock", lambda: NOW)
+    brain, rec, _ = connected(settings, [])
+    history(brain.spatial)
+    brain.spatial.record(
+        screen("李雷 合同.docx - Word", "winword.exe", ["李雷 合同"], at(11, 5, 9))
+    )
+    await specialists.handle(brain, "find_again", {"query": "李雷 合同"})
+    [ready] = await until(rec, "job_ready")
+    assert ready["title"] == "Found it: 李雷 合同.docx"
+    assert ready["body"].startswith('On screen in Word: "李雷 合同.docx"')
+    assert trace.from_screen(brain.spatial, ["ab"], None) == []  # too short to search on
+
+
+def test_mail_in_the_right_week_but_not_about_it_is_left_out():
+    span = (at(11, 5, 0), at(11, 7, 0))
+    news = {"from": "News <n@shop.example>", "subject": "Weekly deals", "text": "Big savings",
+            "date": datetime(2026, 11, 6, 7, 0, tzinfo=TZ), "id": "m9"}  # fmt: skip
+    assert trace.from_mail([news], ["tax"], span) == []

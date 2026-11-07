@@ -254,13 +254,13 @@ def add_page_numbers(
 def add_watermark(
     files: list[Path], text: str, opacity: float = 0.15, angle: float = 45, out: Path | None = None
 ) -> PixelResult:
-    from pyxi.agents.pixel_render import fonts
+    from pyxi.agents.pixel_render import font_for, fonts
 
     (src,) = need(files, {".pdf"}, "PDF")
     text = (text or "").strip()
     if not text:
         raise PixelError("What should the watermark say? (e.g. DRAFT, CONFIDENTIAL)")
-    bold = fonts()[1]
+    bold = font_for(text, fonts()[1])  # 機密 needs a Chinese font, not empty boxes
     alpha = max(0.05, min(float(opacity or 0.15), 0.6))
 
     def draw(c, w, h, i, total) -> None:

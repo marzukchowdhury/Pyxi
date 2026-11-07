@@ -87,15 +87,25 @@ def describe_failure(exc: BaseException) -> str:
     """What went wrong, the way you'd tell a person (the notch shows this, never a stack)."""
     text = str(exc)
     low = text.lower()
+    if type(exc).__name__ in ("PixelError", "LedgerError"):
+        # Already said plainly, and it may name a file ("Budget 2026.xlsx is locked"), which
+        # mustn't be mistaken for the spending limit below.
+        return text.strip()[:300] or "That didn't work."
     if "browsertype.launch" in low or "executable doesn't exist" in low:
         return "I couldn't open a browser window on this PC. Restarting Pyxi usually fixes it."
+    if re.search(r"\b401\b|authentication|invalid (x-)?api.?key", low):
+        return "The AI model turned the key down. Check the model settings, then try again."
+    if re.search(r"\b429\b|rate.?limit|overloaded", low):
+        return "The AI model is busy right now. Try again in a minute."
     if "net::err_name_not_resolved" in low or "net::err_internet" in low:
         return "I couldn't reach that site. Is the internet connection up?"
     if "net::err" in low:
         return "That site wouldn't load."
     if "timeout" in low:
         return "The site took too long to respond."
-    if "budget" in low or "max_cost" in low:
+    if type(exc).__name__ == "BudgetExceededError" or re.search(
+        r"budget[ _](exceeded|exhausted|reached)|cost limit|max_cost", low
+    ):
         return "I stopped before going over the spending limit for this job."
     first = text.strip().splitlines()[0] if text.strip() else type(exc).__name__
     return first[:160]
@@ -413,7 +423,9 @@ class JobManager:
             messages=[Message.user(prompt)],
             max_tokens=4000,
         )
-        text = response.text.strip()
+        # No em dashes in what they send, even when the model slips one in (a spaced en dash
+        # is the same thing; "9-5" style ranges are left alone).
+        text = re.sub(r"\s*—\s*|\s+–\s+", ", ", response.text).strip()
         if not text:
             raise RuntimeError("The writer returned nothing.")
         out_dir = self.settings.data_dir / "outputs"

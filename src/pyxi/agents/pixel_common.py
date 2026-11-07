@@ -73,8 +73,16 @@ def need(paths: list[Path], exts: set[str], what: str, *, many: bool = False) ->
     if not paths:
         raise PixelError(f"Which {what}? I need the file's path.")
     for p in paths:
+        if p.is_dir():
+            raise PixelError(f"{p.name} is a folder. Which file in it?")
         if not p.is_file():
             raise PixelError(f"I can't find {p.name} at {p.parent}.")
+        try:
+            p.open("rb").close()
+        except PermissionError:  # open in Word or Excel with a lock, or not theirs to read
+            raise PixelError(
+                f"{p.name} is locked by another app. Close it there and try again."
+            ) from None
         if p.suffix.lower() not in exts:
             an = "an" if what[:1].lower() in "aeiou" else "a"
             raise PixelError(f"{p.name} isn't {an} {what}.")
@@ -94,15 +102,17 @@ def size_text(n: float) -> str:
 def parse_ranges(spec: str, pages: int) -> list[tuple[int, int]]:
     """'1-3, 5, 7-' -> [(1, 3), (5, 5), (7, pages)], 1-based and inclusive. 'last' works too."""
     out = []
-    spec = re.sub(r"(?i)\blast\b", str(pages), str(spec))
-    spec = re.sub(r"(?i)\b(pages?|and)\b", ",", spec)
+    said = str(spec).strip()
+    spec = re.sub(r"(?i)\blast\b", str(pages), said)
+    spec = re.sub(r"(?i)\bfirst\b", "1", spec)
+    spec = re.sub(r"(?i)\b(pages?|and|the)\b", ",", spec)
     for part in re.split(r"[,;]\s*", spec.strip()):
         part = part.strip()
         if not part:
             continue
         m = re.fullmatch(r"(\d*)\s*(?:-|–|to)\s*(\d*)|(\d+)", part)
-        if not m:
-            raise PixelError(f"I don't understand the page range {part!r}.")
+        if not m:  # quote what they said, not the half-rewritten spec ("the 5 one")
+            raise PixelError(f"I don't understand the pages {said!r}. Try something like 1-3, 5.")
         if m.group(3):
             a = b = int(m.group(3))
         else:
