@@ -352,3 +352,23 @@ async def test_a_scan_job_says_it_is_getting_the_reader(settings, tmp_path, monk
     await brain.jobs.wait_all()
     said = [e["data"]["message"] for e in rec.of("job_event")]
     assert "Getting the text reader first (about 75 MB, once)" in said
+
+
+def test_an_old_file_leaves_no_folder_in_temp(tmp_path, monkeypatch):
+    import tempfile
+
+    (tmp_path / "old.doc").write_bytes(b"\xd0\xcf old")
+    temp = tmp_path / "Temp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setattr(pixel, "libreoffice", lambda: "soffice.exe")
+
+    def fake_run(cmd, **kw):
+        word(Path(cmd[cmd.index("--outdir") + 1]) / "old.docx")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    doc = open_local(tmp_path / "old.doc")
+    assert list(temp.iterdir()) == []  # read into memory, the converted copy is gone
+    doc.apply({"op": "add_heading", "text": "Still editable", "level": 2})
+    assert Document(str(doc.save())).paragraphs[-1].text == "Still editable"

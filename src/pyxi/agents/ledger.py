@@ -762,6 +762,7 @@ def open_local(path: Path) -> Workbook | WordDoc | Deck:
 def _open_old(path: Path) -> Workbook | WordDoc | Deck:
     """An old .doc/.xls/.ppt: LibreOffice turns a copy into the modern format, Ledger edits that,
     and the result is saved beside the original as "<name> (edited by Pyxi).docx" and so on."""
+    import shutil
     import subprocess
     import tempfile
 
@@ -789,10 +790,13 @@ def _open_old(path: Path) -> Workbook | WordDoc | Deck:
             f"LibreOffice couldn't open {path.name}. If it's open in another app, close it and "
             "try again."
         ) from None
-    made = tmp / f"{path.stem}{new_ext}"
-    if not made.is_file():
-        raise LedgerError(f"LibreOffice couldn't open {path.name}.")
-    target = {".xlsx": Workbook, ".docx": WordDoc, ".pptx": Deck}[new_ext](made)
+    try:
+        made = tmp / f"{path.stem}{new_ext}"
+        if not made.is_file():
+            raise LedgerError(f"LibreOffice couldn't open {path.name}.")
+        target = {".xlsx": Workbook, ".docx": WordDoc, ".pptx": Deck}[new_ext](made)
+    finally:  # the copy is read into memory: no folder left behind in Temp for every file
+        shutil.rmtree(tmp, ignore_errors=True)
     target.path = path.with_suffix(new_ext)  # saves beside the original, in the new format
     return target
 
