@@ -755,14 +755,14 @@ class GoogleConnector(Connector):
 
         gist = re.sub(r"\s+", " ", str(args.get("gist") or "")).strip() or _first_line(body)
         attached = f"\nAttached: {', '.join(f'{p.name} (from {p.parent})' for p in files)}" if files else ""
+        # The card shows the whole email exactly as it's sent: every address, the subject, and
+        # the full body (the card scrolls). The Gist line is Pyxi's own summary, not sent.
         return Outgoing(
             action=f"Send an email to {shown}",
-            preview=(
-                f"To: {shown}\nSubject: {subject}\nGist: {gist[:160]}{replying}{attached}\n\n"
-                f"{body[:600]}{'...' if len(body) > 600 else ''}"
-            ),
+            preview=f"To: {shown}\nSubject: {subject}\nGist: {gist[:160]}{replying}{attached}\n\n{body}",
             run=send,
             recipients=[a for _, a in names],
+            payload=body,
         )
 
     # ------------------------------------------------------------------ calendar
@@ -888,12 +888,21 @@ class GoogleConnector(Connector):
 
         if not guests:  # only your own calendar: nothing leaves, no approval needed
             return await create()
+        # Everything Google sends the guests: who, what, when, where, and the description.
+        details = [f"Guests: {', '.join(guests)}", f"Title: {event['summary']}", f"When: {when}"]
+        if event.get("location"):
+            details.append(f"Where: {event['location']}")
+        if meet:
+            details.append("With a Google Meet link")
+        if event.get("description"):
+            details.append(f"\n{event['description']}")
         return Outgoing(
             action=f"Invite {', '.join(guests)} to '{event['summary']}'",
-            preview=f"{when}" + (" with a Google Meet link" if meet else ""),
+            preview="\n".join(details),
             run=create,
             kind="invite",
             recipients=guests,
+            payload=str(event.get("description") or ""),
         )
 
     # ------------------------------------------------------------------ docs

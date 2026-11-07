@@ -600,7 +600,7 @@ async def after_fix(brain: Brain, job: Job) -> bool:
         agent=job.agent_name,
         action=f"Apply this fix to {name}?",
         reason=(f"{fix.why}\n\n" if fix.why else "")
-        + fix.diff[:1800]
+        + fix.diff  # the whole change, exactly as it will be written (the card scrolls)
         + "\n\nA backup of the file is kept beside it.",
     )
     if not ok:

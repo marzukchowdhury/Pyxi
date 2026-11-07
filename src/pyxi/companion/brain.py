@@ -520,6 +520,7 @@ class Brain:
                 f"Scout opens a browser you can watch and uses {booking.shared_labels(profile)} on "
                 "that site. It asks you before the final booking click, and never pays: at the "
                 "payment page it hands the window to you."
+                + (f"\nWebsite: {url}" if url.startswith(("http://", "https://")) else "")
             ),
         )
         if not allowed:
@@ -1039,7 +1040,9 @@ class Brain:
             action=f"Open the cancel page for {sub.service}",
             reason=(
                 f"{sub.service}: {sub.price()}, last charged {sub.last_charged}.\n"
-                f'From: "{sub.email_subject}"\nOpens: {where}.\n\n'
+                f'From: "{sub.email_subject}"\nOpens: {where}.\n'
+                + (f"Link: {sub.cancel_url}\n" if sub.cancel_url else "")
+                + "\n"
                 "Pyxi only opens the page. You press Cancel yourself; nothing is cancelled for you."
             ),
         )

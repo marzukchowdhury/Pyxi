@@ -28,6 +28,9 @@ class Outgoing:
     agent: str = "Pyxi"
     kind: str = "message"  # "invite" (a calendar invite) or "message" (email, post, chat)
     recipients: list[str] = field(default_factory=list)
+    # The exact text that goes out (an email's body, a post). The card shows it in full, byte for
+    # byte, inside ``preview``: nothing is cut on the card that would go out anyway.
+    payload: str = ""
 
 
 Result = str | Outgoing

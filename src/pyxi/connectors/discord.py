@@ -103,15 +103,18 @@ class DiscordConnector(Connector):
         text = str(args.get("text", "")).strip()
         if chan is None or not text:
             return "discord_send: which channel, and what should it say?"
+        if len(text) > 2000:  # never cut what the user approved: Discord's limit, said plainly
+            return f"discord_send: that's {len(text)} characters; Discord takes 2000. Make it shorter."
 
         async def post() -> str:
-            await self._api(
-                "POST", f"/channels/{chan['id']}/messages", json={"content": text[:2000]}
-            )
+            await self._api("POST", f"/channels/{chan['id']}/messages", json={"content": text})
             return f"Posted in #{chan['name']}."
 
         return Outgoing(
-            action=f"Post in #{chan['name']} ({chan['server']})", preview=text[:800], run=post
+            action=f"Post in #{chan['name']} ({chan['server']})",
+            preview=text,
+            run=post,
+            payload=text,
         )
 
     def tools(self) -> list[Tool]:

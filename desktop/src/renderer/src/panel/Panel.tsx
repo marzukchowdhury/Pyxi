@@ -48,6 +48,7 @@ export function Panel() {
       {requests.map((r) => (
         <div key={r.request_id} className="approval">
           <b>{r.agent}</b> {r.kind === "confirm" ? "wants to" : "asks"}: {r.text}
+          {r.detail && <p className="approval-detail">{r.detail}</p>}
           <div>
             <button className="primary" onClick={trusted(() => answer(r.request_id, r.kind === "confirm" ? true : prompt(r.text) ?? ""))}>{r.kind === "confirm" ? "Allow" : "Answer"}</button>
             <button onClick={trusted(() => answer(r.request_id, r.kind === "confirm" ? false : null))}>{r.kind === "confirm" ? "Don't" : "Skip"}</button>

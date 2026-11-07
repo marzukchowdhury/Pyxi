@@ -43,6 +43,7 @@ button { cursor: pointer; }
 .demo-banner { margin: 0 14px 10px; padding: 9px 12px; border-radius: 10px; background: rgba(255,213,158,.06); border: 1px solid rgba(255,213,158,.2); font-size: 12px; line-height: 1.45; color: var(--ink-2); }
 .approval { margin: 0 14px 10px; padding: 12px; border-radius: 12px; background: rgba(255,213,158,.06); border: 1px solid rgba(255,213,158,.3); font-size: 13px; display: flex; flex-direction: column; gap: 10px; animation: rise .3s var(--spring); }
 .approval div { display: flex; gap: 6px; }
+.approval-detail { margin: 0; max-height: 220px; overflow-y: auto; white-space: pre-wrap; font-size: 12.5px; line-height: 1.5; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.035); border: 1px solid var(--hair); user-select: text; }
 .approval button { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--hair-hi); background: var(--surface); }
 
 /* segmented navigation */

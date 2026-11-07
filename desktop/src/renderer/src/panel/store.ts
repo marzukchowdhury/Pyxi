@@ -16,6 +16,8 @@ interface Request {
   kind: "confirm" | "ask";
   agent: string;
   text: string;
+  /** For a card: exactly what will happen, in full (shown in a scrolling box). */
+  detail?: string;
 }
 
 interface PanelState {
@@ -111,7 +113,7 @@ brain.on((e: BrainEvent) => {
       }
       break;
     case "confirm":
-      usePanel.setState((s) => ({ requests: [...s.requests, { request_id: e.request_id, kind: "confirm", agent: e.agent, text: `${e.action}: ${e.reason}` }] }));
+      usePanel.setState((s) => ({ requests: [...s.requests, { request_id: e.request_id, kind: "confirm", agent: e.agent, text: e.action, detail: e.reason }] }));
       break;
     case "ask":
       usePanel.setState((s) => ({ requests: [...s.requests, { request_id: e.request_id, kind: "ask", agent: e.agent, text: e.question }] }));

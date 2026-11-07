@@ -153,6 +153,8 @@ class LinkedInConnector(Connector):
         text = str(args.get("text", "")).strip()
         if not saved or not text:
             return "linkedin_post: nothing to post, or LinkedIn isn't connected."
+        if len(text) > 3000:  # never cut what the user approved: LinkedIn's limit, said plainly
+            return f"linkedin_post: that's {len(text)} characters; LinkedIn takes 3000. Make it shorter."
         visibility = "CONNECTIONS" if args.get("connections_only") else "PUBLIC"
 
         async def publish() -> str:
@@ -161,7 +163,7 @@ class LinkedInConnector(Connector):
                 "lifecycleState": "PUBLISHED",
                 "specificContent": {
                     "com.linkedin.ugc.ShareContent": {
-                        "shareCommentary": {"text": text[:3000]},
+                        "shareCommentary": {"text": text},
                         "shareMediaCategory": "NONE",
                     }
                 },
@@ -181,7 +183,7 @@ class LinkedInConnector(Connector):
             return "Posted on LinkedIn."
 
         return Outgoing(
-            action=f"Post on LinkedIn ({visibility.lower()})", preview=text[:900], run=publish
+            action=f"Post on LinkedIn ({visibility.lower()})", preview=text, run=publish, payload=text
         )
 
     def tools(self) -> list[Tool]:
