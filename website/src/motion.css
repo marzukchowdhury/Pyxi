@@ -149,15 +149,13 @@
 .layers-stage.has-3d .lyr-world { display: none; }
 .how3d {
   position: absolute;
-  left: -14%;
+  left: -2%;
   top: -16%;
-  width: 128%;
+  width: 112%;
   height: 132%;
   display: block;
-  mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 40%, transparent 96%);
-  -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 40%, transparent 96%);
   pointer-events: none;
 }
 @media (max-width: 999px) {
-  .how3d { left: -20%; width: 140%; top: -22%; height: 144%; }
+  .how3d { left: -6%; width: 112%; top: -6%; height: 112%; }
 }
