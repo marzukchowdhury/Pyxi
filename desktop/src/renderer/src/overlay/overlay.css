@@ -557,6 +557,10 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .tray-chip.failed .tray-dot { background: #ff9ea0; box-shadow: none; }
 .tray-view { display: grid; gap: 6px; } .tray-view img { width: 100%; border-radius: 10px; border: 1px solid var(--hair); }
 .tray-view p { margin: 0; font-size: 12px; color: var(--ink-2); padding: 4px; }
+.tray-card { display: grid; gap: 6px; max-height: 320px; overflow-y: auto; padding: 4px; font-size: 12px; color: var(--ink-2); }
+.tray-card > b { color: var(--ink); font-size: 12.5px; font-weight: 600; }
+.tray-card h4 { margin: 2px 0 1px; font-size: 11px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em; }
+.tray-card ul { margin: 0; padding-left: 14px; display: grid; gap: 2px; line-height: 1.35; }
 .tray-stop { justify-self: end; height: 26px; padding: 0 12px; border-radius: 8px; border: 1px solid rgba(255,158,160,.4); background: rgba(255,158,160,.1); color: #ffc9ca; font-size: 12px; }
 
 /* ============================================================ cheaper elsewhere */

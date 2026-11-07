@@ -39,7 +39,7 @@ from pydantic import ValidationError
 from pyxi import booking, hands, media, tidy, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
-from pyxi.companion import filework, paperwork, pricecheck, prompts
+from pyxi.companion import filework, paperwork, pricecheck, prompts, specialists
 from pyxi.companion.actions import app_target, open_app, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
@@ -2155,6 +2155,8 @@ class Brain:
             )
             await self.hub.emit("agents", agents=[a.model_dump() for a in self.registry.all()])
             return f"Created {agent.name} ({agent.role})."
+        if name in specialists.TOOLS:  # Atlas and the other specialists: companion/specialists.py
+            return await specialists.handle(self, name, args)
         if name in FILE_TOOLS:  # Pixel, Ledger and file search: companion/filework.py
             return await filework.handle(self, name, args)
         if name in PAPER_TOOLS:  # forms, flight check-in, showing a bill: companion/paperwork.py
@@ -2496,6 +2498,9 @@ class Brain:
             title = f"{job.agent_name} couldn't finish"
             body = (job.summary or job.status)[:220]
             actions = []
+        if job.role in specialists.ROLES and data.get("title"):  # a specialist's own card
+            title, body = str(data["title"])[:70], str(data.get("body") or body)[:300]
+            actions = [str(a) for a in data.get("actions") or actions]
         await self.hub.emit(
             "job_ready",
             job_id=job.id,

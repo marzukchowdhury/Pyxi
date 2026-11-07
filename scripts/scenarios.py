@@ -31,6 +31,9 @@ from pyxi.config import PyxiSettings
 from pyxi.hub import Hub
 from pyxi.screen.context import ScreenContext, UIElement, WindowInfo
 from pyxi.screen.ocr import TextLine
+from specialist_scenarios import SCENARIOS as SPECIALIST_SCENARIOS
+from specialist_scenarios import install as specialist_fakes
+from specialist_scenarios import problems as specialist_problems
 
 DB = ".pyxi/pyxi.db"
 MAPS_SCREEN = "turn_7252307e"  # Google Maps showing coffee places open now
@@ -347,6 +350,7 @@ SCENARIOS = [
     ('joke', 'turn_49b75541', 'Tell me a quick joke.', 'chat'),
     ('who are you', 'turn_49b75541', 'Who are you and what can you do?', 'nohands'),
 ]
+SCENARIOS += SPECIALIST_SCENARIOS  # Atlas and the other specialists: specialist_scenarios.py
 
 
 # What each sample bill must get right: the amount owed, and the thing that looks wrong.
@@ -573,6 +577,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         else _invoice_read(p, *a, **k)
     )
     brain.connectors.google.connected = lambda: True  # type: ignore[method-assign]
+    specialist_fakes(brain, background)
     started = time.monotonic()
     await brain.turn(question)
     await asyncio.sleep(0.3)
@@ -786,6 +791,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append("didn't look in the mail for the booking")
     if expect in ("fill_form", "checkin", "checkin_mail") and len(re.findall(r"[.!?](\s|$)", said)) > 2:
         problems.append(f"talks too much ({len(said)} chars)")
+    problems += specialist_problems(expect, tools, said, background)
     from pyxi.companion.brain import drop_false_promises
 
     # Background work is quiet: a short "On it", not a running commentary.

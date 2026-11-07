@@ -985,3 +985,10 @@ INFO_TOOLS = {
 from pyxi.companion.pricecheck import TOOL as CHECK_PRICES  # noqa: E402
 
 COMPANION_TOOLS.append(CHECK_PRICES)
+
+# Specialist teammates: Atlas (travel), ... (companion/specialists.py).
+from pyxi.companion.specialists import INFO as SPECIALIST_INFO  # noqa: E402
+from pyxi.companion.specialists import SPECS as SPECIALIST_TOOLS  # noqa: E402
+
+COMPANION_TOOLS += SPECIALIST_TOOLS
+INFO_TOOLS |= SPECIALIST_INFO

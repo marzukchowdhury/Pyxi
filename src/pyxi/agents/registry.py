@@ -8,6 +8,7 @@ Each agent has a *role* that decides what it can do:
 * ``explainer`` turns a topic into a 3D scene.
 * ``files`` converts files: PDFs, images, Word to PDF, CSV and Excel (Pixel).
 * ``documents`` edits Excel, Word and PowerPoint files and Google Sheets and Docs (Ledger).
+* ``travel`` builds trip itineraries from the confirmations in the user's mail (Atlas).
 
 Agents keep their own long-term memory (Otto's FTS5 memory store, scoped per agent), and
 any agent can hand its result to another (Scout researches, then Quill writes).
@@ -26,7 +27,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Role = Literal["companion", "browser", "writer", "explainer", "files", "documents"]
+Role = Literal[
+    "companion", "browser", "writer", "explainer", "files", "documents", "travel"
+]
 
 
 class AgentProfile(BaseModel):
@@ -119,6 +122,18 @@ DEFAULT_ROSTER = [
         "real formulas instead of pasted numbers, and keeps your original safe.",
         skills=["Excel formulas & totals", "pivot summaries", "Word & PowerPoint", "Google Sheets & Docs"],
         max_cost_usd=0.3,
+    ),
+    AgentProfile(
+        id="atlas",
+        name="Atlas",
+        role="travel",
+        voice="am_fenrir",
+        color="#ffb27a",
+        builtin=True,
+        persona="Calm, organised travel planner. Reads your flight and hotel confirmations, lays "
+        "the trip out day by day, and reminds you before you need to leave.",
+        skills=["itineraries from your mail", "flight reminders", "hotel addresses", "check-in"],
+        max_cost_usd=0.05,
     ),
 ]
 

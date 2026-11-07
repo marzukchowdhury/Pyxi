@@ -11,6 +11,8 @@ import { Interactive } from "./Interactive";
 import { useOverlay } from "./store";
 
 const COLORS: Record<string, string> = { scout: "#7cc7ff", quill: "#f0a9c9", sketch: "#86e0c3", pyxi: "#ffc861" };
+/** The specialists' colours (agents/registry.py). */
+Object.assign(COLORS, { atlas: "#ffb27a" });
 
 export function Team() {
   const jobs = useOverlay((s) => s.jobs);
@@ -67,7 +69,9 @@ export function Team() {
       })}
       {shown && (
         <div className="tray-view">
-          {frames[shown.id] ? (
+          {shown.status === "done" && card(shown.data) ? (
+            <SpecialistCard card={card(shown.data)!} />
+          ) : frames[shown.id] ? (
             <img src={`data:image/jpeg;base64,${frames[shown.id]}`} alt={`What ${shown.agent_name} sees`} />
           ) : (
             <p>
@@ -116,4 +120,26 @@ function boardingPass(data: unknown): string | null {
 function bestLink(data: unknown): { url: string; store: string } | null {
   const best = (data as { best?: { url?: string; store?: string } } | null)?.best;
   return best?.url ? { url: best.url, store: best.store ?? "the store" } : null;
+}
+
+type Card = { title: string; sections: { heading: string; lines: string[] }[] };
+
+/** A specialist's detail card (an itinerary day by day, ...), from job.data.card. */
+function card(data: unknown): Card | null {
+  const c = (data as { card?: Card } | null)?.card;
+  return c && Array.isArray(c.sections) && c.sections.length ? c : null;
+}
+
+function SpecialistCard({ card }: { card: Card }) {
+  return (
+    <div className="tray-card">
+      <b>{card.title}</b>
+      {card.sections.slice(0, 12).map((s) => (
+        <section key={s.heading}>
+          <h4>{s.heading}</h4>
+          <ul>{s.lines.slice(0, 8).map((l) => <li key={l}>{l}</li>)}</ul>
+        </section>
+      ))}
+    </div>
+  );
 }

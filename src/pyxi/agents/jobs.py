@@ -7,6 +7,7 @@
 * Files agents (Pixel) convert files: PDFs, images, Word to PDF, CSV and Excel. No model needed.
 * Documents agents (Ledger) edit Excel, Word and PowerPoint files, and Google Sheets and Docs.
   Neither opens an app window or touches the user's mouse.
+* Specialists (Atlas for travel, ...) each have a runner module, see ``agents/specialists.py``.
 
 ``then`` chains a handoff: when a job finishes, its result becomes the context of the next
 agent's job. That's how "Scout, research Lumen, then Quill, draft a note to their CEO" works.
@@ -265,6 +266,10 @@ class JobManager:
                 await self._run_files(job, agent)
             elif agent.role == "documents":
                 await self._run_documents(job, agent)
+            else:  # Atlas and the other specialists: agents/specialists.py
+                from pyxi.agents.specialists import run as run_specialist
+
+                await run_specialist(self, job, agent)
         except asyncio.CancelledError:
             job.status, job.summary = "stopped", job.summary or "Stopped."
         except Exception as exc:
