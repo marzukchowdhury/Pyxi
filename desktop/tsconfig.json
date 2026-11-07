@@ -15,5 +15,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "electron.vite.config.ts", "vite.web.config.ts"]
+  "include": ["src", "electron.vite.config.ts", "vite.web.config.ts", "csp.ts"]
 }

@@ -106,6 +106,31 @@ function ownPage(url: string): boolean {
   }
 }
 
+/** Opens a link in the user's browser: http and https only (never file:, ms-settings:, etc.). */
+function openExternalSafe(url: unknown): void {
+  if (typeof url !== "string") return;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") void shell.openExternal(parsed.toString());
+  } catch {
+    /* not a URL */
+  }
+}
+
+// Every window runs Pyxi's own pages with no Node in the page, isolated from the preload, in
+// Chromium's sandbox. The preload is the only bridge (see preload/index.ts).
+const SAFE_PREFERENCES = {
+  preload: join(__dirname, "../preload/index.js"),
+  contextIsolation: true,
+  nodeIntegration: false,
+  nodeIntegrationInWorker: false,
+  sandbox: true,
+  webSecurity: true,
+  allowRunningInsecureContent: false,
+  webviewTag: false,
+  navigateOnDragDrop: false,
+} as const;
+
 function rendererUrl(page: "overlay" | "panel", query: Record<string, string>): string | null {
   const dev = process.env.ELECTRON_RENDERER_URL;
   const qs = new URLSearchParams(query).toString();
@@ -145,7 +170,7 @@ function createOverlay(d: Display): void {
     hasShadow: false,
     alwaysOnTop: true,
     backgroundColor: "#00000000",
-    webPreferences: { preload: join(__dirname, "../preload/index.js"), backgroundThrottling: false },
+    webPreferences: { ...SAFE_PREFERENCES, backgroundThrottling: false },
   });
   win.setAlwaysOnTop(true, "screen-saver");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -205,7 +230,7 @@ function createPanel(): void {
     backgroundColor: "#00000000",
     backgroundMaterial: "acrylic",
     titleBarStyle: "hidden",
-    webPreferences: { preload: join(__dirname, "../preload/index.js") },
+    webPreferences: { ...SAFE_PREFERENCES },
   });
   loadPage(panel, "panel", { backend: BACKEND });
   panel.on("close", (e) => {
@@ -326,9 +351,29 @@ function trayIcon(): Electron.NativeImage {
   return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
 }
 
+// No page can open new windows, navigate an app window away, or embed a webview. Links a page
+// asks to open go to the user's browser (http and https only).
+app.on("web-contents-created", (_e, contents) => {
+  contents.setWindowOpenHandler(({ url }) => {
+    openExternalSafe(url);
+    return { action: "deny" };
+  });
+  const stay = (e: Electron.Event, url: string) => {
+    if (!ownPage(url)) e.preventDefault();
+  };
+  contents.on("will-navigate", stay);
+  contents.on("will-redirect", stay);
+  contents.on("will-attach-webview", (e) => e.preventDefault());
+});
+
 app.whenReady().then(async () => {
   startUpdates(broadcast);
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));
+  // The microphone, for Pyxi's own pages only; nothing else (camera, location, notifications...).
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) =>
+    cb(permission === "media" && ownPage(details.requestingUrl ?? "")),
+  );
+  // Permission checks (no prompt) pass for Pyxi's own pages only.
+  session.defaultSession.setPermissionCheckHandler((_wc, _permission, origin) => origin.startsWith("file://") || ownPage(origin + "/"));
   primaryId = screen.getPrimaryDisplay().id;
   await ensureBrain();
   for (const d of screen.getAllDisplays()) createOverlay(d);
@@ -444,14 +489,12 @@ ipcMain.on("release-focus", (e) => {
   win.setFocusable(false);
 });
 ipcMain.on("ptt", () => broadcast("ptt"));
-ipcMain.on("open-external", (_e, url: string) => {
-  if (/^https?:\/\//.test(url)) void shell.openExternal(url);
-});
+ipcMain.on("open-external", (_e, url: unknown) => openExternalSafe(url));
 ipcMain.handle("displays", () => screen.getAllDisplays().map(displayInfo));
 // Quick actions. Inserting pastes into whatever field has focus, then puts your clipboard back.
 ipcMain.on("action", async (_e, kind: string, value: string) => {
   if (typeof value !== "string" || !value) return;
-  if (kind === "open_url" && /^https?:\/\//i.test(value)) void shell.openExternal(value);
+  if (kind === "open_url") openExternalSafe(value);
   else if (kind === "copy") clipboard.writeText(value);
   else if (kind === "insert") {
     const focused = BrowserWindow.getFocusedWindow();
@@ -474,9 +517,16 @@ function pyxiFile(path: unknown): string | null {
   const allowed = [join(app.getPath("documents"), "Pyxi"), join(HOME, ".pyxi", "outputs")].map((d) => resolve(d).toLowerCase());
   return allowed.some((d) => full.toLowerCase().startsWith(d + "\\") || full.toLowerCase().startsWith(d + "/")) && existsSync(full) ? full : null;
 }
+// Opening runs whatever Windows associates with the file, so programs and scripts are never
+// opened, even inside Pyxi's folders (a downloaded attachment could be one): shown in Explorer.
+const RUNNABLE = /\.(exe|com|bat|cmd|scr|pif|cpl|msi|msp|msc|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|hta|lnk|url|reg|jar|appx|appref-ms|application|gadget|scf|inf|chm|dll|sys)$/i;
+function openSafe(file: string): void {
+  if (RUNNABLE.test(file)) shell.showItemInFolder(file);
+  else void shell.openPath(file);
+}
 ipcMain.on("open-file", (_e, path: unknown) => {
   const file = pyxiFile(path);
-  if (file) void shell.openPath(file);
+  if (file) openSafe(file);
 });
 ipcMain.on("show-in-folder", (_e, path: unknown) => {
   const file = pyxiFile(path);
@@ -486,7 +536,7 @@ ipcMain.on("notify", (_e, title: string, body: string, path?: string) => {
   if (!Notification.isSupported()) return;
   const note = new Notification({ title: String(title).slice(0, 80), body: String(body).slice(0, 200), silent: true });
   const file = pyxiFile(path);
-  if (file) note.on("click", () => void shell.openPath(file));
+  if (file) note.on("click", () => openSafe(file));
   note.show();
 });
 ipcMain.handle("share-visible", () => shareVisible);

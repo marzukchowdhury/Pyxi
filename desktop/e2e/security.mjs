@@ -1,6 +1,8 @@
 // The real app, end to end, with the launch key: Electron starts the brain (demo model, its own
 // port and data folder, so an installed Pyxi keeps running untouched), its windows connect, an
-// Allow card works, and a program without the key is refused.
+// Allow card works, and a program without the key is refused. Also checks the Electron
+// hardening: sandboxed isolated windows, strict CSP, no popups, no navigating away, and links
+// limited to http and https (the shell is stubbed, so nothing opens on this PC).
 //
 //   npm run build && node e2e/security.mjs
 import { _electron as electron } from "playwright-core";
@@ -32,6 +34,7 @@ const app = await electron.launch({
   },
 });
 const errors = [];
+const violations = [];
 try {
   const seen = new Map();
   for (let i = 0; i < 160 && seen.size < 2; i++) {
@@ -42,6 +45,7 @@ try {
       if (kind && !seen.has(kind)) {
         seen.set(kind, w);
         w.on("pageerror", (e) => errors.push(`${kind}: ${e.message}`));
+        w.on("console", (m) => /Content Security Policy|Refused to/i.test(m.text()) && violations.push(`${kind}: ${m.text()}`));
       }
     }
     await new Promise((r) => setTimeout(r, 250));
@@ -49,6 +53,48 @@ try {
   const overlay = seen.get("overlay");
   const panel = seen.get("panel");
   check("both windows open", overlay && panel);
+
+  // Electron hardening: every window sandboxed and isolated, no Node in the page.
+  const prefs = await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().map((w) => {
+      const p = w.webContents.getLastWebPreferences() ?? {};
+      return { url: w.webContents.getURL().split("?")[0].slice(-30), contextIsolation: p.contextIsolation, nodeIntegration: p.nodeIntegration, sandbox: p.sandbox, webviewTag: p.webviewTag };
+    }),
+  );
+  check("every window: contextIsolation, sandbox, no nodeIntegration, no webview",
+    prefs.length >= 2 && prefs.every((p) => p.contextIsolation === true && p.sandbox === true && !p.nodeIntegration && !p.webviewTag), JSON.stringify(prefs));
+  check("no Node in the page", await panel.evaluate(() => typeof require === "undefined" && typeof process === "undefined"));
+  const csp = await panel.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute("content") ?? "");
+  check("strict CSP on the page", csp.includes("default-src 'none'") && /script-src 'self';/.test(csp) && !csp.includes("unsafe-eval"), csp);
+  check("CSP blocks inline script", await panel.evaluate(() => {
+    const s = document.createElement("script");
+    s.textContent = "window.__inline = 1";
+    document.head.appendChild(s);
+    return window.__inline === undefined;
+  }));
+  check("CSP blocks other hosts", await panel.evaluate(() => fetch("https://example.com/").then(() => false, () => true)));
+  violations.length = 0; // the two above were meant to be refused
+
+  // Links: stub the real shell so nothing opens on this PC, then try what a page might.
+  await app.evaluate(({ shell }) => {
+    globalThis.__opened = [];
+    shell.openExternal = async (url) => void globalThis.__opened.push(url);
+  });
+  await panel.evaluate(() => {
+    const b = window.pyxiBridge;
+    b.openExternal("file:///C:/Windows/System32/calc.exe");
+    b.openExternal("ms-settings:privacy");
+    b.runAction("open_url", "javascript:alert(1)");
+    b.runAction("open_url", "https://example.com/ok");
+    b.openExternal("http://example.com/also-ok");
+    return window.open("https://example.com/popup") === null;
+  });
+  const windowsBefore = app.windows().length;
+  await panel.evaluate(() => window.open("file:///C:/Windows/win.ini"));
+  await new Promise((r) => setTimeout(r, 800));
+  const opened = await app.evaluate(() => globalThis.__opened);
+  check("openExternal: http and https only", JSON.stringify(opened) === JSON.stringify(["https://example.com/ok", "http://example.com/also-ok", "https://example.com/popup"]), JSON.stringify(opened));
+  check("window.open never makes a window", app.windows().length === windowsBefore);
 
   // The renderer has the key (from the preload), and it isn't in the page URL.
   const key = await overlay.evaluate(() => window.pyxiBridge?.brainKey ?? "");
@@ -102,6 +148,17 @@ try {
     check("card closed", (await overlay.locator(".request").count()) === 0);
   }
   tool.close();
+  // The demo answer to "how do you work?" is a 3D scene: WebGL still renders under the strict CSP.
+  await overlay.locator("canvas").first().waitFor({ state: "attached", timeout: 30000 }).catch(() => undefined);
+  check("3D scene renders under the CSP", (await overlay.locator("canvas").count()) > 0);
+  // Last, as Playwright then waits on the refused navigation: a page can't take the window away.
+  const urls = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.webContents.getURL().split("?")[0]));
+  const before = await urls();
+  await panel.evaluate(() => { location.href = "https://example.com/phish"; }).catch(() => undefined);
+  await overlay.evaluate(() => { location.assign("file:///C:/Windows/win.ini"); }).catch(() => undefined);
+  await new Promise((r) => setTimeout(r, 1500));
+  const after = await urls();
+  check("a page can't navigate the app windows away", JSON.stringify(after) === JSON.stringify(before), JSON.stringify(after).slice(0, 160));
 } finally {
   await app.close().catch(() => undefined);
   await new Promise((r) => setTimeout(r, 1500));
@@ -109,7 +166,8 @@ try {
   rmSync(profile, { recursive: true, force: true });
   rmSync(data, { recursive: true, force: true });
 }
+check("no CSP violations during the run", violations.length === 0, violations.join(" | "));
 const failed = checks.filter((c) => !c.ok);
-console.log(JSON.stringify({ checks, errors }, null, 2));
+console.log(JSON.stringify({ checks, errors, violations }, null, 2));
 console.log(failed.length ? `FAILED: ${failed.map((c) => c.name).join(", ")}` : `all ${checks.length} checks passed`);
 process.exit(failed.length ? 1 : 0);

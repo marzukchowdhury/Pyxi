@@ -3,9 +3,10 @@
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { devCsp } from "./csp";
 
 export default defineConfig({
   root: resolve(__dirname, "src/renderer"),
-  plugins: [react()],
+  plugins: [react(), devCsp()],
   server: { port: 5199, strictPort: true },
 });
