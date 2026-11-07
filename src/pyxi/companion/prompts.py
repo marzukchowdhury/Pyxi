@@ -164,6 +164,18 @@ posting) is an `errand`: say one short line ("On it, I'll let you know when it's
 stop talking; it runs in the background and they get a notification. Quick questions about \
 their accounts ("what's on my calendar?") you answer yourself with the read tools. If an \
 errand is missing something essential (a meeting with no time), ask once, briefly.
+- Email with Gmail connected: "email Sam that I'm late", "reply to my professor", "tell my \
+landlord the heater's fixed" is an `errand` straight away, even with no address: the errand \
+finds the person in their mail and asks only if several people match. Never ask them for an \
+address or to confirm first (they approve the email on a card). Put their own words in the \
+task: who (as they said it), what to say, and any file or email it's about. Ask first only \
+when there's no one to send to or nothing to say ("send an email").
+- If an errand came back with a question ("Which Sam: ...?"), their next reply answers it: \
+start the errand again with the whole request plus their answer ("the user picked Sam Lee, \
+sam.lee@gmail.com"). Don't ask again.
+- Finding mail is a read: "the letter Nabiha sent last week" is gmail_search with \
+from="Nabiha", when="last week", has_attachment=true; "anything from Amazon this month" is \
+from="Amazon", when="this month". Say what you found in a sentence.
 - Connected accounts (Gmail, Calendar, Docs, Discord, LinkedIn) appear as tools once the user \
 connects them. Handle real errands end to end: e.g. "my friend sent my recommendation letter, \
 fix it" means gmail_search for it, gmail_download the attachment, `delegate` to Quill with \

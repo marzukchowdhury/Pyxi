@@ -19,9 +19,9 @@ import os
 import re
 import sys
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
-from email.utils import parseaddr
+from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +64,220 @@ def _strip_html(text: str) -> str:
     text = re.sub(r"(?is)<(script|style).*?</\1>", " ", text)
     text = re.sub(r"(?i)<br\s*/?>|</p>|</div>", "\n", text)
     return html.unescape(re.sub(r"<[^>]+>", " ", text))
+
+
+MONTHS = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+]  # fmt: skip
+WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+NUMBERS = {"a": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "few": 3}
+
+
+def date_range(phrase: str, now: datetime) -> tuple[datetime, datetime] | None:
+    """Everyday time words ("last week", "this month", "yesterday", "in October", "the past 3
+    days") as a start and end in the user's own time zone, so Gmail gets exact bounds instead of
+    the model guessing dates. None when the phrase isn't one of these."""
+    p = re.sub(r"[^a-z0-9 ]", " ", phrase.lower()).strip()
+    if p.startswith("since "):  # "since October": from then until now
+        span = date_range(p[6:], now)
+        return (
+            (span[0], now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
+            if span
+            else None
+        )
+    p = re.sub(r"\b(the|in|on|during|from|of|over)\b", " ", p)
+    p = re.sub(r"\s+", " ", p).strip()
+    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week = day - timedelta(days=day.weekday())  # this Monday
+    month = day.replace(day=1)
+    end = day + timedelta(days=1)  # through the end of today
+
+    def month_start(year: int, m: int) -> datetime:
+        return day.replace(year=year + (m - 1) // 12, month=(m - 1) % 12 + 1, day=1)
+
+    if p == "today":
+        return day, end
+    if p == "yesterday":
+        return day - timedelta(days=1), day
+    if p in ("this week", "week"):
+        return week, end
+    if p == "last week":
+        return week - timedelta(days=7), week
+    if p in ("this month", "month"):
+        return month, end
+    if p == "last month":
+        return month_start(day.year, day.month - 1), month
+    if p in ("this year", "year"):
+        return day.replace(month=1, day=1), end
+    if p == "last year":
+        start = day.replace(year=day.year - 1, month=1, day=1)
+        return start, start.replace(year=day.year)
+    if p in ("recent", "recently", "lately"):
+        return day - timedelta(days=30), end
+    m = re.fullmatch(r"(?:last|past|previous) (\d+|[a-z]+)? ?(day|week|month)s?", p)
+    if m:
+        n = int(m.group(1)) if (m.group(1) or "").isdigit() else NUMBERS.get(m.group(1) or "a")
+        if n:
+            days = {"day": 1, "week": 7, "month": 30}[m.group(2)] * n
+            return day - timedelta(days=days - 1 if m.group(2) == "day" else days), end
+    m = re.fullmatch(r"(?:last )?(" + "|".join(WEEKDAYS) + ")", p)
+    if m:  # the most recent such day ("Monday" on a Monday means today)
+        back = (day.weekday() - WEEKDAYS.index(m.group(1))) % 7
+        if p.startswith("last ") and back == 0:
+            back = 7
+        start = day - timedelta(days=back)
+        return start, start + timedelta(days=1)
+    m = re.fullmatch(r"(?:last )?(" + "|".join(MONTHS) + r")(?: (\d{4}))?", p)
+    if m:  # the most recent such month, or that month of the year they said
+        n = MONTHS.index(m.group(1)) + 1
+        year = int(m.group(2)) if m.group(2) else (day.year if n <= day.month else day.year - 1)
+        start = month_start(year, n)
+        return start, min(month_start(year, n + 1), end)
+    return None
+
+
+def _term(field: str, value: str) -> str:
+    value = value.strip().strip('"')
+    return f'{field}:"{value}"' if " " in value else f"{field}:{value}"
+
+
+def build_query(args: dict[str, Any], now: datetime) -> tuple[str, str]:
+    """A Gmail query from plain fields, plus a note on anything it couldn't use. A raw ``query``
+    still works and is kept as is; the fields are added to it."""
+    parts = [str(args.get("query") or "").strip()]
+    note = ""
+    for field in ("from", "to"):
+        for who in re.split(r"\s*(?:,|\bor\b)\s*", str(args.get(field) or "")):
+            if who.strip():
+                parts.append(_term(field, who))
+    if args.get("sent"):
+        parts.append("in:sent")
+    if args.get("unread"):
+        parts.append("is:unread")
+    if args.get("has_attachment") or args.get("filename"):
+        parts.append("has:attachment")
+    if args.get("filename"):
+        name = str(args["filename"]).strip().lstrip("*.")
+        parts.append(_term("filename", name))
+    if args.get("words"):
+        parts.append(str(args["words"]).strip())
+    when = str(args.get("when") or "").strip()
+    after, before = str(args.get("after") or "").strip(), str(args.get("before") or "").strip()
+    span = date_range(when, now) if when else None
+    if when and span is None:
+        note = f" (I couldn't read the time {when!r}, so I searched all dates)"
+    if span:
+        parts += [f"after:{int(span[0].timestamp())}", f"before:{int(span[1].timestamp())}"]
+    for field, value in (("after", after), ("before", before)):
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            parts.append(f"{field}:{value.replace('-', '/')}")
+    return " ".join(p for p in parts if p), note
+
+
+NOREPLY = re.compile(r"no[-_.]?reply|do[-_.]?not[-_.]?reply|notifications?@|mailer-daemon", re.I)
+FILLER = {
+    "my",
+    "the",
+    "a",
+    "an",
+    "to",
+    "from",
+    "email",
+    "mail",
+    "reply",
+    "back",
+    "at",
+    "our",
+    "me",
+    "friend",
+    "buddy",
+    "pal",
+    "mate",
+    "colleague",
+    "coworker",
+    "mr",
+    "mrs",
+    "ms",
+    "dr",
+    "miss",
+    "his",
+    "her",
+    "their",
+    "that",
+    "guy",
+}
+
+
+ROLES = {
+    w: q
+    for words, q in (
+        (
+            ("professor", "prof", "lecturer", "instructor"),
+            "{professor prof dr lecturer instructor}",
+        ),
+        (("teacher", "tutor"), "{teacher tutor class}"),
+        (("boss", "manager", "supervisor"), "{manager boss supervisor}"),
+        (("advisor", "adviser"), "{advisor adviser}"),
+        (("landlord", "landlady", "property"), "{landlord rent lease tenancy}"),
+        (("doctor", "gp", "dentist", "clinic"), "{doctor dr clinic appointment dental}"),
+        (("coach",), "{coach practice}"),
+        (("mom", "mum", "mother"), "{mom mum mother}"),
+        (("dad", "father"), "{dad father}"),
+        (("recruiter", "hr"), "{recruiter interview application}"),
+    )
+    for w in words
+}
+
+
+def _matches(word: str, name: str, address: str) -> bool:
+    """ "sam" matches Sam Rahman and sam.r@uni.edu, not Samantha's colleague "Osama"."""
+    if "@" in word:
+        return word == address.lower()
+    parts = re.findall(r"[a-z0-9]+", f"{name} {address.split('@')[0]}".lower())
+    return any(p.startswith(word) for p in parts)
+
+
+def _when(meta: dict[str, Any], headers: dict[str, str]) -> datetime | None:
+    if meta.get("internalDate"):
+        return datetime.fromtimestamp(int(meta["internalDate"]) / 1000).astimezone()
+    try:
+        when = parsedate_to_datetime(headers.get("date", ""))
+    except (TypeError, ValueError):
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=UTC)
+
+
+def _person(address: str, p: dict[str, Any]) -> str:
+    bits = []
+    if p["wrote"]:
+        bits.append(f"you wrote to them {p['wrote']}x")
+    if p["heard"]:
+        bits.append(f"they wrote {p['heard']}x")
+    if p["last"]:
+        bits.append(f"last {p['last']:%d %b %Y}")
+    if NOREPLY.search(address):
+        bits.append("a no-reply address")
+    return f"- {_who(p['name'], address)}: {', '.join(bits)}"
+
+
+def _first_line(body: str) -> str:
+    """A one-line gist when the model didn't give one: the first real sentence of the email."""
+    lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+    lines = [
+        ln
+        for ln in lines
+        if not re.fullmatch(r"(hi|hey|hello|dear)([ ,][^.?]{0,40})?[,!]?", ln, re.I)
+    ]
+    text = " ".join(lines) or body
+    m = re.match(r"(.+?[.!?])(\s|$)", text)
+    return (m.group(1) if m else text)[:160]
+
+
+def _who(name: str, address: str) -> str:
+    """How the approval card and summaries show someone: "Sam Rahman (sam@example.com)"."""
+    name = name.strip().strip('"')
+    return f"{name} ({address})" if name and name.lower() != address.lower() else address
 
 
 def _safe_name(name: str) -> str:
@@ -115,6 +329,7 @@ class GoogleConnector(Connector):
         self._creds = None
         self.email: str | None = None
         self._tz: str | None = None
+        self._names: dict[str, str] = {}  # address -> display name, from mail seen this session
 
     # ------------------------------------------------------------------ auth
     def client_config(self) -> dict[str, Any] | None:
@@ -222,20 +437,123 @@ class GoogleConnector(Connector):
         return r.json() if r.content else {}
 
     # ------------------------------------------------------------------ gmail
+    async def _now(self) -> datetime:
+        return datetime.now(zone(await self.time_zone()))
+
+    async def _list(self, q: str, n: int) -> list[str]:
+        listing = await self._api("GET", f"{GMAIL}/messages", params={"q": q, "maxResults": n})
+        return [m["id"] for m in listing.get("messages", [])]
+
     async def gmail_search(self, args: dict[str, Any]) -> Result:
-        q = str(args.get("query", "")).strip()
-        listing = await self._api(
-            "GET",
-            f"{GMAIL}/messages",
-            params={"q": q, "maxResults": min(int(args.get("max", 6) or 6), 10)},
-        )
-        ids = [m["id"] for m in listing.get("messages", [])]
+        """Search with plain fields (from, when, has_attachment...) or raw Gmail syntax. When
+        nothing matches, it loosens the search step by step (the extra words, then the dates)
+        and says so, rather than coming back empty for "the letter Nabiha sent last week"."""
+        n = min(int(args.get("max", 6) or 6), 10)
+        now = await self._now()
+        q, note = build_query(args, now)
+        if not q:
+            return "gmail_search: say what to look for (from, words, when...)."
+        ids = await self._list(q, n)
+        looser = dict(args)
+        for drop, why in (("words", "without the extra words"), ("when", "from any date")):
+            if ids or not looser.get(drop) or not (set(looser) - {drop, "max"}):
+                continue
+            looser.pop(drop)
+            if drop == "when":
+                looser.pop("after", None), looser.pop("before", None)
+            wider, _ = build_query(looser, now)
+            if wider and wider != q:
+                ids = await self._list(wider, n)
+                if ids:
+                    note += f" (nothing matched {q!r} exactly; these are {why}: {wider!r})"
         if not ids:
-            return f"gmail_search: nothing matched {q!r}."
+            return f"gmail_search: nothing matched {q!r}{note}."
         metas = await asyncio.gather(
             *(self._api("GET", f"{GMAIL}/messages/{i}", params={"format": "full"}) for i in ids)
         )
-        return "Emails (newest first):\n" + "\n".join(self._summary(m) for m in metas)
+        return f"Emails (newest first){note}:\n" + "\n".join(self._summary(m) for m in metas)
+
+    def _remember(self, *headers: str) -> None:
+        for name, addr in getaddresses([h for h in headers if h]):
+            if name and addr and "@" in addr:
+                self._names.setdefault(addr.lower(), name.strip().strip('"'))
+
+    async def gmail_people(self, args: dict[str, Any]) -> Result:
+        """Who "Sam" or "my professor" is, from the people they really write to and hear from.
+        Sent mail counts most (someone you write to is who you mean), recent mail breaks ties."""
+        asked = str(args.get("name", "")).strip()
+        words = [w for w in re.findall(r"[\w.'@+-]+", asked.lower()) if w not in FILLER]
+        if not words:
+            return "gmail_people: who are you looking for?"
+        role = next((ROLES[w] for w in words if w in ROLES), None)
+        named = role is None
+        me = {(self.email or self._saved_email() or "").lower()} - {""}
+        if named:  # a name or an address: match the headers
+            probe = " ".join(words)
+            queries = [(f"in:sent {_term('to', probe)}", True), (_term("from", probe), False)]
+        else:  # a role ("my professor", "the landlord"): those words in the mail itself
+            queries = [(f"in:sent {role}", True), (role, False)]
+        found = await asyncio.gather(*(self._list(q, 15) for q, _ in queries))
+        seen: dict[str, bool] = {}
+        for (_, sent), ids in zip(queries, found, strict=True):
+            for i in ids:
+                seen[i] = seen.get(i, False) or sent
+        metas = await asyncio.gather(
+            *(
+                self._api(
+                    "GET",
+                    f"{GMAIL}/messages/{i}",
+                    params={"format": "metadata", "metadataHeaders": ["From", "To", "Cc", "Date"]},
+                )
+                for i in seen
+            )
+        )
+        people: dict[str, dict[str, Any]] = {}
+        for meta in metas:
+            h = self._headers(meta)
+            self._remember(h.get("from", ""), h.get("to", ""), h.get("cc", ""))
+            when = _when(meta, h)
+            outgoing = seen.get(meta.get("id", ""), False) or (
+                parseaddr(h.get("from", ""))[1].lower() in me
+            )
+            field = ("to", "cc") if outgoing else ("from",)
+            for name, addr in getaddresses([h.get(f, "") for f in field]):
+                addr = addr.lower()
+                if "@" not in addr or addr in me:
+                    continue
+                if named and not all(_matches(w, name, addr) for w in words):
+                    continue
+                p = people.setdefault(addr, {"name": "", "wrote": 0, "heard": 0, "last": None})
+                p["name"] = p["name"] or name.strip().strip('"')
+                p["wrote" if outgoing else "heard"] += 1
+                if when and (p["last"] is None or when > p["last"]):
+                    p["last"] = when
+        if not people:
+            return (
+                f"gmail_people: no one like {asked!r} in their recent mail. Ask the user for "
+                "the address (one short question)."
+            )
+
+        def score(item: tuple[str, dict[str, Any]]) -> float:
+            addr, p = item
+            return (3 * p["wrote"] + p["heard"]) * (0.2 if NOREPLY.search(addr) else 1)
+
+        ranked = sorted(people.items(), key=score, reverse=True)
+        lines = [_person(a, p) for a, p in ranked[:5]]
+        top = score(ranked[0])
+        rest = score(ranked[1]) if len(ranked) > 1 else 0.0
+        # A clear match: the only one, or someone they write to far more than anyone else.
+        clear = len(ranked) == 1 or (ranked[0][1]["wrote"] > 0 and top >= 3 * max(rest, 1))
+        if clear:
+            addr, p = ranked[0]
+            return (
+                f"Clear match for {asked!r}: {_who(p['name'], addr)}. Use this address.\n"
+                + "\n".join(lines)
+            )
+        return (
+            f"Several people could be {asked!r}. Ask the user which one, in one short question "
+            "naming the top two or three:\n" + "\n".join(lines)
+        )
 
     def _headers(self, msg: dict[str, Any]) -> dict[str, str]:
         return {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
@@ -256,6 +574,7 @@ class GoogleConnector(Connector):
 
     def _summary(self, msg: dict[str, Any]) -> str:
         h = self._headers(msg)
+        self._remember(h.get("from", ""), h.get("to", ""))
         atts = self._attachments(msg.get("payload", {}), [])
         files = f" | attachments: {', '.join(a['filename'] for a in atts)}" if atts else ""
         return f"- id={msg['id']} from {h.get('from', '?')} | {h.get('subject', '(no subject)')} | {h.get('date', '')}{files}\n  {msg.get('snippet', '')[:160]}"
@@ -276,6 +595,7 @@ class GoogleConnector(Connector):
     async def gmail_read(self, args: dict[str, Any]) -> Result:
         msg = await self._api("GET", f"{GMAIL}/messages/{args['id']}", params={"format": "full"})
         h = self._headers(msg)
+        self._remember(h.get("from", ""), h.get("to", ""), h.get("cc", ""))
         atts = self._attachments(msg.get("payload", {}), [])
         body = re.sub(r"\n{3,}", "\n\n", self._body(msg.get("payload", {}))).strip()[:5000]
         files = "\n".join(f"- {a['filename']} ({a['size'] // 1024} KB)" for a in atts) or "none"
@@ -301,7 +621,9 @@ class GoogleConnector(Connector):
         return "Saved to this PC:\n" + "\n".join(f"- {p}" for p in saved)
 
     async def gmail_send(self, args: dict[str, Any]) -> Result:
-        """Prepare an email (new or a reply, optionally with files) and ask before sending."""
+        """Prepare an email (new or a reply, optionally with files) and ask before sending. The
+        approval card reads back exactly what Pyxi understood: who (name and address), the
+        subject, and the gist in one line, then the email itself."""
         to = str(args.get("to", "")).strip()
         subject = str(args.get("subject", "")).strip()
         body = str(args.get("body", "")).strip()
@@ -309,7 +631,10 @@ class GoogleConnector(Connector):
         missing = [str(p) for p in files if not p.is_file()]
         if missing:
             return f"gmail_send: can't find {missing}."
+        if not body:
+            return "gmail_send: what should the email say?"
         thread_id = None
+        replying = ""
         msg = EmailMessage()
         if args.get("reply_to_id"):
             orig = await self._api(
@@ -317,16 +642,30 @@ class GoogleConnector(Connector):
             )
             h = self._headers(orig)
             thread_id = orig.get("threadId")
-            to = to or parseaddr(h.get("reply-to") or h.get("from", ""))[1]
+            sender = h.get("reply-to") or h.get("from", "")
+            self._remember(h.get("from", ""), sender)
+            to = to or sender
             subject = subject or (
                 "Re: " + re.sub(r"^(re:\s*)+", "", h.get("subject", ""), flags=re.I)
+            )
+            replying = f"\nReplying to: {h.get('subject') or '(no subject)'}" + (
+                f" ({h['date'][:16].strip()})" if h.get("date") else ""
             )
             if h.get("message-id"):
                 msg["In-Reply-To"] = h["message-id"]
                 msg["References"] = (h.get("references", "") + " " + h["message-id"]).strip()
-        if not to or "@" not in to:
-            return "gmail_send: who should it go to?"
-        msg["To"], msg["Subject"] = to, subject
+        people = [(n, a.strip()) for n, a in getaddresses([to]) if a.strip()]
+        bad = [a for _, a in people if not EMAIL.fullmatch(a)]
+        if not people:
+            return "gmail_send: who should it go to? Find them with gmail_people first."
+        if bad:
+            return f"gmail_send: {bad} aren't email addresses. Find them with gmail_people first."
+        if not subject:
+            return "gmail_send: give it a short subject."
+        names = [(n.strip().strip('"') or self._names.get(a.lower(), ""), a) for n, a in people]
+        shown = ", ".join(_who(n, a) for n, a in names)
+        msg["To"] = ", ".join(f'"{n}" <{a}>' if n else a for n, a in names)
+        msg["Subject"] = subject
         msg.set_content(body)
         for p in files:
             ctype, _ = mimetypes.guess_type(p.name)
@@ -337,13 +676,18 @@ class GoogleConnector(Connector):
         async def send() -> str:
             # Sent only on approval; a declined email leaves nothing behind (no stray draft).
             await self._api("POST", f"{GMAIL}/messages/send", json=raw)
-            return f"Sent to {to}."
+            return f'Sent to {shown}: "{subject}".'
 
+        gist = re.sub(r"\s+", " ", str(args.get("gist") or "")).strip() or _first_line(body)
         attached = f"\nAttached: {', '.join(p.name for p in files)}" if files else ""
         return Outgoing(
-            action=f"Send an email to {to}",
-            preview=f"Subject: {subject}\n\n{body[:600]}{'...' if len(body) > 600 else ''}{attached}",
+            action=f"Send an email to {shown}",
+            preview=(
+                f"To: {shown}\nSubject: {subject}\nGist: {gist[:160]}{replying}{attached}\n\n"
+                f"{body[:600]}{'...' if len(body) > 600 else ''}"
+            ),
             run=send,
+            recipients=[a for _, a in names],
         )
 
     # ------------------------------------------------------------------ calendar
@@ -511,11 +855,61 @@ class GoogleConnector(Connector):
             Tool(
                 tool(
                     "gmail_search",
-                    "Search the user's Gmail (Gmail search syntax, e.g. 'from:sam has:attachment newer_than:7d').",
-                    {"query": {"type": "string"}, "max": {"type": "integer"}},
-                    ["query"],
+                    "Search the user's Gmail. Prefer the plain fields; they are combined. 'The letter Nabiha "
+                    "sent last week' is from='Nabiha', when='last week', has_attachment=true. 'Anything from "
+                    "Amazon this month' is from='Amazon', when='this month'. If nothing matches it loosens "
+                    "the search itself and says so.",
+                    {
+                        "from": {"type": "string", "description": "A name, company or address."},
+                        "to": {"type": "string", "description": "A name or address they wrote to."},
+                        "words": {
+                            "type": "string",
+                            "description": "Words in the email (subject or text). Only words likely to be in it.",
+                        },
+                        "when": {
+                            "type": "string",
+                            "description": "Their time words as said: today, yesterday, this week, last week, this month, last month, past 3 days, in October, since September, Monday.",
+                        },
+                        "after": {
+                            "type": "string",
+                            "description": "YYYY-MM-DD, when they gave an exact date.",
+                        },
+                        "before": {"type": "string", "description": "YYYY-MM-DD."},
+                        "has_attachment": {
+                            "type": "boolean",
+                            "description": "A letter, file, document, PDF, photo or invoice they sent.",
+                        },
+                        "filename": {
+                            "type": "string",
+                            "description": "Part of a file name or a type: pdf, docx, jpg.",
+                        },
+                        "sent": {"type": "boolean", "description": "Only mail the user sent."},
+                        "unread": {"type": "boolean"},
+                        "query": {
+                            "type": "string",
+                            "description": "Raw Gmail search syntax, for anything the fields can't say.",
+                        },
+                        "max": {"type": "integer"},
+                    },
                 ),
                 self.gmail_search,
+                info=True,
+            ),
+            Tool(
+                tool(
+                    "gmail_people",
+                    "Find who the user means by a name or role ('Sam', 'Nabiha Rahman', 'my professor', 'my "
+                    "landlord') from the people they really email: sent mail and recent threads. Says if "
+                    "there's one clear match (use it) or several (ask which).",
+                    {
+                        "name": {
+                            "type": "string",
+                            "description": "The name or role exactly as they said it.",
+                        }
+                    },
+                    ["name"],
+                ),
+                self.gmail_people,
                 info=True,
             ),
             Tool(
@@ -547,10 +941,19 @@ class GoogleConnector(Connector):
             Tool(
                 tool(
                     "gmail_send",
-                    "Write an email or a reply (reply_to_id threads it), optionally attaching files from this PC. The user always sees and approves it before it is sent.",
+                    "Write an email or a reply (reply_to_id threads it and addresses it to the sender), optionally "
+                    "attaching files from this PC. The user sees an approval card with who, the subject and "
+                    "the gist, and approves it before it is sent.",
                     {
-                        "to": {"type": "string"},
-                        "subject": {"type": "string"},
+                        "to": {
+                            "type": "string",
+                            "description": "'Name <address>', comma separated for several. Omit for a reply to the sender.",
+                        },
+                        "subject": {"type": "string", "description": "Short. Omit for a reply."},
+                        "gist": {
+                            "type": "string",
+                            "description": "One line on what the email says, e.g. 'Running 10 minutes late to the 3pm meeting.'",
+                        },
                         "body": {"type": "string"},
                         "reply_to_id": {"type": "string"},
                         "attachments": {"type": "array", "items": {"type": "string"}},

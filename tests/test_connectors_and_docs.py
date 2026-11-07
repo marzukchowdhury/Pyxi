@@ -180,7 +180,7 @@ async def test_the_recommendation_letter_errand(settings, tmp_path):
     await asyncio.sleep(0.05)
     [ask] = rec.of("confirm")
     assert (
-        ask["action"] == "Send an email to sam@example.com"
+        ask["action"] == "Send an email to Sam Rahman (sam@example.com)"
         and "Attached: LOR (fixed by Pyxi).docx" in ask["reason"]
     )
     assert not gmail.drafts and not gmail.sent  # nothing touches the account before approval
