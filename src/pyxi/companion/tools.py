@@ -5,6 +5,7 @@ from __future__ import annotations
 from otto.llm.base import ToolSpec
 
 from pyxi.companion.notes import DIAGRAM_SCHEMA
+from pyxi.agents.pixel import OPERATIONS as PIXEL_OPERATIONS
 from pyxi.scenes import TITLES, tool_schema
 from pyxi.scenes.object_gallery import OBJECT_TITLES
 from pyxi.scenes.objects import build_tool_schema, edit_tool_schema
@@ -386,7 +387,8 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "delegate",
         "Hand a task to a teammate who works in the background. Browser agents (like Scout) drive a real browser; "
         "writers (like Quill) draft text; explainers (like Sketch) build 3D scenes. Chain a handoff with then_agent/"
-        "then_task, e.g. Scout researches then Quill drafts. Give complete, specific instructions.",
+        "then_task, e.g. Scout researches then Quill drafts. Give complete, specific instructions. For files use "
+        "convert_files (Pixel) and edit_document (Ledger) instead: they're faster and exact.",
         {
             "agent": {"type": "string"},
             "task": {"type": "string"},
@@ -446,7 +448,10 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "Create a new named teammate when the user asks for one.",
         {
             "name": {"type": "string"},
-            "role": {"type": "string", "enum": ["browser", "writer", "explainer"]},
+            "role": {
+                "type": "string",
+                "enum": ["browser", "writer", "explainer", "files", "documents"],
+            },
             "persona": {"type": "string"},
             "voice": {
                 "type": "string",
@@ -589,9 +594,10 @@ COMPANION_TOOLS += [
     _tool(
         "use_computer",
         "Do it yourself on their PC with the mouse and keyboard, in any app: play a song (in YouTube Music "
-        "from the taskbar, or a new tab, then come back), search Maps, fill in or format a spreadsheet, "
-        "write formulas, make a pivot table, rename or move files in Explorer, change a setting in an app, "
-        "click through a site. They see an Allow card first, watch the cursor move, and can stop it by "
+        "from the taskbar, or a new tab, then come back), search Maps, rename or move files in Explorer, "
+        "change a setting in an app, click through a site. Never for files, PDFs, images, Excel, Word, "
+        "PowerPoint, Google Sheets or Google Docs: convert_files and edit_document do those in the "
+        "background, in seconds, without their mouse. They see an Allow card first, watch the cursor move, and can stop it by "
         "moving the mouse or pressing Esc; anything that sends, buys, posts or deletes asks again. Use it "
         "whenever they ask you to DO something on screen; use `guide` instead when they want to learn to "
         "do it themselves. Give `task` exactly: what to do, in which app, and what done looks like, plus "
@@ -770,6 +776,87 @@ COMPANION_TOOLS += [
         ["title", "summary", "event_ids"],
     ),
     _tool(
+        "convert_files",
+        "Pixel converts files in the background, in seconds, with no app window and without their mouse: "
+        "images to PDF, merge, split or shrink PDFs, Word to PDF, PDF pages to images, image format and "
+        "size, CSV to and from Excel. Needs real paths: from what's on screen (an Explorer window, an "
+        "attachment you downloaded), from search_files, or from them. The original is never changed; "
+        "the new file goes beside it. Say one short line ('On it.'); they get a notification.",
+        {
+            "operation": {
+                "type": "string",
+                "enum": list(PIXEL_OPERATIONS),
+                "description": " ".join(f"{k}: {v}" for k, v in PIXEL_OPERATIONS.items()),
+            },
+            "files": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Full paths, in order (the order of pages when merging).",
+            },
+            "options": {
+                "type": "object",
+                "description": "Optional: name (new file's name, no extension), pages ('1-3, 5' "
+                "for split_pdf or pdf_to_images), format (png, jpg, webp...), quality (1-95), "
+                "width, height, percent, dpi, sheet.",
+            },
+        },
+        ["operation", "files"],
+    ),
+    _tool(
+        "edit_document",
+        "Ledger edits spreadsheets, documents and decks in the background, straight in the file, with no "
+        "Office license and no app window: Excel (formulas, a totals row, a pivot-style summary, "
+        "formatting, a table or chart), Word (headings, bullets, paragraphs, tables, replace text), "
+        "PowerPoint (slides, titles, bullets, notes), and Google Sheets and Docs (totals, a real pivot "
+        "table, headings, bullets) through Google. A local file is saved as a copy beside the original; "
+        "Google files are edited in place. For fixing the grammar of a document, delegate to Quill "
+        "instead. Say one short line ('On it.'); they get a notification.",
+        {
+            "task": {
+                "type": "string",
+                "description": "Exactly what to change, with every value they gave, e.g. 'Add a "
+                "totals row under the Amount column' or 'Make a pivot of total sales by region'.",
+            },
+            "files": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Full paths of .xlsx, .docx or .pptx files on this PC.",
+            },
+            "google": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Google Sheets or Docs: the link (from the address bar), words "
+                "from the file's name ('sales sheet'), or 'new sheet: <title>' / 'new doc: <title>' "
+                "to make a new one.",
+            },
+        },
+        ["task"],
+    ),
+    _tool(
+        "search_files",
+        "Find files on their PC by name or contents (only in the folders they allowed; the first time, "
+        "they see a card asking if Pyxi may search their files). Use it to get the exact path for "
+        "convert_files, edit_document or read_file when they name a file without saying where it is.",
+        {
+            "query": {
+                "type": "string",
+                "description": "Words from the file's name or contents, e.g. 'budget 2026'.",
+            },
+            "kind": {
+                "type": "string",
+                "enum": ["pdf", "image", "word", "excel", "powerpoint", "text"],
+            },
+        },
+        ["query"],
+    ),
+    _tool(
+        "read_file",
+        "Read a file on their PC (text, PDF, Word, Excel, PowerPoint; an image's size) to answer a "
+        "question about it. Only inside the folders they allowed.",
+        {"path": {"type": "string"}},
+        ["path"],
+    ),
+    _tool(
         "pin_note",
         "Pin a sticky note to an element; it reappears on that element whenever this app is open.",
         {"element_id": {"type": "integer"}, "note": {"type": "string"}},
@@ -786,4 +873,6 @@ INFO_TOOLS = {
     "recall_screen",
     "look_closer",
     "get_activity",
+    "search_files",
+    "read_file",
 }  # results come back to the model for another round

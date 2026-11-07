@@ -25,7 +25,7 @@ from pathlib import Path
 from otto.config import load_dotenv
 from PIL import Image
 
-from pyxi import tidy
+from pyxi import files_access, tidy
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
 from pyxi.hub import Hub
@@ -221,9 +221,17 @@ SCENARIOS = [
     ('routine', 'turn_49b75541', "Every weekday at 9am, tell me what's on my calendar.", 'routine'),
     ('reminder', 'turn_49b75541', 'Every Friday at 5pm remind me to back up my files.', 'routine'),
     ('list routines', 'turn_49b75541', 'What routines have you got set up for me?', 'routine_list'),
-    ('sheets table', 'turn_49b75541', 'Make a table in Google Sheets of my monthly expenses: rent 1200, food 400, transport 150, and total them.', 'hands'),
+    ('sheets table', 'turn_49b75541', 'Make a table in Google Sheets of my monthly expenses: rent 1200, food 400, transport 150, and total them.', 'ledger'),
     ('type note', 'turn_88b16ad3', "Type 'Meeting at 3pm' on a new line in this note.", 'hands_or_insert'),
-    ('rename tab', 'turn_49b75541', 'In Google Docs, make a heading called Weekly Report.', 'hands'),
+    ('rename tab', 'turn_49b75541', 'In Google Docs, make a heading called Weekly Report.', 'ledger_or_ask'),
+    # Files, PDFs and Office work go to Pixel and Ledger, never the mouse (sample Desktop below).
+    ('image to pdf', 'turn_f05f1ae6', 'Convert the receipt photo on my desktop to a PDF.', 'pixel'),
+    ('smaller pdf', 'turn_f05f1ae6', 'Make the tax return PDF on my desktop smaller so I can email it.', 'pixel'),
+    ('word to pdf', 'turn_f05f1ae6', 'Turn my PwC cover letter into a PDF.', 'pixel'),
+    ('csv to excel', 'turn_f05f1ae6', 'Turn sales.csv on my desktop into an Excel file.', 'pixel'),
+    ('totals row', 'turn_f05f1ae6', 'Add a totals row to budget.xlsx.', 'ledger'),
+    ('sheet pivot', 'turn_49b75541', 'Make a pivot of sales by region in my Google Sheet called Sales 2026.', 'ledger'),
+    ('pdf question', 'turn_f05f1ae6', "What's the total on invoice 1182?", 'read'),
     ('capcut new', 'turn_46ef6b02', 'Start a new project in CapCut for me.', 'hands'),
     ('guide capcut', 'turn_46ef6b02', 'Show me how to start a new video in CapCut, step by step. I want to learn.', 'teach'),
     ('guide youtube', 'turn_1f172cb9', 'Teach me how to make a YouTube playlist, one step at a time.', 'teach'),
@@ -278,7 +286,8 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         background.append(f"3d: {args.get('subject')}")
 
     async def fake_start(agent, task, **kw):
-        background.append(f"delegate {agent}: {task[:60]}")
+        names = [Path(f).name for f in kw.get("files") or []] + list((kw.get("params") or {}).get("google") or [])
+        background.append(f"delegate {str(agent).lower()}: {task[:60]}" + (f" {names}" if names else ""))
 
         class J:
             id, agent_name = "job_x", str(agent).title()
@@ -319,6 +328,8 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         "tax return 2025.pdf",
         "song.mp3",
         "invoice-1182.pdf",
+        "receipt.jpg",
+        "sales.csv",
     ]:
         (mess / fname).write_text("x")
     real_known = tidy.known_folder
@@ -365,6 +376,18 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     brain.connectors.tools = lambda: dummies  # type: ignore[method-assign]
     brain._build_from_brief = fake_build  # type: ignore[method-assign]
     brain.jobs.start = fake_start  # type: ignore[method-assign]
+    # File search is allowed, only on the sample Desktop, and never through the real Search index
+    # (so the founder's own files never come into it).
+    files_access.save(settings.data_dir, files_access.FileAccess(True, [str(mess)], True))
+    files_access.search_index = lambda *a, **k: None  # type: ignore[assignment]
+
+    # The sample files are placeholders, so a PDF reads as a real invoice would.
+    real_read = files_access.read_text
+    files_access.read_text = lambda p, *a, **k: (  # type: ignore[assignment]
+        "PDF, 1 pages.\n[page 1] Invoice 1182 from Northwind Supplies. Subtotal $1,040.00, tax "
+        "$135.20, total $1,175.20." if Path(p).suffix.lower() == ".pdf" else real_read(p, *a, **k)
+    )
+    brain.connectors.google.connected = lambda: True  # type: ignore[method-assign]
     started = time.monotonic()
     await brain.turn(question)
     await asyncio.sleep(0.3)
@@ -527,6 +550,16 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("drove the mouse instead of booking")
     if expect == "tidy" and not any(b.startswith("tidy") for b in background):
         problems.append("no tidy plan")
+    if expect in ("pixel", "ledger", "ledger_or_ask", "read") and "use_computer" in tools:
+        problems.append("drove the mouse for file work")
+    if expect == "pixel" and not any(b.startswith("delegate pixel") and "[" in b for b in background):
+        problems.append("didn't hand it to Pixel with the file")
+    if expect == "ledger" and not any(b.startswith("delegate ledger") for b in background):
+        problems.append("didn't hand it to Ledger")
+    if expect == "ledger_or_ask" and not (any(b.startswith("delegate ledger") for b in background) or "?" in said):
+        problems.append("neither handed it to Ledger nor asked")
+    if expect == "read" and ("read_file" not in tools or "1,175" not in said.replace("1175", "1,175")):
+        problems.append("didn't read the invoice")
     from pyxi.companion.brain import drop_false_promises
 
     # Background work is quiet: a short "On it", not a running commentary.

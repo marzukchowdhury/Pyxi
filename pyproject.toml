@@ -30,6 +30,11 @@ dependencies = [
     "google-auth-oauthlib>=1.2",
     "python-docx>=1.1",
     "pypdf>=4.0",
+    # Pixel and Ledger: files and Office documents edited directly, no Office license needed
+    "openpyxl>=3.1",
+    "python-pptx>=1.0",
+    "pypdfium2>=4.0",  # PDF pages to images
+    "reportlab>=4.0",  # Word to PDF when LibreOffice isn't installed
     # Time zones on Windows (zoneinfo needs the IANA database)
     "tzdata>=2024.1",
     # Windows' built-in OCR: reads text inside images so Pyxi can underline it

@@ -6,6 +6,8 @@ Each agent has a *role* that decides what it can do:
 * ``browser`` drives a real browser through Otto (research, forms, lookups).
 * ``writer`` drafts text from context (messages, summaries, emails). No browser access.
 * ``explainer`` turns a topic into a 3D scene.
+* ``files`` converts files: PDFs, images, Word to PDF, CSV and Excel (Pixel).
+* ``documents`` edits Excel, Word and PowerPoint files and Google Sheets and Docs (Ledger).
 
 Agents keep their own long-term memory (Otto's FTS5 memory store, scoped per agent), and
 any agent can hand its result to another (Scout researches, then Quill writes).
@@ -24,7 +26,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Role = Literal["companion", "browser", "writer", "explainer"]
+Role = Literal["companion", "browser", "writer", "explainer", "files", "documents"]
 
 
 class AgentProfile(BaseModel):
@@ -93,6 +95,30 @@ DEFAULT_ROSTER = [
         persona="Visual thinker. Turns any idea into a tidy 3D scene with a five-step tour.",
         skills=["3D diagrams", "exploded views", "flow animations"],
         max_cost_usd=0.4,
+    ),
+    AgentProfile(
+        id="pixel",
+        name="Pixel",
+        role="files",
+        voice="af_kore",
+        color="#b9a3ff",
+        builtin=True,
+        persona="Tidy, fast file wrangler. Converts, merges, splits and shrinks files in seconds, "
+        "never touches the original, and says exactly where the new one is.",
+        skills=["image to PDF", "merge, split, shrink PDFs", "Word to PDF", "CSV and Excel"],
+        max_cost_usd=0.05,
+    ),
+    AgentProfile(
+        id="ledger",
+        name="Ledger",
+        role="documents",
+        voice="bm_george",
+        color="#8fd694",
+        builtin=True,
+        persona="Careful numbers person. Edits spreadsheets, documents and decks directly, writes "
+        "real formulas instead of pasted numbers, and keeps your original safe.",
+        skills=["Excel formulas & totals", "pivot summaries", "Word & PowerPoint", "Google Sheets & Docs"],
+        max_cost_usd=0.3,
     ),
 ]
 

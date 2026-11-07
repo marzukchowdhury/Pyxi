@@ -4,6 +4,9 @@
   approvals and questions routed to the UI and live frames streamed to the panel.
 * Writer agents draft text from the context they're handed.
 * Explainer agents turn a topic into a 3D scene for the overlay.
+* Files agents (Pixel) convert files: PDFs, images, Word to PDF, CSV and Excel. No model needed.
+* Documents agents (Ledger) edit Excel, Word and PowerPoint files, and Google Sheets and Docs.
+  Neither opens an app window or touches the user's mouse.
 
 ``then`` chains a handoff: when a job finishes, its result becomes the context of the next
 agent's job. That's how "Scout, research Lumen, then Quill, draft a note to their CEO" works.
@@ -58,6 +61,8 @@ class Job(BaseModel):
     start_url: str | None = None
     files: list[str] = Field(default_factory=list)  # documents to work on (writers fix them)
     kind: str = "task"  # "booking": the final click is approved, payment is handed to the user
+    # Pixel: {"operation": "compress_pdf", "options": {...}}; Ledger: {"google": [link or name]}
+    params: dict[str, Any] = Field(default_factory=dict)
     status: JobStatus = "queued"
     summary: str = ""
     data: Any = None
@@ -160,6 +165,7 @@ class JobManager:
         parent: str | None = None,
         files: list[str] | None = None,
         kind: str = "task",
+        params: dict[str, Any] | None = None,
     ) -> Job:
         agent = self.registry.get(agent_ref)
         if agent is None:
@@ -177,6 +183,7 @@ class JobManager:
             parent=parent,
             files=list(files or []),
             kind=kind,
+            params=dict(params or {}),
         )
         self.jobs[job.id] = job
         await self._update(job)
@@ -250,6 +257,10 @@ class JobManager:
                 await self._run_writer(job, agent)
             elif agent.role == "explainer":
                 await self._run_explainer(job, agent)
+            elif agent.role == "files":
+                await self._run_files(job, agent)
+            elif agent.role == "documents":
+                await self._run_documents(job, agent)
         except asyncio.CancelledError:
             job.status, job.summary = "stopped", job.summary or "Stopped."
         except Exception as exc:
@@ -262,7 +273,7 @@ class JobManager:
             for path in job.outputs:
                 try:
                     context += f"\n\nFile {path}:\n" + Path(path).read_text(encoding="utf-8")[:4000]
-                except OSError:
+                except (OSError, ValueError):  # a PDF or a spreadsheet: the summary says enough
                     pass
             await self.hub.emit(
                 "handoff", source=job.agent_name, target=job.then.agent, task=job.then.task
@@ -424,3 +435,91 @@ class JobManager:
         scene = await self.scene_maker(job.task, job.context, agent)
         job.summary = f"Built a 3D scene: {scene.get('title', 'untitled')}."
         job.data, job.status = {"scene_id": scene.get("id")}, "done"
+
+    async def _status(self, job: Job, message: str) -> None:
+        await self.hub.emit(
+            "job_event",
+            job_id=job.id,
+            agent=job.agent_name,
+            event="status",
+            data={"message": message},
+        )
+
+    async def _run_files(self, job: Job, agent: AgentProfile) -> None:
+        """Pixel: one conversion, straight on the files, in a worker thread. No model call."""
+        from pyxi.agents import pixel
+
+        op = str(job.params.get("operation") or "") or pixel.guess_operation(job.task, job.files)
+        if not op:
+            raise RuntimeError(
+                "I couldn't tell which conversion you want: PDF, images, smaller, merge or split?"
+            )
+        names = ", ".join(Path(f).name for f in job.files[:3]) or "your files"
+        await self._status(job, f"Working on {names}")
+        result = await asyncio.to_thread(pixel.run, op, job.files, job.params.get("options") or {})
+        job.outputs = [str(p) for p in result.outputs]
+        job.summary = result.summary
+        if job.outputs:
+            where = Path(job.outputs[0]).parent
+            job.summary += f" It's in {where}." if len(job.outputs) == 1 else f" They're in {where}."
+        job.data = {"operation": op, "outputs": job.outputs, **result.details}
+        job.status = "done"
+
+    def _google(self) -> Any:
+        if getattr(self, "google", None) is None:
+            from pyxi.connectors.google import GoogleConnector
+
+            self.google = GoogleConnector(
+                self.settings.data_dir / "connectors", Path.home() / "Documents" / "Pyxi"
+            )
+        return self.google
+
+    async def _run_documents(self, job: Job, agent: AgentProfile) -> None:
+        """Ledger: edit Excel, Word and PowerPoint files (a copy beside each) or Google files."""
+        from pyxi.agents.ledger import run_ledger
+
+        llm = self.llm_factory(agent)
+
+        async def ask(system: str, prompt: str) -> tuple[str, float]:
+            response = await llm.complete(
+                system=system, messages=[Message.user(prompt)], max_tokens=4000
+            )
+            return response.text, response.usage.cost_usd
+
+        async def progress(line: str) -> None:
+            await self._status(job, line[:1].upper() + line[1:])
+
+        google_refs = [str(g) for g in job.params.get("google") or [] if str(g).strip()]
+        result = await run_ledger(
+            job.task,
+            files=job.files,
+            google=self._google() if google_refs else None,
+            google_refs=google_refs,
+            ask=ask,
+            name=agent.name,
+            persona=agent.persona,
+            context=job.context,
+            progress=progress,
+        )
+        job.cost_usd = result.cost_usd
+        job.outputs = result.outputs
+        job.data = {
+            "changes": result.changes[:12],
+            "notes": result.problems[:3],
+            "links": result.links,
+            "outputs": result.outputs,
+        }
+        if not result.changes:
+            job.status = "failed"
+            job.summary = result.summary or "I couldn't make that change."
+            return
+        parts = [". ".join(result.changes[:4]) + "."]
+        if result.outputs:
+            names = ", ".join(Path(o).name for o in result.outputs)
+            parts.append(f"Saved as {names}, beside the original.")
+        if result.links:
+            parts.append("Edited in Google (File > Version history has the old one): " + " ".join(result.links))
+        if result.problems:
+            parts.append(f"{len(result.problems)} edit(s) didn't work.")
+        job.summary = " ".join(parts)
+        job.status = "done"

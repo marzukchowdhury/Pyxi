@@ -39,7 +39,7 @@ from pydantic import ValidationError
 from pyxi import booking, hands, media, tidy, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
-from pyxi.companion import prompts
+from pyxi.companion import filework, prompts
 from pyxi.companion.actions import app_target, open_app, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
@@ -51,6 +51,7 @@ from pyxi.companion.annotations import (
     split_markers,
 )
 from pyxi.companion.errands import run_errand
+from pyxi.companion.filework import FILE_TOOLS
 from pyxi.companion.layout import Placed
 from pyxi.companion.notes import (
     BOARD_SIZES,
@@ -1963,6 +1964,8 @@ class Brain:
             )
             await self.hub.emit("agents", agents=[a.model_dump() for a in self.registry.all()])
             return f"Created {agent.name} ({agent.role})."
+        if name in FILE_TOOLS:  # Pixel, Ledger and file search: companion/filework.py
+            return await filework.handle(self, name, args)
         # Phrased as a problem note, so the model hears it and tries a real tool.
         return f"{name}: there's no tool by that name. Use one of the tools you have."
 

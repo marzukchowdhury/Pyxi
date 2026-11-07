@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { bridge, keysOf } from "../shared/bridge";
-import { Close, Compass, Cube, Feather, Mark, Mic, Minus, Plus, Replay, Send, Spark, Thread } from "../shared/icons";
+import { Close, Compass, Cube, Feather, FileStack, Grid, Mark, Mic, Minus, Plus, Replay, Send, Spark, Thread } from "../shared/icons";
 import type { Agent, Job } from "../shared/protocol";
 import { brain } from "../shared/socket";
 import { answer, getJson, usePanel } from "./store";
 import { Connections, Routines } from "./Connections";
+import { FileAccess } from "./FileAccess";
 import { VoiceStudio } from "./VoiceStudio";
 
 export type Tab = "chat" | "team" | "palace" | "gallery" | "voice" | "settings";
@@ -156,6 +157,8 @@ const ROLE: Record<string, { label: string; Icon: (p: React.SVGProps<SVGSVGEleme
   browser: { label: "Researcher", Icon: Compass },
   writer: { label: "Writer", Icon: Feather },
   explainer: { label: "3D explainer", Icon: Cube },
+  files: { label: "Files", Icon: FileStack },
+  documents: { label: "Documents", Icon: Grid },
 };
 
 /** Pyxi itself: the one you talk to, who hands work to everyone below. */
@@ -224,7 +227,7 @@ function NewAgent({ onDone }: { onDone: () => void }) {
     <form className="new-agent" onSubmit={(e) => { e.preventDefault(); brain.send({ type: "agent_create", name, role, persona, voice }); onDone(); }}>
       <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. Pixel" />
       <select value={role} onChange={(e) => setRole(e.target.value)}>
-        <option value="browser">Browser agent</option><option value="writer">Writer</option><option value="explainer">3D explainer</option>
+        <option value="browser">Browser agent</option><option value="writer">Writer</option><option value="explainer">3D explainer</option><option value="files">Files (convert)</option><option value="documents">Documents (edit)</option>
       </select>
       <textarea required value={persona} onChange={(e) => setPersona(e.target.value)} placeholder="Personality and focus, e.g. 'A patient shopping scout who always checks three stores.'" />
       <select value={voice} onChange={(e) => setVoice(e.target.value)}>
@@ -491,6 +494,8 @@ export function Settings() {
       <ShareToggle />
       <h4>Booking details</h4>
       <BookingDetails />
+      <h4>Your files</h4>
+      <FileAccess />
       <h4>Connected accounts</h4>
       <Connections />
       <h4>Routines</h4>

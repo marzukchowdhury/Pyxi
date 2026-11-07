@@ -1,6 +1,7 @@
-"""Google: Gmail, Calendar and Docs with one sign-in.
+"""Google: Gmail, Calendar, Docs and Sheets with one sign-in.
 
-Setup (once): create a free Google Cloud project, enable the Gmail, Calendar and Docs APIs,
+Setup (once): create a free Google Cloud project, enable the Gmail, Calendar, Docs, Sheets and
+Drive APIs,
 make an OAuth client of type "Desktop app", and save its JSON as ``.pyxi/google_client.json``
 (or set ``GOOGLE_CLIENT_ID`` and ``GOOGLE_CLIENT_SECRET``). Then ``pyxi connect google`` (or the
 Connect button in Settings) opens Google's sign-in in your browser. Pyxi never sees your
@@ -44,12 +45,18 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/documents",
     "https://www.googleapis.com/auth/drive.file",
+    # Ledger edits Google Sheets, and finds a Sheet or Doc by its name ("my sales sheet").
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.metadata.readonly",
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
 ]
 GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 CAL = "https://www.googleapis.com/calendar/v3/calendars/primary"
 DOCS = "https://docs.googleapis.com/v1/documents"
+SHEETS = "https://sheets.googleapis.com/v4/spreadsheets"
+DRIVE = "https://www.googleapis.com/drive/v3/files"
+SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 
 
 def _b64url(data: bytes) -> str:
@@ -320,7 +327,7 @@ def bundled_client() -> Path | None:
 
 class GoogleConnector(Connector):
     id = "google"
-    name = "Google (Gmail, Calendar, Docs)"
+    name = "Google (Gmail, Calendar, Docs, Sheets)"
 
     def __init__(self, store: Path, downloads: Path) -> None:
         self.token_path = store / "google.json"
@@ -359,10 +366,13 @@ class GoogleConnector(Connector):
 
     def status(self) -> Status:
         if self.connected():
-            return Status(self.id, self.name, True, self._saved_email() or "Connected")
+            detail = self._saved_email() or "Connected"
+            if self.missing_scopes():
+                detail += ". Press Connect again to let Pyxi work in Google Sheets"
+            return Status(self.id, self.name, True, detail)
         setup = [
             "Open console.cloud.google.com and create a project (free).",
-            "Enable the Gmail API, Google Calendar API and Google Docs API.",
+            "Enable the Gmail, Google Calendar, Google Docs, Google Sheets and Google Drive APIs.",
             "OAuth consent screen: External, add yourself as a test user.",
             "Credentials > Create OAuth client > Desktop app > Download JSON.",
             "Save it as pyxi/.pyxi/google_client.json, then press Connect.",
@@ -379,6 +389,21 @@ class GoogleConnector(Connector):
             return json.loads(self.token_path.read_text(encoding="utf-8")).get("pyxi_email")
         except (OSError, ValueError):
             return None
+
+    def granted_scopes(self) -> set[str]:
+        try:
+            data = json.loads(self.token_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return set()
+        scopes = data.get("scopes") or []
+        return set(scopes.split() if isinstance(scopes, str) else scopes)
+
+    def missing_scopes(self) -> list[str]:
+        """Scopes added since they connected (Sheets came later). Connect again to grant them."""
+        granted = self.granted_scopes()
+        if not granted:
+            return []  # an old token that didn't record its scopes: let Google decide
+        return [s for s in SCOPES if s not in granted and s != "openid"]
 
     def sign_in(self) -> str:
         """Run Google's sign-in in the browser (blocking; call in a thread)."""
@@ -420,7 +445,11 @@ class GoogleConnector(Connector):
         from google.oauth2.credentials import Credentials
 
         if self._creds is None:
-            self._creds = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
+            # The scopes they actually granted: asking a refresh for new ones (Sheets, added
+            # later) would fail and take Gmail down with it until they reconnect.
+            self._creds = Credentials.from_authorized_user_file(
+                str(self.token_path), sorted(self.granted_scopes()) or SCOPES
+            )
         if not self._creds.valid:
             await asyncio.to_thread(self._creds.refresh, Request())
             data = json.loads(self._creds.to_json())
@@ -844,6 +873,126 @@ class GoogleConnector(Connector):
             f"Created the Google Doc: https://docs.google.com/document/d/{doc['documentId']}/edit"
         )
 
+    # ------------------------------------------------------------------ sheets (Ledger)
+    def _need_sheets(self) -> None:
+        if SHEETS_SCOPE in self.missing_scopes():
+            raise RuntimeError(
+                "Pyxi needs your OK to work in Google Sheets: press Connect next to Google in "
+                "Settings once more."
+            )
+
+    async def sheets_meta(self, sheet_id: str) -> dict[str, Any]:
+        self._need_sheets()
+        return await self._api(
+            "GET", f"{SHEETS}/{sheet_id}", params={"fields": "properties.title,sheets.properties"}
+        )
+
+    async def sheets_values(
+        self, sheet_id: str, a1: str, *, formulas: bool = False
+    ) -> list[list[Any]]:
+        self._need_sheets()
+        data = await self._api(
+            "GET",
+            f"{SHEETS}/{sheet_id}/values/{a1}",
+            params={"valueRenderOption": "FORMULA" if formulas else "FORMATTED_VALUE"},
+        )
+        return data.get("values", [])
+
+    async def sheets_write(self, sheet_id: str, data: list[dict[str, Any]]) -> Any:
+        self._need_sheets()
+        return await self._api(
+            "POST",
+            f"{SHEETS}/{sheet_id}/values:batchUpdate",
+            json={"valueInputOption": "USER_ENTERED", "data": data},
+        )
+
+    async def sheets_append(self, sheet_id: str, a1: str, rows: list[list[Any]]) -> Any:
+        self._need_sheets()
+        return await self._api(
+            "POST",
+            f"{SHEETS}/{sheet_id}/values/{a1}:append",
+            params={"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"},
+            json={"values": rows},
+        )
+
+    async def sheets_batch(self, sheet_id: str, requests: list[dict[str, Any]]) -> Any:
+        self._need_sheets()
+        return await self._api(
+            "POST", f"{SHEETS}/{sheet_id}:batchUpdate", json={"requests": requests}
+        )
+
+    async def docs_get(self, doc_id: str) -> dict[str, Any]:
+        return await self._api("GET", f"{DOCS}/{doc_id}")
+
+    async def docs_batch(self, doc_id: str, requests: list[dict[str, Any]]) -> Any:
+        return await self._api("POST", f"{DOCS}/{doc_id}:batchUpdate", json={"requests": requests})
+
+    async def drive_find(self, name: str, kind: str) -> list[dict[str, Any]]:
+        """Sheets or Docs whose name contains these words, newest first."""
+        mime = {
+            "sheet": "application/vnd.google-apps.spreadsheet",
+            "doc": "application/vnd.google-apps.document",
+        }[kind]
+        words = [w.replace("'", "\\'") for w in re.findall(r"[\w-]+", name)[:4]]
+        q = " and ".join(
+            [f"mimeType='{mime}'", "trashed=false", *(f"name contains '{w}'" for w in words)]
+        )
+        data = await self._api(
+            "GET",
+            DRIVE,
+            params={
+                "q": q,
+                "orderBy": "modifiedTime desc",
+                "pageSize": 5,
+                "fields": "files(id,name)",
+            },
+        )
+        return data.get("files", [])
+
+    async def open_for_edit(self, ref: str) -> Any:
+        """A Google Sheet or Doc for Ledger, from a link, an id, or words from its name."""
+        from pyxi.agents.ledger import GoogleDoc, GoogleSheet, LedgerError
+
+        ref = ref.strip()
+        if m := re.search(r"/spreadsheets/d/([\w-]+)", ref):
+            return GoogleSheet(self, m.group(1))
+        if m := re.search(r"/document/d/([\w-]+)", ref):
+            return GoogleDoc(self, m.group(1))
+        if m := re.match(r"(?i)new (sheet|doc)\s*:\s*(.+)", ref):  # make one for them
+            title = m.group(2).strip()[:120]
+            if m.group(1).lower() == "sheet":
+                self._need_sheets()
+                made = await self._api("POST", SHEETS, json={"properties": {"title": title}})
+                return GoogleSheet(self, made["spreadsheetId"])
+            made = await self._api("POST", DOCS, json={"title": title})
+            return GoogleDoc(self, made["documentId"])
+        if re.fullmatch(r"[\w-]{25,}", ref):  # a bare id: ask Drive which kind it is
+            meta = await self._api("GET", f"{DRIVE}/{ref}", params={"fields": "mimeType"})
+            if "document" in meta.get("mimeType", ""):
+                return GoogleDoc(self, ref)
+            return GoogleSheet(self, ref)
+        kind = "doc" if re.search(r"\bdoc(ument)?s?\b", ref, re.I) else "sheet"
+        words = re.sub(
+            r"(?i)\b(my|the|a|google|sheets?|spreadsheet|docs?|document|in|on|called|named)\b",
+            " ",
+            ref,
+        ).strip()
+        found = await self.drive_find(words or ref, kind)
+        if not found:
+            other = "sheet" if kind == "doc" else "doc"
+            found = await self.drive_find(words or ref, other)
+            kind = other if found else kind
+        if not found:
+            what = "Doc" if kind == "doc" else "Sheet"
+            raise LedgerError(f"I couldn't find a Google {what} called {ref!r}.")
+        f = found[0]
+        return GoogleDoc(self, f["id"]) if kind == "doc" else GoogleSheet(self, f["id"])
+
+    async def sheets_read(self, args: dict[str, Any]) -> Result:
+        target = await self.open_for_edit(str(args["sheet"]))
+        await target.load()
+        return target.describe()[:8000]
+
     @staticmethod
     def _doc_id(ref: str) -> str:
         m = re.search(r"/document/d/([\w-]+)", ref)
@@ -1016,5 +1165,16 @@ class GoogleConnector(Connector):
                     ["title"],
                 ),
                 self.docs_create,
+            ),
+            Tool(
+                tool(
+                    "sheets_read",
+                    "Read a Google Sheet or Doc (a link, or words from its name) to answer a question "
+                    "about it. To change one, use edit_document instead.",
+                    {"sheet": {"type": "string"}},
+                    ["sheet"],
+                ),
+                self.sheets_read,
+                info=True,
             ),
         ]

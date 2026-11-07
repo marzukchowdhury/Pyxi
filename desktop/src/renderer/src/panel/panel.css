@@ -295,3 +295,9 @@ button.ghost:hover { color: var(--ink); border-color: var(--hair-hi); }
 .booking-grid input { height: 30px; font-size: 12.5px; }
 .booking-row { display: flex; align-items: center; gap: 10px; }
 .booking-row .beta-ok { color: #ffc861; font-size: 12px; }
+.file-access { display: grid; gap: 8px; margin-bottom: 14px; }
+.file-access .folders { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.file-access .folders li { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.file-access .folders code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.file-access .folder-add { display: flex; gap: 8px; }
+.file-access .folder-add input { flex: 1; height: 30px; font-size: 12.5px; }

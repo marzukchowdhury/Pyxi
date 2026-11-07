@@ -213,7 +213,7 @@ export interface TimelineMoment {
 export interface Agent {
   id: string;
   name: string;
-  role: "companion" | "browser" | "writer" | "explainer";
+  role: "companion" | "browser" | "writer" | "explainer" | "files" | "documents";
   persona: string;
   voice: string;
   color: string;
@@ -364,7 +364,15 @@ export type BrainEvent =
   | { type: "voice_preview"; engine: string; voice: string; text: string; audio: string | null; error: string | null }
   | { type: "error"; message: string }
   | { type: "beta"; ok: boolean; message: string }
-  | { type: "profile"; profile: Record<string, string>; saved?: boolean };
+  | { type: "profile"; profile: Record<string, string>; saved?: boolean }
+  | ({ type: "file_access" } & FileAccessState);
+
+/** "Let Pyxi search my files" (off until they allow it), and the folders it may look in. */
+export interface FileAccessState {
+  enabled: boolean;
+  folders: string[];
+  asked: boolean;
+}
 
 export type ClientMessage =
   | { type: "text"; text: string }
@@ -374,6 +382,8 @@ export type ClientMessage =
   | { type: "beta_leave" }
   | { type: "profile_get" }
   | { type: "profile_save"; profile: Record<string, string> }
+  | { type: "file_access_get" }
+  | { type: "file_access_save"; enabled: boolean; folders: string[] }
   | { type: "ptt_cancel" }
   | { type: "audio"; data: string; mime: string }
   | { type: "interrupt" }

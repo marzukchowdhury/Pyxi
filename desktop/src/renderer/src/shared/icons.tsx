@@ -22,6 +22,8 @@ export const Clock = (p: P) => <svg {...base(p)}><circle cx="10" cy="10" r="6.5"
 export const Plus = (p: P) => <svg {...base(p)}><path d="M10 4.5v11M4.5 10h11" /></svg>;
 export const Stop = (p: P) => <svg {...base(p)}><rect x="6" y="6" width="8" height="8" rx="1.5" /></svg>;
 export const Minus = (p: P) => <svg {...base(p)}><path d="M5 10h10" /></svg>;
+export const FileStack = (p: P) => <svg {...base(p)}><path d="M7 3.5h5.5L16 7v8.5a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1Z" /><path d="M12.5 3.5V7H16M4 6v10.5a1 1 0 0 0 1 1h8" /></svg>;
+export const Grid = (p: P) => <svg {...base(p)}><rect x="3.5" y="4" width="13" height="12" rx="1.5" /><path d="M3.5 8h13M3.5 12h13M8 4v12" /></svg>;
 export const Cube = (p: P) => <svg {...base(p)}><path d="M10 3 16 6.5v7L10 17l-6-3.5v-7Z" /><path d="M4 6.5 10 10l6-3.5M10 10v7" /></svg>;
 
 /** Pyxi's mark: the same little firefly as the on-screen presence. */
