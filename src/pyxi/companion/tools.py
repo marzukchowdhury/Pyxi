@@ -986,7 +986,7 @@ from pyxi.companion.pricecheck import TOOL as CHECK_PRICES  # noqa: E402
 
 COMPANION_TOOLS.append(CHECK_PRICES)
 
-# Specialist teammates: Atlas (travel), ... (companion/specialists.py).
+# Specialist teammates: Atlas (travel), Penny (money), ... (companion/specialists.py).
 from pyxi.companion.specialists import INFO as SPECIALIST_INFO  # noqa: E402
 from pyxi.companion.specialists import SPECS as SPECIALIST_TOOLS  # noqa: E402
 

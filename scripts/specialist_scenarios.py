@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from typing import Any
+
+from pyxi.agents.penny import month_range
 
 HOME = "turn_49b75541"  # an ordinary desktop
 
@@ -29,6 +32,11 @@ SCENARIOS = [
         "Remind me before my flight next week, and check me in when it opens.",
         "travel_checkin",
     ),
+    # Penny, money: spending from receipts, budgets, receipts into a spreadsheet.
+    ("money month", HOME, "How much did I spend last month?", "money:summary"),
+    ("money over", HOME, "Am I over budget this month?", "money:summary"),
+    ("money budget", HOME, "Set my monthly budget to $1,500.", "money:budget"),
+    ("money sheet", HOME, "Put my October receipts in a spreadsheet.", "money:sheet"),
 ]
 
 
@@ -40,7 +48,14 @@ def install(brain: Any, background: list[str]) -> None:
         background.append("travel: " + json.dumps(args)[:200])
         return "Started job_x: Atlas is reading their travel mail. Say one short line ('On it.')."
 
+    async def fake_money(brain_: Any, args: dict[str, Any]) -> str:
+        background.append("money: " + json.dumps(args)[:200])
+        if args.get("action") == "budget":
+            return "money: Monthly budget set. Say that in a few words."
+        return "Started job_x: Penny is reading their receipts. Say one short line ('On it.')."
+
     specialists._travel = fake_travel  # type: ignore[assignment]
+    specialists._money = fake_money  # type: ignore[assignment]
 
 
 def sentences(said: str) -> int:
@@ -67,6 +82,24 @@ def problems(expect: str, tools: list[str], said: str, background: list[str]) ->
             out.append("lost which trip")
         if "use_computer" in tools:
             out.append("drove the mouse for a trip")
+        if sentences(said) > 2:
+            out.append(f"talks too much ({len(said)} chars)")
+    if expect.startswith("money:"):
+        want = expect.split(":", 1)[1]
+        calls = [json.loads(b[len("money: ") :]) for b in background if b.startswith("money: ")]
+        if not calls:
+            out.append("didn't hand it to Penny")
+        elif calls[0].get("action") != want:
+            out.append(f"Penny got action {calls[0].get('action')!r}, not {want!r}")
+        elif want == "budget" and float(calls[0].get("amount") or 0) != 1500:
+            out.append(f"wrong budget: {calls[0].get('amount')}")
+        elif (
+            want == "sheet"
+            and month_range(str(calls[0].get("month", "")), datetime.now())[0].month != 10
+        ):
+            out.append("lost the month")
+        if "use_computer" in tools:
+            out.append("drove the mouse for money")
         if sentences(said) > 2:
             out.append(f"talks too much ({len(said)} chars)")
     return out

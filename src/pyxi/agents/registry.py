@@ -9,6 +9,7 @@ Each agent has a *role* that decides what it can do:
 * ``files`` converts files: PDFs, images, Word to PDF, CSV and Excel (Pixel).
 * ``documents`` edits Excel, Word and PowerPoint files and Google Sheets and Docs (Ledger).
 * ``travel`` builds trip itineraries from the confirmations in the user's mail (Atlas).
+* ``money`` sums up spending from receipts, keeps budgets, puts receipts in a sheet (Penny).
 
 Agents keep their own long-term memory (Otto's FTS5 memory store, scoped per agent), and
 any agent can hand its result to another (Scout researches, then Quill writes).
@@ -28,7 +29,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Role = Literal[
-    "companion", "browser", "writer", "explainer", "files", "documents", "travel"
+    "companion", "browser", "writer", "explainer", "files", "documents", "travel", "money"
 ]
 
 
@@ -134,6 +135,23 @@ DEFAULT_ROSTER = [
         "the trip out day by day, and reminds you before you need to leave.",
         skills=["itineraries from your mail", "flight reminders", "hotel addresses", "check-in"],
         max_cost_usd=0.05,
+    ),
+    AgentProfile(
+        id="penny",
+        name="Penny",
+        role="money",
+        voice="af_nicole",
+        color="#e8d36a",
+        builtin=True,
+        persona="Level-headed money keeper. Adds up what you really spent from your receipts, "
+        "watches your budget and your subscriptions, and never judges a coffee.",
+        skills=[
+            "monthly spending",
+            "budgets",
+            "receipts to a spreadsheet",
+            "subscriptions & bills",
+        ],
+        max_cost_usd=0.1,
     ),
 ]
 

@@ -129,10 +129,10 @@ def test_activity_log_and_causal_scene(tmp_path):
 def test_agent_registry(tmp_path):
     reg = AgentRegistry(tmp_path / "w.db")
     assert {a.id for a in reg.all()} >= {"pyxi", "scout", "quill", "sketch"}
-    penny = reg.create("Penny", "explainer", "Loves diagrams.")
-    again = reg.create("Penny", "writer", "Another one.")
-    assert penny.id == "penny" and again.id == "penny-2"
-    assert reg.get("PENNY").id == "penny" and not reg.delete("scout") and reg.delete("penny")
+    pip = reg.create("Pip", "explainer", "Loves diagrams.")
+    again = reg.create("Pip", "writer", "Another one.")
+    assert pip.id == "pip" and again.id == "pip-2"
+    assert reg.get("PIP").id == "pip" and not reg.delete("scout") and reg.delete("pip")
 
 
 @pytest.mark.skipif(

@@ -5,11 +5,18 @@ Every tool here starts a background job and returns at once, so Pyxi says one sh
 the result arrives as a notification and a chip in the task tray.
 
 * ``travel``: Atlas builds the itinerary of a trip from the confirmations in Gmail.
+* ``money``: Penny's monthly spending summary from receipts, budgets, and receipts into a
+  spreadsheet (a new one, or theirs through Ledger).
+
+:func:`after_job` runs when any specialist's job ends (the brain calls it from ``_job_done``),
+so a job started by a routine or a hand-off gets the same follow-up as one started here.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from otto.llm.base import ToolSpec
@@ -46,8 +53,36 @@ TRAVEL = ToolSpec(
     },
 )
 
+MONEY = ToolSpec(
+    "money",
+    "Penny, the money teammate. action 'summary': what they spent in a month, from the "
+    "receipts in their Gmail, by category and against their budget ('how much did I spend last "
+    "month?', 'where's my money going?', 'am I over budget?'); monthly=true also sends that "
+    "summary on the 1st of every month. action 'sheet': that month's receipts into a "
+    "spreadsheet (a new Excel file, or `target`: their own .xlsx path or a Google Sheet link "
+    "or name, which Ledger adds the rows to). action 'budget': set a monthly budget (`amount`, "
+    "optional `category` like 'groceries' or 'eating out'; amount 0 removes it). Summary and "
+    "sheet run in the background: say one short line ('On it.'). Subscriptions, bills and "
+    "price checks have their own tools.",
+    {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["summary", "sheet", "budget", "monthly_off"]},
+            "month": {
+                "type": "string",
+                "description": "In their words: 'this month', 'last month', 'October', '2026-09'.",
+            },
+            "monthly": {"type": "boolean"},
+            "amount": {"type": "number"},
+            "category": {"type": "string"},
+            "target": {"type": "string"},
+        },
+        "required": ["action"],
+    },
+)
+
 ROLES = set(RUNNERS)  # their jobs' notifications come from job.data (title, body)
-SPECS: list[ToolSpec] = [TRAVEL]
+SPECS: list[ToolSpec] = [TRAVEL, MONEY]
 TOOLS = {s.name for s in SPECS}
 INFO: set[str] = set()  # tools whose result goes back to the model for another round
 
@@ -55,7 +90,20 @@ INFO: set[str] = set()  # tools whose result goes back to the model for another 
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
     if name == "travel":
         return await _travel(brain, args)
+    if name == "money":
+        return await _money(brain, args)
     return None
+
+
+async def after_job(brain: Brain, job: Job) -> None:
+    """Follow-ups when a specialist's job ends. A problem here never breaks the card."""
+    try:
+        if job.role == "travel":
+            await after_trip(brain, job)
+        elif job.role == "money":
+            await after_money(brain, job)
+    except Exception:
+        log.exception("after %s's job", job.agent_name)
 
 
 def _share_google(brain: Brain) -> bool:
@@ -75,18 +123,18 @@ async def _travel(brain: Brain, args: dict[str, Any]) -> str:
         )
     trip = str(args.get("trip") or "").strip()
     job = await brain.jobs.start(
-        "atlas", f"Itinerary: {trip or 'your next trip'}", params={"trip": trip}
+        "atlas",
+        f"Itinerary: {trip or 'your next trip'}",
+        params={"trip": trip, "check_in": bool(args.get("check_in"))},
     )
-    brain._spawn(after_trip(brain, job, bool(args.get("check_in"))))
     return (
         f"Started {job.id}: {job.agent_name} is reading their travel mail in the background. "
         "Say one short line ('On it.'); the itinerary comes as a notification."
     )
 
 
-async def after_trip(brain: Brain, job: Job, check_in: bool) -> list[str]:
+async def after_trip(brain: Brain, job: Job) -> list[str]:
     """Save the trip's reminders (once each), and schedule check-ins if they asked."""
-    job = await brain.jobs.wait(job.id)
     data = job.data if isinstance(job.data, dict) else {}
     if job.status != "done":
         return []
@@ -105,11 +153,9 @@ async def after_trip(brain: Brain, job: Job, check_in: bool) -> list[str]:
         added.append(r["key"])
     if added:
         await brain.hub.emit("routines", routines=brain.routines.public())
-    if check_in:
-        try:  # the flight check-in (companion/paperwork.py) schedules Scout for when it opens
-            from pyxi.companion import paperwork
-        except ImportError:
-            return added
+    if job.params.get("check_in"):
+        from pyxi.companion import paperwork  # the flight check-in: Scout, when it opens
+
         for f in data.get("flights") or []:
             if not f.get("ref"):
                 continue
@@ -136,3 +182,72 @@ async def after_trip(brain: Brain, job: Job, check_in: bool) -> list[str]:
                 )
                 break
     return added
+
+
+# ---------------------------------------------------------------------------------- Penny
+def schedule_monthly(brain: Brain, now: datetime | None = None) -> str | None:
+    """Next month's summary of the month before, on the 1st at 09:00 (once)."""
+    now = now or datetime.now()
+    when = (now.replace(day=1) + timedelta(days=32)).replace(day=1, hour=9, minute=0)
+    key = f"penny:monthly:{when:%Y-%m}"
+    if brain.routines.has_key(key):
+        return None
+    brain.routines.add(
+        "Penny: last month's spending",
+        on=when.date().isoformat(),
+        time="09:00",
+        kind="job",
+        key=key,
+        job={
+            "agent": "penny",
+            "task": "Spending: last month",
+            "params": {"action": "summary", "month": "last month", "monthly": True},
+        },
+        now=now,
+    )
+    return f"{when:%a} {when.day} {when:%b}"
+
+
+async def _money(brain: Brain, args: dict[str, Any]) -> str:
+    from pyxi.agents import penny
+
+    action = str(args.get("action") or "summary")
+    if action == "budget":
+        try:
+            amount = float(args.get("amount") or 0)
+        except (TypeError, ValueError):
+            return "money: the budget needs an amount, as a number."
+        said = penny.set_budget(brain.settings.data_dir, amount, str(args.get("category") or ""))
+        return f"money: {said} Say that in a few words."
+    if action == "monthly_off":
+        for r in [r for r in brain.routines.items if (r.key or "").startswith("penny:monthly")]:
+            brain.routines.remove(r.id)
+        await brain.hub.emit("routines", routines=brain.routines.public())
+        return "money: the monthly summary is off. Say so in a few words."
+    if not _share_google(brain):
+        return (
+            "money: Gmail isn't connected, so Penny can't read their receipts. Tell them to "
+            "connect Google in Settings, in one sentence."
+        )
+    month = str(args.get("month") or "this month").strip()
+    target = str(args.get("target") or "").strip().strip('"')
+    own_file = action == "sheet" and target.lower().endswith((".xlsx", ".xlsm"))
+    if own_file and not Path(target).expanduser().is_file():
+        return f"money: there's no spreadsheet at {target}. Find it with search_files first."
+    params: dict[str, Any] = {"action": "sheet" if action == "sheet" else "summary", "month": month}
+    if action == "sheet" and target:
+        params["target"] = target
+    if args.get("monthly"):
+        params["monthly"] = True
+    what = "Receipts to a spreadsheet" if action == "sheet" else "Spending"
+    job = await brain.jobs.start("penny", f"{what}: {month}", params=params)
+    return (
+        f"Started {job.id}: {job.agent_name} is reading their receipts in the background. "
+        "Say one short line ('On it.'); the result comes as a notification."
+    )
+
+
+async def after_money(brain: Brain, job: Job) -> None:
+    """A monthly summary books the next one (it also starts the series the first time)."""
+    if job.params.get("monthly") and schedule_monthly(brain):
+        await brain.hub.emit("routines", routines=brain.routines.public())

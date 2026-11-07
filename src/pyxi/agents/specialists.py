@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 # role -> module with run(manager, job, agent)
 RUNNERS = {
     "travel": "pyxi.agents.atlas",
+    "money": "pyxi.agents.penny",
 }
 
 

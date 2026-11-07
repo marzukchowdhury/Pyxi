@@ -308,7 +308,7 @@ SCENARIOS = [
     ('coffee 2', 'turn_7252307e', 'Which of these coffee places is open the latest?', 'nohands'),
     ('near me', 'turn_49b75541', "Find a pharmacy near me that's open now.", 'maps'),
     ('research team', 'turn_49b75541', 'Scout, compare the prices of the iPhone 17 and Pixel 11, then Quill, write me a summary.', 'delegate'),
-    ('new teammate', 'turn_49b75541', 'Make me a teammate called Penny who tracks my spending.', 'create_agent'),
+    ('new teammate', 'turn_49b75541', 'Make me a teammate called Juno who looks up recipes for me.', 'create_agent'),
     ('remember', 'turn_49b75541', 'Remember that my favourite colour is green.', 'remember'),
     ('recall', 'turn_49b75541', 'What do you remember about me?', 'nohands'),
     ('email by name', 'turn_49b75541', "Email Sam that I'm running 10 minutes late.", 'errand_noask'),

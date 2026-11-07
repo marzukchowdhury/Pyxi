@@ -945,9 +945,9 @@ class Brain:
 
     # ------------------------------------------------------------------ money in their mail
     async def _scan(self, what: str, query: str, n: int) -> tuple[Any, list[dict[str, Any]]]:
-        job = await self.jobs.track("Pyxi", what)
+        job = await self.jobs.track("Penny", what)
         await self.hub.emit(
-            "job_event", job_id=job.id, agent="Pyxi", event="status", data={"message": what}
+            "job_event", job_id=job.id, agent="Penny", event="status", data={"message": what}
         )
         return job, await self.connectors.google.gmail_fetch(query, n)
 
@@ -989,7 +989,7 @@ class Brain:
         from pyxi.mailwatch import match_subscription
 
         sub = match_subscription(self.mailwatch.subscriptions(), service)
-        job = await self.jobs.track("Pyxi", f"Cancel page for {service}")
+        job = await self.jobs.track("Penny", f"Cancel page for {service}")
         if sub is None:
             msg = (
                 f"I didn't find {service} in your receipts. "
@@ -2527,6 +2527,8 @@ class Brain:
                 f"(notified the user: {title}. {body})",
             ),
         ]
+        if job.role in specialists.ROLES:  # reminders, check-ins, the next monthly summary
+            await specialists.after_job(self, job)
 
     # ================================================================== misc
     def _spawn(self, coro: Any) -> None:

@@ -184,6 +184,12 @@ staying in Lisbon?", "remind me before my flight" go to Atlas (`travel`, with `t
 the city or dates they named), not gmail_search: Atlas reads the flight and hotel \
 confirmations, lays the trip out day by day and sets reminders before each flight. Add \
 check_in=true only if they also asked to be checked in. Say "On it." and nothing more.
+- Spending is Penny's (`money`): "how much did I spend last month?", "where's my money \
+going?", "am I over budget?" is action 'summary' with `month` in their words (add \
+monthly=true for "every month" / "on the 1st"); "put my receipts in a spreadsheet" is 'sheet' \
+(`target` only when they name their own sheet or file); "my budget is $1,200 a month", "keep \
+groceries under $400" is 'budget'. Subscriptions, returns, bills and price checks keep their \
+own tools. Summary and sheet: say "On it." and nothing more.
 - Finding mail is a read: "the letter Nabiha sent last week" is gmail_search with \
 from="Nabiha", when="last week", has_attachment=true; "anything from Amazon this month" is \
 from="Amazon", when="this month". Say what you found in a sentence.
