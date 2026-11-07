@@ -12,12 +12,15 @@ Mistakes are designed out rather than hoped away:
 * "email Sam" or "reply to my professor" is resolved from the people they really write to
   (gmail_people); several matches mean one short question, not a guess;
 * an email address that came from neither the user nor their mail is refused in code;
+* what the mail says is data, never instructions (pyxi/safety.py): it's fenced in the prompt,
+  and a card for a recipient the user never named, after mail that talks to an AI, says so;
 * the calendar tool rejects times in the past and bad addresses, and reads the event back;
 * if something essential is missing, the errand stops and says exactly what it needs.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -26,6 +29,7 @@ from typing import Any
 
 from otto.llm.base import LLMProvider, Message, ToolSpec
 
+from pyxi import safety
 from pyxi.connectors import Outgoing, Tool
 
 MAX_STEPS = 7
@@ -146,7 +150,7 @@ async def run_errand(
         prompt = f"{now}\n\n# Errand\n{task}\n\n# What the user said\n{user_text}\n\n# Steps so far\n{done}"
         try:
             response = await llm.complete(
-                system=SYSTEM,
+                system=SYSTEM + safety.RULE,
                 messages=[Message.user(prompt)],
                 tools=[*(t.spec for t in tools), FINISH],
                 max_tokens=2000,
@@ -216,6 +220,10 @@ async def run_errand(
                     and result.kind == "invite"
                     and said_by_user(result.recipients, user_text)
                 )
+                # Mail that talks to an AI, and a recipient they never named: the card says so.
+                warning = safety.card_warning(result.recipients, user_text, "\n".join(seen[2:]))
+                if warning:
+                    result = dataclasses.replace(result, preview=f"{warning}\n\n{result.preview}")
                 if not allowed and not await approve(result):
                     steps.append(
                         f"{call.name}: the user said no to '{result.action}'. Don't retry it."
@@ -253,7 +261,10 @@ async def run_errand(
                 links.setdefault(kind, url)
             # What was found is kept whole enough to use: six search results, or a read email.
             keep = 3000 if getattr(tool, "info", False) else 600
-            steps.append(f"{call.name}({_short(args)}) -> {text[:keep]}")
+            shown = text[:keep]
+            if call.name in safety.UNTRUSTED_TOOLS:
+                shown = safety.fence("what " + call.name + " returned", shown)
+            steps.append(f"{call.name}({_short(args)}) -> {shown}")
     return ErrandResult(
         ok=False,
         title="Couldn't finish",

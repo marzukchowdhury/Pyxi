@@ -25,6 +25,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pyxi import safety
+
 if TYPE_CHECKING:
     from pyxi.agents.jobs import Job, JobManager
     from pyxi.agents.registry import AgentProfile
@@ -364,8 +366,10 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
             if focus:
                 ask += f" Focus on: {focus}."
             resp = await llm.complete(
-                system=SYSTEM,
-                messages=[Message.user(f"{ask}\n\nNotes from {path.name}:\n{chunk}")],
+                system=SYSTEM + safety.READ_ONLY_RULE,
+                messages=[
+                    Message.user(f"{ask}\n\n{safety.fence('notes from ' + path.name, chunk)}")
+                ],
                 max_tokens=4000,
             )
             job.cost_usd += resp.usage.cost_usd

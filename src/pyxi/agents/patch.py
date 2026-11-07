@@ -22,6 +22,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pyxi import safety
+
 if TYPE_CHECKING:
     from pyxi.agents.jobs import Job, JobManager
     from pyxi.agents.registry import AgentProfile
@@ -255,12 +257,15 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         f"The error:\n{error[-4000:] or '(they only said: ' + job.task + ')'}\n\n"
         f"File {path.name}"
         + (f", the error points at line {loc.line}" if loc.line else "")
-        + f":\n{numbered}"
+        + ":\n"
+        + safety.fence(path.name, numbered)  # a comment in the code is data, never orders
     )
     if job.params.get("ask"):
         prompt += f"\n\nWhat they asked: {job.params['ask']}"
     llm = manager.llm_factory(agent)
-    resp = await llm.complete(system=SYSTEM, messages=[Message.user(prompt)], max_tokens=2000)
+    resp = await llm.complete(
+        system=SYSTEM + safety.READ_ONLY_RULE, messages=[Message.user(prompt)], max_tokens=2000
+    )
     job.cost_usd = resp.usage.cost_usd
     data = parse(resp.text)
     if data is None:

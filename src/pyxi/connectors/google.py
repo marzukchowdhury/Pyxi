@@ -754,7 +754,7 @@ class GoogleConnector(Connector):
             return f'Sent to {shown}: "{subject}".'
 
         gist = re.sub(r"\s+", " ", str(args.get("gist") or "")).strip() or _first_line(body)
-        attached = f"\nAttached: {', '.join(p.name for p in files)}" if files else ""
+        attached = f"\nAttached: {', '.join(f'{p.name} (from {p.parent})' for p in files)}" if files else ""
         return Outgoing(
             action=f"Send an email to {shown}",
             preview=(

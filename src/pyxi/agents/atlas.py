@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from pyxi import safety
 from pyxi.mailwatch import DATE, merchant, parse_date
 
 if TYPE_CHECKING:
@@ -910,7 +911,9 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         )
         try:
             resp = await llm.complete(
-                system=MODEL_SYSTEM, messages=[Message.user(sample)], max_tokens=900
+                system=MODEL_SYSTEM + safety.READ_ONLY_RULE,
+                messages=[Message.user(safety.fence("the emails", sample))],
+                max_tokens=900,
             )
             job.cost_usd += resp.usage.cost_usd
             more_f, more_s = from_model(resp.text, unread)

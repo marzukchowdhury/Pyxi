@@ -39,6 +39,7 @@ from pyxi.config import PyxiSettings
 from pyxi.docs import SUMMARY_EXTS, SUPPORTED, document_mode, fix_document, summarize_document
 from pyxi.hub import Hub
 from pyxi.llm import otto_settings
+from pyxi.safety import RULE as UNTRUSTED_RULE
 
 log = logging.getLogger(__name__)
 
@@ -419,7 +420,8 @@ class JobManager:
             prompt += f"\n\nThings you remember:\n{memories}"
         response = await llm.complete(
             system=f"You are {agent.name}, a writer on the user's team. {agent.persona} "
-            "Write the deliverable itself, ready to use, with no preamble. Never invent facts that are not in the context.",
+            "Write the deliverable itself, ready to use, with no preamble. Never invent facts that are not in the context."
+            + UNTRUSTED_RULE,
             messages=[Message.user(prompt)],
             max_tokens=4000,
         )
@@ -646,7 +648,7 @@ class JobManager:
 
         async def ask(system: str, prompt: str) -> tuple[str, float]:
             response = await llm.complete(
-                system=system, messages=[Message.user(prompt)], max_tokens=4000
+                system=system + UNTRUSTED_RULE, messages=[Message.user(prompt)], max_tokens=4000
             )
             return response.text, response.usage.cost_usd
 

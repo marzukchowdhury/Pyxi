@@ -33,6 +33,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pyxi import safety
+
 if TYPE_CHECKING:
     from pyxi.agents.jobs import Job, JobManager
     from pyxi.agents.registry import AgentProfile
@@ -467,7 +469,7 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         + f"\n\nConversions Pixel can do: {', '.join(OPERATIONS)}"
     )
     llm = manager.llm_factory(agent)
-    resp = await llm.complete(system=SYSTEM, messages=[Message.user(prompt)], max_tokens=3000)
+    resp = await llm.complete(system=SYSTEM + safety.RULE, messages=[Message.user(prompt)], max_tokens=3000)
     job.cost_usd = resp.usage.cost_usd
     plan = parse_plan(resp.text, items)
     if plan is not None and plan.route == "files" and folder is not None:

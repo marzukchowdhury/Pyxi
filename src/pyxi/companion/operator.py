@@ -26,7 +26,7 @@ from typing import Any
 from otto.llm.base import ImagePart, Message, TextPart, ToolSpec
 from PIL import Image, ImageChops, ImageStat
 
-from pyxi import hands, windows
+from pyxi import hands, safety, windows
 from pyxi.companion.actions import app_target, safe_url
 from pyxi.companion.aim import confirm_target
 from pyxi.companion.annotations import resolve_point, resolve_rect
@@ -394,7 +394,7 @@ class Operator:
             try:
                 llm = self.strong_llm if self.escalated and self.strong_llm else self.llm
                 res = await llm.complete(
-                    system=SYSTEM,
+                    system=SYSTEM + safety.RULE,
                     messages=[Message("user", parts)],
                     tools=[ACT, DONE, ASK],
                     max_tokens=2500,

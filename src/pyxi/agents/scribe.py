@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pyxi import safety
+
 if TYPE_CHECKING:
     from pyxi.agents.jobs import Job, JobManager
     from pyxi.agents.registry import AgentProfile
@@ -215,7 +217,11 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
 
     async def ask(system: str, text: str) -> Notes | None:
         nonlocal cost
-        resp = await llm.complete(system=system, messages=[Message.user(text)], max_tokens=2500)
+        resp = await llm.complete(
+            system=system + safety.READ_ONLY_RULE,
+            messages=[Message.user(safety.fence("the transcript", text))],
+            max_tokens=2500,
+        )
         cost += resp.usage.cost_usd
         return parse_notes(resp.text)
 

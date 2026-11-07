@@ -36,7 +36,7 @@ from otto.types import ToolCall, Usage
 from PIL import Image
 from pydantic import ValidationError
 
-from pyxi import booking, hands, media, tidy, web, windows
+from pyxi import booking, hands, media, safety, tidy, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
 from pyxi.companion import filework, paperwork, pricecheck, prompts, specialists
@@ -998,10 +998,14 @@ class Brain:
             await self.jobs.settle(job, ok=False, summary=msg)
             await self._notify(job.id, ok=False, title=f"No {service} subscription found", body=msg)
             return
+        # The card names the site: a link from an email could point anywhere (a phishing page).
+        from urllib.parse import urlparse
+
+        host = (urlparse(sub.cancel_url).hostname or "") if sub.cancel_url else ""
         where = (
-            "the cancel link in your receipt"
+            f"the cancel link in your receipt, on {host}"
             if sub.cancel_from == "email"
-            else f"{sub.service}'s account page"
+            else f"{sub.service}'s account page, on {host}"
             if sub.cancel_url
             else f"{sub.service}'s website (Scout finds the cancel page in the background)"
         )
@@ -1586,6 +1590,8 @@ class Brain:
                 except Exception as exc:
                     log.exception("tool %s failed", call.name)
                     note = f"{call.name} failed: {exc}"
+                if note and call.name in safety.UNTRUSTED_TOOLS:
+                    note = safety.fence(call.name, note)  # the web, files, mail: data only
                 if lookup:
                     self._looked[key] = note or ""
                 if note:
