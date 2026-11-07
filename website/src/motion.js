@@ -65,6 +65,18 @@ function initLayers(reduced) {
     steps.forEach((li) => li.classList.add("on"));
     return;
   }
+  // The real-time 3D version loads only as the section comes near; the flat layers stay if it can't run.
+  const stage = track.querySelector(".layers-stage");
+  new IntersectionObserver(
+    ([e], io) => {
+      if (!e.isIntersecting) return;
+      io.disconnect();
+      import("./how3d.js")
+        .then(({ startHow3D }) => startHow3D(stage, track) && stage.classList.add("has-3d"))
+        .catch(() => undefined);
+    },
+    { rootMargin: "800px 0px" },
+  ).observe(track);
   const smooth = (t) => t * t * (3 - 2 * t);
   let raf = 0;
   const update = () => {
@@ -75,8 +87,8 @@ function initLayers(reduced) {
     // Lift apart over the first fifth, hold while each layer has its turn, settle at the end.
     const open = p < 0.18 ? smooth(p / 0.18) : p > 0.86 ? smooth((1 - p) / 0.14) : 1;
     track.style.setProperty("--open", open.toFixed(3));
-    setStep(p < 0.18 || p > 0.86 ? 0 : p < 0.41 ? 1 : p < 0.64 ? 2 : 3);
-    if (p >= 0.86) steps.forEach((li) => li.classList.add("on"));
+    setStep(p < 0.1 || p > 0.92 ? 0 : p < 0.4 ? 1 : p < 0.66 ? 2 : 3);
+    if (p >= 0.92) steps.forEach((li) => li.classList.add("on"));
   };
   const queue = () => (raf ||= requestAnimationFrame(update));
   addEventListener("scroll", queue, { passive: true });
