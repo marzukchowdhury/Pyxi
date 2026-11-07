@@ -66,10 +66,52 @@ SCENARIOS = [
         "Explain this diagram, I have an exam on it tomorrow.",
         "study:diagram",
     ),
+    # Patch, code: an error in a terminal, explained on screen, the fix on a card.
+    ("code error", HOME, "What's this error? Can you fix it?", "code"),
+    ("code why", HOME, "Why does my script keep crashing?", "code"),
+]
+
+TRACE = [
+    "PS C:\\Users\\alex\\Desktop> python report.py",
+    "Traceback (most recent call last):",
+    '  File "{folder}\\report.py", line 14, in <module>',
+    '    print("Total:", total(rows))',
+    '  File "{folder}\\report.py", line 10, in total',
+    '    return sum(r["amount"] for r in rows)',
+    "TypeError: unsupported operand type(s) for +: 'float' and 'str'",
+    "PS C:\\Users\\alex\\Desktop>",
 ]
 
 
-def install(brain: Any, background: list[str]) -> None:
+def terminal_screen(folder: str) -> Any:
+    """Windows Terminal showing a real-looking Python traceback from report.py in ``folder``."""
+    import time
+
+    from PIL import Image, ImageDraw
+
+    from pyxi.screen.context import ScreenContext, WindowInfo
+    from pyxi.screen.ocr import TextLine
+
+    w, h = 1920, 1080
+    shot = Image.new("RGB", (w, h), (12, 12, 12))
+    draw = ImageDraw.Draw(shot)
+    ocr = []
+    for i, line in enumerate(TRACE):
+        text = line.format(folder=folder)
+        x, y, per = 40, 80 + i * 34, 11
+        draw.text((x, y), text, fill=(255, 110, 110) if "Error" in text else (230, 230, 230))
+        words, cx = [], x
+        for word in text.split():
+            words.append((word, (cx, y, per * len(word), 24)))
+            cx += per * (len(word) + 1)
+        ocr.append(TextLine(text, (x, y, per * len(text), 24), words, i + 1))
+    window = WindowInfo("Windows PowerShell", "WindowsTerminal.exe", (0, 0, w, h))
+    ctx = ScreenContext(time.time(), window, [], shot)
+    ctx.text = ocr
+    return ctx
+
+
+def install(brain: Any, background: list[str], name: str = "") -> None:
     """Replace each specialist's work with a recorder."""
     from pyxi.companion import specialists
 
@@ -106,6 +148,15 @@ def install(brain: Any, background: list[str]) -> None:
         sage.Deck("The heart", "Lecture 4 slides.pptx", [sage.Card(q, a) for q, a in cards]),
     )
 
+    async def fake_fix(brain_: Any, args: dict[str, Any]) -> str:
+        background.append("fix: " + json.dumps(args)[:400])
+        return "Started job_x: Patch is looking at report.py. Say one short line; the fix comes on a card."
+
+    allowed = files_access.load(brain.settings.data_dir).folders
+    if name.startswith("code ") and allowed:
+        (Path(allowed[0]) / "report.py").write_text("rows = []\n", encoding="utf-8")
+        brain.screen.ctx = terminal_screen(allowed[0])
+    specialists._fix_code = fake_fix  # type: ignore[assignment]
     specialists._travel = fake_travel  # type: ignore[assignment]
     specialists._meeting = fake_meeting  # type: ignore[assignment]
     specialists._money = fake_money  # type: ignore[assignment]
@@ -198,4 +249,18 @@ def problems(
             out.append("drove the mouse for studying")
         if want == "make" and sentences(said) > 2:
             out.append(f"talks too much ({len(said)} chars)")
+    if expect == "code":
+        fixes = [json.loads(b[len("fix: ") :]) for b in background if b.startswith("fix: ")]
+        if not fixes:
+            out.append("didn't hand it to Patch")
+        elif "TypeError" not in fixes[0].get("error", "") or "report.py" not in json.dumps(
+            fixes[0]
+        ):
+            out.append(f"lost the error text: {json.dumps(fixes[0])[:120]}")
+        if "explain_on_screen" not in tools and not ({"point", "circle", "highlight"} & set(tools)):
+            out.append("didn't point at the line")
+        if re.search(r"\b(fixed it|it's fixed|all fixed)\b", said, re.I):
+            out.append("claimed it was fixed before the card")
+        if "use_computer" in tools:
+            out.append("drove the mouse for code")
     return out

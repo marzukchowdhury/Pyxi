@@ -596,7 +596,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         else _invoice_read(p, *a, **k)
     )
     brain.connectors.google.connected = lambda: True  # type: ignore[method-assign]
-    specialist_fakes(brain, background)
+    specialist_fakes(brain, background, name)
     started = time.monotonic()
     await brain.turn(question)
     await asyncio.sleep(0.3)

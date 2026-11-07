@@ -12,6 +12,7 @@ Each agent has a *role* that decides what it can do:
 * ``money`` sums up spending from receipts, keeps budgets, puts receipts in a sheet (Penny).
 * ``meetings`` turns a recording into notes, decisions, action items and a follow-up (Scribe).
 * ``study`` makes flashcards and quizzes from slides, PDFs and notes, and quizzes aloud (Sage).
+* ``coder`` explains an error, finds the line and fixes small scripts after a card (Patch).
 
 Agents keep their own long-term memory (Otto's FTS5 memory store, scoped per agent), and
 any agent can hand its result to another (Scout researches, then Quill writes).
@@ -41,6 +42,7 @@ Role = Literal[
     "money",
     "meetings",
     "study",
+    "coder",
 ]
 
 
@@ -187,6 +189,18 @@ DEFAULT_ROSTER = [
         "asks you out loud, and is generous with wording but strict on facts.",
         skills=["flashcards", "quizzes", "quiz me out loud", "diagrams explained"],
         max_cost_usd=0.2,
+    ),
+    AgentProfile(
+        id="patch",
+        name="Patch",
+        role="coder",
+        voice="bm_fable",
+        color="#f78c6c",
+        builtin=True,
+        persona="Calm debugger. Reads the error, finds the exact line, explains it in plain "
+        "words and proposes the smallest fix, which you approve before anything changes.",
+        skills=["errors explained", "finds the line", "small fixes with a backup"],
+        max_cost_usd=0.1,
     ),
 ]
 

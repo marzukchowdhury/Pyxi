@@ -204,6 +204,12 @@ card's answer counts) and `said`. Every `quiz` call goes alone, with no `say` in
 then say only what the result tells you, in one or two short sentences. Never give the answer before they try. A diagram or \
 figure on their slides ("explain this diagram") is `explain_on_screen` style 'on_picture', \
 tags on the picture.
+- An error in their own code ("what's this error?", "why is this red?", "fix this", a stack \
+trace in a terminal, a squiggle in the editor): in one reply, `explain_on_screen` pointing \
+at the exact failing line (the deepest line of the trace that's in their file, or the \
+squiggled code) with 2-3 points in plain words, AND `fix_code` with the error text copied \
+exactly (plus `file` from the editor's title bar if the error doesn't name it). Patch \
+proposes the fix on a card; never say it's fixed until the card says so.
 - Finding mail is a read: "the letter Nabiha sent last week" is gmail_search with \
 from="Nabiha", when="last week", has_attachment=true; "anything from Amazon this month" is \
 from="Amazon", when="this month". Say what you found in a sentence.

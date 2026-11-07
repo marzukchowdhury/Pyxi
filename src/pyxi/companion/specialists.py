@@ -11,6 +11,8 @@ the result arrives as a notification and a chip in the task tray.
   decisions and action items, and drafts a follow-up email that goes only through a card.
 * ``make_flashcards`` and ``quiz``: Sage makes flashcards and a quiz from slides, PDFs or notes, and quizzes them out
   loud (the quiz lives on the brain as ``brain.study_quiz``, one question per voice turn).
+* ``fix_code``: Patch finds the failing line from an error and proposes a small fix; the
+  file is written only after the approval card, with a backup beside it.
 
 :func:`after_job` runs when any specialist's job ends (the brain calls it from ``_job_done``),
 so a job started by a routine or a hand-off gets the same follow-up as one started here.
@@ -18,6 +20,7 @@ so a job started by a routine or a hand-off gets the same follow-up as one start
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -143,8 +146,27 @@ QUIZ = ToolSpec(
     },
 )
 
+FIX_CODE = ToolSpec(
+    "fix_code",
+    "Patch, the coding teammate: works out why a script on this PC fails and proposes the "
+    "smallest fix, shown as a diff on a card; the file changes only if they press Allow (a "
+    "backup is kept). `error`: the full error text as it is on screen (stack trace, compiler "
+    "message, the squiggle's tooltip), copied exactly. `file`: the script's full path when the "
+    "error doesn't include it (from the editor's title bar or search_files), with `line` if "
+    "you know it. Runs in the background: say one short line.",
+    {
+        "type": "object",
+        "properties": {
+            "error": {"type": "string"},
+            "file": {"type": "string"},
+            "line": {"type": "integer"},
+            "ask": {"type": "string", "description": "What they asked, in their words."},
+        },
+    },
+)
+
 ROLES = set(RUNNERS)  # their jobs' notifications come from job.data (title, body)
-SPECS: list[ToolSpec] = [TRAVEL, MONEY, MEETING, FLASHCARDS, QUIZ]
+SPECS: list[ToolSpec] = [TRAVEL, MONEY, MEETING, FLASHCARDS, QUIZ, FIX_CODE]
 TOOLS = {s.name for s in SPECS}
 INFO: set[str] = {"quiz"}  # tools whose result goes back to the model for another round
 
@@ -156,6 +178,8 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         return await _money(brain, args)
     if name == "meeting_notes":
         return await _meeting(brain, args)
+    if name == "fix_code":
+        return await _fix_code(brain, args)
     if name == "make_flashcards":
         return await _study(brain, {**args, "action": "make"})
     if name == "quiz":
@@ -173,6 +197,8 @@ async def after_job(brain: Brain, job: Job) -> None:
             await after_money(brain, job)
         elif job.role == "meetings":  # the card can wait half an hour: not inside the job
             brain._spawn(after_meeting(brain, job))
+        elif job.role == "coder":  # the same: the card waits for them
+            brain._spawn(after_fix(brain, job))
     except Exception:
         log.exception("after %s's job", job.agent_name)
 
@@ -467,3 +493,80 @@ async def _study(brain: Brain, args: dict[str, Any]) -> str:
             f"quiz: {verdict} Then ask the next one, word for word, and stop there.\n{quiz.ask()}"
         )
     return f"quiz: unknown action {action!r}."
+
+
+# ---------------------------------------------------------------------------------- Patch
+async def _fix_code(brain: Brain, args: dict[str, Any]) -> str:
+    from pyxi.agents import patch
+
+    error = str(args.get("error") or "").strip()
+    raw = str(args.get("file") or "").strip().strip('"')
+    if raw:
+        path = Path(raw).expanduser()
+        if not path.is_file():
+            return f"fix_code: there's no file at {raw}. Find it with search_files, or ask them."
+        loc = patch.Location(str(path), int(args.get("line") or 0))
+    else:
+        found = patch.locations(error)
+        if not found:
+            return (
+                "fix_code: the error doesn't name a file on this PC. Ask them which script it "
+                "is (or read the editor's title bar), then call fix_code with `file`."
+            )
+        loc = found[0]
+    path = Path(loc.path)
+    if path.suffix.lower() not in patch.CODE:
+        return f"fix_code: {path.name} isn't a script Patch edits."
+    job = await brain.jobs.start(
+        "patch",
+        f"Fix: {path.name}" + (f" line {loc.line}" if loc.line else ""),
+        files=[str(path)],
+        params={"error": error[-6000:], "line": loc.line, "ask": str(args.get("ask") or "")},
+    )
+    return (
+        f"Started {job.id}: {job.agent_name} is looking at {path.name} in the background. "
+        "Say one short line; the fix comes on a card they approve before anything changes."
+    )
+
+
+async def after_fix(brain: Brain, job: Job) -> bool:
+    """The diff on an approval card; the file changes only on Allow. True if it was applied."""
+    from pyxi.agents import patch
+
+    data = job.data if isinstance(job.data, dict) else {}
+    if job.status != "done" or not data.get("fix"):
+        return False
+    fix = patch.Fix(**data["fix"])
+    name = Path(fix.path).name
+    ok = await brain.hub.request(
+        "confirm",
+        timeout=1800,
+        job_id=job.id,
+        agent=job.agent_name,
+        action=f"Apply this fix to {name}?",
+        reason=(f"{fix.why}\n\n" if fix.why else "")
+        + fix.diff[:1800]
+        + "\n\nA backup of the file is kept beside it.",
+    )
+    if not ok:
+        return False
+    try:
+        backup = await asyncio.to_thread(patch.apply, fix)
+    except (OSError, RuntimeError, UnicodeDecodeError) as exc:
+        await brain._notify(job.id, ok=False, title=f"{name} wasn't changed", body=str(exc)[:200])
+        return False
+    await brain._notify(
+        job.id,
+        ok=True,
+        title=f"Fixed {name}",
+        body=f"Line {fix.line} changed. The old version is saved as {backup.name}.",
+        files=[fix.path],
+    )
+    brain.history = [
+        *brain.history[-11:],
+        (
+            f"(applied {job.agent_name}'s fix to {fix.path})",
+            f"(notified: fixed {name}, backup {backup.name})",
+        ),
+    ]
+    return True
