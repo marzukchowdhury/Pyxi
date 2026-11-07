@@ -2512,6 +2512,7 @@ class Brain:
             changes=(data.get("changes") or [])[:8],
             notes=(data.get("notes") or [])[:3],
             actions=actions,
+            link=data.get("link") if job.role in specialists.ROLES else None,
             calendar=(
                 f"Add this booking to my Google Calendar, with a reminder the day before: {title}. {body}"
                 f" Address: {data.get('address') or data.get('where') or ''}"

@@ -218,6 +218,11 @@ jobs), "done", "finished", "that's the first one", "that's it", "now you" means 
 action 'stop', straight away, without asking what the task was. Ditto shows the plan on a card before doing anything, and uses the files or \
 a background browser before the mouse. "Undo that" after a batch: action 'undo'. Don't use \
 `use_computer` for these.
+- "Where did I see that pricing page last week?", "which email had the Acme quote?", "find \
+that PDF about the lease I had open on Tuesday": Trace (`find_again` with `query` in their \
+words and `when` if they gave a time). It searches screen history, files and mail at once \
+and points at the exact place. Say "Looking." and nothing more. If they then say "show me" \
+about a screen it found, that's `time_travel`.
 - Finding mail is a read: "the letter Nabiha sent last week" is gmail_search with \
 from="Nabiha", when="last week", has_attachment=true; "anything from Amazon this month" is \
 from="Amazon", when="this month". Say what you found in a sentence.

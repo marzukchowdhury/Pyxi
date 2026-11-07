@@ -78,6 +78,10 @@ SCENARIOS = [
         "watch:start",
     ),
     ("watch done", HOME, "Okay, done, that's the first one.", "watch:stop"),
+    # Trace, memory: screen history, files and mail at once, with the exact place.
+    ("find pricing", HOME, "Where did I see that pricing page last week?", "find"),
+    ("find lease", HOME, "Find that PDF about the lease I had open on Tuesday.", "find"),
+    ("find quote", HOME, "Which email had the Acme quote in it?", "find_or_mail"),
 ]
 
 TRACE = [
@@ -192,6 +196,12 @@ def install(brain: Any, background: list[str], name: str = "") -> None:
         )
         brain.jobs.jobs[chip.id] = chip
     specialists._watch = fake_watch  # type: ignore[assignment]
+
+    async def fake_find(brain_: Any, args: dict[str, Any]) -> str:
+        background.append("find: " + json.dumps(args)[:200])
+        return "Started job_x: Trace is looking. Say one short line ('Looking.')."
+
+    specialists._find = fake_find  # type: ignore[assignment]
     specialists._travel = fake_travel  # type: ignore[assignment]
     specialists._meeting = fake_meeting  # type: ignore[assignment]
     specialists._money = fake_money  # type: ignore[assignment]
@@ -308,5 +318,15 @@ def problems(
         if "use_computer" in tools or any(b.startswith("hands") for b in background):
             out.append("drove the mouse instead of watching")
         if sentences(said) > 2:
+            out.append(f"talks too much ({len(said)} chars)")
+    if expect in ("find", "find_or_mail"):
+        finds = [json.loads(b[len("find: ") :]) for b in background if b.startswith("find: ")]
+        if not finds and not (expect == "find_or_mail" and "gmail_search" in tools):
+            out.append("didn't hand it to Trace")
+        if finds and not re.search(r"pricing|lease|acme|quote", finds[0].get("query", ""), re.I):
+            out.append(f"lost what to look for: {finds[0]}")
+        if "use_computer" in tools:
+            out.append("drove the mouse to look")
+        if finds and sentences(said) > 2:
             out.append(f"talks too much ({len(said)} chars)")
     return out

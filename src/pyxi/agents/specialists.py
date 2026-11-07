@@ -24,6 +24,7 @@ RUNNERS = {
     "study": "pyxi.agents.sage",
     "coder": "pyxi.agents.patch",
     "automation": "pyxi.agents.ditto",
+    "memory": "pyxi.agents.trace",
 }
 
 

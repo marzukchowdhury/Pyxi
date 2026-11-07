@@ -13,6 +13,8 @@ the result arrives as a notification and a chip in the task tray.
   loud (the quiz lives on the brain as ``brain.study_quiz``, one question per voice turn).
 * ``watch_me``: Ditto watches them do one item, then does the rest the quietest way it can
   (files, Pixel, Ledger, Scout; the mouse only as a last resort), after a card.
+* ``find_again``: Trace finds where they saw something (screen history, files, mail) and
+  points at the exact place.
 * ``fix_code``: Patch finds the failing line from an error and proposes a small fix; the
   file is written only after the approval card, with a backup beside it.
 
@@ -192,8 +194,28 @@ WATCH = ToolSpec(
     },
 )
 
+FIND = ToolSpec(
+    "find_again",
+    "Trace, the memory teammate: 'where did I see that pricing page last week?', 'which email "
+    "had the Acme quote?', 'that PDF about the lease I opened on Tuesday'. Looks through their "
+    "screen history (the Memory Palace), their files (if file search is on) and their mail at "
+    "once, and answers with the exact place: the window and the moment, the file's path, or "
+    "the email with its link. Runs in the background: say one short line ('Looking.').",
+    {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What they're looking for, in their words."},
+            "when": {
+                "type": "string",
+                "description": "Time words if they said: 'last week', 'on Tuesday'.",
+            },
+        },
+        "required": ["query"],
+    },
+)
+
 ROLES = set(RUNNERS)  # their jobs' notifications come from job.data (title, body)
-SPECS: list[ToolSpec] = [TRAVEL, MONEY, MEETING, FLASHCARDS, QUIZ, FIX_CODE, WATCH]
+SPECS: list[ToolSpec] = [TRAVEL, MONEY, MEETING, FLASHCARDS, QUIZ, FIX_CODE, WATCH, FIND]
 TOOLS = {s.name for s in SPECS}
 INFO: set[str] = {"quiz"}  # tools whose result goes back to the model for another round
 
@@ -205,6 +227,8 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         return await _money(brain, args)
     if name == "meeting_notes":
         return await _meeting(brain, args)
+    if name == "find_again":
+        return await _find(brain, args)
     if name == "watch_me":
         return await _watch(brain, args)
     if name == "fix_code":
@@ -797,3 +821,27 @@ async def after_repeat(brain: Brain, job: Job) -> str:
     )
     brain._spawn(brain._drive(task, None))
     return f"mouse:{len(batch)}"
+
+
+# ---------------------------------------------------------------------------------- Trace
+async def _find(brain: Brain, args: dict[str, Any]) -> str:
+    from pyxi import files_access
+
+    query = str(args.get("query") or "").strip()
+    if not query:
+        return "find_again: what are they looking for? Ask for a word or two from it."
+    _share_google(brain)
+    brain.jobs.spatial = brain.spatial  # the Memory Palace's screen history
+    access = files_access.load(brain.settings.data_dir)
+    job = await brain.jobs.start(
+        "trace",
+        f"Finding: {query[:60]}",
+        params={"query": query, "when": str(args.get("when") or "")},
+    )
+    files = (
+        "" if access.enabled else " (Their files aren't searched: file search is off in Settings.)"
+    )
+    return (
+        f"Started {job.id}: {job.agent_name} is looking through their screen history, files and "
+        f"mail. Say one short line ('Looking.'); the answer comes as a notification.{files}"
+    )

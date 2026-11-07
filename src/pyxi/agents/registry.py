@@ -14,6 +14,7 @@ Each agent has a *role* that decides what it can do:
 * ``study`` makes flashcards and quizzes from slides, PDFs and notes, and quizzes aloud (Sage).
 * ``coder`` explains an error, finds the line and fixes small scripts after a card (Patch).
 * ``automation`` watches the user do a task once, then repeats it for the rest (Ditto).
+* ``memory`` finds where they saw something: screen history, files and mail (Trace).
 
 Agents keep their own long-term memory (Otto's FTS5 memory store, scoped per agent), and
 any agent can hand its result to another (Scout researches, then Quill writes).
@@ -45,6 +46,7 @@ Role = Literal[
     "study",
     "coder",
     "automation",
+    "memory",
 ]
 
 
@@ -215,6 +217,18 @@ DEFAULT_ROSTER = [
         "way (files, a background browser) and only borrows your mouse when it has to.",
         skills=["watch me once", "batch renames & filing", "forms per row", "hands as a last resort"],
         max_cost_usd=0.2,
+    ),
+    AgentProfile(
+        id="trace",
+        name="Trace",
+        role="memory",
+        voice="af_heart",
+        color="#89ddff",
+        builtin=True,
+        persona="Remembers where everything was. Searches your screen history, files and mail "
+        "at once and points at the exact window, file or email.",
+        skills=["where did I see that?", "screen history", "files & mail"],
+        max_cost_usd=0.02,
     ),
 ]
 
