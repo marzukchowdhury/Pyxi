@@ -16,7 +16,7 @@ import re
 import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -38,6 +38,9 @@ class Routine(BaseModel):
     kind: Literal["turn", "remind", "returns", "job"] = "turn"
     message: str | None = None  # what a "remind" routine shows
     key: str | None = None  # so the same reminder is never set twice
+    # kind="job": a teammate's job started straight away when due, with no model turn in
+    # between ({"agent": "scout", "task": ..., "kind": "checkin", "start_url": ...}).
+    job: dict[str, Any] | None = None
 
     def day_set(self) -> set[int]:
         out: set[int] = set()
@@ -136,6 +139,7 @@ class RoutineStore:
         kind: str = "turn",
         message: str | None = None,
         key: str | None = None,
+        job: dict[str, Any] | None = None,
     ) -> Routine:
         now = now or datetime.now()
         if every_minutes is not None:
@@ -154,6 +158,7 @@ class RoutineStore:
             kind=kind,  # type: ignore[arg-type]
             message=message,
             key=key,
+            job=job,
         )
         r.next_run = r.compute_next(now)
         self.items.append(r)

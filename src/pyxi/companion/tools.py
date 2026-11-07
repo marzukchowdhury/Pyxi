@@ -123,8 +123,27 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "precisely), and `flow` traces a route through named parts as you say it (blood, air, current, a "
         "signal): give a `flow` on every point where something moves, so the route draws itself across "
         "the picture step by step. Walk it in the order things happen. Never make a separate diagram for this: sketch_diagram "
-        "is only for when they ask you to draw one.",
+        "is only for when they ask you to draw one. "
+        "BILLS: a bill, invoice, insurance statement (EOB), phone or utility bill, or tax letter is explained ON "
+        "it: style 'on_picture', `bill` FIRST (before `picture`), then `picture` (the page), then 4-7 tags, each "
+        "with a `quote` of that line's exact words so it pins to the real line: what they owe, the due date, "
+        "the charges that make up the total and why, and every line that looks wrong.",
         {
+            "bill": {
+                "type": "object",
+                "description": "Bills only, given first: the verdict for the task tray.",
+                "properties": {
+                    "from": {"type": "string", "description": "Who sent it, e.g. 'Telus', 'CRA'."},
+                    "owe": {"type": "string", "description": "Amount to pay, e.g. '$84.12' ('$0' if nothing)."},
+                    "due": {"type": "string", "description": "Pay by, e.g. '28 Nov'."},
+                    "flags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "What looks wrong, short: 'Roaming charged twice ($15)', "
+                        "'Plan up $10 from last month', '$5 paper bill fee'. Empty if nothing.",
+                    },
+                },
+            },
             "style": {
                 "type": "string",
                 "enum": ["card", "on_picture"],
@@ -549,6 +568,68 @@ COMPANION_TOOLS += [
         ["what"],
     ),
     _tool(
+        "fill_form",
+        "Fill in a web form for them from their saved details and a document they name: a job "
+        "application from their CV, a government or school form, a rental application. Scout fills "
+        "it in a browser they can watch, asks them before the final Submit, and leaves passwords, "
+        "card numbers and ID numbers (SIN, passport, health card) for them to type. Use it for 'fill "
+        "this in from my CV', 'apply to this job with my resume', never use_computer.",
+        {
+            "what": {
+                "type": "string",
+                "description": "e.g. 'job application for Junior Analyst at Northwind'.",
+            },
+            "url": {
+                "type": "string",
+                "description": "The form's address: from the address bar on screen, or what they gave.",
+            },
+            "documents": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Full paths of the CV or documents to fill it from (search_files first).",
+            },
+            "where": {"type": "string", "description": "The organisation, if known."},
+            "notes": {
+                "type": "string",
+                "description": "Anything they asked for: 'say I can start in January', 'salary 60k'.",
+            },
+        },
+        ["what", "url"],
+    ),
+    _tool(
+        "check_in_flight",
+        "Check them in for a flight when online check-in opens: schedules Scout for exactly 24 hours "
+        "before departure (or now, if it's already open). Scout skips paid seats and upgrades, and "
+        "the boarding pass link comes in a notification. Take the details from the airline's "
+        "confirmation email (gmail_search) or from what they said.",
+        {
+            "airline": {"type": "string", "description": "e.g. 'Air Canada'."},
+            "flight": {"type": "string", "description": "e.g. 'AC 123'."},
+            "confirmation": {"type": "string", "description": "The booking reference, e.g. 'K7Q2ZP'."},
+            "last_name": {"type": "string", "description": "As on the booking, if not theirs."},
+            "departure": {
+                "type": "string",
+                "description": "YYYY-MM-DDTHH:MM, the departure airport's local time.",
+            },
+            "from": {"type": "string", "description": "Departure airport, e.g. 'YVR'."},
+            "url": {
+                "type": "string",
+                "description": "The airline's check-in page if you know it (from the email).",
+            },
+            "notes": {"type": "string", "description": "e.g. 'both passengers', 'window seat if free'."},
+        },
+        ["confirmation", "departure"],
+    ),
+    _tool(
+        "show_file",
+        "Open a bill, statement or letter on their screen only when they ask you to EXPLAIN it ('explain "
+        "my phone bill PDF', 'what is this tax letter about'), so you can tag it on the page with "
+        "explain_on_screen. A question about what a file says ('what's the total on invoice 1182?', 'when "
+        "is it due?') is read_file, not this. Only inside the folders they allowed; path from search_files.",
+        {"path": {"type": "string"}},
+        ["path"],
+    ),
+    _tool(
         "play_music",
         "Play a song, album or video right now: finds it on YouTube, opens it in a window behind the one "
         "they're in (so they keep working), checks it's really playing, and sets the volume if they "
@@ -897,4 +978,5 @@ INFO_TOOLS = {
     "get_activity",
     "search_files",
     "read_file",
+    "show_file",
 }  # results come back to the model for another round

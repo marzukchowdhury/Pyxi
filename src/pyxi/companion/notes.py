@@ -258,7 +258,17 @@ def _picture_card(
     for i, raw in enumerate(args.get("items", [])[:8], start=1):
         if not isinstance(raw, dict) or not str(raw.get("text", "")).strip():
             continue
-        at = locate(raw.get("part") or raw.get("text"), raw.get("at"))
+        at = None
+        if (
+            raw.get("quote")
+            and (args.get("bill") or not raw.get("part"))
+            and (r := target_rect(ctx, raw))
+        ):
+            # Quoted words are exact (a line on a bill, a label in a document): pin the tag to
+            # the end of the line, where its amount or date usually is.
+            at = (r[0] + max(1, r[2] - min(r[2] // 4, 40)), r[1] + r[3] // 2)
+        if at is None:
+            at = locate(raw.get("part") or raw.get("text"), raw.get("at"))
         if at is None and (r := target_rect(ctx, raw)):
             at = (r[0] + r[2] // 2, r[1] + r[3] // 2)
         trace = [p for n in (raw.get("flow") or [])[:8] if (p := locate(n))]

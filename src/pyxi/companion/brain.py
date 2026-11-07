@@ -39,7 +39,7 @@ from pydantic import ValidationError
 from pyxi import booking, hands, media, tidy, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
-from pyxi.companion import filework, prompts
+from pyxi.companion import filework, paperwork, prompts
 from pyxi.companion.actions import app_target, open_app, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
@@ -64,6 +64,7 @@ from pyxi.companion.notes import (
     target_rect,
 )
 from pyxi.companion.operator import Operator, Outcome
+from pyxi.companion.paperwork import PAPER_TOOLS
 from pyxi.companion.tools import BUILD_BRIEF, COMPANION_TOOLS, INFO_TOOLS
 from pyxi.companion.turns import TurnStore
 from pyxi.config import PyxiSettings
@@ -739,6 +740,8 @@ class Brain:
         """Explaining a picture: start finding its parts now, while the opener is spoken."""
         if self._survey is not None or not self.settings.model_aim or self.settings.local_mode:
             return
+        if args.get("bill"):  # a bill's tags pin to its quoted lines: nothing to look for
+            return
         ctx = self._ctx
         pic = picture_rect(ctx, args)
         if ctx is None or pic is None or pic[2] < 40 or pic[3] < 40:
@@ -1141,6 +1144,8 @@ class Brain:
                     await self._notify(job.id, ok=True, title="Reminder", body=r.message or r.task)
                 elif r.kind == "returns":
                     self._spawn(self._watch_returns(quiet=True))
+                elif r.kind == "job":  # a flight check-in: Scout starts now (paperwork.py)
+                    await paperwork.start_routine_job(self, r)
                 ran += 1
                 continue
             if self._lock.locked() or self.state != "idle":
@@ -1766,6 +1771,8 @@ class Brain:
                 self._placed.put("card", (*card.place, w, h), linger)
             self._turn_card = card
             self._watch_window()
+            if args.get("bill"):  # what you owe and what looks off, in the task tray too
+                await paperwork.bill_chip(self, args["bill"])
             missing = [it.n for it in card.items if it.mark != "none" and it.rect is None]
             return f"explain_on_screen: points {missing} had nothing to frame." if missing else None
         if name == "guide":
@@ -2150,6 +2157,8 @@ class Brain:
             return f"Created {agent.name} ({agent.role})."
         if name in FILE_TOOLS:  # Pixel, Ledger and file search: companion/filework.py
             return await filework.handle(self, name, args)
+        if name in PAPER_TOOLS:  # forms, flight check-in, showing a bill: companion/paperwork.py
+            return await paperwork.handle(self, name, args)
         # Phrased as a problem note, so the model hears it and tries a real tool.
         return f"{name}: there's no tool by that name. Use one of the tools you have."
 
@@ -2427,6 +2436,24 @@ class Brain:
         # Background work is quiet: no voice, just a notification with the result and the files.
         # (You asked Pyxi to go off and do it; it shouldn't start talking over you when it's done.)
         data = job.data if isinstance(job.data, dict) else {}
+        if (note := paperwork.notice(job, data)) is not None:  # a check-in or a filled form
+            await self.hub.emit(
+                "job_ready",
+                job_id=job.id,
+                agent=job.agent_name,
+                files=[],
+                changes=[],
+                notes=[],
+                **note,
+            )
+            self.history = [
+                *self.history[-11:],
+                (
+                    f"(job {job.id} finished: {job.summary[:600]})",
+                    f"(notified the user: {note['title']}. {note['body']})",
+                ),
+            ]
+            return
         fixed = data.get("fixed") or []
         files = [str(f) for f in (fixed or job.outputs)]
         booked = job.kind == "booking" and job.status == "done" and bool(data.get("booked"))

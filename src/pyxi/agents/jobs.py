@@ -33,7 +33,7 @@ from otto.types import AgentEvent
 from pydantic import BaseModel, Field
 
 from pyxi.agents.registry import AgentProfile, AgentRegistry
-from pyxi.booking import CONFIRM_PATTERNS, HANDOVER
+from pyxi.booking import CHECKIN_PATTERNS, CHECKIN_SAFE, CONFIRM_PATTERNS, HANDOVER
 from pyxi.config import PyxiSettings
 from pyxi.docs import SUPPORTED, fix_document
 from pyxi.hub import Hub
@@ -113,11 +113,15 @@ BROWSER_RULES = """How to work:
   matters. Use success=false only when you really could not find or do it."""
 
 
-def plain_card(action: str, reason: str, *, booking: bool = False) -> tuple[str, str]:
+def plain_card(
+    action: str, reason: str, *, booking: bool = False, checkin: bool = False
+) -> tuple[str, str]:
     """Otto's confirm text ("click [8] "Book appointment"" / "... (matched '\\bbook\\b')") in
     words a person reads at a glance: Click "Book appointment" / This books it."""
     label = re.search(r'"([^"]+)"', action)
     what = f'Click "{label.group(1)}"' if label else action
+    if checkin:
+        return what, "This looks like a paid extra during check-in. Scout skips it unless you allow it."
     if booking:
         return (
             what,
@@ -292,12 +296,18 @@ class JobManager:
             safety["allowed_domains"] = agent.allowed_domains
         if booking:  # "Book appointment" and "Reserve" are as final as "Submit": approve first
             safety["sensitive_action_patterns"] = [*DEFAULT_SENSITIVE_PATTERNS, *CONFIRM_PATTERNS]
+        checkin = job.kind == "checkin"  # flight check-in: free steps go ahead, paid extras stop
+        if checkin:
+            safety["sensitive_action_patterns"] = [
+                *(p for p in DEFAULT_SENSITIVE_PATTERNS if p not in CHECKIN_SAFE),
+                *CHECKIN_PATTERNS,
+            ]
         s = otto_settings(
             self.settings,
             model=self.settings.job_model,
             headless=not self.headed and not booking,  # they may need to pay in that window
             budget={
-                "max_steps": 30 if booking else 18,
+                "max_steps": 30 if booking else 25 if checkin else 18,
                 "max_cost_usd": max(agent.max_cost_usd, 0.3) if booking else agent.max_cost_usd,
             },
             safety=safety,
@@ -305,7 +315,7 @@ class JobManager:
         )
 
         async def confirm(action: str, reason: str) -> bool:
-            action, reason = plain_card(action, reason, booking=booking)
+            action, reason = plain_card(action, reason, booking=booking, checkin=checkin)
             answer = await self.hub.request(
                 "confirm", job_id=job.id, agent=agent.name, action=action, reason=reason
             )
@@ -353,7 +363,8 @@ class JobManager:
 
         controls.subscribe(relay)
         self._controls[job.id] = controls
-        rules = "" if booking else "\n\n" + BROWSER_RULES  # bookings carry their own rules
+        # Bookings, forms and check-ins carry their own rules.
+        rules = "" if booking or checkin else "\n\n" + BROWSER_RULES
         task = f"{job.task}\n\nYou are {agent.name}: {agent.persona}{rules}"
         if job.context:
             task += f"\n\nContext from your teammates:\n{job.context}"

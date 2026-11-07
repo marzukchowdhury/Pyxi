@@ -5,6 +5,7 @@
  * Nothing here ever needs the mouse to keep working.
  */
 import { useEffect, useState } from "react";
+import { bridge } from "../shared/bridge";
 import { brain } from "../shared/socket";
 import { Interactive } from "./Interactive";
 import { useOverlay } from "./store";
@@ -58,7 +59,7 @@ export function Team() {
           >
             <i className="tray-dot" />
             <span className="tray-text">
-              <b>{j.agent_name}</b> {j.task.split("\n")[0].replace(/^Book: /, "Booking ").slice(0, 48)}
+              <b>{j.agent_name}</b> {chipTitle(j.task)}
               <small>{live ? (status[j.id] ?? (j.steps ? `step ${j.steps}` : "starting")) : (j.summary || j.status).split(". ")[0]}</small>
             </span>
           </button>
@@ -69,7 +70,16 @@ export function Team() {
           {frames[shown.id] ? (
             <img src={`data:image/jpeg;base64,${frames[shown.id]}`} alt={`What ${shown.agent_name} sees`} />
           ) : (
-            <p>{shown.agent_name} is working without a screen to show. {status[shown.id] ?? ""}</p>
+            <p>
+              {shown.status === "done" && shown.summary
+                ? shown.summary
+                : `${shown.agent_name} is working without a screen to show. ${status[shown.id] ?? ""}`}
+            </p>
+          )}
+          {boardingPass(shown.data) && (
+            <button className="tray-link" onClick={() => bridge.openExternal(boardingPass(shown.data)!)}>
+              Boarding pass
+            </button>
           )}
           {(shown.status === "running" || shown.status === "queued") && (
             <button className="tray-stop" onClick={() => brain.send({ type: "job_control", job_id: shown.id, action: "stop" })}>Stop</button>
@@ -78,4 +88,21 @@ export function Team() {
       )}
     </Interactive>
   );
+}
+
+/** The chip's headline: "Booking a dental cleaning", "Filling job application at Northwind",
+ * "Checking in Skyward Air SK 482", "Explaining your Maplewave bill". */
+function chipTitle(task: string): string {
+  const line = task.split("\n").find((l) => /^(Book|Fill|Check in): /.test(l)) ?? task.split("\n")[0];
+  return line
+    .replace(/^Book: /, "Booking ")
+    .replace(/^Fill: /, "Filling ")
+    .replace(/^Check in: /, "Checking in ")
+    .slice(0, 48);
+}
+
+/** A finished check-in's boarding pass page. */
+function boardingPass(data: unknown): string | null {
+  const url = (data as { boarding_pass?: unknown } | null)?.boarding_pass;
+  return typeof url === "string" && /^https?:\/\//.test(url) ? url : null;
 }

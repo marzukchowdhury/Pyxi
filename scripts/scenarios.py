@@ -38,7 +38,22 @@ EL = re.compile(r'^\s*\[(\d+)\] (\w+)(?: "(.*)")? @\((-?\d+),(-?\d+),(\d+)x(\d+)
 OCR = re.compile(r'^\[(\d+)\] "(.*)" @\((-?\d+),(-?\d+),(\d+)x(\d+)\)')
 
 
+def bill_screen(name: str) -> ScreenContext:
+    """A made-up bill open in a PDF viewer (scripts/sample_bills.py), with exact text boxes."""
+    sys.path.insert(0, str(Path(__file__).parent))
+    from sample_bills import render
+
+    shot, lines, title = render(name)
+    ocr = [TextLine(t, rect, words, i) for i, (t, rect, words) in enumerate(lines, start=1)]
+    w, h = shot.size
+    ctx = ScreenContext(time.time(), WindowInfo(title, "msedge.exe", (0, 0, w, h)), [], shot)
+    ctx.text = ocr
+    return ctx
+
+
 def screen_from(turn_id: str) -> ScreenContext:
+    if turn_id.startswith("bill:"):
+        return bill_screen(turn_id[5:])
     c = sqlite3.connect(DB)
     text, app, window, image = c.execute(
         "select screen_text, app, window, image_path from turns where id=?", (turn_id,)
@@ -266,10 +281,66 @@ SCENARIOS = [
     ('book chiro', 'turn_49b75541', 'Can you book me a chiropractor appointment for Monday after work?', 'book_or_ask'),
     ('book checkup', 'turn_49b75541', 'I need a regular check-up with a doctor sometime next week, can you book it?', 'book_or_ask'),
     ('book table', 'turn_49b75541', 'Reserve a table for 4 at an Italian place downtown on Saturday at 7.', 'book_or_ask'),
+    # Paperwork (companion/paperwork.py): bills explained on the bill, forms from a CV, check-in.
+    ('bill phone', 'bill:phone', 'What is this bill? Anything wrong with it?', 'bill'),
+    ('bill insurance', 'bill:insurance', 'Do I actually owe this? Explain it to me.', 'bill'),
+    ('bill tax', 'bill:tax', 'Can you explain this tax letter?', 'bill'),
+    ('bill pdf', 'turn_f05f1ae6', 'Explain the Maplewave phone bill PDF on my desktop.', 'bill_pdf'),
+    ('fill job form', 'turn_49b75541', 'Fill in the job application at http://127.0.0.1:8791/jobs/apply with my resume on my desktop.', 'fill_form'),
+    ('check in ref', 'turn_49b75541', 'Check me in for my flight when it opens. Skyward Air SK 482, booking K7Q2ZP, leaving Vancouver on November 12 at 8:35 in the morning.', 'checkin'),
+    ('check in mail', 'turn_49b75541', 'Check me in for my Skyward flight as soon as check-in opens.', 'checkin_mail'),
     ('thanks', 'turn_49b75541', "Thanks, that's all for now.", 'chat'),
     ('joke', 'turn_49b75541', 'Tell me a quick joke.', 'chat'),
     ('who are you', 'turn_49b75541', 'Who are you and what can you do?', 'nohands'),
 ]
+
+
+# What each sample bill must get right: the amount owed, and the thing that looks wrong.
+BILL_FACTS = {
+    "bill phone": ("107.80", r"twice|duplicate|double|two .*roam|roam.*(x2|2x)"),
+    "bill pdf": ("107.80", r"twice|duplicate|double|two .*roam|roam.*(x2|2x)"),
+    "bill insurance": ("587", r"twice|duplicate|double|out.of.network|same (visit|claim)"),
+    "bill tax": ("312.40", r"penalt|late|tuition|interest"),
+}
+
+
+def bill_problems(
+    name: str, calls: list[dict], cards: list[dict], events: list[dict], pdf: bool, background: list[str]
+) -> list[str]:
+    """A bill gets tags on its real lines (on the picture, each pinned by a quote), the amount
+    owed, what looks wrong, and a chip in the task tray."""
+    owe, wrong = BILL_FACTS[name.rsplit(" ", 1)[0]]
+    out = []
+    tools = [c["tool"] for c in calls]
+    if pdf and not any(b.startswith("show: ") for b in background):
+        out.append("didn't open the PDF on screen")
+    explains = [c["arguments"] for c in calls if c["tool"] == "explain_on_screen"]
+    if not explains:
+        return [*out, "no explanation on the bill"]
+    args = explains[-1]
+    bill = args.get("bill") if isinstance(args.get("bill"), dict) else {}
+    if args.get("style") != "on_picture" or not bill:
+        out.append("not tagged on the bill")
+    items = args.get("items") or []
+    if len(items) < 4:
+        out.append(f"thin ({len(items)} tags)")
+    if sum(1 for it in items if it.get("quote")) < len(items) - 1:
+        out.append("tags without a quoted line")
+    card = cards[-1] if cards else None
+    pinned = sum(1 for it in (card or {}).get("items", []) if it.get("at"))
+    if pinned < min(4, len(items)):
+        out.append(f"only {pinned} tags pinned to a line")
+    if owe not in str(bill.get("owe", "")).replace(",", ""):
+        out.append(f"owe {bill.get('owe')!r}, not {owe}")
+    flags = " ".join(str(f) for f in bill.get("flags") or [])
+    said_text = " ".join(str(it.get("say", "")) + " " + str(it.get("text", "")) for it in items)
+    if not re.search(wrong, flags + " " + said_text, re.I):
+        out.append(f"missed what's wrong ({flags[:80]!r})")
+    if not any(e["type"] == "job" and e["job"]["task"].startswith("Explaining your") for e in events):
+        out.append("no chip in the task tray")
+    if "use_computer" in tools:
+        out.append("drove the mouse for a bill")
+    return out
 
 
 async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path) -> dict:
@@ -316,6 +387,24 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     brain._watch_returns = fake_returns  # type: ignore[method-assign]
     brain.connectors.google.connected = lambda: True  # type: ignore[method-assign]
 
+    from pyxi.companion import paperwork
+
+    async def fake_fill(brain_, args):  # never open a real form
+        background.append("fill: " + json.dumps(args)[:240])
+        return "Started job_x: Scout is filling it in. Say one short line and nothing more."
+
+    async def fake_checkin(brain_, args):  # never schedule a real check-in
+        background.append("checkin: " + json.dumps(args)[:240])
+        return "Saved: Scout checks them in 24 hours before departure. Say that in one short sentence."
+
+    def fake_open(path):  # "opens" the PDF: the screen now shows that bill
+        background.append(f"show: {Path(path).name}")
+        brain.screen.ctx = screen_from("bill:phone")
+
+    paperwork._fill_form = fake_fill  # type: ignore[assignment]
+    paperwork._check_in = fake_checkin  # type: ignore[assignment]
+    paperwork.open_path = fake_open  # type: ignore[assignment]
+
     async def fake_drive(task, window, come_back=False):  # never touch the real mouse
         background.append(f"hands: {task[:70]}")
 
@@ -350,6 +439,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         "invoice-1182.pdf",
         "receipt.jpg",
         "sales.csv",
+        "Maplewave bill Nov 2026.pdf",
     ]:
         (mess / fname).write_text("x")
     real_known = tidy.known_folder
@@ -384,6 +474,13 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         return "calendar_list: tomorrow 10:00 Team standup (30 min); 15:00 Dentist (1 h). Nothing else."
 
     async def _mail(args):
+        if re.search(r"skyward|flight|booking|itinerary|confirmation|check.?in", json.dumps(args), re.I):
+            return (
+                "gmail_search: 1 email. 1) Skyward Air <bookings@skyward.example>, 'Your trip to "
+                "Toronto: booking K7Q2ZP' (Oct 20): Flight SK 482, Vancouver (YVR) to Toronto (YYZ), "
+                "Thu 12 Nov 2026, departs 08:35, arrives 16:02. Passenger: Alex Tester. Check in "
+                "online from 24 hours before: https://skyward.example/checkin"
+            )
         return (
             "gmail_search: 2 emails. 1) Amazon.ca, 'Your order has shipped' (Mon). "
             "2) Amazon.ca, 'Your package was delivered' (Wed)."
@@ -406,6 +503,13 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     files_access.read_text = lambda p, *a, **k: (  # type: ignore[assignment]
         "PDF, 1 pages.\n[page 1] Invoice 1182 from Northwind Supplies. Subtotal $1,040.00, tax "
         "$135.20, total $1,175.20." if Path(p).suffix.lower() == ".pdf" else real_read(p, *a, **k)
+    )
+    _invoice_read = files_access.read_text
+    files_access.read_text = lambda p, *a, **k: (  # type: ignore[assignment]
+        "PDF, 1 pages.\n[page 1] Maplewave Mobile. Amount due $107.80, pay by Nov 28, 2026. "
+        "US Roam Pass Oct 18 $15.00 (twice). Paper bill fee $2.50."
+        if "maplewave" in Path(p).name.lower()
+        else _invoice_read(p, *a, **k)
     )
     brain.connectors.google.connected = lambda: True  # type: ignore[method-assign]
     started = time.monotonic()
@@ -590,6 +694,24 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("neither handed it to Ledger nor asked")
     if expect == "read" and ("read_file" not in tools or "1,175" not in said.replace("1175", "1,175")):
         problems.append("didn't read the invoice")
+    if expect in ("bill", "bill_pdf"):
+        problems += bill_problems(name, brain._calls, cards, events, expect == "bill_pdf", background)
+    if expect == "fill_form":
+        fills = [b for b in background if b.startswith("fill: ")]
+        if not fills or "use_computer" in tools:
+            problems.append("didn't hand the form to fill_form")
+        elif "Resume final v3.pdf" not in fills[0] or "/jobs/apply" not in fills[0]:
+            problems.append("fill_form without the CV or the form's address")
+    if expect in ("checkin", "checkin_mail"):
+        ins = [b for b in background if b.startswith("checkin: ")]
+        if not ins or "use_computer" in tools:
+            problems.append("didn't schedule the check-in")
+        elif "K7Q2ZP" not in ins[0] or "2026-11-12T08:35" not in ins[0]:
+            problems.append(f"check-in with the wrong details: {ins[0][9:120]}")
+        if expect == "checkin_mail" and "gmail_search" not in tools:
+            problems.append("didn't look in the mail for the booking")
+    if expect in ("fill_form", "checkin", "checkin_mail") and len(re.findall(r"[.!?](\s|$)", said)) > 2:
+        problems.append(f"talks too much ({len(said)} chars)")
     from pyxi.companion.brain import drop_false_promises
 
     # Background work is quiet: a short "On it", not a running commentary.
