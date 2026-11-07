@@ -14,3 +14,4 @@ desktop/dist/
 
 desktop/build/
 desktop/build-secrets/
+.venv-audit/

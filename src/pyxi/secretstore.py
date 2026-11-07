@@ -126,7 +126,7 @@ def read_json(path: Path) -> dict[str, Any] | None:
         return None
     if body.startswith(MAGIC):
         try:
-            data = json.loads(unprotect(body[len(MAGIC):]).decode("utf-8"))
+            data = json.loads(unprotect(body[len(MAGIC) :]).decode("utf-8"))
         except (SecretError, ValueError) as exc:
             _drop(path, str(exc) or exc.__class__.__name__)
             return None

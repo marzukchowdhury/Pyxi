@@ -6,7 +6,8 @@
 2. Runs the tests (unless --skip-tests).
 3. Builds the installer (only Pyxi's own code is refreshed in the bundled Python; --full rebuilds
    that Python too, for new dependencies).
-4. Checks the build holds no keys, tokens, invite codes or personal data.
+4. Checks the build holds no keys, tokens, invite codes or personal data, and that nothing it
+   ships has a known high or critical vulnerability (scripts/security_check.py).
 5. Publishes GitHub release v<version> with Pyxi-Setup.exe, its blockmap, latest.yml and the
    voice pack (pyxi-voice-pack-<hash>.zip: the speech libraries, which installed copies download
    from this release on first use).
@@ -51,6 +52,8 @@ PRIVATE_FILES = {
     "beta_invite_codes.txt",
     "beta_invite_codes.csv",
     "google.json",
+    "linkedin.json",
+    "brain.key",
 }
 
 
@@ -205,6 +208,7 @@ def main() -> None:
     if missing:
         raise SystemExit(f"STOP: the build didn't produce {missing}.")
     check_clean_build()
+    sh(sys.executable, "scripts/security_check.py")  # stops on high or critical
     publish(v, notes)
     verify(v)
     sh("git", "add", "pyproject.toml", "src/pyxi/__init__.py", "desktop/package.json")
