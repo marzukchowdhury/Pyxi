@@ -23,6 +23,7 @@ RUNNERS = {
     "meetings": "pyxi.agents.scribe",
     "study": "pyxi.agents.sage",
     "coder": "pyxi.agents.patch",
+    "automation": "pyxi.agents.ditto",
 }
 
 

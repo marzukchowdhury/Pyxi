@@ -11,6 +11,8 @@ the result arrives as a notification and a chip in the task tray.
   decisions and action items, and drafts a follow-up email that goes only through a card.
 * ``make_flashcards`` and ``quiz``: Sage makes flashcards and a quiz from slides, PDFs or notes, and quizzes them out
   loud (the quiz lives on the brain as ``brain.study_quiz``, one question per voice turn).
+* ``watch_me``: Ditto watches them do one item, then does the rest the quietest way it can
+  (files, Pixel, Ledger, Scout; the mouse only as a last resort), after a card.
 * ``fix_code``: Patch finds the failing line from an error and proposes a small fix; the
   file is written only after the approval card, with a backup beside it.
 
@@ -165,8 +167,33 @@ FIX_CODE = ToolSpec(
     },
 )
 
+WATCH = ToolSpec(
+    "watch_me",
+    "Ditto, 'watch me once, then do the rest': for a repetitive job (renaming a folder of "
+    "invoices, filing downloads, filling a form per spreadsheet row). action 'start' when they "
+    "offer to show you: Ditto watches the screen (which window, button and field, what they "
+    "typed; never passwords) while they do ONE item; `folder` is where the items are, if "
+    "they said. action 'stop' when they say they're done: Ditto works out the pattern and "
+    "shows the plan for the rest on a card, choosing files, Pixel, Ledger or Scout in the "
+    "background before ever using the mouse. `items` only if they listed what's left. "
+    "'cancel' stops watching; 'undo' puts back the last batch of renamed files.",
+    {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["start", "stop", "cancel", "undo"]},
+            "task": {"type": "string", "description": "The job, in their words."},
+            "folder": {
+                "type": "string",
+                "description": "Where the items are (a path, or Desktop/Downloads/Documents).",
+            },
+            "items": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["action"],
+    },
+)
+
 ROLES = set(RUNNERS)  # their jobs' notifications come from job.data (title, body)
-SPECS: list[ToolSpec] = [TRAVEL, MONEY, MEETING, FLASHCARDS, QUIZ, FIX_CODE]
+SPECS: list[ToolSpec] = [TRAVEL, MONEY, MEETING, FLASHCARDS, QUIZ, FIX_CODE, WATCH]
 TOOLS = {s.name for s in SPECS}
 INFO: set[str] = {"quiz"}  # tools whose result goes back to the model for another round
 
@@ -178,6 +205,8 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         return await _money(brain, args)
     if name == "meeting_notes":
         return await _meeting(brain, args)
+    if name == "watch_me":
+        return await _watch(brain, args)
     if name == "fix_code":
         return await _fix_code(brain, args)
     if name == "make_flashcards":
@@ -199,6 +228,8 @@ async def after_job(brain: Brain, job: Job) -> None:
             brain._spawn(after_meeting(brain, job))
         elif job.role == "coder":  # the same: the card waits for them
             brain._spawn(after_fix(brain, job))
+        elif job.role == "automation":
+            brain._spawn(after_repeat(brain, job))
     except Exception:
         log.exception("after %s's job", job.agent_name)
 
@@ -570,3 +601,199 @@ async def after_fix(brain: Brain, job: Job) -> bool:
         ),
     ]
     return True
+
+
+# ---------------------------------------------------------------------------------- Ditto
+async def _watch(brain: Brain, args: dict[str, Any]) -> str:
+    from pyxi.agents import ditto
+
+    action = str(args.get("action") or "start")
+    rec: ditto.Recorder | None = getattr(brain, "ditto_recorder", None)
+    out_dir = brain.settings.data_dir / "watch"
+    if action == "start":
+        if rec is not None:
+            return "watch_me: already watching. Tell them to say 'done' when they've finished one."
+        folder = str(args.get("folder") or "").strip().strip('"')
+        if folder and not Path(folder).expanduser().is_dir():
+            from pyxi import tidy
+
+            known = tidy.known_folder(folder)
+            if known is None:
+                return f"watch_me: there's no folder {folder!r}. Ask them which folder the items are in."
+            folder = str(known)
+
+        async def snap() -> Any:
+            ctx = await brain.screen.capture(pixels=True)
+            if ctx.excluded or ctx.screenshot is None:
+                return None
+            img = ctx.screenshot.copy()
+            img.thumbnail((960, 540))
+            return img
+
+        def log_step(step: ditto.Step) -> None:
+            brain.activity.log(
+                "watch",
+                app=step.app,
+                title=step.title,
+                name=step.name,
+                role=step.role,
+                detail=step.line(),
+            )
+
+        rec = ditto.Recorder(
+            str(args.get("task") or ""),
+            str(Path(folder).expanduser()) if folder else "",
+            out_dir=out_dir,
+            snap=snap,
+            log=log_step,
+            excluded=lambda app, title: bool(brain.screen.is_excluded(_window(app, title))),
+        )
+        rec.start()
+        brain.ditto_recorder = rec
+        brain.ditto_job = await brain.jobs.track(
+            "Ditto", watching_task(rec.rec.task), role="watching"
+        )
+        # Not a "watch_me:" note: those go back to the model for another round, and the reply
+        # that started this already told them to go ahead.
+        return "Watching now. They do one item the normal way and say 'done'."
+    if action == "cancel":
+        if rec is None:
+            return "watch_me: nothing is being watched."
+        await rec.stop()
+        brain.ditto_recorder = None
+        if chip := getattr(brain, "ditto_job", None):
+            await brain.jobs.settle(chip, ok=False, summary="Stopped watching.")
+        return "watch_me: stopped watching, nothing will be repeated. Say so in a few words."
+    if action == "undo":
+        logs = sorted((out_dir / "undo").glob("ditto-*.json"))
+        if not logs:
+            return "watch_me: there's nothing of mine to undo."
+        n = await asyncio.to_thread(ditto.undo_files, logs[-1])
+        logs[-1].unlink(missing_ok=True)
+        return f"watch_me: put {n} files back the way they were. Say so in a few words."
+    if action == "stop":
+        if rec is None:
+            return "watch_me: I wasn't watching. Offer to watch them do it once (action start)."
+        recording = await rec.stop()
+        brain.ditto_recorder = None
+        if chip := getattr(brain, "ditto_job", None):
+            await brain.jobs.settle(chip, ok=True, summary=f"Saw {len(recording.steps)} steps.")
+        raw = args.get("items")
+        items = [str(i) for i in raw] if isinstance(raw, list) else None
+        job = await brain.jobs.start(
+            "ditto",
+            f"Repeat: {recording.task or 'what you showed me'}",
+            params={"recording": str(out_dir / f"{recording.id}.json"), "items": items},
+        )
+        return (
+            f"Started {job.id}: saw {len(recording.steps)} steps; {job.agent_name} is working out "
+            "the rest in the background. Say one short line; the plan comes on a card first."
+        )
+    return f"watch_me: unknown action {action!r}."
+
+
+def watching_task(task: str) -> str:
+    """The tray chip's text, and what the model sees under "Teammates' jobs" next turn."""
+    return f"Watching: {(task or 'your task')[:40]}\non 'done': watch_me stop"
+
+
+def _window(app: str, title: str) -> Any:
+    from pyxi.screen import WindowInfo
+
+    return WindowInfo(title, app)
+
+
+ROUTE_NOTE = {
+    "files": "Renames and moves the files right here (you can undo it).",
+    "convert": "Pixel converts each file in the background; the originals stay.",
+    "sheet": "Ledger edits the spreadsheet (a copy is saved beside it).",
+    "web": "Scout does each one in a background browser; anything that submits or pays asks you.",
+    "mouse": "This one needs your mouse and keyboard: don't touch them while it runs. Move the "
+    "mouse or press Esc to stop.",
+}
+
+
+async def after_repeat(brain: Brain, job: Job) -> str:
+    """Ditto's plan on a card, then done the quietest way. Returns what happened."""
+    from pyxi.agents import ditto
+
+    data = job.data if isinstance(job.data, dict) else {}
+    if job.status != "done" or not data.get("plan"):
+        return "no plan"
+    plan = ditto.Plan(**data["plan"])
+    folder = Path(data.get("folder") or ".")
+    preview = "\n".join(
+        f"{it['item']}  ->  {it['to']}" if it.get("to") else it["item"] for it in plan.items[:6]
+    )
+    more = f"\n... and {len(plan.items) - 6} more" if len(plan.items) > 6 else ""
+    ok = await brain.hub.request(
+        "confirm",
+        timeout=1800,
+        job_id=job.id,
+        agent=job.agent_name,
+        action=f"Do the other {len(plan.items)} the same way?",
+        reason=f"{plan.summary}\n{ROUTE_NOTE[plan.route]}\n\n{preview}{more}",
+    )
+    if not ok:
+        return "declined"
+    items = [it["item"] for it in plan.items]
+    if plan.route == "files":
+        moves = ditto.check_files(plan, folder)
+        undo_dir = brain.settings.data_dir / "watch" / "undo"
+        done, _undo = await asyncio.to_thread(ditto.do_files, moves, undo_dir)
+        skipped = len(plan.items) - done
+        body = f"{plan.summary} " if done else ""
+        if skipped:
+            body += f"{skipped} skipped (a name clash or a missing file). "
+        if done:
+            body += "Say 'undo that' to put them back."
+        await brain._notify(
+            job.id,
+            ok=done > 0,
+            title=f"Done {done} more" if done else "Nothing was changed",
+            body=body.strip(),
+            changes=[f"{s.name} -> {d.relative_to(folder)}" for s, d in moves[:6]],
+        )
+        return f"files:{done}"
+    if plan.route == "convert":
+        from pyxi.agents.pixel import OPERATIONS
+
+        if plan.operation not in OPERATIONS:
+            await brain._notify(
+                job.id,
+                ok=False,
+                title="I couldn't repeat that",
+                body="Pixel can't do that conversion.",
+            )
+            return "bad operation"
+        files = [str(folder / i) for i in items if (folder / i).is_file()]
+        await brain.jobs.start(
+            "pixel",
+            f"{plan.operation.replace('_', ' ')}: {len(files)} files",
+            files=files,
+            params={"operation": plan.operation, "options": {}},
+        )
+        return "convert"
+    if plan.route == "sheet":
+        target = [
+            str(folder / i) for i in items if (folder / i).suffix.lower() in (".xlsx", ".xlsm")
+        ]
+        await brain.jobs.start("ledger", plan.sheet_task or plan.summary, files=target[:1])
+        return "sheet"
+    steps = "\n".join(f"{n + 1}. {s}" for n, s in enumerate(plan.steps))
+    if plan.route == "web":
+        for item in items:
+            task = (
+                f"Repeat what the user did once, for this item: {item}\n"
+                f"Steps:\n{steps.replace('{item}', item)}"
+            )
+            await brain.jobs.start("scout", task, start_url=plan.url or None)
+        return f"web:{len(items)}"
+    # mouse: the last resort, one run of the hands for a few items at a time
+    batch = items[: ditto.MAX_MOUSE_ITEMS]
+    task = (
+        f"Do this for each of these {len(batch)} items, one after another: {', '.join(batch)}. "
+        f"For each one: {steps}"
+    )
+    brain._spawn(brain._drive(task, None))
+    return f"mouse:{len(batch)}"

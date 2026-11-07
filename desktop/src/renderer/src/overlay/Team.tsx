@@ -12,7 +12,7 @@ import { useOverlay } from "./store";
 
 const COLORS: Record<string, string> = { scout: "#7cc7ff", quill: "#f0a9c9", sketch: "#86e0c3", pyxi: "#ffc861" };
 /** The specialists' colours (agents/registry.py). */
-Object.assign(COLORS, { atlas: "#ffb27a", penny: "#e8d36a", scribe: "#a0d8ef", sage: "#c3e88d", patch: "#f78c6c" });
+Object.assign(COLORS, { atlas: "#ffb27a", penny: "#e8d36a", scribe: "#a0d8ef", sage: "#c3e88d", patch: "#f78c6c", ditto: "#c792ea" });
 
 export function Team() {
   const jobs = useOverlay((s) => s.jobs);

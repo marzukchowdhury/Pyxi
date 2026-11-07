@@ -69,6 +69,15 @@ SCENARIOS = [
     # Patch, code: an error in a terminal, explained on screen, the fix on a card.
     ("code error", HOME, "What's this error? Can you fix it?", "code"),
     ("code why", HOME, "Why does my script keep crashing?", "code"),
+    # Ditto, watch me once: start watching, then "done" hands it over (never the mouse here).
+    (
+        "watch start",
+        HOME,
+        "I have to rename all the invoices in my Downloads by date and company. Let me show "
+        "you one and then you do the rest.",
+        "watch:start",
+    ),
+    ("watch done", HOME, "Okay, done, that's the first one.", "watch:stop"),
 ]
 
 TRACE = [
@@ -157,6 +166,32 @@ def install(brain: Any, background: list[str], name: str = "") -> None:
         (Path(allowed[0]) / "report.py").write_text("rows = []\n", encoding="utf-8")
         brain.screen.ctx = terminal_screen(allowed[0])
     specialists._fix_code = fake_fix  # type: ignore[assignment]
+
+    async def fake_watch(brain_: Any, args: dict[str, Any]) -> str:
+        background.append("watch: " + json.dumps(args)[:200])
+        if args.get("action") == "start":
+            return "Watching now. They do one item the normal way and say 'done'."
+        return "Started job_x: saw 6 steps; Ditto is working out the rest. Say one short line."
+
+    if name == "watch done":  # they asked to be watched a minute ago, and Ditto is watching
+        from pyxi.agents.jobs import Job
+
+        brain.history = [
+            (
+                "I have to rename all the invoices in my Downloads by date and company. Let me "
+                "show you one and then you do the rest.",
+                "Go ahead, rename one the normal way and say done.",
+            )
+        ]
+        chip = Job(
+            agent_id="ditto",
+            agent_name="Ditto",
+            role="watching",
+            task=specialists.watching_task("rename the invoices by date and company"),
+            status="running",
+        )
+        brain.jobs.jobs[chip.id] = chip
+    specialists._watch = fake_watch  # type: ignore[assignment]
     specialists._travel = fake_travel  # type: ignore[assignment]
     specialists._meeting = fake_meeting  # type: ignore[assignment]
     specialists._money = fake_money  # type: ignore[assignment]
@@ -263,4 +298,15 @@ def problems(
             out.append("claimed it was fixed before the card")
         if "use_computer" in tools:
             out.append("drove the mouse for code")
+    if expect.startswith("watch:"):
+        want = expect.split(":", 1)[1]
+        watches = [json.loads(b[len("watch: ") :]) for b in background if b.startswith("watch: ")]
+        if not watches or watches[0].get("action") != want:
+            out.append(f"didn't {want} watching: {watches}")
+        elif want == "start" and "download" not in str(watches[0].get("folder", "")).lower():
+            out.append("lost the folder")
+        if "use_computer" in tools or any(b.startswith("hands") for b in background):
+            out.append("drove the mouse instead of watching")
+        if sentences(said) > 2:
+            out.append(f"talks too much ({len(said)} chars)")
     return out
