@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
-from pyxi import __version__, booking, cloud, files_access
+from pyxi import __version__, booking, brainkey, cloud, files_access
 from pyxi.companion import pricecheck
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
@@ -29,9 +29,12 @@ log = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"^[a-f0-9]{12}\.png$")
 
 # Who may talk to the brain. It sees the screen, drives the mouse and answers its own "Allow"
-# cards, so a web page in the user's browser must never reach it: browsers let any site open a
-# WebSocket to 127.0.0.1. Pyxi's own windows (the built app is file://, the dev servers are on
-# localhost) and local tools that send no Origin at all (scripts, curl) are let in.
+# cards, so two checks guard every request:
+# - Origin: a web page in the user's browser must never reach it (browsers let any site open a
+#   WebSocket to 127.0.0.1). Pyxi's own windows (the built app is file://, the dev servers are on
+#   localhost) and local tools that send no Origin at all are let through this one.
+# - The launch key (pyxi.brainkey): any program on the PC can connect to 127.0.0.1 and send no
+#   Origin, so every request must also carry the key the desktop app made at launch.
 APP_ORIGINS = frozenset(
     {
         "file://",
@@ -77,9 +80,14 @@ def has_key(settings: PyxiSettings) -> bool:
 
 
 def create_app(
-    settings: PyxiSettings | None = None, *, demo: bool | None = None, brain: Brain | None = None
+    settings: PyxiSettings | None = None,
+    *,
+    demo: bool | None = None,
+    brain: Brain | None = None,
+    key: str | None = None,
 ) -> FastAPI:
     settings = settings or PyxiSettings()
+    key = key or brainkey.resolve(settings.data_dir)
     hub = brain.hub if brain is not None else Hub()
     demo = (not has_key(settings)) if demo is None else demo
     demo_site = None
@@ -184,13 +192,21 @@ def create_app(
     app = FastAPI(title="Pyxi", version=__version__, lifespan=lifespan)
     app.state.brain, app.state.hub = brain, hub
 
+    def keyed(headers: Any, query: Any) -> bool:
+        return brainkey.matches(key, headers.get(brainkey.HEADER) or query.get(brainkey.QUERY))
+
     @app.middleware("http")
     async def own_windows_only(request: Request, call_next: Any) -> Any:
         origin = request.headers.get("origin")
         if not origin_allowed(origin):
             return JSONResponse({"detail": "not one of Pyxi's windows"}, status_code=403)
+        authorized = keyed(request.headers, request.query_params)
+        request.state.authorized = authorized
         if request.method == "OPTIONS" and origin:
             response: Any = JSONResponse({})
+            response.headers["Access-Control-Allow-Headers"] = brainkey.HEADER
+        elif not authorized and request.url.path != "/api/health":
+            return JSONResponse({"detail": "missing or wrong launch key"}, status_code=401)
         else:
             response = await call_next(request)
         if origin:  # Pyxi's own pages read these replies (the Memory tab's timeline)
@@ -210,8 +226,10 @@ def create_app(
         }
 
     @app.get("/api/health")
-    async def health() -> dict[str, Any]:
-        return {"ok": True, "version": __version__}
+    async def health(request: Request) -> dict[str, Any]:
+        # Open to any local caller, so a starting app can tell "a brain is on this port" from
+        # "it's my brain" (authorized: it sent this brain's key).
+        return {"ok": True, "version": __version__, "authorized": request.state.authorized}
 
     @app.post("/api/quit")
     async def quit_brain() -> dict[str, Any]:
@@ -258,7 +276,12 @@ def create_app(
     @app.get("/file")
     async def file(path: str) -> FileResponse:
         target = Path(path).resolve()
-        if not target.is_relative_to(settings.data_dir.resolve()) or not target.is_file():
+        # Pictures Pyxi saved (walkthrough steps) only: never its tokens, keys or databases.
+        if (
+            not target.is_relative_to(settings.data_dir.resolve())
+            or target.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp")
+            or not target.is_file()
+        ):
             raise HTTPException(404)
         return FileResponse(target)
 
@@ -294,6 +317,10 @@ def create_app(
             log.warning("refused a connection from %s", socket.headers.get("origin"))
             await socket.close(code=1008)
             return
+        if not keyed(socket.headers, socket.query_params):
+            log.warning("refused a connection without the launch key")
+            await socket.close(code=1008)
+            return
         await socket.accept()
         cid = hub.connect(socket.send_text)
         await socket.send_text(json.dumps({"type": "hello", **hello()}, default=str))
@@ -306,9 +333,19 @@ def create_app(
         finally:
             hub.disconnect(cid)
 
+    async def _e2e_card() -> None:
+        """End-to-end tests only (demo mode with PYXI_E2E=1): a harmless Allow card, so a test can
+        answer it in the real overlay. The answer is broadcast back."""
+        value = await hub.request(
+            "confirm", timeout=120, job_id="", agent="Pyxi", action="E2E check", reason="Test card."
+        )
+        await hub.emit("e2e_answer", value=value)
+
     async def handle(msg: dict[str, Any]) -> None:
         kind = msg.get("type")
-        if kind == "text" and msg.get("text", "").strip():
+        if kind == "e2e_card" and demo and os.environ.get("PYXI_E2E") == "1":
+            brain._spawn(_e2e_card())
+        elif kind == "text" and msg.get("text", "").strip():
             brain._spawn(brain.turn(msg["text"].strip()))
         elif kind == "ptt_start":
             brain.begin_listening()

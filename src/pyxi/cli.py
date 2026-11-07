@@ -87,6 +87,8 @@ def serve(
     console.print(
         f"Pyxi brain on [bold]ws://{s.host}:{s.port}/ws[/] · {mode} · voice {s.voice.tts}"
     )
+    if not os.environ.get("PYXI_BRAIN_KEY"):
+        console.print(f"Launch key for local tools: {s.data_dir / 'brain.key'} (send it as ?key=)")
     uvicorn.run(app_, host=s.host, port=s.port, log_level="warning")
 
 

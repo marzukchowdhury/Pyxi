@@ -10,6 +10,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { SceneNode, SceneSpec } from "../shared/protocol";
+import { brainUrl } from "../shared/bridge";
 import { computeLayout, fitDistance, focusBounds, type Layout, type Placed, type Vec3 } from "./layout";
 import { nodeColor, type Theme, THEMES } from "./themes";
 
@@ -309,7 +310,7 @@ function ScreenPiece({ node, color, w, h, cropsBase, glow }: { node: SceneNode; 
   if (node.image) {
     return (
       <Suspense fallback={<GlassPanel color={color} w={w} h={h} glow={glow} />}>
-        <TexturedPanel url={`${cropsBase}/crops/${node.image}`} color={color} w={w} h={h} glow={glow} />
+        <TexturedPanel url={brainUrl(`/crops/${node.image}`, cropsBase)} color={color} w={w} h={h} glow={glow} />
       </Suspense>
     );
   }

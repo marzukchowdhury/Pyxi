@@ -6,6 +6,10 @@ import sys
 
 from playwright.async_api import async_playwright
 
+from pyxi.brainkey import client_key
+
+KEY = client_key()  # the running brain's launch key (PYXI_BRAIN_KEY or .pyxi/brain.key)
+
 
 async def main(kind: str, arg: str, steps: list[int], out: str):
     async with async_playwright() as p:
@@ -19,13 +23,13 @@ async def main(kind: str, arg: str, steps: list[int], out: str):
         pg = await b.new_page(viewport={"width": 1440, "height": 900})
         errors = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
-        await pg.goto("http://localhost:5199/overlay.html?backdrop=1")
+        await pg.goto(f"http://localhost:5199/overlay.html?backdrop=1&key={KEY}")
         await pg.wait_for_timeout(1200)
         await pg.mouse.move(1010, 470)
         if kind == "scene":
             await pg.evaluate(
-                """async (name) => { const ws = new WebSocket('ws://127.0.0.1:8766/ws'); await new Promise(r => ws.onopen = r); ws.send(JSON.stringify({type: 'show_scene', name})); }""",
-                arg,
+                """async ([name, key]) => { const ws = new WebSocket('ws://127.0.0.1:8766/ws?key=' + key); await new Promise(r => ws.onopen = r); ws.send(JSON.stringify({type: 'show_scene', name})); }""",
+                [arg, KEY],
             )
             await pg.wait_for_timeout(2200)
             play = pg.locator(".step-row .icon.primary")

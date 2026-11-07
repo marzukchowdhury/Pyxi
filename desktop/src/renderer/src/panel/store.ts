@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { backendUrl } from "../shared/bridge";
+import { brainUrl } from "../shared/bridge";
 import type { Agent, BrainEvent, BrainState, ConnectorStatus, Hello, Job, RoutineInfo, VoiceInfo, VoicePublic } from "../shared/protocol";
 import { brain } from "../shared/socket";
 
@@ -144,6 +144,6 @@ export function answer(request_id: string, value: unknown): void {
 }
 
 export async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(backendUrl + path);
+  const res = await fetch(brainUrl(path));
   return (await res.json()) as T;
 }

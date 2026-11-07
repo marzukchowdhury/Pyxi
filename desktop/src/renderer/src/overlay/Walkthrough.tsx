@@ -4,7 +4,7 @@
  * why. "Try it yourself" opens the page so you can follow along.
  */
 import { useEffect, useRef, useState } from "react";
-import { backendUrl, bridge } from "../shared/bridge";
+import { brainUrl, bridge } from "../shared/bridge";
 import { Close, Next, Prev } from "../shared/icons";
 import { Interactive } from "./Interactive";
 import { useOverlay, voice } from "./store";
@@ -61,7 +61,7 @@ export function Walkthrough() {
         </div>
         <div className="walk-stage">
           {step.image && (
-            <img src={`${backendUrl}/file?path=${encodeURIComponent(step.image)}`} alt=""
+            <img src={brainUrl(`/file?path=${encodeURIComponent(step.image)}`)} alt=""
               onLoad={(e) => setBox({ w: e.currentTarget.clientWidth, h: e.currentTarget.clientHeight })} />
           )}
           <div className="walk-dim" />

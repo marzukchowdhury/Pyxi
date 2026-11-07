@@ -8,8 +8,10 @@
  * - Global hotkeys, the cursor feed for the buddy, and the Python brain's lifecycle.
  */
 import { type ChildProcess, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
 import { startUpdates } from "./updates";
 import {
@@ -36,6 +38,11 @@ const REPO = resolve(__dirname, "../../..");
 // Where Pyxi keeps its data and runs its brain: the repo while developing, the user's own app
 // data folder (%APPDATA%/Pyxi) once installed, where a .env can also go.
 const HOME = app.isPackaged ? app.getPath("userData") : REPO;
+// The brain's launch key, new at every start. Any program on the PC can connect to 127.0.0.1, so
+// the brain refuses every request without it (pyxi/brainkey.py). Only the brain (through its
+// environment) and Pyxi's own pages (through the preload) ever get it.
+let brainKey = process.env.PYXI_BRAIN_KEY || randomBytes(32).toString("base64url");
+const keyed = (init: RequestInit = {}): RequestInit => ({ ...init, headers: { "X-Pyxi-Key": brainKey } });
 // Each action tries its shortcuts in order and keeps the first one Windows lets us have.
 // Other apps (Discord, overlays, launchers) often own a combination already; without a
 // fallback the shortcut would silently do nothing.
@@ -85,6 +92,19 @@ function loadShareVisible(): boolean {
   }
 }
 let shareVisible = loadShareVisible();
+
+/** Is this one of Pyxi's own pages (the built files, or the dev server while developing)? */
+function ownPage(url: string): boolean {
+  const dev = process.env.ELECTRON_RENDERER_URL;
+  if (dev && url.startsWith(dev.replace(/\/$/, "") + "/")) return true;
+  if (!url.startsWith("file://")) return false;
+  try {
+    const path = resolve(fileURLToPath(url)).toLowerCase();
+    return path.startsWith(resolve(join(__dirname, "../renderer")).toLowerCase());
+  } catch {
+    return false;
+  }
+}
 
 function rendererUrl(page: "overlay" | "panel", query: Record<string, string>): string | null {
   const dev = process.env.ELECTRON_RENDERER_URL;
@@ -218,24 +238,43 @@ function broadcast(channel: string, ...args: unknown[]): void {
   }
 }
 
-/** The running brain's version, or null when nothing answers. */
-async function backendVersion(): Promise<string | null> {
+/** The brain on our port: its version and whether it took our key, or null when nothing answers. */
+async function brainHealth(): Promise<{ version: string; ours: boolean } | null> {
   try {
-    const res = await fetch(`${BACKEND}/api/health`);
-    return res.ok ? String(((await res.json()) as { version?: string }).version ?? "") : null;
+    const res = await fetch(`${BACKEND}/api/health`, keyed());
+    if (!res.ok) return null;
+    const body = (await res.json()) as { version?: string; authorized?: boolean };
+    // Brains before the launch key had no "authorized" and took anything.
+    return { version: String(body.version ?? ""), ours: body.authorized !== false };
+  } catch {
+    return null;
+  }
+}
+
+/** Developing: a brain started by hand (pyxi serve) wrote its own key to .pyxi/brain.key. */
+function handStartedKey(): string | null {
+  if (app.isPackaged || process.env.PYXI_BRAIN_KEY) return null;
+  try {
+    return readFileSync(join(HOME, ".pyxi", "brain.key"), "utf-8").trim() || null;
   } catch {
     return null;
   }
 }
 
 async function ensureBrain(): Promise<void> {
-  const running = await backendVersion();
-  // Reuse a brain only if it's this version. After an update an old brain can still be running
-  // (left behind when the installer closed the app): ask it to quit, then start our own.
-  if (running !== null && (running === app.getVersion() || !app.isPackaged)) return;
+  let running = await brainHealth();
+  const fileKey = running && !running.ours ? handStartedKey() : null;
+  if (fileKey) {
+    brainKey = fileKey;
+    running = await brainHealth();
+  }
+  // Reuse a brain only if it's ours and this version. After an update an old brain can still be
+  // running (left behind when the installer closed the app): ask it to quit, then start our own.
+  if (running?.ours && (running.version === app.getVersion() || !app.isPackaged)) return;
   if (running !== null) {
-    await fetch(`${BACKEND}/api/quit`, { method: "POST" }).catch(() => undefined);
-    for (let i = 0; i < 30 && (await backendVersion()) !== null; i++) await new Promise((r) => setTimeout(r, 200));
+    await fetch(`${BACKEND}/api/quit`, keyed({ method: "POST" })).catch(() => undefined);
+    // A brain with another key ignores that, but quits by itself when its app has gone.
+    for (let i = 0; i < 50 && (await brainHealth()) !== null; i++) await new Promise((r) => setTimeout(r, 200));
   }
   // The installed app carries its own Python with the brain already in it (resources/python).
   const py =
@@ -256,7 +295,13 @@ async function ensureBrain(): Promise<void> {
     stdio: log === null ? "inherit" : ["ignore", log, log],
     windowsHide: true,
     // PYXI_APP_PID: the brain quits when this app does, so it's never left running on its own.
-    env: { ...process.env, PYTHONUTF8: "1", PYTHONNOUSERSITE: "1", PYXI_APP_PID: String(process.pid) },
+    env: {
+      ...process.env,
+      PYTHONUTF8: "1",
+      PYTHONNOUSERSITE: "1",
+      PYXI_APP_PID: String(process.pid),
+      PYXI_BRAIN_KEY: brainKey,
+    },
   });
   brain.on("exit", (code) => {
     console.log(`[pyxi] brain exited (${code})`);
@@ -367,6 +412,10 @@ ipcMain.on("set-interactive", (e, interactive: boolean) => {
   if (win && !interactive && !win.isFocused()) win.setFocusable(false);
 });
 ipcMain.on("toggle-panel", togglePanel);
+// The preload asks for the launch key once per page; only Pyxi's own pages get it.
+ipcMain.on("brain-key", (e) => {
+  e.returnValue = ownPage(e.senderFrame?.url ?? "") ? brainKey : "";
+});
 
 // One voice across monitors: clips from other overlays play on the main screen's queue, and
 // its "started / ended / cancelled" go back to the window that queued them.

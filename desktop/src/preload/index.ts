@@ -11,6 +11,8 @@ function on<T>(channel: string, fn: Listener<T>): () => void {
 
 contextBridge.exposeInMainWorld("pyxiBridge", {
   electron: true,
+  // Asked once at load. The main process only gives it to Pyxi's own pages.
+  brainKey: String(ipcRenderer.sendSync("brain-key") ?? ""),
   onCursor: (fn: Listener<{ x: number; y: number }>) => on("cursor", fn),
   onPtt: (fn: Listener<void>) => on("ptt", fn),
   onPttDown: (fn: Listener<void>) => on("ptt-down", fn),

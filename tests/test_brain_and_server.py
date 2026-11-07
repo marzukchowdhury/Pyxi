@@ -17,6 +17,9 @@ from pyxi.hub import Hub
 from pyxi.server import create_app
 from pyxi.voice import make_tts
 
+KEY = "test-launch-key"  # what the desktop app would have made at launch
+KEYED = {"x-pyxi-key": KEY}
+
 
 def make_brain(settings, llm=None, otto_llm=None):
     hub = Hub()
@@ -157,8 +160,8 @@ def test_server_websocket_round_trip(settings):
         screen=FakeScreen(),
         tts=make_tts(settings.voice, settings.models_dir),
     )
-    app = create_app(settings, demo=True, brain=brain)
-    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+    app = create_app(settings, demo=True, brain=brain, key=KEY)
+    with TestClient(app, headers=KEYED) as client, client.websocket_connect(f"/ws?key={KEY}") as ws:
         hello = json.loads(ws.receive_text())
         assert hello["type"] == "hello" and hello["demo"] and "https" in hello["gallery"]
         ws.send_text(json.dumps({"type": "text", "text": "how do you work?"}))
@@ -170,6 +173,13 @@ def test_server_websocket_round_trip(settings):
         assert any(e["type"] == "scene" and e["scene"]["title"] == "How Pyxi works" for e in seen)
         assert client.get("/file", params={"path": "C:/Windows/win.ini"}).status_code == 404
         assert client.get("/crops/..%2F..%2Fsecret.png").status_code == 404
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        (settings.data_dir / "cloud.json").write_text("{}")
+        shot = settings.data_dir / "step_clean.jpg"
+        shot.write_bytes(bytes([0xFF, 0xD8]))
+        # Inside the data folder, still only pictures: never tokens, keys or databases.
+        assert client.get("/file", params={"path": str(settings.data_dir / "cloud.json")}).status_code == 404
+        assert client.get("/file", params={"path": str(shot)}).status_code == 200
 
 
 def test_settings_offers_the_beta_to_someone_with_their_own_key(settings, monkeypatch):
@@ -179,8 +189,8 @@ def test_settings_offers_the_beta_to_someone_with_their_own_key(settings, monkey
     monkeypatch.delenv("PYXI_BETA", raising=False)
     hub = Hub()
     brain = Brain(settings, hub, llm=DemoLLM(), screen=FakeScreen(), tts=make_tts(settings.voice, settings.models_dir))
-    app = create_app(settings, demo=False, brain=brain)
-    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+    app = create_app(settings, demo=False, brain=brain, key=KEY)
+    with TestClient(app) as client, client.websocket_connect(f"/ws?key={KEY}") as ws:
         hello = json.loads(ws.receive_text())
     assert hello["beta"] == {"joined": False, "can_join": True, "own_key": True}
 
@@ -206,14 +216,70 @@ def test_only_pyxis_own_windows_can_reach_the_brain(settings):
         screen=FakeScreen(),
         tts=make_tts(settings.voice, settings.models_dir),
     )
-    app = create_app(settings, demo=True, brain=brain)
+    app = create_app(settings, demo=True, brain=brain, key=KEY)
     with TestClient(app) as client:
         evil = {"origin": "https://evil.example"}
-        with pytest.raises(Closed), client.websocket_connect("/ws", headers=evil) as ws:
-            ws.receive_text()
-        assert client.get("/api/timeline", headers=evil).status_code == 403
-        ok = client.get("/api/timeline", headers={"origin": "file://"})
+        with pytest.raises(Closed), client.websocket_connect(f"/ws?key={KEY}", headers=evil) as ws:
+            ws.receive_text()  # a web page is refused even if it somehow had the key
+        assert client.get("/api/timeline", headers={**evil, **KEYED}).status_code == 403
+        ok = client.get("/api/timeline", headers={"origin": "file://", **KEYED})
         assert ok.status_code == 200 and ok.headers["access-control-allow-origin"] == "file://"
-        assert client.get("/api/timeline").status_code == 200  # local scripts send no Origin
-        with client.websocket_connect("/ws", headers={"origin": "http://localhost:5173"}) as ws:
+        assert client.get("/api/timeline", headers=KEYED).status_code == 200  # local scripts
+        with client.websocket_connect(
+            f"/ws?key={KEY}", headers={"origin": "http://localhost:5173"}
+        ) as ws:
             assert json.loads(ws.receive_text())["type"] == "hello"
+
+
+def test_a_program_without_the_launch_key_is_refused(settings, monkeypatch):
+    """Any program on the PC can reach 127.0.0.1 and send no Origin. Without the key the desktop
+    app made at launch it can't read anything, send requests, or answer an Allow card."""
+    from starlette.websockets import WebSocketDisconnect as Closed
+
+    hub = Hub()
+    brain = Brain(
+        settings, hub, llm=DemoLLM(), screen=FakeScreen(), tts=make_tts(settings.voice, settings.models_dir)
+    )
+    app = create_app(settings, demo=True, brain=brain, key=KEY)
+    answered: list[object] = []
+    hub.resolve = lambda rid, value: answered.append((rid, value))  # type: ignore[method-assign]
+    with TestClient(app) as client:
+        for url in ("/ws", "/ws?key=", "/ws?key=guess", f"/ws?key={KEY}x"):
+            with pytest.raises(Closed), client.websocket_connect(url) as ws:
+                ws.send_text(json.dumps({"type": "answer", "request_id": "r1", "value": True}))
+                ws.receive_text()
+        with pytest.raises(Closed), client.websocket_connect(
+            "/ws", headers={"origin": "file://", "x-pyxi-key": "nope"}
+        ) as ws:
+            ws.receive_text()
+        for path in ("/api/state", "/api/timeline", "/api/turns", "/api/beta", "/api/activity"):
+            assert client.get(path).status_code == 401, path
+            assert client.get(path, headers={"x-pyxi-key": "nope"}).status_code == 401, path
+        assert client.post("/api/quit").status_code == 401  # can't shut Pyxi down either
+        assert client.get("/file", params={"path": str(settings.data_dir / "x.png")}).status_code == 401
+        # Health stays open (the starting app asks "is a brain on this port?"), but says whose.
+        assert client.get("/api/health").json()["authorized"] is False
+        assert client.get("/api/health", headers=KEYED).json()["authorized"] is True
+        # The real app's way in: the key as a header (fetch) or ?key= (WebSocket, <img>).
+        assert client.get(f"/api/timeline?key={KEY}", headers={"origin": "file://"}).status_code == 200
+        with client.websocket_connect(f"/ws?key={KEY}", headers={"origin": "file://"}) as ws:
+            assert json.loads(ws.receive_text())["type"] == "hello"
+            ws.send_text(json.dumps({"type": "answer", "request_id": "r1", "value": True}))
+            ws.send_text(json.dumps({"type": "routines"}))
+            assert json.loads(ws.receive_text())["type"] == "routines"
+    assert answered == [("r1", True)]  # only the keyed window's answer reached the card
+
+
+def test_a_brain_started_by_hand_writes_its_key_for_local_tools(settings, monkeypatch, tmp_path):
+    from pyxi import brainkey
+
+    monkeypatch.delenv(brainkey.ENV, raising=False)
+    first = brainkey.resolve(tmp_path)
+    assert len(first) >= 40 and (tmp_path / "brain.key").read_text() == first
+    assert brainkey.client_key(tmp_path) == first
+    assert brainkey.resolve(tmp_path) != first  # a new key every start
+    monkeypatch.setenv(brainkey.ENV, "from-the-app")
+    (tmp_path / "brain.key").unlink()
+    assert brainkey.resolve(tmp_path) == "from-the-app" and not (tmp_path / "brain.key").exists()
+    assert brainkey.client_key(tmp_path) == "from-the-app"
+    assert not brainkey.matches("", "") and not brainkey.matches("a", None)

@@ -1,6 +1,6 @@
 // One WebSocket to the brain, with auto-reconnect and a tiny pub/sub on top.
 import "./bridge";
-import { backendUrl } from "./bridge";
+import { brainUrl } from "./bridge";
 import type { BrainEvent, ClientMessage } from "./protocol";
 
 type Handler = (e: BrainEvent) => void;
@@ -14,7 +14,7 @@ class BrainSocket {
   private statusHandlers = new Set<(up: boolean) => void>();
 
   connect(): void {
-    const url = backendUrl.replace(/^http/, "ws") + "/ws";
+    const url = brainUrl("/ws").replace(/^http/, "ws");
     const ws = new WebSocket(url);
     this.ws = ws;
     ws.onopen = () => {

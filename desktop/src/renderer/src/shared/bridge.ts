@@ -12,6 +12,8 @@ export interface DisplayInfo {
 
 export interface Bridge {
   electron: boolean;
+  /** The brain's launch key: every request to the brain must carry it (see pyxi/brainkey.py). */
+  brainKey: string;
   onCursor(fn: (p: { x: number; y: number }) => void): () => void;
   onPtt(fn: () => void): () => void;
   onPttDown(fn: () => void): () => void;
@@ -81,6 +83,8 @@ function mockBridge(): Bridge {
     onSayStarted: noop,
     releaseFocus: () => {},
     electron: false,
+    // Browser preview: pass the key of a brain started by hand (.pyxi/brain.key) as ?key=.
+    brainKey: new URLSearchParams(location.search).get("key") ?? "",
     onCursor(fn) {
       const h = (e: MouseEvent) => fn({ x: e.clientX, y: e.clientY });
       window.addEventListener("mousemove", h);
@@ -189,6 +193,13 @@ export function currentDisplay(): DisplayInfo {
 }
 
 export const backendUrl = params.get("backend") ?? "http://127.0.0.1:8766";
+
+/** A brain URL that carries the launch key (WebSocket, <img>, textures and fetches alike). */
+export function brainUrl(path: string, base: string = backendUrl): string {
+  const url = new URL(path, base);
+  url.searchParams.set("key", bridge.brainKey ?? "");
+  return url.toString();
+}
 
 /** "Control+Alt+Space" -> ["Ctrl", "Alt", "Space"] for display. */
 export function keysOf(accelerator: string | null | undefined): string[] {

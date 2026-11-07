@@ -25,6 +25,8 @@ from pathlib import Path
 from PIL import Image
 from playwright.async_api import Page, async_playwright
 
+from pyxi.brainkey import client_key
+
 OUT = Path("docs/images")
 TMP = Path(".pyxi/shots")
 URL = "http://localhost:5199"
@@ -41,7 +43,7 @@ def wanted(name: str) -> bool:
 
 async def overlay(b, events: list[dict] | None = None, mouse=(1010, 470)) -> Page:
     pg = await b.new_page(viewport={"width": 1440, "height": 900})
-    await pg.goto(f"{URL}/overlay.html?backdrop=1&live=1")
+    await pg.goto(f"{URL}/overlay.html?backdrop=1&live=1&key={client_key()}")
     await pg.wait_for_timeout(1300)
     await pg.mouse.move(*mouse)
     for ev in events or []:
@@ -221,7 +223,7 @@ async def main() -> None:
         # The panel, at the size of its own window, against the demo brain (demo roster, no data).
         if any(wanted(n) for n in ("panel-chat", "panel-team", "panel-memory", "voice-studio")):
             pg = await b.new_page(viewport={"width": 440, "height": 760}, device_scale_factor=2)
-            await pg.goto(f"{URL}/panel.html?live=1")
+            await pg.goto(f"{URL}/panel.html?live=1&key={client_key()}")
             await pg.wait_for_timeout(1800)
             if wanted("panel-chat"):
                 await pg.screenshot(path=OUT / "panel-chat.png")
