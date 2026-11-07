@@ -2353,6 +2353,8 @@ class Brain:
     ) -> None:
         """Queue speech behind anything already being said. ``record=False`` for background
         lines (a finished build, an error) that aren't part of the current turn."""
+        if record and agent == "Pyxi":
+            text = trim_chatter(text, said_before=bool(self._said))
         if not text.strip():
             return
         if record:
@@ -2854,6 +2856,39 @@ def strip_filler(text: str) -> str:
     """Drop stock openers ("There you go, I have done this.") when there's a real sentence after."""
     rest = _FILLER_LEAD.sub("", text, count=1)
     return rest[0].upper() + rest[1:] if rest.strip() and rest != text else text
+
+
+# "On it." and its kin: said once a turn at most.
+_ACK = re.compile(r"^\W*(on it|got it|sure thing|on my way)\W*$", re.IGNORECASE)
+# Short running commentary on the work ("I'll look at what's on your desktop first.", "Looking up
+# your Skyward booking."). Not "I'll check you in 24 hours before...": that's the result.
+_NARRATION = re.compile(
+    r"^\W*(?:(?:okay|ok|alright),?\s+)?"
+    r"(?:(?:i'?ll|i will|let me|i'?m going to)\s+(?:first\s+)?(?:have a\s+|take a\s+)?"
+    r"(?:look|check|scan|search|go through|dig|see|pull|grab|read|find)"
+    r"(?!\s+(?:you|them|him|her|us)\s+in\b)"
+    r"|(?:looking|checking|searching|scanning|digging|going through|pulling)"
+    r"\s+(?:up|at|for|through|into|on|your|the)\b)"
+    r"[^,;:]{0,70}(?:,\s*then\b[^;:]{0,60})?$",
+    re.IGNORECASE,
+)
+
+
+def trim_chatter(text: str, said_before: bool) -> str:
+    """Pyxi says one short line while it works, not a running commentary: a second "On it" in a
+    turn goes, and so does commentary once something else has been or is being said. Sentences
+    with markers (a note or a pointer) always stay."""
+    sentences = split_sentences(text)
+    kept: list[str] = []
+    for i, s in enumerate(sentences):
+        others = said_before or kept or i < len(sentences) - 1
+        if not MARKER.search(s) and (
+            (_ACK.match(s) and said_before)
+            or (_NARRATION.match(s) and others)
+        ):
+            continue
+        kept.append(s)
+    return " ".join(kept) if len(kept) < len(sentences) else text
 
 
 def _same_view(a: Image.Image, b: Image.Image) -> bool:
