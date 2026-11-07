@@ -240,7 +240,7 @@ sequenceDiagram
 
 ## Safety and privacy
 
-The full policy is in [docs/PRIVACY.md](docs/PRIVACY.md).
+The full policy is in [docs/PRIVACY.md](docs/PRIVACY.md). How to report a security problem, what's stored where and how Pyxi is protected: [SECURITY.md](SECURITY.md).
 
 | | |
 |---|---|
@@ -248,8 +248,9 @@ The full policy is in [docs/PRIVACY.md](docs/PRIVACY.md).
 | **Private apps** | Password managers, banking and credential dialogs (configurable regexes) are never captured or recorded. Password fields are masked in every image and never stored. |
 | **Control** | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> pauses all screen access, with a visible indicator. "Forget everything" wipes the palace. Retention defaults to 72 hours. |
 | **Acting** | Pyxi only uses your mouse and keyboard after you press Allow (once, or Always allow). Moving the mouse or pressing <kbd>Esc</kbd> stops it instantly. Sending, paying, deleting, posting, signing in or out and closing tabs or apps always ask again, password fields are never typed into, and every task has a step and cost limit. Browser teammates work in their own browser under Otto's guardrails, with domain rules, no password or card fields, and on-screen approval for anything irreversible. |
-| **Local connections** | The brain listens on 127.0.0.1 only, and only Pyxi's own windows (and local tools) may connect: any other web page that tries to reach it is refused, so a site in your browser can't read what Pyxi sees or press its Allow buttons. |
-| **Content** | Screen text is treated as data. The prompt tells the model to ignore instructions it finds on screen. |
+| **Local connections** | The brain listens on 127.0.0.1 only. Every request needs the random key the desktop app makes at each launch (`PYXI_BRAIN_KEY`; a brain started by hand writes its own to `.pyxi/brain.key` for local tools), and requests from web pages are refused. So no other program, and no site in your browser, can read what Pyxi sees or press its Allow buttons. |
+| **Content** | Screens, emails, web pages and documents are treated as data: every model that reads them is told so and gets them fenced off from your words, and the approval cards hold even if a model is fooled (`tests/test_prompt_injection.py`). |
+| **Secrets at rest** | Google, LinkedIn and beta tokens are encrypted with Windows DPAPI. |
 | **Cost** | Per-turn and daily budgets across turns and agent jobs, shown in the panel. Local mode costs nothing. |
 | **Storage** | Everything (palace, turns, trajectories, memories) stays in `.pyxi/` on your machine. |
 
