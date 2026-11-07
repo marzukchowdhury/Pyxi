@@ -365,6 +365,18 @@ def create_app(
             await hub.emit("shopping", **pricecheck.load(settings.data_dir))
         elif kind == "shopping_save":
             await hub.emit("shopping", **pricecheck.save(settings.data_dir, msg))
+        elif kind in ("memories_get", "memory_forget", "memories_wipe"):
+            if kind == "memory_forget":
+                brain.forget_memory(
+                    str(msg.get("store") or "pyxi"), str(msg.get("scope") or ""), str(msg.get("key") or "")
+                )
+            elif kind == "memories_wipe":
+                async def _wipe() -> None:
+                    await hub.emit("notice", message=await brain.wipe_everything())
+                    await hub.emit("memories", memories=brain.memories_public())
+
+                brain._spawn(_wipe())
+            await hub.emit("memories", memories=brain.memories_public())
         elif kind in ("audit_get", "audit_undo"):
             if kind == "audit_undo" and msg.get("id"):
                 done = await asyncio.to_thread(brain.audit.undo, str(msg["id"]))

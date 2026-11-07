@@ -3,6 +3,7 @@ import { bridge, keysOf } from "../shared/bridge";
 import { trusted } from "../shared/trusted";
 import { Activity } from "./Activity";
 import { Grants } from "./Grants";
+import { Memories } from "./Memories";
 import { PrivateApps } from "./PrivateApps";
 import { Close, Compass, Cube, Feather, FileStack, Grid, Mark, Mic, Minus, Plus, Replay, Send, Spark, Thread } from "../shared/icons";
 import type { Agent, Job } from "../shared/protocol";
@@ -343,6 +344,7 @@ export function Palace() {
           <button className="danger" onClick={() => confirm("Forget everything Pyxi remembers about your screen?") && set("forget_screen", true)}>Forget everything</button>
         </div>
       )}
+      <Memories />
     </div>
   );
 }

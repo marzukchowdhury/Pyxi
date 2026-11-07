@@ -343,6 +343,15 @@ export interface AuditEntry {
   can_undo: boolean;
 }
 
+/** Something Pyxi or a teammate remembers (Settings can forget it). */
+export interface MemoryItem {
+  store: string;
+  scope: string;
+  key: string;
+  content: string;
+  at: number;
+}
+
 export type BrainEvent =
   | ({ type: "hello" } & Hello)
   | ({ type: "settings" } & Hello)
@@ -389,6 +398,7 @@ export type BrainEvent =
   | { type: "private_apps"; apps: string[]; built_in: string[] }
   | { type: "grants"; grants: Grant[] }
   | { type: "audit"; entries: AuditEntry[] }
+  | { type: "memories"; memories: MemoryItem[] }
   | { type: "beta"; ok: boolean; message: string }
   | { type: "profile"; profile: Record<string, string>; saved?: boolean }
   | ({ type: "file_access" } & FileAccessState)
@@ -437,6 +447,9 @@ export type ClientMessage =
   | { type: "grants_get" }
   | { type: "audit_get" }
   | { type: "stop_everything" }
+  | { type: "memories_get" }
+  | { type: "memory_forget"; store: string; scope: string; key: string }
+  | { type: "memories_wipe" }
   | { type: "audit_undo"; id: string }
   | { type: "grant_revoke"; kind: string }
   | { type: "private_apps_save"; apps: string[] }

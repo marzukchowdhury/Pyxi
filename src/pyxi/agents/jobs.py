@@ -258,7 +258,7 @@ class JobManager:
                 c.stop()
             except Exception:
                 log.exception("stopping %s", job_id)
-        for job_id, task in list(self._tasks.items()):
+        for task in list(self._tasks.values()):
             if not task.done():
                 task.cancel()
         for job in list(self.jobs.values()):

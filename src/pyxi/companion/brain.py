@@ -154,6 +154,9 @@ class Brain:
             db, retention_hours=settings.screen.retention_hours, thumbs_dir=thumbs
         )
         self.activity = ActivityLog(db)
+        from pyxi import memory_guard
+
+        memory_guard.install()  # no passwords, card numbers, IDs or keys, for anyone (Scout too)
         self.memory = MemoryStore(db)
         self.turns = TurnStore(db, settings.turns_dir)
         otto_dir = settings.data_dir / "otto"
@@ -1320,6 +1323,55 @@ class Brain:
             synthetic=True,
         )
 
+    # ------------------------------------------------------------------ memories (Settings)
+    def _memory_stores(self) -> list[tuple[str, Any]]:
+        """Pyxi's own memories, and what teammates remembered in their runs (Otto's store)."""
+        stores = [("pyxi", self.memory)]
+        otto_db = self.settings.data_dir / "otto" / "otto.db"
+        if otto_db.exists():
+            stores.append(("teammates", MemoryStore(otto_db)))
+        return stores
+
+    def memories_public(self) -> list[dict[str, Any]]:
+        return [
+            {"store": name, "scope": m.scope, "key": m.key, "content": m.content, "at": m.created_at}
+            for name, store in self._memory_stores()
+            for m in store.all(None, 500)
+        ]
+
+    def forget_memory(self, store: str, scope: str, key: str) -> int:
+        target = dict(self._memory_stores()).get(store)
+        return target.forget(scope, key) if target is not None else 0
+
+    async def wipe_everything(self) -> str:
+        """Settings' "Wipe everything", after a confirm card: every memory (Pyxi's and the
+        teammates'), the Memory Palace, and the conversations with their screenshots."""
+        mems = self.memories_public()
+        ok = await self.hub.request(
+            "confirm",
+            timeout=300,
+            job_id="",
+            agent="Pyxi",
+            action="Wipe everything Pyxi remembers?",
+            reason=(
+                f"This forgets {len(mems)} memor{'y' if len(mems) == 1 else 'ies'}, your Memory "
+                "Palace history, and your conversations with Pyxi (with their screenshots). It "
+                "can't be undone. Your settings, connected accounts, files and the activity log "
+                "stay."
+            ),
+        )
+        if not ok:
+            return "Okay, nothing was wiped."
+        for _, store in self._memory_stores():
+            for scope in {m.scope for m in store.all(None, 100000)}:
+                store.forget(scope)
+        self.spatial.forget_all()
+        self.activity.forget_all()
+        self.turns.prune(0)
+        self.history = []
+        self.audit.add("wrote", "Wiped every memory, the Memory Palace and the conversations", agent="You")
+        return "Done: Pyxi has forgotten everything it remembered."
+
     async def stop_everything(self) -> str:
         """The "Stop everything" hotkey and tray item: every teammate job, the hands, Scout's
         browser, open cards (answered "no") and anything queued to go out, all at once."""
@@ -2126,7 +2178,12 @@ class Brain:
             self._images.append(buf.getvalue())
             return f"Zoomed image of {rect} added below the screenshot."
         if name == "remember":
-            self.memory.remember("agent:pyxi", str(args["key"]), str(args["content"]))
+            from pyxi.memory_guard import SensitiveMemory
+
+            try:
+                self.memory.remember("agent:pyxi", str(args["key"]), str(args["content"]))
+            except SensitiveMemory as exc:
+                return f"remember: {exc} Tell them, briefly."
             return None
         if name == "recall_memories":
             q = str(args.get("query") or "").strip()
