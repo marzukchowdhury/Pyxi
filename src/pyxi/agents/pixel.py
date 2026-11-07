@@ -86,6 +86,8 @@ OPERATIONS = {
     "excel_to_csv": "Turn an Excel sheet into a CSV file (options: sheet).",
 }
 
+BUILT_IN_NOTE = " Install LibreOffice for an exact copy of the Office layout."
+
 # The job asks the user for these on a password card, so the model never sees them.
 NEEDS_PASSWORD = {"protect_pdf", "unlock_pdf"}
 
@@ -387,7 +389,12 @@ def pdf_to_images(
 
 # ---------------------------------------------------------------------------- to PDF
 def libreoffice() -> str | None:
-    """soffice, if LibreOffice is installed (it's optional)."""
+    """soffice: Pyxi's own copy (set up on demand, see agents/libreoffice.py), or one the user
+    installed themselves. None when there's neither."""
+    from pyxi.agents.libreoffice import installed
+
+    if own := installed():
+        return str(own)
     found = shutil.which("soffice") or shutil.which("soffice.exe")
     if found:
         return found
@@ -416,7 +423,7 @@ def to_pdf(files: list[Path], out: Path | None = None, *, sheet: str = "") -> Pi
                 f"{ext} files need LibreOffice to turn into PDF; save it as {ext}x, or install LibreOffice."
             )
         outputs.append(target)
-    note = " Install LibreOffice for an exact copy of the Office layout." if used_builtin else ""
+    note = BUILT_IN_NOTE if used_builtin else ""
     pages = []
     for o in outputs:
         try:

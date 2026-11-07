@@ -367,7 +367,18 @@ export type BrainEvent =
   | { type: "error"; message: string }
   | { type: "beta"; ok: boolean; message: string }
   | { type: "profile"; profile: Record<string, string>; saved?: boolean }
-  | ({ type: "file_access" } & FileAccessState);
+  | ({ type: "file_access" } & FileAccessState)
+  | ({ type: "libreoffice" } & ConverterState);
+
+/** LibreOffice on demand, for exact Office layouts and old .doc/.xls/.ppt files. */
+export interface ConverterState {
+  state: "missing" | "downloading" | "checking" | "unpacking" | "ready" | "failed";
+  progress: number;
+  version: string;
+  message: string;
+  asked?: boolean;
+  allowed?: boolean;
+}
 
 /** A "cheaper elsewhere" tag: where it sits (physical screen px, beside the price) and what it says. */
 export interface PriceTagInfo {
@@ -398,6 +409,8 @@ export type ClientMessage =
   | { type: "profile_get" }
   | { type: "profile_save"; profile: Record<string, string> }
   | { type: "file_access_get" }
+  | { type: "libreoffice_get" }
+  | { type: "libreoffice_set"; allowed: boolean }
   | { type: "shopping_get" }
   | { type: "shopping_save"; auto: boolean }
   | { type: "file_access_save"; enabled: boolean; folders: string[] }

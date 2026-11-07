@@ -36,6 +36,9 @@ dependencies = [
     "pypdfium2>=4.0",  # PDF pages to images
     "reportlab>=4.0",  # Word to PDF when LibreOffice isn't installed
     "pillow-heif>=0.18",  # iPhone photos (HEIC)
+    # Reading scans when Windows' own OCR can't (no language pack); models ship in the package
+    # and it runs on onnxruntime, which the voice stack already brings.
+    "rapidocr-onnxruntime>=1.4",
     # Time zones on Windows (zoneinfo needs the IANA database)
     "tzdata>=2024.1",
     # Windows' built-in OCR: reads text inside images so Pyxi can underline it

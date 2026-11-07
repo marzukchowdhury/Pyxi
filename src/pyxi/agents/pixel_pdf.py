@@ -417,13 +417,16 @@ def fill_form(
 
 # ============================================================================ text and OCR
 def _ocr_image(img) -> list[Any]:
-    from pyxi.screen import ocr
+    """Lines of text in a picture: Windows OCR, or RapidOCR when Windows can't read it."""
+    from pyxi.agents import pixel_ocr
 
-    if not ocr.available():
+    if not pixel_ocr.available():
         raise PixelError(
-            "Reading scanned pages needs Windows' built-in text recognition, which isn't available here."
+            "Reading scanned pages needs a text reader, and neither Windows' own nor the built-in "
+            "one could start. Reinstalling Pyxi usually fixes it."
         )
-    return ocr.read_lines(img.convert("RGB"))
+    lines, _engine = pixel_ocr.read_lines(img)
+    return lines
 
 
 def _render_page(pdf_path: Path, index: int, dpi: int = 200, password: str | None = None):
@@ -668,9 +671,7 @@ NUMBER_MARK = re.compile(r"^(\d{1,3}|[a-zA-Z])[.)]\s+")
 def _paragraphs(lines: list[tuple[str, float, bool, float]], body: float):
     """Join wrapped lines into paragraphs. A paragraph ends at a bigger gap than the usual line
     spacing; larger or short bold lines become headings; bullet and number marks become lists."""
-    gaps = sorted(
-        a[3] - b[3] for a, b in pairwise(lines) if 0 < a[3] - b[3] < body * 4
-    )
+    gaps = sorted(a[3] - b[3] for a, b in pairwise(lines) if 0 < a[3] - b[3] < body * 4)
     step = gaps[len(gaps) // 3] if gaps else body * 1.25  # a typical line-to-line distance
     para: list[str] = []
     kind = "p"

@@ -70,6 +70,7 @@ STAY_ON_DISK = {
     "certifi",
     "python-docx",
     "pycparser",
+    "rapidocr-onnxruntime",  # opens its OCR models and config by path
 }
 NATIVE = {".pyd", ".dll", ".exe", ".so"}
 JUNK_SUFFIXES = {".pyi", ".pxd", ".pyx", ".h", ".hpp", ".c", ".cpp", ".lib", ".pdb", ".a"}

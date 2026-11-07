@@ -331,6 +331,17 @@ def create_app(
                 access.folders = [str(f) for f in msg["folders"]]
             saved = files_access.save(settings.data_dir, access)
             await hub.emit("file_access", **saved.public())
+        elif kind in ("libreoffice_get", "libreoffice_set"):
+            from pyxi.agents import libreoffice
+
+            converter = brain.jobs.converter()
+            if kind == "libreoffice_set":
+                allowed = bool(msg.get("allowed"))
+                libreoffice.save_choice(settings.data_dir, libreoffice.Choice(True, allowed))
+                if allowed:
+                    converter.start()  # downloads in the background; progress comes as events
+            choice = libreoffice.load_choice(settings.data_dir)
+            await hub.emit("libreoffice", **converter.status.public(), **vars(choice))
         elif kind == "beta_join" and str(msg.get("code") or "").strip():
             brain._spawn(_beta_join(str(msg["code"])))
         elif kind == "beta_leave" and cloud.in_beta():

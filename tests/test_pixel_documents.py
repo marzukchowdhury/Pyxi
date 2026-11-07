@@ -15,7 +15,7 @@ from pptx import Presentation
 from pypdf import PdfReader
 
 from pyxi import booking
-from pyxi.agents import pixel
+from pyxi.agents import pixel, pixel_ocr
 from pyxi.agents.pixel import PixelError
 from pyxi.companion import filework
 from pyxi.docs import document_mode, fix_document, summarize_document
@@ -25,6 +25,12 @@ from test_connectors_and_docs import Script
 
 ARIAL = Path(r"C:\Windows\Fonts\arial.ttf")
 needs_ocr = pytest.mark.skipif(not ocr.available(), reason="Windows OCR isn't available here")
+ENGINES = [
+    pytest.param("windows", marks=needs_ocr),
+    pytest.param(
+        "rapid", marks=pytest.mark.skipif(pixel_ocr.rapid_engine() is None, reason="no RapidOCR")
+    ),
+]
 
 
 @pytest.fixture(autouse=True)
@@ -185,8 +191,9 @@ def test_fill_form_from_saved_details_never_ids(tmp_path):
 
 
 # ---------------------------------------------------------------------------- reading
-@needs_ocr
-def test_text_out_of_scans_and_photos(tmp_path):
+@pytest.mark.parametrize("engine", ENGINES)
+def test_text_out_of_scans_and_photos(tmp_path, monkeypatch, engine):
+    monkeypatch.setenv("PYXI_OCR", engine)
     page = scan(tmp_path / "lease.png", ["Monthly rent 1450 dollars", "Due on the first"])
     src = pixel.run("images_to_pdf", [page], {"name": "lease scan"}).outputs[0]
     assert not text_of(src).strip()  # a scan: no text layer at all
@@ -197,8 +204,9 @@ def test_text_out_of_scans_and_photos(tmp_path):
     assert "Due on the first" in photo
 
 
-@needs_ocr
-def test_a_scan_becomes_searchable(tmp_path):
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_scan_becomes_searchable(tmp_path, monkeypatch, engine):
+    monkeypatch.setenv("PYXI_OCR", engine)
     src = pixel.run("images_to_pdf", [scan(tmp_path / "s.png", ["Signed by Mina Rahman"])]).outputs[
         0
     ]

@@ -511,11 +511,21 @@ class JobManager:
             from pyxi import booking
 
             options["details"] = booking.load(self.settings.data_dir)
+        note = ""
+        if op in ("to_pdf", "word_to_pdf") and any(
+            Path(f).suffix.lower() in pixel.OFFICE for f in job.files
+        ):
+            got = await self._office_converter(job, agent, names)
+            if got is None:
+                return  # an old Office file, and no converter: the job says why
+            note = got
         await self._status(job, f"Working on {names}")
         result = await asyncio.to_thread(pixel.run, op, job.files, options)
         options.pop("password", None)
         job.outputs = [str(p) for p in result.outputs]
         job.summary = result.summary
+        if note:
+            job.summary = job.summary.replace(pixel.BUILT_IN_NOTE, "") + note
         if job.outputs:
             where = Path(job.outputs[0]).parent
             job.summary += f" It's in {where}." if len(job.outputs) == 1 else f" They're in {where}."
@@ -533,6 +543,72 @@ class JobManager:
             "ask", timeout=300, job_id=job.id, agent=agent.name, question=question, secret=True
         )
         return str(answer or "")
+
+    def converter(self) -> Any:
+        """LibreOffice on demand (agents/libreoffice.py); progress goes to Settings."""
+        if getattr(self, "_converter", None) is None:
+            from pyxi.agents.libreoffice import Installer
+
+            self._converter = Installer()
+
+        async def tell(status: Any) -> None:
+            await self.hub.emit("libreoffice", **status.public())
+
+        self._converter.listen(tell)
+        return self._converter
+
+    async def _office_converter(self, job: Job, agent: AgentProfile, names: str) -> str | None:
+        """Before an Office file becomes a PDF: "" to go ahead, a note for the summary, or None
+        when it can't be done (an old .doc/.xls/.ppt and no LibreOffice)."""
+        from pyxi.agents import libreoffice, pixel
+
+        if pixel.libreoffice():
+            return ""
+        old = [f for f in job.files if Path(f).suffix.lower() in pixel.OFFICE - pixel.BUILT_IN]
+        choice = libreoffice.load_choice(self.settings.data_dir)
+        if not choice.asked:
+            ok = await self.hub.request(
+                "confirm",
+                timeout=300,
+                job_id=job.id,
+                agent=agent.name,
+                action=f"Download the free LibreOffice converter (about {libreoffice.APPROX_MB} MB)?",
+                reason="Once, from The Document Foundation, into Pyxi's own folder: no admin rights, "
+                "and nothing else on your PC changes. Then Word, Excel and PowerPoint files keep "
+                "their exact layout as PDFs, and old .doc, .xls and .ppt files work too.",
+            )
+            choice = libreoffice.save_choice(
+                self.settings.data_dir, libreoffice.Choice(asked=True, allowed=bool(ok))
+            )
+            await self.hub.emit("libreoffice", **self.converter().status.public(), **vars(choice))
+        if choice.allowed:
+            installer = self.converter()
+            installer.start()
+            if not old:
+                return " Exact layouts from next time: LibreOffice is downloading in the background."
+
+            async def relay(status: Any) -> None:
+                pct = f" ({status.progress:.0%})" if status.state == "downloading" else ""
+                await self._status(job, f"{status.message}{pct}")
+
+            installer.listen(relay)
+            try:
+                soffice = await installer.wait()
+            finally:
+                installer.unlisten(relay)
+            if soffice is None:
+                job.status = "failed"
+                job.summary = installer.status.message or "LibreOffice couldn't be set up."
+                return None
+            return ""
+        if old:
+            job.status = "failed"
+            job.summary = (
+                f"{Path(old[0]).name} is an old Office file, and turning it into a PDF needs the free "
+                "LibreOffice converter. Turn it on in Settings, under Your files, and ask again."
+            )
+            return None
+        return ""
 
     def _google(self) -> Any:
         if getattr(self, "google", None) is None:

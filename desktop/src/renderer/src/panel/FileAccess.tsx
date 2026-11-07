@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { brain } from "../shared/socket";
-import type { FileAccessState } from "../shared/protocol";
+import type { ConverterState, FileAccessState } from "../shared/protocol";
 
 /** "Let Pyxi search my files": off until they turn it on, and only in the folders listed here. */
 export function FileAccess() {
@@ -45,6 +45,51 @@ export function FileAccess() {
         <input value={adding} placeholder="Add a folder, e.g. D:\Work" onChange={(e) => setAdding(e.target.value)} />
         <button type="submit" disabled={!adding.trim()}>Add</button>
       </form>
+      <Converter />
+    </div>
+  );
+}
+
+/** LibreOffice on demand: exact layouts for Office files as PDFs, and old .doc/.xls/.ppt files. */
+function Converter() {
+  const [lo, setLo] = useState<ConverterState | null>(null);
+  useEffect(() => {
+    const off = brain.on((e) => {
+      if (e.type === "libreoffice") setLo((prev) => ({ ...(prev ?? {}), ...e }) as ConverterState);
+    });
+    brain.send({ type: "libreoffice_get" });
+    return off;
+  }, []);
+  if (!lo) return null;
+  const busy = lo.state === "downloading" || lo.state === "checking" || lo.state === "unpacking";
+  const set = (allowed: boolean) => brain.send({ type: "libreoffice_set", allowed });
+  return (
+    <div className="converter">
+      <div className="kv">
+        <span>Exact Office layouts (LibreOffice)</span>
+        <b>
+          {lo.state === "ready"
+            ? `Ready${lo.version ? `, ${lo.version}` : ""}`
+            : busy
+              ? `${lo.message}${lo.state === "downloading" ? ` ${Math.round(lo.progress * 100)}%` : ""}`
+              : lo.state === "failed"
+                ? "Didn't finish"
+                : lo.allowed
+                  ? "On, downloads when needed"
+                  : "Off"}
+        </b>
+      </div>
+      {busy && <progress max={1} value={lo.state === "downloading" ? lo.progress : undefined} />}
+      {lo.state === "failed" && lo.message && <p className="muted">{lo.message}</p>}
+      <p className="muted">
+        Without it, Pixel still turns Office files into PDFs with their text, lists, tables and pictures. With it (a free, one-time download of about 380 MB from The Document Foundation, into Pyxi's own folder, no admin rights), the PDF matches the original exactly and old .doc, .xls and .ppt files work.
+      </p>
+      {lo.state !== "ready" && !busy && (
+        <div className="booking-row">
+          <button className="primary" onClick={() => set(true)}>{lo.state === "failed" ? "Try again" : "Download it now"}</button>
+          {lo.allowed && <button className="ghost" onClick={() => set(false)}>Don't download it</button>}
+        </div>
+      )}
     </div>
   );
 }

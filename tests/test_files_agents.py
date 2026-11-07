@@ -306,7 +306,7 @@ async def test_ledger_job_asks_once_retries_failures_and_saves_a_copy(tmp_path):
     assert wb["Budget"]["A6"].value == "Total" and "Pivot" in wb.sheetnames
 
 
-async def test_ledger_reports_what_it_could_not_do(tmp_path):
+async def test_ledger_reports_what_it_could_not_do(tmp_path, monkeypatch):
     async def ask(system, prompt):
         return '{"edits": [], "summary": "There is no sales data in this file."}', 0.0
 
@@ -314,7 +314,8 @@ async def test_ledger_reports_what_it_could_not_do(tmp_path):
     assert r.outputs == [] and r.summary == "There is no sales data in this file."
     with pytest.raises(LedgerError, match="Which file"):
         await run_ledger("anything", files=[], ask=ask)
-    with pytest.raises(LedgerError, match="old Office format"):
+    monkeypatch.setattr(pixel, "libreoffice", lambda: None)  # no converter on this PC
+    with pytest.raises(LedgerError, match="free LibreOffice converter"):
         (tmp_path / "old.xls").write_bytes(b"x")
         await run_ledger("anything", files=[str(tmp_path / "old.xls")], ask=ask)
 

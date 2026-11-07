@@ -741,10 +741,48 @@ def open_local(path: Path) -> Workbook | WordDoc | Deck:
     if ext == ".pptx":
         return Deck(path)
     if ext in (".xls", ".doc", ".ppt"):
-        raise LedgerError(
-            f"{path.name} is an old Office format; Pixel can't read it without LibreOffice. Save it as {ext}x first."
-        )
+        return _open_old(path)
     raise LedgerError(f"Ledger works on Excel, Word and PowerPoint files, not {ext}.")
+
+
+def _open_old(path: Path) -> Workbook | WordDoc | Deck:
+    """An old .doc/.xls/.ppt: LibreOffice turns a copy into the modern format, Ledger edits that,
+    and the result is saved beside the original as "<name> (edited by Pyxi).docx" and so on."""
+    import subprocess
+    import tempfile
+
+    from pyxi.agents.pixel import libreoffice
+
+    soffice = libreoffice()
+    new_ext = path.suffix.lower() + "x"
+    if soffice is None:
+        raise LedgerError(
+            f"{path.name} is an old Office file. Pyxi can open it once the free LibreOffice converter "
+            "is set up (Settings, under Your files)."
+        )
+    tmp = Path(tempfile.mkdtemp(prefix="pyxi_old_"))
+    subprocess.run(
+        [
+            soffice,
+            "--headless",
+            "--norestore",
+            "--convert-to",
+            new_ext[1:],
+            "--outdir",
+            str(tmp),
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=180,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    made = tmp / f"{path.stem}{new_ext}"
+    if not made.is_file():
+        raise LedgerError(f"LibreOffice couldn't open {path.name}.")
+    target = {".xlsx": Workbook, ".docx": WordDoc, ".pptx": Deck}[new_ext](made)
+    target.path = path.with_suffix(new_ext)  # saves beside the original, in the new format
+    return target
 
 
 # ============================================================================ Google
