@@ -360,6 +360,12 @@ def create_app(
             await hub.emit("shopping", **pricecheck.load(settings.data_dir))
         elif kind == "shopping_save":
             await hub.emit("shopping", **pricecheck.save(settings.data_dir, msg))
+        elif kind in ("grants_get", "grant_revoke"):
+            from pyxi import grants
+
+            if kind == "grant_revoke":
+                grants.revoke(settings.data_dir, str(msg.get("kind") or ""))
+            await hub.emit("grants", grants=grants.public(settings.data_dir))
         elif kind in ("private_apps_get", "private_apps_save"):
             from pyxi.screen import private_apps
 

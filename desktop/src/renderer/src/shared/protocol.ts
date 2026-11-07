@@ -323,6 +323,14 @@ export interface Hello {
   beta?: { joined: boolean; can_join: boolean; own_key?: boolean };
 }
 
+/** A standing "Always allow" (pyxi/grants.py). Times are Unix seconds. */
+export interface Grant {
+  kind: string;
+  label: string;
+  granted: number;
+  expires: number;
+}
+
 export type BrainEvent =
   | ({ type: "hello" } & Hello)
   | ({ type: "settings" } & Hello)
@@ -367,6 +375,7 @@ export type BrainEvent =
   | { type: "error"; message: string }
   | { type: "notice"; message: string }
   | { type: "private_apps"; apps: string[]; built_in: string[] }
+  | { type: "grants"; grants: Grant[] }
   | { type: "beta"; ok: boolean; message: string }
   | { type: "profile"; profile: Record<string, string>; saved?: boolean }
   | ({ type: "file_access" } & FileAccessState)
@@ -412,6 +421,8 @@ export type ClientMessage =
   | { type: "profile_save"; profile: Record<string, string> }
   | { type: "file_access_get" }
   | { type: "private_apps_get" }
+  | { type: "grants_get" }
+  | { type: "grant_revoke"; kind: string }
   | { type: "private_apps_save"; apps: string[] }
   | { type: "libreoffice_get" }
   | { type: "libreoffice_set"; allowed: boolean }

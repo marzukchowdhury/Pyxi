@@ -320,10 +320,10 @@ class Brain:
         )
 
     def _hands_always(self) -> bool:
-        try:
-            return bool(json.loads((self.settings.data_dir / "hands.json").read_text())["always"])
-        except (OSError, ValueError, KeyError, TypeError):
-            return False
+        """Their "Always allow" for the mouse and keyboard, while it lasts (pyxi/grants.py)."""
+        from pyxi import grants
+
+        return grants.active(self.settings.data_dir, "hands")
 
     async def _use_computer(self, args: dict[str, Any]) -> str | None:
         """Do a task with the mouse and keyboard, in the background, after they allow it."""
@@ -367,7 +367,10 @@ class Brain:
                 **({} if after_reading else {"always": "Always allow"}),
             )
             if ok == "always":
-                (self.settings.data_dir / "hands.json").write_text(json.dumps({"always": True}))
+                from pyxi import grants
+
+                grants.grant(self.settings.data_dir, "hands")  # for 30 days; Settings revokes it
+                await self.hub.emit("grants", grants=grants.public(self.settings.data_dir))
             elif not ok:
                 await self.say_line("Okay, hands off.")
                 return
