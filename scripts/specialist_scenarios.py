@@ -162,7 +162,7 @@ def install(brain: Any, background: list[str], name: str = "") -> None:
     )
 
     async def fake_fix(brain_: Any, args: dict[str, Any]) -> str:
-        background.append("fix: " + json.dumps(args)[:400])
+        background.append("fix: " + json.dumps(args))
         return "Started job_x: Patch is looking at report.py. Say one short line; the fix comes on a card."
 
     allowed = files_access.load(brain.settings.data_dir).folders

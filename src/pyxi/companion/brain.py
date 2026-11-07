@@ -278,8 +278,8 @@ class Brain:
         if not groups:
             listing = await asyncio.to_thread(tidy.listing, folder)
             return (
-                f"tidy_folder: {listing}\nNow call tidy_folder again with groups (and say one short "
-                "line about what you see, e.g. the funniest thing in there)."
+                f"tidy_folder: {listing}\nNow call tidy_folder again with groups. Say nothing in this "
+                "reply: they've heard 'On it' and the card will show the plan."
             )
         plan = await asyncio.to_thread(tidy.make_plan, folder, groups)
         if not plan.moves:
@@ -2619,7 +2619,10 @@ def friendly_error(exc: BaseException) -> str:
     text = str(exc)
     # The Pyxi beta server says why in plain words ("You've used today's Pyxi beta allowance...");
     # show exactly that, without the "OpenRouter API error: Error code: 429 - " in front.
-    beta = re.search(r"(You've used today's Pyxi beta allowance[^\"'}]*|The Pyxi beta is at its limit[^\"'}]*|Sign in to the Pyxi beta first[^\"'}]*)", text)
+    beta = re.search(
+        r"(You've used today's Pyxi beta allowance[^\"'}]*|The Pyxi beta is at its limit[^\"'}]*|Sign in to the Pyxi beta first[^\"'}]*)",
+        text,
+    )
     if beta:
         return beta.group(1).strip()
     m = re.search(r'"message":\s*"([^"]{3,140})"', text)

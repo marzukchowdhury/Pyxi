@@ -828,7 +828,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     if busy and len(re.findall(r"[.!?](\s|$)", said)) > 2:
         problems.append(f"talks too much while working ({len(said)} chars)")
     # "I'll look for a slot" is a kept promise when a teammate or booking really is off doing it.
-    working = any(b.startswith(("book", "delegate", "errand", "hands", "tidy")) for b in background)
+    working = any(b.startswith(("book", "delegate", "errand", "hands", "tidy", "checkin")) for b in background)
     if drop_false_promises(said.split(". ")[-1])[1] and not working:
         problems.append("ends promising a search")
     if re.search(r"M4|model is finished", said):
