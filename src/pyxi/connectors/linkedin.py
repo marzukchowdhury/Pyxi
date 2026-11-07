@@ -11,7 +11,6 @@ OpenID Connect" and "Share on LinkedIn". Auth tab: add the redirect URL
 
 from __future__ import annotations
 
-import json
 import os
 import secrets
 import threading
@@ -24,6 +23,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
+from pyxi import secretstore
 from pyxi.connectors import Connector, Outgoing, Result, Status, Tool, tool
 
 REDIRECT = "http://localhost:8767/linkedin/callback"
@@ -38,11 +38,8 @@ class LinkedInConnector(Connector):
         self.token_path = store / "linkedin.json"
 
     def _saved(self) -> dict[str, Any] | None:
-        try:
-            data = json.loads(self.token_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
-        return data if data.get("expires_at", 0) > time.time() else None
+        data = secretstore.read_json(self.token_path)  # DPAPI; old plain files migrate
+        return data if data and data.get("expires_at", 0) > time.time() else None
 
     def connected(self) -> bool:
         return self._saved() is not None
@@ -145,8 +142,7 @@ class LinkedInConnector(Connector):
             "sub": me.get("sub"),
             "name": me.get("name"),
         }
-        self.token_path.parent.mkdir(parents=True, exist_ok=True)
-        self.token_path.write_text(json.dumps(data), encoding="utf-8")
+        secretstore.write_json(self.token_path, data)
         return data.get("name") or "you"
 
     def disconnect(self) -> None:

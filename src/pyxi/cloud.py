@@ -1,7 +1,7 @@
 """The Pyxi beta: no API key on the user's PC.
 
 A beta user types an invite code once (Settings). Pyxi swaps it for a token at the beta server,
-saves it in the data folder (cloud.json), and from then on every model call goes to the beta
+saves it in the data folder (cloud.json, encrypted with Windows DPAPI), and from then on every model call goes to the beta
 server, which adds the founder's OpenRouter key and keeps each user inside a daily allowance.
 Joining is a deliberate choice, so once someone has joined, the beta wins even if a key of their
 own is on the PC (common for developers, who often have ANTHROPIC_API_KEY set for other tools).
@@ -10,13 +10,14 @@ Settings offers "Use my own key instead", which leaves the beta.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+from pyxi import secretstore
 
 log = logging.getLogger(__name__)
 
@@ -36,11 +37,8 @@ def server_url() -> str:
 
 
 def saved(data_dir: Path) -> dict[str, Any] | None:
-    try:
-        d = json.loads((data_dir / FILE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return d if isinstance(d, dict) and str(d.get("token", "")).startswith("pyxi_") else None
+    d = secretstore.read_json(data_dir / FILE)  # an old plain file is encrypted on first read
+    return d if d is not None and str(d.get("token", "")).startswith("pyxi_") else None
 
 
 def has_own_key() -> bool:
@@ -97,8 +95,7 @@ async def join(data_dir: Path, code: str) -> str:
     body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
     if r.status_code != 200 or "token" not in body:
         return str(body.get("error") or f"The beta server said no ({r.status_code}).")
-    data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / FILE).write_text(json.dumps({"url": url, "token": body["token"]}), encoding="utf-8")
+    secretstore.write_json(data_dir / FILE, {"url": url, "token": body["token"]})
     return "ok"
 
 

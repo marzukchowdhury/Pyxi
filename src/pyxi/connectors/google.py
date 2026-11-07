@@ -28,6 +28,7 @@ from typing import Any
 
 import httpx
 
+from pyxi import secretstore
 from pyxi.connectors import Connector, Outgoing, Result, Status, Tool, tool
 from pyxi.timecontext import zone
 
@@ -361,8 +362,13 @@ class GoogleConnector(Connector):
             return json.loads(shipped.read_text(encoding="utf-8"))
         return None
 
+    def _saved(self) -> dict[str, Any] | None:
+        """The saved token (encrypted with DPAPI; an old plain file migrates on first read).
+        None when there's none, or it was unreadable: then they simply connect again."""
+        return secretstore.read_json(self.token_path)
+
     def connected(self) -> bool:
-        return self.token_path.exists()
+        return self.token_path.exists() and self._saved() is not None
 
     def status(self) -> Status:
         if self.connected():
@@ -385,17 +391,10 @@ class GoogleConnector(Connector):
         return Status(self.id, self.name, False, detail, setup)
 
     def _saved_email(self) -> str | None:
-        try:
-            return json.loads(self.token_path.read_text(encoding="utf-8")).get("pyxi_email")
-        except (OSError, ValueError):
-            return None
+        return (self._saved() or {}).get("pyxi_email")
 
     def granted_scopes(self) -> set[str]:
-        try:
-            data = json.loads(self.token_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return set()
-        scopes = data.get("scopes") or []
+        scopes = (self._saved() or {}).get("scopes") or []
         return set(scopes.split() if isinstance(scopes, str) else scopes)
 
     def missing_scopes(self) -> list[str]:
@@ -431,8 +430,7 @@ class GoogleConnector(Connector):
             pass
         data = json.loads(creds.to_json())
         data["pyxi_email"] = email
-        self.token_path.parent.mkdir(parents=True, exist_ok=True)
-        self.token_path.write_text(json.dumps(data), encoding="utf-8")
+        secretstore.write_json(self.token_path, data)
         self._creds = None
         return email or "your Google account"
 
@@ -447,14 +445,17 @@ class GoogleConnector(Connector):
         if self._creds is None:
             # The scopes they actually granted: asking a refresh for new ones (Sheets, added
             # later) would fail and take Gmail down with it until they reconnect.
-            self._creds = Credentials.from_authorized_user_file(
-                str(self.token_path), sorted(self.granted_scopes()) or SCOPES
+            saved = self._saved()
+            if saved is None:
+                raise RuntimeError("Google isn't connected (or its sign-in expired): press Connect.")
+            self._creds = Credentials.from_authorized_user_info(
+                saved, sorted(self.granted_scopes()) or SCOPES
             )
         if not self._creds.valid:
             await asyncio.to_thread(self._creds.refresh, Request())
             data = json.loads(self._creds.to_json())
             data["pyxi_email"] = self._saved_email()
-            self.token_path.write_text(json.dumps(data), encoding="utf-8")
+            secretstore.write_json(self.token_path, data)
         return self._creds.token
 
     async def _api(self, method: str, url: str, **kw: Any) -> Any:
