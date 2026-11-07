@@ -6,7 +6,18 @@ A tiny Vercel project that lets beta users run Pyxi without an API key. It holds
 - passes each user's model calls to OpenRouter;
 - keeps everyone inside a daily allowance and the whole beta inside a monthly cap.
 
-It stores no prompts or screen content. It keeps only token hashes and spend totals.
+It stores no prompts, replies, screen content or voice, and writes nothing to the function logs. Requests and replies pass straight through to OpenRouter. All it keeps (in Upstash) is:
+
+| Key | What | How long |
+|---|---|---|
+| `tok:<sha256 of the token>` | the invite code used and when the device joined | until revoked |
+| `code:<CODE>` | how many devices used that code | as long as the code exists |
+| `spend:<token hash>:<day>` | that device's cost that day (OpenRouter's own figure) | 3 days |
+| `spend:all:<month>` | the whole beta's cost that month | about 40 days |
+| `rl:join:<hash of the IP address>:<hour>` | join tries from one address in that hour | 1 hour |
+| `revoked:<device id>`, `revoked-code:<CODE>` | what the founder revoked | until restored |
+
+`test/beta.test.ts` checks this: after a join and two chats, the store holds only these keys, and no prompt, reply, token or IP address. Vercel and Upstash keep their own standard request logs (time, path, status, IP), under their own policies. On OpenRouter, turn off prompt logging and "use my data for training" for the beta key's account.
 
 | Route | What it does |
 |---|---|

@@ -254,3 +254,38 @@ function envOf(c: typeof cfg): Record<string, string> {
     MONTHLY_CAP_USD: String(c.monthlyCapUsd),
   };
 }
+
+describe("the beta server keeps nothing it doesn't need", () => {
+  it("stores only token hashes, counts and costs: no prompts, replies or addresses", async () => {
+    const store = new MemoryStore();
+    const logged: unknown[] = [];
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((m) => {
+      const orig = console[m];
+      console[m] = (...a: unknown[]) => void logged.push(a);
+      return () => (console[m] = orig);
+    });
+    try {
+      const res = await joinRequest(store, cfg, new Request("https://beta.pyxi.app/api/join", {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.77" },
+        body: JSON.stringify({ code: "FIREFLY" }),
+      }));
+      const { token } = (await res.json()) as { token: string };
+      const secret = "PROMPT-TEXT the user's screen says their lease is at 12 Main St";
+      const plain = (async () => new Response(JSON.stringify({ choices: [{ message: { content: "REPLY-TEXT about the lease" } }], usage: { cost: 0.01 } }), { status: 200 })) as unknown as typeof fetch;
+      await chat(store, cfg, chatRequest(token, { model: "anthropic/claude-haiku-5.5", messages: [{ role: "user", content: secret }] }), plain);
+      const streamed = (async () => sse(['data: {"choices":[{"delta":{"content":"REPLY-TEXT streamed"}}]}\n', 'data: {"usage":{"cost":0.02}}\n'])) as unknown as typeof fetch;
+      const r = await chat(store, cfg, chatRequest(token, { model: "anthropic/claude-haiku-5.5", stream: true, messages: [{ role: "user", content: secret }] }), streamed);
+      await r.text();
+      const everything = JSON.stringify([...store.data.entries()]);
+      for (const leak of ["PROMPT-TEXT", "REPLY-TEXT", "lease", token, "203.0.113.77"]) expect(everything).not.toContain(leak);
+      const kinds = new Set([...store.data.keys()].map((k) => k.split(":")[0]));
+      expect([...kinds].sort()).toEqual(["code", "rl", "spend", "tok"]);
+      const [, record] = [...store.data.entries()].find(([k]) => k.startsWith("tok:"))!;
+      expect(Object.keys(JSON.parse(record)).sort()).toEqual(["code", "created"]);
+      expect(logged).toEqual([]); // nothing written to the function logs either
+    } finally {
+      spies.forEach((undo) => undo());
+    }
+  });
+});
