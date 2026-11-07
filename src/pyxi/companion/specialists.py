@@ -9,6 +9,8 @@ the result arrives as a notification and a chip in the task tray.
   spreadsheet (a new one, or theirs through Ledger).
 * ``meeting_notes``: Scribe transcribes a recording (local faster-whisper) into notes,
   decisions and action items, and drafts a follow-up email that goes only through a card.
+* ``make_flashcards`` and ``quiz``: Sage makes flashcards and a quiz from slides, PDFs or notes, and quizzes them out
+  loud (the quiz lives on the brain as ``brain.study_quiz``, one question per voice turn).
 
 :func:`after_job` runs when any specialist's job ends (the brain calls it from ``_job_done``),
 so a job started by a routine or a hand-off gets the same follow-up as one started here.
@@ -104,10 +106,47 @@ MEETING = ToolSpec(
     },
 )
 
+FLASHCARDS = ToolSpec(
+    "make_flashcards",
+    "Sage, the study teammate: turns lecture slides, a PDF or notes on this PC into flashcards "
+    "(a CSV that Anki and Quizlet import) and a multiple-choice quiz, in the background. "
+    "`files` are full paths (search_files first if they only named them). Say one short line "
+    "('On it.'); afterwards they can say 'quiz me'.",
+    {
+        "type": "object",
+        "properties": {
+            "files": {"type": "array", "items": {"type": "string"}},
+            "count": {"type": "integer", "description": "How many flashcards (default 20)."},
+            "focus": {"type": "string", "description": "A part to focus on, if they said."},
+        },
+        "required": ["files"],
+    },
+)
+
+QUIZ = ToolSpec(
+    "quiz",
+    "Quiz them out loud from their flashcards, one question per turn. action 'start' (from the "
+    "latest deck, or `deck`: a topic or file name), 'again' (only the ones they missed), "
+    "'answer' (after they reply: `right` true if it means the same as the card's answer, "
+    "generous with wording, strict on facts; `said` is what they said), 'stop'. The result "
+    "tells you what to say next. Never say the answer before they've tried.",
+    {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["start", "again", "answer", "stop"]},
+            "deck": {"type": "string"},
+            "questions": {"type": "integer", "description": "How many questions (default 10)."},
+            "right": {"type": "boolean"},
+            "said": {"type": "string"},
+        },
+        "required": ["action"],
+    },
+)
+
 ROLES = set(RUNNERS)  # their jobs' notifications come from job.data (title, body)
-SPECS: list[ToolSpec] = [TRAVEL, MONEY, MEETING]
+SPECS: list[ToolSpec] = [TRAVEL, MONEY, MEETING, FLASHCARDS, QUIZ]
 TOOLS = {s.name for s in SPECS}
-INFO: set[str] = set()  # tools whose result goes back to the model for another round
+INFO: set[str] = {"quiz"}  # tools whose result goes back to the model for another round
 
 
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
@@ -117,6 +156,11 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         return await _money(brain, args)
     if name == "meeting_notes":
         return await _meeting(brain, args)
+    if name == "make_flashcards":
+        return await _study(brain, {**args, "action": "make"})
+    if name == "quiz":
+        action = str(args.get("action") or "start")
+        return await _study(brain, {**args, "action": "quiz" if action == "start" else action})
     return None
 
 
@@ -347,3 +391,79 @@ async def after_meeting(brain: Brain, job: Job) -> bool:
         return False
     await brain._notify(job.id, ok=True, title="Follow-up sent", body=line[:200])
     return True
+
+
+# ---------------------------------------------------------------------------------- Sage
+async def _study(brain: Brain, args: dict[str, Any]) -> str:
+    from pyxi.agents import sage
+
+    action = str(args.get("action") or "make")
+    quiz: sage.Quiz | None = getattr(brain, "study_quiz", None)
+    if action == "make":
+        raw = args.get("files") or []
+        paths = [
+            Path(str(f).strip().strip('"')).expanduser()
+            for f in (raw if isinstance(raw, list) else [raw])
+            if str(f).strip()
+        ]
+        missing = [p for p in paths if not p.is_file()]
+        if not paths or missing:
+            names = ", ".join(p.name for p in missing) or "the notes"
+            return f"make_flashcards: I can't find {names}. Find the exact path with search_files first."
+        odd = [p for p in paths if p.suffix.lower() not in sage.READABLE]
+        if odd:
+            return f"make_flashcards: Sage can't read {odd[0].name} (slides, PDFs, Word and text files work)."
+        job = await brain.jobs.start(
+            "sage",
+            f"Flashcards: {', '.join(p.name for p in paths[:3])}",
+            files=[str(p) for p in paths],
+            params={"count": int(args.get("count") or 20), "focus": str(args.get("focus") or "")},
+        )
+        return (
+            f"Started {job.id}: {job.agent_name} is making the cards in the background. Say one "
+            "short line ('On it.'); they get a notification, then can say 'quiz me'."
+        )
+    if action in ("quiz", "again"):
+        if action == "again" and quiz and quiz.missed:
+            quiz = sage.Quiz.start(quiz.deck, len(quiz.missed), only=list(quiz.missed))
+        else:
+            deck = sage.find_deck(brain.settings.data_dir, str(args.get("deck") or ""))
+            if deck is None or not deck.cards:
+                return (
+                    "quiz: there are no flashcards yet. Offer to make some from their slides or "
+                    "notes (action 'make' with the file)."
+                )
+            quiz = sage.Quiz.start(deck, int(args.get("questions") or 10))
+        brain.study_quiz = quiz
+        return (
+            f"quiz: on {quiz.deck.title}, {len(quiz.order)} questions. Say one short line to "
+            f"start, then ask the first question out loud, word for word, and stop there.\n{quiz.ask()}"
+        )
+    if action == "stop":
+        brain.study_quiz = None
+        if quiz is None:
+            return "quiz: there's no quiz going."
+        return f"quiz: quiz stopped at {quiz.score()}. Say so in a few words."
+    if action == "answer":
+        if quiz is None or quiz.done:
+            return "quiz: there's no question waiting. Offer a quiz."
+        card = quiz.current()
+        right = bool(args.get("right"))
+        quiz.mark(right)
+        verdict = (
+            "They got it: say so in a few words."
+            if right
+            else f"Not quite: kindly give the answer in one sentence ({card.a})."
+        )
+        if quiz.done:
+            brain.study_quiz = quiz  # kept for "again"
+            missed = len(quiz.missed)
+            return (
+                f"quiz: {verdict} That was the last one: {quiz.score()} right. Tell them the "
+                "score warmly"
+                + (f" and offer to go again on the {missed} they missed." if missed else ".")
+            )
+        return (
+            f"quiz: {verdict} Then ask the next one, word for word, and stop there.\n{quiz.ask()}"
+        )
+    return f"quiz: unknown action {action!r}."

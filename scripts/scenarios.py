@@ -820,7 +820,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append("didn't look in the mail for the booking")
     if expect in ("fill_form", "checkin", "checkin_mail") and len(re.findall(r"[.!?](\s|$)", said)) > 2:
         problems.append(f"talks too much ({len(said)} chars)")
-    problems += specialist_problems(expect, tools, said, background)
+    problems += specialist_problems(expect, tools, said, background, brain._calls)
     from pyxi.companion.brain import drop_false_promises
 
     # Background work is quiet: a short "On it", not a running commentary.

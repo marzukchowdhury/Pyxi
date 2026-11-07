@@ -52,6 +52,20 @@ SCENARIOS = [
         "follow-up to sam.rahman@uni.edu.",
         "meeting_to",
     ),
+    # Sage, study: flashcards from slides, a quiz out loud, diagrams explained on the picture.
+    (
+        "study make",
+        "turn_f05f1ae6",
+        "Make flashcards from my Lecture 4 slides on the desktop.",
+        "study:make",
+    ),
+    ("study quiz", HOME, "Quiz me on the heart.", "study:quiz"),
+    (
+        "study diagram",
+        "turn_480a31d9",
+        "Explain this diagram, I have an exam on it tomorrow.",
+        "study:diagram",
+    ),
 ]
 
 
@@ -79,6 +93,19 @@ def install(brain: Any, background: list[str]) -> None:
     for folder in files_access.load(brain.settings.data_dir).folders[:1]:
         (Path(folder) / "Team standup Nov 6.m4a").write_bytes(b"\x00" * 64)
 
+    # A deck from last week's lecture, for "quiz me" (the real quiz code runs: it's all local).
+    from pyxi.agents import sage
+
+    cards = [
+        ("How many chambers does the heart have?", "Four: two atria and two ventricles."),
+        ("What does the mitral valve stop?", "Blood flowing back into the left atrium."),
+        ("Where does the right ventricle pump blood?", "To the lungs."),
+    ]
+    sage.save_deck(
+        brain.settings.data_dir,
+        sage.Deck("The heart", "Lecture 4 slides.pptx", [sage.Card(q, a) for q, a in cards]),
+    )
+
     specialists._travel = fake_travel  # type: ignore[assignment]
     specialists._meeting = fake_meeting  # type: ignore[assignment]
     specialists._money = fake_money  # type: ignore[assignment]
@@ -88,7 +115,13 @@ def sentences(said: str) -> int:
     return len(re.findall(r"[.!?](\s|$)", said))
 
 
-def problems(expect: str, tools: list[str], said: str, background: list[str]) -> list[str]:
+def problems(
+    expect: str,
+    tools: list[str],
+    said: str,
+    background: list[str],
+    tool_calls: list[dict] | None = None,
+) -> list[str]:
     out: list[str] = []
     travel = [b for b in background if b.startswith("travel: ")]
     if expect in ("travel", "travel_checkin"):
@@ -143,5 +176,26 @@ def problems(expect: str, tools: list[str], said: str, background: list[str]) ->
         if "use_computer" in tools or "gmail_send" in tools:
             out.append("sent or clicked instead of the card")
         if sentences(said) > 2:
+            out.append(f"talks too much ({len(said)} chars)")
+    if expect.startswith("study:"):
+        want = expect.split(":", 1)[1]
+        if want == "make" and not any(
+            b.startswith("delegate sage") and "Lecture 4 slides.pptx" in b for b in background
+        ):
+            out.append("didn't hand the slides to Sage")
+        if want == "quiz":
+            if "quiz" not in tools:
+                out.append("didn't start the quiz")
+            elif "?" not in said:
+                out.append("didn't ask a question")
+            if re.search(r"two atria|left atrium|to the lungs", said, re.I):
+                out.append("gave the answer away")
+        if want == "diagram":
+            pics = [c for c in tool_calls or [] if c["tool"] == "explain_on_screen"]
+            if not pics or pics[0]["arguments"].get("style") != "on_picture":
+                out.append("didn't explain it on the picture")
+        if "use_computer" in tools:
+            out.append("drove the mouse for studying")
+        if want == "make" and sentences(said) > 2:
             out.append(f"talks too much ({len(said)} chars)")
     return out

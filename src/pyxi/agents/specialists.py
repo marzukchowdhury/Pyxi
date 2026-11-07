@@ -21,6 +21,7 @@ RUNNERS = {
     "travel": "pyxi.agents.atlas",
     "money": "pyxi.agents.penny",
     "meetings": "pyxi.agents.scribe",
+    "study": "pyxi.agents.sage",
 }
 
 

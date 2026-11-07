@@ -11,6 +11,7 @@ Each agent has a *role* that decides what it can do:
 * ``travel`` builds trip itineraries from the confirmations in the user's mail (Atlas).
 * ``money`` sums up spending from receipts, keeps budgets, puts receipts in a sheet (Penny).
 * ``meetings`` turns a recording into notes, decisions, action items and a follow-up (Scribe).
+* ``study`` makes flashcards and quizzes from slides, PDFs and notes, and quizzes aloud (Sage).
 
 Agents keep their own long-term memory (Otto's FTS5 memory store, scoped per agent), and
 any agent can hand its result to another (Scout researches, then Quill writes).
@@ -39,6 +40,7 @@ Role = Literal[
     "travel",
     "money",
     "meetings",
+    "study",
 ]
 
 
@@ -173,6 +175,18 @@ DEFAULT_ROSTER = [
         "decided and who does what by when, and drafts the follow-up for you to check.",
         skills=["transcripts", "decisions & action items", "follow-up emails"],
         max_cost_usd=0.15,
+    ),
+    AgentProfile(
+        id="sage",
+        name="Sage",
+        role="study",
+        voice="af_aoede",
+        color="#c3e88d",
+        builtin=True,
+        persona="Patient study buddy. Turns your slides and notes into flashcards and quizzes, "
+        "asks you out loud, and is generous with wording but strict on facts.",
+        skills=["flashcards", "quizzes", "quiz me out loud", "diagrams explained"],
+        max_cost_usd=0.2,
     ),
 ]
 
