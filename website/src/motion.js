@@ -40,12 +40,15 @@ function initClips(reduced) {
   // In the hero, a clip starts from its beginning each time its slide comes round.
   const stage = document.getElementById("stage");
   if (stage)
-    new MutationObserver(() => {
-      for (const slide of stage.querySelectorAll(".slide")) {
+    new MutationObserver((records) => {
+      for (const r of records) {
+        const slide = r.target;
+        // Only the moment a slide becomes the visible one (not every class change inside it).
+        if (!slide.classList?.contains("slide") || !slide.classList.contains("is-on") || (r.oldValue || "").includes("is-on")) continue;
         const v = slide.querySelector("video[data-clip]");
-        if (v && slide.classList.contains("is-on") && v.readyState > 0) v.currentTime = start(v);
+        if (v && v.readyState > 0) v.currentTime = start(v);
       }
-    }).observe(stage, { subtree: true, attributes: true, attributeFilter: ["class"] });
+    }).observe(stage, { subtree: true, attributes: true, attributeFilter: ["class"], attributeOldValue: true });
 }
 
 function initLayers(reduced) {
