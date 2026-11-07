@@ -60,7 +60,17 @@ SKIP_DLLS = {"_tkinter.pyd", "tcl86t.dll", "tk86t.dll"}
 DROP_DISTS = {"pip", "setuptools", "wheel"}
 DROP_STDLIB = {"ensurepip", "venv", "pydoc_data"}
 # The speech stack: downloaded on first use. Everything only these need goes with them.
-VOICE_ROOTS = ["faster-whisper", "kokoro-onnx", "soundfile", "av", "ctranslate2", "onnxruntime"]
+# RapidOCR (Pixel's fallback for reading scans) rides along: it runs on the same onnxruntime, and
+# its OpenCV is big, so it arrives with the pack instead of growing the installer.
+VOICE_ROOTS = [
+    "faster-whisper",
+    "kokoro-onnx",
+    "soundfile",
+    "av",
+    "ctranslate2",
+    "onnxruntime",
+    "rapidocr-onnxruntime",
+]
 # Pure Python, but they open their own files by path or write into their own folder
 # (comtypes generates modules in comtypes/gen), so they stay as plain files.
 STAY_ON_DISK = {
@@ -70,7 +80,6 @@ STAY_ON_DISK = {
     "certifi",
     "python-docx",
     "pycparser",
-    "rapidocr-onnxruntime",  # opens its OCR models and config by path
 }
 NATIVE = {".pyd", ".dll", ".exe", ".so"}
 JUNK_SUFFIXES = {".pyi", ".pxd", ".pyx", ".h", ".hpp", ".c", ".cpp", ".lib", ".pdb", ".a"}

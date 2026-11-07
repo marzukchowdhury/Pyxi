@@ -520,6 +520,13 @@ class JobManager:
                 return  # an old Office file, and no converter: the job says why
             note = got
         await self._status(job, f"Working on {names}")
+        if op in ("extract_text", "make_searchable", "pdf_to_word"):
+            from pyxi.agents import pixel_ocr
+
+            if not pixel_ocr.windows_available() and pixel_ocr.pack_pending():
+                # No Windows OCR here, and the voice pack (which brings RapidOCR's engine) is
+                # still on its way: the scan waits for it, so say why.
+                await self._status(job, "Getting the text reader first (about 75 MB, once)")
         result = await asyncio.to_thread(pixel.run, op, job.files, options)
         options.pop("password", None)
         job.outputs = [str(p) for p in result.outputs]

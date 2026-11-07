@@ -293,3 +293,62 @@ def test_no_ocr_at_all_says_so(tmp_path, monkeypatch):
     monkeypatch.setattr(pixel_ocr, "available", lambda: False)
     with pytest.raises(pixel.PixelError, match="text reader"):
         pixel.run("extract_text", [scan(tmp_path / "s.png", "x")])
+
+
+def test_rapidocr_load_is_retried_after_a_failure(monkeypatch):
+    """Offline at first (no voice pack yet): try again a minute later, not never."""
+    import builtins
+    import sys
+
+    monkeypatch.setattr(pixel_ocr, "_rapid", None)
+    monkeypatch.setattr(pixel_ocr, "_rapid_failed_at", None)
+    real_import = builtins.__import__
+
+    def offline_import(name, *args, **kwargs):
+        if name.startswith("rapidocr_onnxruntime"):
+            raise ImportError("no voice pack yet")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.delitem(sys.modules, "rapidocr_onnxruntime", raising=False)
+    monkeypatch.setattr(builtins, "__import__", offline_import)
+    clock = [1000.0]
+    monkeypatch.setattr(pixel_ocr.time, "monotonic", lambda: clock[0])
+    assert pixel_ocr.rapid_engine() is None
+    monkeypatch.setattr(builtins, "__import__", real_import)  # the pack has arrived
+    clock[0] += 10
+    assert pixel_ocr.rapid_engine() is None  # too soon to try again
+    clock[0] += 60
+    if pytest.importorskip("rapidocr_onnxruntime"):
+        assert pixel_ocr.rapid_engine() is not None
+
+
+def test_pack_pending_reads_the_import_hook_without_triggering_it(monkeypatch):
+    import sys
+
+    class Pack:
+        ready = False
+
+    class Finder:
+        by_module = {"onnxruntime": Pack(), "faster_whisper": Pack()}
+
+        def find_spec(self, *a, **k):
+            raise AssertionError("must not trigger a download")
+
+    assert pixel_ocr.pack_pending() is False  # no hook: a dev install, or the pack is in
+    monkeypatch.setattr(sys, "meta_path", [Finder(), *sys.meta_path])
+    assert pixel_ocr.pack_pending() is True
+    Finder.by_module["onnxruntime"].ready = True
+    assert pixel_ocr.pack_pending() is False
+
+
+async def test_a_scan_job_says_it_is_getting_the_reader(settings, tmp_path, monkeypatch):
+    monkeypatch.setattr(pixel_ocr, "windows_available", lambda: False)
+    monkeypatch.setattr(pixel_ocr, "pack_pending", lambda: True)
+    brain, rec = make_brain(settings)
+    pdf = pixel.run("images_to_pdf", [scan(tmp_path / "s.png", "Rent 1450")]).outputs[0]
+    await filework.handle(
+        brain, "convert_files", {"operation": "extract_text", "files": [str(pdf)]}
+    )
+    await brain.jobs.wait_all()
+    said = [e["data"]["message"] for e in rec.of("job_event")]
+    assert "Getting the text reader first (about 75 MB, once)" in said

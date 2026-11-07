@@ -1,21 +1,28 @@
 """Text out of pictures for Pixel: Windows' built-in OCR first (fast, offline), RapidOCR when
 Windows can't (no OCR language pack on this PC, or a language it doesn't have installed).
 
-RapidOCR runs on onnxruntime, which Pyxi already ships for its voice, and its models come in the
-package (Latin-script languages and Chinese), so it works offline on any PC. Both engines give the
-same TextLine shape the screen reader uses, so searchable PDFs place text the same way.
+RapidOCR runs on onnxruntime, like Pyxi's voice, and its models come in the package
+(Latin-script languages and Chinese), so once it's here it works offline. In the installed app it
+arrives with the voice pack (scripts/build_installer.py): the speech warm-up fetches that a moment
+after Pyxi starts, and the first import fetches it anyway if that hasn't happened yet
+(sitecustomize's pack hook). If it can't load (offline, a download that failed), it's tried again
+a minute later, not never. Both engines give the same TextLine shape the screen reader uses, so
+searchable PDFs place text the same way.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 import threading
+import time
 from typing import Any
 
 from pyxi.screen.ocr import TextLine
 
 _rapid: Any = None
-_rapid_failed = False
+_rapid_failed_at: float | None = None
+RETRY_AFTER_S = 60.0
 _lock = threading.Lock()
 
 
@@ -25,16 +32,32 @@ def _engine_choice() -> str:
 
 
 def rapid_engine() -> Any:
-    global _rapid, _rapid_failed
+    """RapidOCR, loaded once. A failed load (no voice pack yet, offline) is retried after a minute."""
+    global _rapid, _rapid_failed_at
     with _lock:
-        if _rapid is None and not _rapid_failed:
+        recently = (
+            _rapid_failed_at is not None and time.monotonic() - _rapid_failed_at < RETRY_AFTER_S
+        )
+        if _rapid is None and not recently:
             try:
                 from rapidocr_onnxruntime import RapidOCR
 
                 _rapid = RapidOCR()
+                _rapid_failed_at = None
             except Exception:
-                _rapid_failed = True
+                _rapid_failed_at = time.monotonic()
     return _rapid
+
+
+def pack_pending() -> bool:
+    """True when RapidOCR's onnxruntime is in the voice pack and that pack isn't downloaded yet
+    (so the first scan waits for it). Looks at sitecustomize's import hook without triggering it."""
+    for finder in sys.meta_path:
+        by_module = getattr(finder, "by_module", {})
+        pack = by_module.get("rapidocr_onnxruntime") or by_module.get("onnxruntime")
+        if pack is not None:
+            return not getattr(pack, "ready", True)
+    return False
 
 
 def windows_available() -> bool:
