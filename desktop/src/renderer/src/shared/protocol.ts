@@ -436,6 +436,7 @@ export type ClientMessage =
   | { type: "private_apps_get" }
   | { type: "grants_get" }
   | { type: "audit_get" }
+  | { type: "stop_everything" }
   | { type: "audit_undo"; id: string }
   | { type: "grant_revoke"; kind: string }
   | { type: "private_apps_save"; apps: string[] }

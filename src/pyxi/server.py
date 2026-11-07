@@ -237,6 +237,11 @@ def create_app(
         asyncio.get_running_loop().call_later(0.2, os._exit, 0)
         return {"ok": True}
 
+    @app.post("/api/stop")
+    async def stop_everything() -> dict[str, Any]:
+        """The desktop app's "Stop everything" hotkey and tray item (needs the launch key)."""
+        return {"ok": True, "message": await brain.stop_everything()}
+
     @app.get("/api/state")
     async def state() -> dict[str, Any]:
         return hello()
@@ -414,6 +419,8 @@ def create_app(
             await brain.set_state("idle")
         elif kind == "interrupt":
             brain.interrupt()
+        elif kind == "stop_everything":
+            await brain.stop_everything()
         elif kind == "answer":
             from pyxi import hands
 

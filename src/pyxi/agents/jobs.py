@@ -249,6 +249,26 @@ class JobManager:
         )()
         return True
 
+    async def stop_all(self) -> int:
+        """Stop every teammate at once (the "Stop everything" hotkey): Otto's browsers are told to
+        stop and their tasks cancelled, and every unfinished job shows as stopped."""
+        stopped = 0
+        for job_id, c in list(self._controls.items()):
+            try:
+                c.stop()
+            except Exception:
+                log.exception("stopping %s", job_id)
+        for job_id, task in list(self._tasks.items()):
+            if not task.done():
+                task.cancel()
+        for job in list(self.jobs.values()):
+            if job.status in ("queued", "running"):
+                job.status = "stopped"
+                job.summary = job.summary or "Stopped, as you asked."
+                stopped += 1
+                await self._update(job)
+        return stopped
+
     async def wait(self, job_id: str) -> Job:
         task = self._tasks.get(job_id)
         if task:

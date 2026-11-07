@@ -51,9 +51,10 @@ const HOTKEY_CHOICES = {
   panel: ["Control+Alt+W", "Control+Shift+W", "Alt+Shift+W"],
   dismiss: ["Control+Alt+Backspace", "Control+Shift+Backspace"],
   privacy: ["Control+Alt+P", "Control+Shift+P"],
+  stop: ["Control+Alt+Pause", "Control+Alt+End", "Control+Shift+Pause"],
 } as const;
 type HotkeyName = keyof typeof HOTKEY_CHOICES;
-const activeHotkeys: Record<HotkeyName, string | null> = { talk: null, panel: null, dismiss: null, privacy: null };
+const activeHotkeys: Record<HotkeyName, string | null> = { talk: null, panel: null, dismiss: null, privacy: null, stop: null };
 
 function registerHotkeys(handlers: Record<HotkeyName, () => void>): void {
   for (const name of Object.keys(HOTKEY_CHOICES) as HotkeyName[]) {
@@ -241,6 +242,16 @@ function createPanel(): void {
   });
 }
 
+/** Stop everything: every teammate, the hands, Scout's browser, open cards and anything queued.
+ * Asked of the brain directly (with the launch key), so it works even if a window is stuck. */
+async function stopEverything(): Promise<void> {
+  try {
+    await fetch(`${BACKEND}/api/stop`, keyed({ method: "POST" }));
+  } catch (err) {
+    console.warn("[pyxi] stop everything: the brain didn't answer", err);
+  }
+}
+
 /** Everything lives in the notch now; Ctrl+Alt+W and the tray icon unfold it. */
 function toggleNotch(): void {
   const win = overlays.get(primaryId);
@@ -421,6 +432,7 @@ app.whenReady().then(async () => {
     panel: toggleNotch,
     dismiss: () => broadcast("dismiss"),
     privacy: () => broadcast("privacy-toggle"),
+    stop: () => void stopEverything(),
   });
 
   tray = new Tray(trayIcon());
@@ -432,6 +444,7 @@ app.whenReady().then(async () => {
       { label: "Open as a separate window", click: togglePanel },
       { label: `Talk  (${pretty(activeHotkeys.talk)})`, click: () => broadcast("ptt") },
       { label: `Dismiss drawings  (${pretty(activeHotkeys.dismiss)})`, click: () => broadcast("dismiss") },
+      { label: `Stop everything  (${pretty(activeHotkeys.stop)})`, click: () => void stopEverything() },
       {
         label: "Mute Pyxi's voice",
         type: "checkbox",

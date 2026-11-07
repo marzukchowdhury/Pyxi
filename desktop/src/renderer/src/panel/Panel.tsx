@@ -520,6 +520,8 @@ export function Settings() {
       <div className="kv"><span>Show or hide this panel</span><kbd>{k("panel")}</kbd></div>
       <div className="kv"><span>Dismiss drawings and scenes</span><kbd>{k("dismiss")}</kbd></div>
       <div className="kv"><span>Pause screen sharing</span><kbd>{k("privacy")}</kbd></div>
+      <div className="kv"><span>Stop everything (every teammate, the mouse, Scout's browser, anything waiting)</span><kbd>{k("stop")}</kbd></div>
+      <button className="danger" onClick={() => brain.send({ type: "stop_everything" })}>Stop everything now</button>
       <h4>Privacy</h4>
       <p className="muted">Pyxi only looks at your screen when you talk to it, plus lightweight UI metadata for the Memory Palace. Password managers, banking and password fields are never captured. Everything is stored locally in <code>.pyxi/</code>. Pyxi v{hello.version}.</p>
     </div>

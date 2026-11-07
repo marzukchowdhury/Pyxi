@@ -60,7 +60,7 @@ export interface Bridge {
   onSayStarted(fn: (key: string) => void): () => void;
   /** Hand the keyboard back to the app the user was in. */
   releaseFocus(): void;
-  hotkeys(): Promise<Record<"talk" | "panel" | "dismiss" | "privacy" | "hold", string | null>>;
+  hotkeys(): Promise<Record<"talk" | "panel" | "dismiss" | "privacy" | "stop" | "hold", string | null>>;
 }
 
 declare global {
@@ -169,7 +169,7 @@ function mockBridge(): Bridge {
       return [currentDisplay()];
     },
     async hotkeys() {
-      return { talk: "Control+Alt+Space", panel: "Control+Alt+W", dismiss: "Control+Alt+Backspace", privacy: "Control+Alt+P", hold: "Control+Alt" };
+      return { talk: "Control+Alt+Space", panel: "Control+Alt+W", dismiss: "Control+Alt+Backspace", privacy: "Control+Alt+P", stop: "Control+Alt+Pause", hold: "Control+Alt" };
     },
   };
 }

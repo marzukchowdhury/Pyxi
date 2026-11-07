@@ -1320,6 +1320,32 @@ class Brain:
             synthetic=True,
         )
 
+    async def stop_everything(self) -> str:
+        """The "Stop everything" hotkey and tray item: every teammate job, the hands, Scout's
+        browser, open cards (answered "no") and anything queued to go out, all at once."""
+        jobs = await self.jobs.stop_all()
+        hands_on = self._operator is not None
+        if hands_on:
+            self._operator.cancelled = True
+        self.hub.cancel_all()  # every open card answers "no"
+        queued = 0
+        for task in list(self._bg):  # errands, sends waiting for a card, a drive starting
+            if task is not asyncio.current_task() and not task.done():
+                task.cancel()
+                queued += 1
+        self._prefetch = None
+        self.interrupt()
+        await self.set_state("idle")
+        parts = [f"{jobs} teammate job{'s' if jobs != 1 else ''}"] if jobs else []
+        if hands_on:
+            parts.append("the mouse and keyboard")
+        if queued:
+            parts.append(f"{queued} waiting action{'s' if queued != 1 else ''}")
+        message = "Stopped everything" + (f": {', '.join(parts)}." if parts else ". Nothing was running.")
+        self.audit.add("clicked", message, agent="You (Stop everything)")
+        await self.hub.emit("notice", message=message)
+        return message
+
     def interrupt(self) -> None:
         self._speech_gen += 1
         if self._operator is not None:
