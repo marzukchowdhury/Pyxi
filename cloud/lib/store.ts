@@ -7,6 +7,7 @@ export interface Store {
   set(key: string, value: string, ttlSeconds?: number): Promise<void>;
   /** Add to a number (cents as floats are fine) and return the new total. */
   incr(key: string, by: number, ttlSeconds?: number): Promise<number>;
+  del(key: string): Promise<void>;
 }
 
 export class MemoryStore implements Store {
@@ -21,6 +22,9 @@ export class MemoryStore implements Store {
     const next = Number(this.data.get(key) ?? 0) + by;
     this.data.set(key, String(next));
     return next;
+  }
+  async del(key: string) {
+    this.data.delete(key);
   }
 }
 
@@ -52,6 +56,9 @@ export class UpstashStore implements Store {
     const total = Number(await this.call("INCRBYFLOAT", key, by));
     if (ttlSeconds) await this.call("EXPIRE", key, ttlSeconds);
     return total;
+  }
+  async del(key: string) {
+    await this.call("DEL", key);
   }
 }
 

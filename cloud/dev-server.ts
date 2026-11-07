@@ -3,7 +3,7 @@
 // (default LOCALTEST). Data lives in memory and is gone when it stops.
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { chat, configFromEnv, identify, join, json, usage } from "./lib/beta.ts";
+import { chat, configFromEnv, joinRequest, json, me, revoke } from "./lib/beta.ts";
 import { MemoryStore } from "./lib/store.ts";
 
 const env: Record<string, string | undefined> = { ...process.env };
@@ -30,10 +30,11 @@ createServer(async (req, res) => {
   });
   let response: Response;
   if (req.url === "/api/join" && req.method === "POST") {
-    response = await join(store, cfg, ((await request.json().catch(() => ({}))) as { code?: string }).code);
+    response = await joinRequest(store, cfg, request);
   } else if (req.url === "/api/me") {
-    const who = await identify(store, request);
-    response = who ? json(await usage(store, cfg, who)) : json({ error: "not signed in" }, 401);
+    response = await me(store, cfg, request);
+  } else if (req.url === "/api/admin/revoke" && req.method === "POST") {
+    response = await revoke(store, cfg, request);
   } else if (req.url === "/api/v1/chat/completions" && req.method === "POST") {
     response = await chat(store, cfg, request);
   } else {

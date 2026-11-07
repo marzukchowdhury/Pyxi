@@ -15,6 +15,12 @@ export interface Config {
   /** Models allowed only to transcribe speech (Bengali listening), never to chat. */
   earsModels: Set<string>;
   maxAudioChars: number;
+  /** Join attempts allowed per IP address per hour (invite codes can't be guessed at speed). */
+  joinPerIpPerHour: number;
+  /** Invite codes switched off: their tokens stop working at once (REVOKED_CODES). */
+  revokedCodes: Set<string>;
+  /** Unlocks POST /api/admin/revoke; empty means that route doesn't exist. */
+  adminToken: string;
 }
 
 const DEFAULT_MODELS = [
@@ -38,6 +44,9 @@ export function configFromEnv(env: Record<string, string | undefined> = process.
     earsModels: new Set(env.EARS_MODELS !== undefined ? list(env.EARS_MODELS) : DEFAULT_EARS_MODELS),
     // base64 of about 80 seconds of 16 kHz mono WAV; also keeps requests under Vercel's 4.5 MB
     maxAudioChars: Number(env.MAX_AUDIO_CHARS ?? 3_500_000),
+    joinPerIpPerHour: Number(env.JOIN_PER_IP_PER_HOUR ?? 10),
+    revokedCodes: new Set(list(env.REVOKED_CODES).map((c) => c.toUpperCase())),
+    adminToken: env.ADMIN_TOKEN ?? "",
   };
 }
 
@@ -60,10 +69,40 @@ export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
+async function codeRevoked(store: Store, cfg: Config, code: string): Promise<boolean> {
+  return cfg.revokedCodes.has(code) || (await store.get(`revoked-code:${code}`)) !== null;
+}
+
+/** The caller's address as Vercel's edge saw it (the edge sets these headers itself). */
+export function clientIp(req: Request): string {
+  return (
+    req.headers.get("x-real-ip") ??
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    "unknown"
+  );
+}
+
+/** POST /api/join: a few attempts per IP address an hour, then the invite code. Only a hash of
+ * the address is kept, and only for that hour. */
+export async function joinRequest(store: Store, cfg: Config, req: Request): Promise<Response> {
+  const ip = (await sha256(clientIp(req))).slice(0, 24);
+  const hour = Math.floor(Date.now() / 3_600_000);
+  const tries = await store.incr(`rl:join:${ip}:${hour}`, 1, 3600);
+  if (tries > cfg.joinPerIpPerHour) {
+    const wait = 3600 - Math.floor((Date.now() % 3_600_000) / 1000);
+    const res = json({ error: "Too many tries. Wait a while, then try your invite code again." }, 429);
+    res.headers.set("Retry-After", String(wait));
+    return res;
+  }
+  const body = (await req.json().catch(() => ({}))) as { code?: unknown } | null;
+  return join(store, cfg, body?.code);
+}
+
 /** Swap an invite code for a token (each code works on a few devices). */
 export async function join(store: Store, cfg: Config, code: unknown): Promise<Response> {
   const c = String(code ?? "").trim().toUpperCase();
-  if (!c || !cfg.inviteCodes.has(c)) return json({ error: "That invite code isn't valid." }, 403);
+  if (!c || !cfg.inviteCodes.has(c) || (await codeRevoked(store, cfg, c)))
+    return json({ error: "That invite code isn't valid." }, 403);
   const uses = await store.incr(`code:${c}`, 1);
   if (uses > cfg.usesPerCode) return json({ error: "That invite code has been used on too many devices." }, 403);
   const token = randomToken();
@@ -76,20 +115,58 @@ export interface Who {
   code: string;
 }
 
-/** Who is calling, from "Authorization: Bearer pyxi_...". */
-export async function identify(store: Store, req: Request): Promise<Who | null> {
+/** A device's short id: what /api/me shows, OpenRouter sees as X-User, and revoking takes. */
+export const userId = (who: Who) => who.id.slice(0, 16);
+
+/** Who is calling, from "Authorization: Bearer pyxi_...". Revoked tokens and codes are nobody. */
+export async function identify(store: Store, req: Request, cfg?: Config): Promise<Who | null> {
   const auth = req.headers.get("authorization") ?? "";
   const token = auth.replace(/^Bearer\s+/i, "").trim();
   if (!token.startsWith("pyxi_")) return null;
   const id = await sha256(token);
   const raw = await store.get(`tok:${id}`);
   if (!raw) return null;
-  return { id, code: (JSON.parse(raw) as { code: string }).code };
+  const who = { id, code: (JSON.parse(raw) as { code: string }).code };
+  if ((await store.get(`revoked:${userId(who)}`)) !== null) return null;
+  if (cfg && (await codeRevoked(store, cfg, who.code))) return null;
+  return who;
 }
 
+/** Today's spend, for the caller only: the key is their own token's hash, so no request can
+ * name someone else. */
 export async function usage(store: Store, cfg: Config, who: Who) {
   const today = Number((await store.get(`spend:${who.id}:${day()}`)) ?? 0);
-  return { spent_today_usd: today, daily_limit_usd: cfg.dailyLimitUsd, left_today_usd: Math.max(0, cfg.dailyLimitUsd - today) };
+  return {
+    user: userId(who),
+    spent_today_usd: today,
+    daily_limit_usd: cfg.dailyLimitUsd,
+    left_today_usd: Math.max(0, cfg.dailyLimitUsd - today),
+  };
+}
+
+/** GET /api/me */
+export async function me(store: Store, cfg: Config, req: Request): Promise<Response> {
+  const who = await identify(store, req, cfg);
+  return who ? json(await usage(store, cfg, who)) : json({ error: "not signed in" }, 401);
+}
+
+/** POST /api/admin/revoke (Bearer ADMIN_TOKEN), for the founder:
+ * {"user": "<16 hex from /api/me or OpenRouter's X-User>"} stops one device;
+ * {"code": "FIREFLY-ANNA"} stops the code and every device that joined with it.
+ * Add "restore": true to undo. Without ADMIN_TOKEN set, the route doesn't exist. */
+export async function revoke(store: Store, cfg: Config, req: Request): Promise<Response> {
+  if (!cfg.adminToken) return json({ error: "not found" }, 404);
+  const given = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  if ((await sha256(given)) !== (await sha256(cfg.adminToken))) return json({ error: "not allowed" }, 403);
+  const body = ((await req.json().catch(() => ({}))) ?? {}) as { user?: unknown; code?: unknown; restore?: unknown };
+  const user = String(body.user ?? "").trim().toLowerCase();
+  const code = String(body.code ?? "").trim().toUpperCase();
+  const key = /^[0-9a-f]{16}$/.test(user) ? `revoked:${user}` : code ? `revoked-code:${code}` : "";
+  if (!key) return json({ error: 'Send {"user": "<16 hex>"} or {"code": "..."}.' }, 400);
+  const restore = body.restore === true;
+  if (restore) await store.del(key);
+  else await store.set(key, String(Date.now()));
+  return json({ ok: true, ...(key.startsWith("revoked:") ? { user } : { code }), revoked: !restore });
 }
 
 async function record(store: Store, who: Who, cost: number): Promise<void> {
@@ -128,7 +205,7 @@ export async function chat(
   req: Request,
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
-  const who = await identify(store, req);
+  const who = await identify(store, req, cfg);
   if (!who) return json({ error: { message: "Sign in to the Pyxi beta first (Settings, invite code)." } }, 401);
   if (!cfg.openrouterKey) return json({ error: { message: "The beta server has no model key set." } }, 503);
   const mine = await usage(store, cfg, who);
@@ -162,7 +239,7 @@ export async function chat(
       "Content-Type": "application/json",
       "HTTP-Referer": "https://pyxi.app",
       "X-Title": "Pyxi beta",
-      "X-User": who.id.slice(0, 16), // per-user abuse tracking on OpenRouter's side, no identity
+      "X-User": userId(who), // per-user abuse tracking on OpenRouter's side, no identity
     },
     body: JSON.stringify(body),
   });

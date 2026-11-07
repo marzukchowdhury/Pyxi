@@ -1,10 +1,10 @@
 // POST /api/join {"code": "..."} -> {"token": "pyxi_..."}: an invite code becomes a beta token.
-import { configFromEnv, join, json } from "../lib/beta.js";
+// A few tries per IP address an hour, so invite codes can't be guessed.
+import { configFromEnv, joinRequest, json } from "../lib/beta.js";
 import { storeFromEnv } from "../lib/store.js";
 
 export async function POST(req: Request): Promise<Response> {
-  const body = (await req.json().catch(() => ({}))) as { code?: string };
-  return join(storeFromEnv(), configFromEnv(), body.code);
+  return joinRequest(storeFromEnv(), configFromEnv(), req);
 }
 
 export function GET(): Response {

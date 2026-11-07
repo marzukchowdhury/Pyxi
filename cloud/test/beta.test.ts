@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chat, configFromEnv, join, usage } from "../lib/beta.js";
+import { chat, configFromEnv, join, joinRequest, me, revoke, usage } from "../lib/beta.js";
 import { MemoryStore } from "../lib/store.js";
 
 const cfg = configFromEnv({
@@ -154,3 +154,103 @@ describe("listening (Bengali speech to text)", () => {
     expect((await chat(store, off, chatRequest(token, clip()), ok)).status).toBe(400);
   });
 });
+
+describe("testers stay apart", () => {
+  it("a tester only ever sees their own usage", async () => {
+    const store = new MemoryStore();
+    const anna = await tokenFor(store, "firefly");
+    const ben = await tokenFor(store, "lamp");
+    const reply = (async () =>
+      new Response(JSON.stringify({ usage: { cost: 0.04 } }), { status: 200 })) as unknown as typeof fetch;
+    await chat(store, cfg, chatRequest(anna, { model: "anthropic/claude-haiku-5.5" }), reply);
+    const meAs = async (token: string, query = "") =>
+      (await (await me(store, cfg, new Request(`https://beta.pyxi.app/api/me${query}`, { headers: { Authorization: `Bearer ${token}` } }))).json()) as {
+        user: string;
+        spent_today_usd: number;
+      };
+    const a = await meAs(anna);
+    const b = await meAs(ben, `?user=${a.user}`); // naming someone else changes nothing
+    expect(a.spent_today_usd).toBeCloseTo(0.04);
+    expect(b.spent_today_usd).toBe(0);
+    expect(a.user).toMatch(/^[0-9a-f]{16}$/);
+    expect(b.user).not.toBe(a.user);
+    expect((await me(store, cfg, new Request("https://beta.pyxi.app/api/me"))).status).toBe(401);
+  });
+});
+
+describe("revoking", () => {
+  const admin = configFromEnv({ ...envOf(cfg), ADMIN_TOKEN: "founder-secret" });
+  const revokeAs = (secret: string, body: unknown) =>
+    revoke(store0, admin, new Request("https://beta.pyxi.app/api/admin/revoke", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }));
+  let store0 = new MemoryStore();
+  const ok = (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
+  const status = async (token: string) =>
+    (await chat(store0, admin, chatRequest(token, { model: "anthropic/claude-haiku-5.5" }), ok)).status;
+
+  it("stops one device at once, and can be undone", async () => {
+    store0 = new MemoryStore();
+    const token = await tokenFor(store0);
+    const other = await tokenFor(store0);
+    const user = ((await (await me(store0, admin, new Request("https://x/api/me", { headers: { Authorization: `Bearer ${token}` } }))).json()) as { user: string }).user;
+    expect((await revokeAs("founder-secret", { user })).status).toBe(200);
+    expect(await status(token)).toBe(401);
+    expect(await status(other)).toBe(200); // the other device on the same code carries on
+    await revokeAs("founder-secret", { user, restore: true });
+    expect(await status(token)).toBe(200);
+  });
+
+  it("stops a whole invite code: its devices and new joins", async () => {
+    store0 = new MemoryStore();
+    const token = await tokenFor(store0, "firefly");
+    const lamp = await tokenFor(store0, "lamp");
+    expect((await revokeAs("founder-secret", { code: "firefly" })).status).toBe(200);
+    expect(await status(token)).toBe(401);
+    expect(await status(lamp)).toBe(200);
+    expect((await join(store0, admin, "FIREFLY")).status).toBe(403);
+    // Or from the environment, with no admin route at all.
+    const envOff = configFromEnv({ ...envOf(cfg), REVOKED_CODES: "lamp" });
+    expect((await chat(store0, envOff, chatRequest(lamp, { model: "anthropic/claude-haiku-5.5" }), ok)).status).toBe(401);
+  });
+
+  it("needs the admin secret, and doesn't exist without one", async () => {
+    store0 = new MemoryStore();
+    expect((await revokeAs("guess", { code: "firefly" })).status).toBe(403);
+    expect((await revokeAs("", { code: "firefly" })).status).toBe(403);
+    const noAdmin = await revoke(store0, cfg, new Request("https://x/api/admin/revoke", { method: "POST", body: "{}" }));
+    expect(noAdmin.status).toBe(404);
+    expect((await revokeAs("founder-secret", { user: "not-hex" })).status).toBe(400);
+  });
+});
+
+describe("joining is rate limited per IP address", () => {
+  const joinFrom = (store: MemoryStore, ip: string, code = "nope") =>
+    joinRequest(store, cfg, new Request("https://beta.pyxi.app/api/join", {
+      method: "POST",
+      headers: { "x-forwarded-for": `${ip}, 10.0.0.1`, "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    }));
+
+  it("allows a few tries an hour, then says wait, without keeping the address", async () => {
+    const store = new MemoryStore();
+    for (let i = 0; i < 10; i++) expect((await joinFrom(store, "203.0.113.9")).status).toBe(403);
+    const blocked = await joinFrom(store, "203.0.113.9", "FIREFLY"); // even the right code waits
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get("Retry-After"))).toBeGreaterThan(0);
+    expect((await joinFrom(store, "198.51.100.4", "FIREFLY")).status).toBe(200); // someone else
+    expect([...store.data.keys()].some((k) => k.includes("203.0.113.9"))).toBe(false);
+  });
+});
+
+function envOf(c: typeof cfg): Record<string, string> {
+  return {
+    OPENROUTER_API_KEY: c.openrouterKey,
+    INVITE_CODES: [...c.inviteCodes].join(","),
+    USES_PER_CODE: String(c.usesPerCode),
+    DAILY_LIMIT_USD: String(c.dailyLimitUsd),
+    MONTHLY_CAP_USD: String(c.monthlyCapUsd),
+  };
+}
