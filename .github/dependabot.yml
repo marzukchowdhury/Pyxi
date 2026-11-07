@@ -1,0 +1,32 @@
+# Weekly update proposals. Nothing merges by itself: review each one, run the tests and
+# scripts/security_check.py, then rebuild the installer (python scripts/release.py ... --full).
+version: 2
+updates:
+  # The installer's Python: requirements/installer.in -> installer.txt (pip-compile, with hashes)
+  - package-ecosystem: pip
+    directory: /requirements
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types: [minor, patch]
+  # The desktop app (Electron, the renderer's build tools)
+  - package-ecosystem: npm
+    directory: /desktop
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      desktop-minor-and-patch:
+        update-types: [minor, patch]
+  # The beta server
+  - package-ecosystem: npm
+    directory: /cloud
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

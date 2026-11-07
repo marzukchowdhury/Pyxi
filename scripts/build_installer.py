@@ -131,6 +131,23 @@ def requirements() -> list[str]:
     return [d for d in deps if not d.startswith("otto-browser-buddy")]
 
 
+LOCK = ROOT / "requirements" / "installer.txt"  # exact versions and hashes (lock_installer_deps.py)
+
+
+def check_lock() -> None:
+    """The lock must cover what Pyxi and Otto ask for today: a dependency added to either
+    pyproject.toml without re-locking stops the build rather than going in unpinned."""
+    if not LOCK.exists():
+        raise SystemExit("STOP: no requirements/installer.txt. Run: python scripts/lock_installer_deps.py")
+    otto = tomllib.loads((OTTO / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+    locked_in = (LOCK.with_suffix(".in")).read_text(encoding="utf-8").splitlines()
+    missing = [d for d in [*requirements(), *otto] if d not in locked_in]
+    if missing:
+        raise SystemExit(
+            f"STOP: {missing} aren't in the lock yet. Run: python scripts/lock_installer_deps.py"
+        )
+
+
 def pip(*args: str) -> None:
     py = str(FULL / "python.exe")
     run(
@@ -147,13 +164,12 @@ def pip(*args: str) -> None:
 
 
 def install_packages() -> None:
+    check_lock()
     run([str(FULL / "python.exe"), "-m", "ensurepip", "--default-pip"])
-    pip(*requirements())
-    pip("--no-deps", str(OTTO))
-    otto_deps = tomllib.loads((OTTO / "pyproject.toml").read_text(encoding="utf-8"))["project"][
-        "dependencies"
-    ]
-    pip(*otto_deps)
+    # Every third-party package (and pip itself) at its locked version, each file checked against
+    # its sha256: a package that changed on PyPI, or one nobody pinned, stops the build.
+    pip("--require-hashes", "-r", str(LOCK))
+    pip("--no-deps", str(OTTO))  # the local checkouts, their dependencies already locked above
     pip("--no-deps", str(ROOT))
 
 
