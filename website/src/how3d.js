@@ -105,7 +105,8 @@ function firefly() {
   return g;
 }
 
-export function startHow3D(stage, track) {
+/** still: reduced motion. One finished frame (the tiles up, the thread drawn), no movement. */
+export function startHow3D(stage, track, { still = false } = {}) {
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -245,6 +246,10 @@ export function startHow3D(stage, track) {
   // ---- the story, from scroll progress
   let progress = 0;
   const readProgress = () => {
+    if (still) {
+      progress = 0.8;
+      return;
+    }
     const r = track.getBoundingClientRect();
     progress = Math.min(1, Math.max(0, -r.top / (r.height - innerHeight)));
   };
@@ -335,6 +340,8 @@ export function startHow3D(stage, track) {
     exportTile.edges.material.color.copy(ICE).lerp(GOLD, draw * 0.6).multiplyScalar(2.4);
 
     composer.render();
+    // Still: keep drawing only until the camera has settled and the textures are in, then stop.
+    if (still && t > 2.5) return;
     raf = requestAnimationFrame(frame);
   };
   const kick = () => {

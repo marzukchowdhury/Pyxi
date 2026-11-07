@@ -621,6 +621,51 @@ class GoogleConnector(Connector):
             return _strip_html(_unb64url(data).decode("utf-8", "replace"))
         return ""
 
+    def _html(self, part: dict[str, Any]) -> str:
+        data = part.get("body", {}).get("data")
+        if data and part.get("mimeType") == "text/html":
+            return _unb64url(data).decode("utf-8", "replace")
+        return "".join(self._html(p) for p in part.get("parts", []) or [])
+
+    async def gmail_fetch(self, query: str, n: int = 40) -> list[dict[str, Any]]:
+        """Whole emails for Pyxi's own background checks (receipts, orders): sender, subject,
+        date, plain text and every link with its words. Fetched ten at a time, so a big scan
+        stays under Gmail's rate limit."""
+        ids = await self._list(query, min(n, 100))
+        msgs: list[dict[str, Any]] = []
+        for i in range(0, len(ids), 10):
+            msgs += await asyncio.gather(
+                *(
+                    self._api("GET", f"{GMAIL}/messages/{m}", params={"format": "full"})
+                    for m in ids[i : i + 10]
+                )
+            )
+        out = []
+        for msg in msgs:
+            h = self._headers(msg)
+            payload = msg.get("payload", {})
+            raw = self._html(payload)
+            links = [
+                (_strip_html(text).strip(), html.unescape(url))
+                for url, text in re.findall(
+                    r"""<a\b[^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>""", raw, re.S | re.I
+                )
+            ]
+            text = self._body(payload)
+            for m in re.finditer(r"([^\n]{0,60}?)\s*(https?://[^\s<>\"')]+)", text):
+                links.append((m.group(1).strip(" :-"), m.group(2)))
+            out.append(
+                {
+                    "id": msg.get("id", ""),
+                    "from": h.get("from", ""),
+                    "subject": h.get("subject", ""),
+                    "date": _when(msg, h),
+                    "text": text or _strip_html(raw),
+                    "links": links,
+                }
+            )
+        return out
+
     async def gmail_read(self, args: dict[str, Any]) -> Result:
         msg = await self._api("GET", f"{GMAIL}/messages/{args['id']}", params={"format": "full"})
         h = self._headers(msg)

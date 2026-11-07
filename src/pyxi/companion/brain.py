@@ -70,6 +70,7 @@ from pyxi.config import PyxiSettings
 from pyxi.connectors import Connectors, Outgoing
 from pyxi.hub import Hub
 from pyxi.llm import make_llm
+from pyxi.mailwatch import MailWatchStore
 from pyxi.memory import SpatialMemory
 from pyxi.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
 from pyxi.partial_json import complete_items, first_chunk, partial_string, picture_head
@@ -201,6 +202,7 @@ class Brain:
         self._operator: Operator | None = None  # Pyxi using the mouse and keyboard
         self.connectors = Connectors(settings.data_dir, Path.home() / "Documents" / "Pyxi")
         self.routines = RoutineStore(settings.data_dir / "routines.json")
+        self.mailwatch = MailWatchStore(settings.data_dir / "mailwatch.json")
 
     # ================================================================== entry points
     async def set_state(self, state: State) -> None:
@@ -938,6 +940,168 @@ class Brain:
             job.id, ok=result.ok, title=result.title, body=result.summary, link=result.link
         )
 
+    # ------------------------------------------------------------------ money in their mail
+    async def _scan(self, what: str, query: str, n: int) -> tuple[Any, list[dict[str, Any]]]:
+        job = await self.jobs.track("Pyxi", what)
+        await self.hub.emit(
+            "job_event", job_id=job.id, agent="Pyxi", event="status", data={"message": what}
+        )
+        return job, await self.connectors.google.gmail_fetch(query, n)
+
+    async def _watch_subscriptions(self) -> None:
+        """Find every recurring charge in their receipts; one card with the monthly total."""
+        from pyxi.mailwatch import find_subscriptions, subscriptions_query, subscriptions_report
+
+        job = None
+        try:
+            job, mails = await self._scan(
+                "Looking for subscriptions in your receipts", subscriptions_query(), 80
+            )
+            subs = find_subscriptions(mails, datetime.now().astimezone())
+        except Exception as exc:
+            log.exception("subscription scan failed")
+            if job is not None:
+                await self.jobs.settle(job, ok=False, summary=friendly_error(exc))
+            await self._notify(
+                job.id if job else "subs",
+                ok=False,
+                title="Couldn't read your receipts",
+                body=friendly_error(exc),
+            )
+            return
+        self.mailwatch.set_subscriptions(subs)
+        title, body, lines = subscriptions_report(subs)
+        await self.jobs.settle(job, ok=True, summary=f"{title}. " + "; ".join(lines))
+        self.history = [
+            *self.history[-11:],
+            (
+                "(subscription check)",
+                f"(notified the user: {title}. {body} " + "; ".join(lines) + ")",
+            ),
+        ]
+        await self._notify(job.id, ok=True, title=title, body=body, changes=lines)
+
+    async def _cancel_subscription(self, service: str) -> None:
+        """Open the cancel page, after an approval card. Pyxi never presses Cancel itself."""
+        from pyxi.mailwatch import match_subscription
+
+        sub = match_subscription(self.mailwatch.subscriptions(), service)
+        job = await self.jobs.track("Pyxi", f"Cancel page for {service}")
+        if sub is None:
+            msg = (
+                f"I didn't find {service} in your receipts. "
+                "Ask me to look for your subscriptions first."
+            )
+            await self.jobs.settle(job, ok=False, summary=msg)
+            await self._notify(job.id, ok=False, title=f"No {service} subscription found", body=msg)
+            return
+        where = (
+            "the cancel link in your receipt"
+            if sub.cancel_from == "email"
+            else f"{sub.service}'s account page"
+            if sub.cancel_url
+            else f"{sub.service}'s website (Scout finds the cancel page in the background)"
+        )
+        ok = await self.hub.request(
+            "confirm",
+            timeout=900,
+            job_id=job.id,
+            agent="Pyxi",
+            action=f"Open the cancel page for {sub.service}",
+            reason=(
+                f"{sub.service}: {sub.price()}, last charged {sub.last_charged}.\n"
+                f'From: "{sub.email_subject}"\nOpens: {where}.\n\n'
+                "Pyxi only opens the page. You press Cancel yourself; nothing is cancelled for you."
+            ),
+        )
+        if not ok:
+            await self.jobs.settle(job, ok=False, summary="You said no, so nothing was opened.")
+            return
+        if sub.cancel_url:
+            await self._quick_action("open_url", sub.cancel_url)
+            await self.jobs.settle(job, ok=True, summary=f"Opened {sub.service}'s cancel page.")
+            await self._notify(
+                job.id,
+                ok=True,
+                title=f"{sub.service}'s cancel page is open",
+                body="Press Cancel there to stop it. I didn't change anything.",
+                link=sub.cancel_url,
+            )
+            return
+        await self.jobs.settle(job, ok=True, summary="Scout is finding the cancel page.")
+        await self.jobs.start(
+            "scout",
+            f"Find where to cancel the user's {sub.service} subscription ({sub.price()}). Open "
+            f"{sub.service}'s own website, go to the account, billing or subscription page, and "
+            "stop on the page with the cancel button. Do NOT press cancel, change any setting, "
+            "sign up or pay. Report the page's URL and what the user should press.",
+        )
+
+    async def _watch_returns(self, quiet: bool = False) -> None:
+        """Orders and their return deadlines, with reminders a few days before each closes. The
+        daily check (quiet) only speaks up when there's a new order with a deadline."""
+        from pyxi.mailwatch import find_orders, orders_query, reminder_day, returns_report
+
+        if not self.connectors.google.connected():
+            return
+        now = datetime.now().astimezone()
+        job = None
+        try:
+            job, mails = await self._scan(
+                "Checking your orders for return windows", orders_query(), 60
+            )
+            orders = find_orders(mails, now)
+        except Exception as exc:
+            log.exception("returns scan failed")
+            if job is not None:
+                await self.jobs.settle(job, ok=False, summary=friendly_error(exc))
+            if not quiet:
+                await self._notify(
+                    job.id if job else "returns",
+                    ok=False,
+                    title="Couldn't read your orders",
+                    body=friendly_error(exc),
+                )
+            return
+        for o in orders:
+            when = reminder_day(o, now)
+            key = f"return:{o.key}"
+            if when and o.return_by and key not in self.mailwatch.reminded():
+                end = datetime.fromisoformat(o.return_by)
+                what = f"{o.store}, {o.item}" if o.item else f"your {o.store} order"
+                self.routines.add(
+                    f"Return reminder: {what}",
+                    on=when.date().isoformat(),
+                    time=when.strftime("%H:%M"),
+                    kind="remind",
+                    message=(
+                        f"Last days to return {what}: the window closes "
+                        f"{end:%A} {end.day} {end:%B}."
+                    ),
+                    key=key,
+                )
+                self.mailwatch.mark_reminded(key)
+        if not self.routines.has_key("returns-watch"):
+            self.routines.add(
+                "Check new orders for return windows",
+                time="09:00",
+                kind="returns",
+                key="returns-watch",
+            )
+        await self.hub.emit("routines", routines=self.routines.public())
+        dated = {o.key for o in orders if o.return_by}
+        new = dated - self.mailwatch.seen_orders()
+        self.mailwatch.mark_orders(dated)
+        title, body, lines = returns_report(orders, now)
+        await self.jobs.settle(job, ok=True, summary=f"{title}. " + "; ".join(lines))
+        if quiet and not new:
+            return
+        self.history = [
+            *self.history[-11:],
+            ("(returns check)", f"(notified the user: {title}. {body} " + "; ".join(lines) + ")"),
+        ]
+        await self._notify(job.id, ok=True, title=title, body=body, changes=lines)
+
     async def _notify(
         self,
         job_id: str,
@@ -969,6 +1133,16 @@ class Brain:
         """Run routines that are due, one at a time, when Pyxi isn't in the middle of something."""
         ran = 0
         for r in self.routines.due(now):
+            if r.kind != "turn":  # a reminder or a quiet check: no model, no need to wait
+                self.routines.mark_ran(r, now)
+                if r.kind == "remind":
+                    job = await self.jobs.track("Pyxi", r.message or r.task, role="reminder")
+                    await self.jobs.settle(job, ok=True, summary=r.message or r.task)
+                    await self._notify(job.id, ok=True, title="Reminder", body=r.message or r.task)
+                elif r.kind == "returns":
+                    self._spawn(self._watch_returns(quiet=True))
+                ran += 1
+                continue
             if self._lock.locked() or self.state != "idle":
                 break
             self.routines.mark_ran(r, now)
@@ -1889,6 +2063,16 @@ class Brain:
                 return "errand: today's budget is used up, so I can't start it. Tell the user."
             words = "" if getattr(self, "_synthetic", False) else self._user_text
             self._spawn(self._run_errand(task, words))
+            return None
+        if name in ("subscriptions", "returns"):
+            if not self.connectors.google.connected():
+                return f"{name}: Gmail isn't connected yet; tell the user to connect Google in Settings."
+            if name == "returns":
+                self._spawn(self._watch_returns())
+            elif args.get("action") == "cancel" and args.get("service"):
+                self._spawn(self._cancel_subscription(str(args["service"])))
+            else:
+                self._spawn(self._watch_subscriptions())
             return None
         if name == "arrange_windows":
             return await self._arrange_windows(args)

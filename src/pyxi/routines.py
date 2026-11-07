@@ -3,7 +3,9 @@ email for anything from my professor and tell me").
 
 A routine is a task and a schedule. When it's due and Pyxi isn't busy, Pyxi runs the task as
 an ordinary turn, so it uses the same tools, approvals and daily budget as anything you ask.
-Routines are saved in ``.pyxi/routines.json``. They only run while Pyxi is open; this is not a
+A routine can also be a one-off on a date (``on``), a plain reminder that shows a notification
+without a model call (``kind="remind"``), or one of Pyxi's own quiet checks (``kind="returns"``,
+the daily look for new orders). Routines are saved in ``.pyxi/routines.json``. They only run while Pyxi is open; this is not a
 cloud service.
 """
 
@@ -32,6 +34,10 @@ class Routine(BaseModel):
     created_at: float = Field(default_factory=lambda: datetime.now().timestamp())
     last_run: float | None = None
     next_run: float = 0.0
+    on: str | None = None  # "YYYY-MM-DD": runs once on that day, then goes away
+    kind: Literal["turn", "remind", "returns", "job"] = "turn"
+    message: str | None = None  # what a "remind" routine shows
+    key: str | None = None  # so the same reminder is never set twice
 
     def day_set(self) -> set[int]:
         out: set[int] = set()
@@ -48,6 +54,9 @@ class Routine(BaseModel):
         return out or set(range(7))
 
     def describe(self) -> str:
+        if self.on:
+            day = datetime.fromisoformat(self.on)
+            return f"on {day:%a} {day.day} {day:%b} at {self.time or '09:00'}"
         if self.every_minutes:
             m = self.every_minutes
             when = (
@@ -68,6 +77,9 @@ class Routine(BaseModel):
             nxt = base + timedelta(minutes=self.every_minutes)
             return max(nxt, now + timedelta(seconds=30)).timestamp()
         hh, mm = (int(x) for x in (self.time or "09:00").split(":"))
+        if self.on:
+            at = datetime.fromisoformat(self.on).replace(hour=hh, minute=mm)
+            return max(at, now + timedelta(seconds=30)).timestamp()
         days = self.day_set()
         for offset in range(0, 8):
             day = (now + timedelta(days=offset)).replace(
@@ -120,6 +132,10 @@ class RoutineStore:
         time: str | None = None,
         every_minutes: int | None = None,
         now: datetime | None = None,
+        on: str | None = None,
+        kind: str = "turn",
+        message: str | None = None,
+        key: str | None = None,
     ) -> Routine:
         now = now or datetime.now()
         if every_minutes is not None:
@@ -134,6 +150,10 @@ class RoutineStore:
             days=days or ["every day"],
             time=time,
             every_minutes=every_minutes,
+            on=on,
+            kind=kind,  # type: ignore[arg-type]
+            message=message,
+            key=key,
         )
         r.next_run = r.compute_next(now)
         self.items.append(r)
@@ -154,8 +174,16 @@ class RoutineStore:
         ts = (now or datetime.now()).timestamp()
         return [r for r in self.items if r.enabled and r.next_run and r.next_run <= ts]
 
+    def has_key(self, key: str) -> bool:
+        return any(r.key == key for r in self.items)
+
     def mark_ran(self, r: Routine, now: datetime | None = None) -> None:
         now = now or datetime.now()
+        if r.on:  # a one-off is done once it has run
+            if r in self.items:
+                self.items.remove(r)
+            self.save()
+            return
         r.last_run = now.timestamp()
         r.next_run = r.compute_next(now)
         self.save()
@@ -169,6 +197,7 @@ class RoutineStore:
                 "next_run": r.next_run,
                 "last_run": r.last_run,
                 "enabled": r.enabled,
+                "kind": r.kind,
             }
             for r in sorted(self.items, key=lambda r: r.next_run)
         ]

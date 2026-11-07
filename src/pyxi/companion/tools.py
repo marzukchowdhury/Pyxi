@@ -475,6 +475,28 @@ COMPANION_TOOLS += [
         ["task"],
     ),
     _tool(
+        "subscriptions",
+        "Find every subscription and recurring charge in the user's Gmail receipts (service, amount, "
+        "how often, last charged) and the monthly total, in the background: 'what am I paying "
+        "for?', 'find subscriptions I forgot', 'how much do I spend on subscriptions?'. "
+        "action=cancel with the service ('cancel Netflix', 'stop my Adobe plan') opens its cancel "
+        "page after an approval card; Pyxi never cancels anything itself, the user presses the "
+        "final button. Say one short line ('On it.'); the result comes as a notification.",
+        {
+            "action": {"type": "string", "enum": ["find", "cancel"]},
+            "service": {"type": "string", "description": "For cancel: the service, as they said it."},
+        },
+    ),
+    _tool(
+        "returns",
+        "Check the user's order and shipping emails for return windows, in the background: 'what "
+        "can I still return?', 'when do I have to return the headphones?', 'keep track of my "
+        "returns'. Lists each order with its return deadline and sets reminders a few days before "
+        "each one closes, then keeps checking new orders daily. Say one short line ('On it.'); the "
+        "list comes as a notification.",
+        {},
+    ),
+    _tool(
         "quick_action",
         "Do a small thing for the user right now: open_url (a website), open_app (notepad, calculator, chrome, "
         "word, excel, spotify, discord, settings, 'sound settings', 'microphone privacy'...), copy (exact text to "

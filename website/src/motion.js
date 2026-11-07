@@ -60,23 +60,24 @@ function initLayers(reduced) {
     track.dataset.step = String(n);
     steps.forEach((li, i) => li.classList.toggle("on", i + 1 === n));
   };
-  if (reduced) {
-    setStep(0);
-    steps.forEach((li) => li.classList.add("on"));
-    return;
-  }
-  // The real-time 3D version loads only as the section comes near; the flat layers stay if it can't run.
+  // The real-time 3D version loads only as the section comes near; the flat layers stay if it can't
+  // run. With reduced motion it's a single still frame of the finished scene, nothing moves.
   const stage = track.querySelector(".layers-stage");
   new IntersectionObserver(
     ([e], io) => {
       if (!e.isIntersecting) return;
       io.disconnect();
       import("./how3d.js")
-        .then(({ startHow3D }) => startHow3D(stage, track) && stage.classList.add("has-3d"))
+        .then(({ startHow3D }) => startHow3D(stage, track, { still: reduced }) && stage.classList.add("has-3d"))
         .catch(() => undefined);
     },
     { rootMargin: "800px 0px" },
   ).observe(track);
+  if (reduced) {
+    setStep(0);
+    steps.forEach((li) => li.classList.add("on"));
+    return;
+  }
   const smooth = (t) => t * t * (3 - 2 * t);
   let raf = 0;
   const update = () => {
