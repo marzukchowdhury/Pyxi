@@ -13,6 +13,7 @@ Each agent has a *role* that decides what it can do:
 * ``meetings`` turns a recording into notes, decisions, action items and a follow-up (Scribe).
 * ``study`` makes flashcards and quizzes from slides, PDFs and notes, and quizzes aloud (Sage).
 * ``coder`` explains an error, finds the line and fixes small scripts after a card (Patch).
+* ``automation`` watches the user do a task once, then repeats it for the rest (Ditto).
 
 Agents keep their own long-term memory (Otto's FTS5 memory store, scoped per agent), and
 any agent can hand its result to another (Scout researches, then Quill writes).
@@ -43,6 +44,7 @@ Role = Literal[
     "meetings",
     "study",
     "coder",
+    "automation",
 ]
 
 
@@ -201,6 +203,18 @@ DEFAULT_ROSTER = [
         "words and proposes the smallest fix, which you approve before anything changes.",
         skills=["errors explained", "finds the line", "small fixes with a backup"],
         max_cost_usd=0.1,
+    ),
+    AgentProfile(
+        id="ditto",
+        name="Ditto",
+        role="automation",
+        voice="af_bella",
+        color="#c792ea",
+        builtin=True,
+        persona="Quick study. Watches you do a boring task once, then does the rest the quiet "
+        "way (files, a background browser) and only borrows your mouse when it has to.",
+        skills=["watch me once", "batch renames & filing", "forms per row", "hands as a last resort"],
+        max_cost_usd=0.2,
     ),
 ]
 

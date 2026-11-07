@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
@@ -44,6 +45,49 @@ Progress = Callable[["Status"], Awaitable[None]]
 def home() -> Path:
     base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
     return Path(base) / "Pyxi" / "LibreOffice"
+
+
+def profile_dir() -> Path:
+    """Pyxi's own LibreOffice profile: never the user's, so a LibreOffice they have open (or their
+    settings) can't collide with Pixel's conversions."""
+    return home() / "profile"
+
+
+def command(soffice: str | Path, *args: str) -> list[str]:
+    """A headless soffice command line with Pyxi's private profile."""
+    return [
+        str(soffice),
+        f"-env:UserInstallation={profile_dir().as_uri()}",
+        "--headless",
+        "--norestore",
+        "--nologo",
+        "--nodefault",
+        *args,
+    ]
+
+
+def warm_up(soffice: str | Path) -> bool:
+    """Convert one tiny Word file now, so LibreOffice builds its profile and first loads Writer
+    and the PDF exporter during setup (about 20 s), not during the user's first conversion."""
+    import tempfile as _tempfile
+
+    try:
+        from docx import Document
+
+        with _tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "warm-up.docx"
+            doc = Document()
+            doc.add_paragraph("Pyxi")
+            doc.save(str(src))
+            subprocess.run(
+                command(soffice, "--convert-to", "pdf", "--outdir", tmp, str(src)),
+                capture_output=True,
+                timeout=180,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return (Path(tmp) / "warm-up.pdf").is_file()
+    except (OSError, subprocess.SubprocessError, ImportError):
+        return False
 
 
 def installed(root: Path | None = None) -> Path | None:
@@ -179,8 +223,13 @@ class Installer:
         self,
         root: Path | None = None,
         client_factory: Callable[[], httpx.AsyncClient] | None = None,
+        staging: Path | None = None,
     ) -> None:
         self.root = root or home()
+        # The download and the unpack happen in TEMP, then the finished copy moves into root: the
+        # Windows Installer service can be refused files in some app folders (their permissions),
+        # and a failed setup leaves nothing half-done in Pyxi's folder.
+        self.staging = staging or Path(tempfile.gettempdir()) / "pyxi-libreoffice"
         self.client_factory = client_factory or (
             lambda: httpx.AsyncClient(timeout=60, follow_redirects=True)
         )
@@ -243,7 +292,9 @@ class Installer:
             sha = await client.get(sha_url)
             sha.raise_for_status()
             expected = parse_sha256(sha.text)
-            msi = self.root / "download" / Path(msi_url).name
+            if self.staging.exists():
+                shutil.rmtree(self.staging, ignore_errors=True)
+            msi = self.staging / "download" / Path(msi_url).name
             msi.parent.mkdir(parents=True, exist_ok=True)
             part = msi.with_suffix(".part")
             last = 0.0
@@ -277,17 +328,28 @@ class Installer:
             )
         self.status = Status("unpacking", 1.0, version, "Setting it up")
         await self._tell()
-        target = self.root / version
-        soffice = await asyncio.to_thread(unpack, msi, target)
+        try:
+            staged = await asyncio.to_thread(unpack, msi, self.staging / version)
+            target = self.root / version
+            if target.exists():
+                await asyncio.to_thread(shutil.rmtree, target, True)
+            await asyncio.to_thread(shutil.move, str(self.staging / version), str(target))
+            soffice = target / staged.relative_to(self.staging / version)
+        finally:
+            await asyncio.to_thread(shutil.rmtree, self.staging, True)  # the 380 MB download too
+        if not soffice.is_file():
+            raise RuntimeError("LibreOffice was set up, but soffice.exe went missing.")
+        self.status = Status("unpacking", 1.0, version, "Getting it ready")
+        await self._tell()
+        await asyncio.to_thread(warm_up, soffice)
         (self.root / MARKER).write_text(
             json.dumps({"version": version, "soffice": str(soffice), "installed_at": time.time()}),
             encoding="utf-8",
         )
-        msi.unlink(missing_ok=True)
         for old in self.root.iterdir():  # older versions Pyxi set up before
             if (
                 old.is_dir()
-                and old.name not in (version, "download")
+                and old.name not in (version, "profile")
                 and re.fullmatch(r"\d+\.\d+\.\d+", old.name)
             ):
                 shutil.rmtree(old, ignore_errors=True)

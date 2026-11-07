@@ -44,7 +44,9 @@ def fake_tdf(msi: bytes = MSI, sha: str | None = None) -> httpx.MockTransport:
 
 def installer(tmp_path: Path, transport: httpx.MockTransport) -> Installer:
     return Installer(
-        root=tmp_path / "LO", client_factory=lambda: httpx.AsyncClient(transport=transport)
+        root=tmp_path / "LO",
+        client_factory=lambda: httpx.AsyncClient(transport=transport),
+        staging=tmp_path / "staging",
     )
 
 
@@ -67,6 +69,9 @@ def stub_setup(monkeypatch):
         return program / "soffice.exe"
 
     monkeypatch.setattr(libreoffice, "unpack", unpack)
+    monkeypatch.setattr(
+        libreoffice, "warm_up", lambda soffice: unpacked.append(Path(soffice)) or True
+    )
     return unpacked
 
 
@@ -85,6 +90,7 @@ def test_picking_the_newest_release():
 async def test_download_check_and_setup(tmp_path, stub_setup):
     lo = installer(tmp_path, fake_tdf())
     seen: list[str] = []
+    warmed = stub_setup
 
     async def listen(status):
         seen.append(status.state)
@@ -93,17 +99,20 @@ async def test_download_check_and_setup(tmp_path, stub_setup):
     soffice = await lo.wait()
     assert soffice == tmp_path / "LO" / "26.8.2" / "LibreOffice" / "program" / "soffice.exe"
     assert libreoffice.installed(tmp_path / "LO") == soffice
-    assert seen[0] == "downloading" and seen[-3:] == ["checking", "unpacking", "ready"]
+    assert seen[0] == "downloading" and seen[-4:] == ["checking", "unpacking", "unpacking", "ready"]
+    assert (
+        warmed[-1] == soffice
+    )  # LibreOffice's first start happens during setup, not on their file
     assert lo.status.version == "26.8.2"
-    assert not list((tmp_path / "LO" / "download").glob("*.msi"))  # the installer is cleaned up
-    assert await lo.wait() == soffice and len(stub_setup) == 1  # set up once
+    assert not (tmp_path / "staging").exists()  # the 380 MB installer is cleaned up
+    assert await lo.wait() == soffice and len(stub_setup) == 2  # set up (and warmed) once
 
 
 async def test_a_tampered_download_is_deleted(tmp_path, stub_setup):
     lo = installer(tmp_path, fake_tdf(sha="0" * 64))
     assert await lo.wait() is None
     assert lo.status.state == "failed" and "checksum" in lo.status.message
-    assert not list((tmp_path / "LO" / "download").iterdir()) and not stub_setup
+    assert not list((tmp_path / "staging").rglob("*.msi")) and not stub_setup
 
 
 async def test_an_unsigned_download_is_deleted(tmp_path, stub_setup, monkeypatch):

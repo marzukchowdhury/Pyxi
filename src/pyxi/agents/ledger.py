@@ -751,6 +751,7 @@ def _open_old(path: Path) -> Workbook | WordDoc | Deck:
     import subprocess
     import tempfile
 
+    from pyxi.agents.libreoffice import command
     from pyxi.agents.pixel import libreoffice
 
     soffice = libreoffice()
@@ -762,16 +763,7 @@ def _open_old(path: Path) -> Workbook | WordDoc | Deck:
         )
     tmp = Path(tempfile.mkdtemp(prefix="pyxi_old_"))
     subprocess.run(
-        [
-            soffice,
-            "--headless",
-            "--norestore",
-            "--convert-to",
-            new_ext[1:],
-            "--outdir",
-            str(tmp),
-            str(path),
-        ],
+        command(soffice, "--convert-to", new_ext[1:], "--outdir", str(tmp), str(path)),
         check=True,
         capture_output=True,
         timeout=180,

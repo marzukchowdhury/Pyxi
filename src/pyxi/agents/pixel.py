@@ -440,17 +440,10 @@ def to_pdf(files: list[Path], out: Path | None = None, *, sheet: str = "") -> Pi
 
 def _soffice_pdf(soffice: str, src: Path, target: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
+        from pyxi.agents.libreoffice import command
+
         subprocess.run(
-            [
-                soffice,
-                "--headless",
-                "--norestore",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                tmp,
-                str(src),
-            ],
+            command(soffice, "--convert-to", "pdf", "--outdir", tmp, str(src)),
             check=True,
             capture_output=True,
             timeout=180,
