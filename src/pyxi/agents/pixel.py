@@ -1,13 +1,19 @@
-"""Pixel, the files teammate: conversions done straight on the files, in the background.
+"""Pixel, the files teammate: anything document-shaped, done straight on the files, in the
+background. No app windows, no mouse, and no model call.
 
-No app windows and no mouse: images to PDF, merge, split and compress PDFs, Word to PDF, PDF
-to images, image format and size, CSV to and from Excel. Every result is a new file beside the
-original (or in Documents\\Pyxi when that folder can't be written), and nothing is ever
-overwritten: a name that's taken gets " (2)", " (3)" and so on.
+* Images: to PDF, format changes (HEIC to JPG included), resizing, compressing.
+* PDFs: merge, split, compress, rotate, reorder, delete or extract pages, page numbers, a text
+  watermark, password-protect or unlock (the password comes from a card the user types into,
+  never from the model), fill form fields from saved details.
+* Conversions: Word, Excel, PowerPoint, Markdown, HTML and text to PDF; PDF to Word; PDF pages
+  to images; CSV to and from Excel.
+* Reading: text out of PDFs and images (Windows OCR for scans), and searchable PDFs from scans.
+* Comparing two documents: what changed, as a list and a marked-up Word report.
 
-Uses pypdf, Pillow, python-docx, openpyxl and pypdfium2. LibreOffice, when it's installed, does
-Word to PDF with full fidelity; without it the text, headings, lists and tables still come
-through via reportlab.
+Every result is a new file beside the original (or in Documents\\Pyxi when that folder can't be
+written); nothing is ever overwritten. LibreOffice, when installed, renders Office files to PDF
+with their exact layout; without it the built-in renderer (pixel_render) keeps text, headings,
+lists, tables and pictures.
 """
 
 from __future__ import annotations
@@ -19,157 +25,135 @@ import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff", ".heic"}
-IMAGE_FORMATS = {
-    "jpg": ("JPEG", ".jpg"),
-    "jpeg": ("JPEG", ".jpg"),
-    "png": ("PNG", ".png"),
-    "webp": ("WEBP", ".webp"),
-    "bmp": ("BMP", ".bmp"),
-    "gif": ("GIF", ".gif"),
-    "tiff": ("TIFF", ".tiff"),
-}
+from pyxi.agents import pixel_pdf, pixel_render
+from pyxi.agents.pixel_common import (
+    IMAGE_EXTS,
+    IMAGE_FORMATS,
+    PixelError,
+    PixelResult,
+    flat_rgb,
+    need,
+    open_image,
+    out_dir_for,
+    parse_ranges,
+    pyxi_folder,
+    size_text,
+    unique_path,
+)
+
+__all__ = [
+    "IMAGE_EXTS",
+    "NEEDS_PASSWORD",
+    "OPERATIONS",
+    "PixelError",
+    "PixelResult",
+    "guess_operation",
+    "out_dir_for",
+    "parse_ranges",
+    "pyxi_folder",
+    "run",
+    "unique_path",
+]
 
 OPERATIONS = {
     "images_to_pdf": "Put one or more images into a PDF, one page each, in the order given.",
+    "to_pdf": "Turn Word, Excel, PowerPoint, Markdown, HTML or text files into PDF.",
+    "word_to_pdf": "Turn a Word document into a PDF (same as to_pdf).",
+    "pdf_to_word": "Turn a PDF into an editable Word document (text, headings, pictures).",
+    "pdf_to_images": "Turn PDF pages into PNG or JPG images (options: pages, format, dpi).",
     "merge_pdfs": "Join PDFs into one, in the order given.",
-    "split_pdf": "Split a PDF: every page on its own, or by page ranges like '1-3, 4, 5-9'.",
+    "split_pdf": "Split a PDF into several: every page on its own, or by pages like '1-2, 3'.",
+    "extract_pages": "Copy some pages into one new PDF (options: pages).",
+    "delete_pages": "Remove pages from a PDF (options: pages).",
+    "rotate_pages": "Turn pages (options: pages, default all; angle 90, 180, 270, left or right).",
+    "reorder_pages": "Put pages in a new order (options: order like '3, 1-2'; the rest follow).",
     "compress_pdf": "Make a PDF smaller (images re-saved at lower quality, streams compressed).",
-    "word_to_pdf": "Turn a Word document (.docx) into a PDF.",
-    "pdf_to_images": "Turn each page of a PDF into a PNG or JPG image.",
-    "convert_image": "Change an image's format (png, jpg, webp, bmp, gif, tiff).",
+    "add_page_numbers": "Number the pages (options: position like 'bottom right', start, format 'Page {n} of {total}').",
+    "add_watermark": "Stamp text across every page (options: text, opacity).",
+    "protect_pdf": "Lock a PDF with a password. The user types it on a card; never put it in options.",
+    "unlock_pdf": "Remove a PDF's password. The user types it on a card; never put it in options.",
+    "fill_form": "Fill a PDF form's fields from their saved details (options: values for anything else, by field name).",
+    "extract_text": "Get the text out of a PDF or an image (OCR for scans) as a .txt.",
+    "make_searchable": "Turn a scanned PDF or photos of pages into a searchable PDF (OCR).",
+    "compare_documents": "List what changed between two documents (old first, then new).",
+    "convert_image": "Change an image's format (jpg, png, webp, bmp, gif, tiff); HEIC photos to JPG.",
     "resize_image": "Resize an image (width and/or height in px, or a percent), keeping its shape.",
+    "compress_image": "Make images smaller to send (options: quality 1-95, max_side in px).",
     "csv_to_excel": "Turn a CSV file into an Excel workbook (.xlsx).",
-    "excel_to_csv": "Turn an Excel sheet into a CSV file.",
+    "excel_to_csv": "Turn an Excel sheet into a CSV file (options: sheet).",
 }
 
+# The job asks the user for these on a password card, so the model never sees them.
+NEEDS_PASSWORD = {"protect_pdf", "unlock_pdf"}
 
-class PixelError(ValueError):
-    """Something about the request or the file, said the way you'd tell a person."""
-
-
-@dataclass
-class PixelResult:
-    outputs: list[Path]
-    summary: str
-    details: dict[str, Any] = field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------- where files go
-def pyxi_folder() -> Path:
-    return Path.home() / "Documents" / "Pyxi"
-
-
-def _writable(folder: Path) -> bool:
-    try:
-        folder.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryFile(dir=folder):
-            pass
-        return True
-    except OSError:
-        return False
-
-
-def out_dir_for(source: Path, fallback: Path | None = None) -> Path:
-    """Beside the original when that folder can be written, else Documents\\Pyxi."""
-    if _writable(source.parent):
-        return source.parent
-    folder = fallback or pyxi_folder()
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder
-
-
-def unique_path(folder: Path, name: str) -> Path:
-    """A path in ``folder`` that doesn't exist yet: "name.pdf", then "name (2).pdf"..."""
-    stem, ext = os.path.splitext(name)
-    stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", stem).strip(" .") or "file"
-    path = folder / f"{stem}{ext}"
-    n = 2
-    while path.exists():
-        path = folder / f"{stem} ({n}){ext}"
-        n += 1
-    return path
-
-
-def _need(paths: list[Path], exts: set[str], what: str, *, many: bool = False) -> list[Path]:
-    if not paths:
-        raise PixelError(f"Which {what}? I need the file's path.")
-    for p in paths:
-        if not p.is_file():
-            raise PixelError(f"I can't find {p.name} at {p.parent}.")
-        if p.suffix.lower() not in exts:
-            raise PixelError(f"{p.name} isn't a {what}.")
-    if not many and len(paths) > 1:
-        return paths[:1]
-    return paths
-
-
-def _size(n: int) -> str:
-    for unit in ("bytes", "KB", "MB", "GB"):
-        if n < 1024 or unit == "GB":
-            return f"{n:.0f} {unit}" if unit == "bytes" else f"{n:.1f} {unit}"
-        n /= 1024  # type: ignore[assignment]
-    return f"{n} bytes"
+OFFICE = {
+    ".docx",
+    ".doc",
+    ".odt",
+    ".rtf",
+    ".xlsx",
+    ".xlsm",
+    ".xls",
+    ".ods",
+    ".pptx",
+    ".ppt",
+    ".odp",
+}
+BUILT_IN = {
+    ".docx",
+    ".xlsx",
+    ".xlsm",
+    ".pptx",
+    ".md",
+    ".markdown",
+    ".html",
+    ".htm",
+    ".txt",
+    ".text",
+    ".log",
+    ".csv",
+}
+TO_PDF = OFFICE | BUILT_IN
 
 
 # ---------------------------------------------------------------------------- images
-def _open_image(path: Path):
-    from PIL import Image, ImageOps
-
-    img = Image.open(path)
-    return ImageOps.exif_transpose(img)  # phone photos come out the right way up
-
-
-def _flat_rgb(img):
-    from PIL import Image
-
-    if img.mode in ("RGBA", "LA", "P"):
-        img = img.convert("RGBA")
-        bg = Image.new("RGB", img.size, (255, 255, 255))
-        bg.paste(img, mask=img.split()[-1])
-        return bg
-    return img.convert("RGB")
-
-
 def images_to_pdf(
     files: list[Path], name: str | None = None, out: Path | None = None
 ) -> PixelResult:
-    files = _need(files, IMAGE_EXTS, "image", many=True)
-    pages = [_flat_rgb(_open_image(p)) for p in files]
-    folder = out or out_dir_for(files[0])
-    target = unique_path(folder, f"{name or files[0].stem}.pdf")
+    files = need(files, IMAGE_EXTS, "image", many=True)
+    pages = [flat_rgb(open_image(p)) for p in files]
+    target = unique_path(out or out_dir_for(files[0]), f"{name or files[0].stem}.pdf")
     pages[0].save(target, "PDF", save_all=True, append_images=pages[1:], resolution=150)
     n = len(pages)
     return PixelResult(
-        [target],
-        f"Made {target.name} from {n} image{'s' if n != 1 else ''}.",
-        {"pages": n},
+        [target], f"Made {target.name} from {n} image{'s' if n != 1 else ''}.", {"pages": n}
     )
 
 
 def convert_image(
-    files: list[Path], to: str = "png", quality: int = 90, out: Path | None = None
+    files: list[Path], to: str = "jpg", quality: int = 90, out: Path | None = None
 ) -> PixelResult:
-    files = _need(files, IMAGE_EXTS, "image", many=True)
+    files = need(files, IMAGE_EXTS, "image", many=True)
     key = to.lower().lstrip(".")
     if key not in IMAGE_FORMATS:
         raise PixelError(f"I can save images as {', '.join(sorted(set(IMAGE_FORMATS)))}, not {to}.")
     fmt, ext = IMAGE_FORMATS[key]
     outputs = []
     for p in files:
-        img = _open_image(p)
+        img = open_image(p)
         if fmt in ("JPEG", "BMP"):
-            img = _flat_rgb(img)
+            img = flat_rgb(img)
         target = unique_path(out or out_dir_for(p), p.stem + ext)
         kw: dict[str, Any] = {"quality": quality} if fmt in ("JPEG", "WEBP") else {}
         img.save(target, fmt, **kw)
         outputs.append(target)
+    n = len(outputs)
     return PixelResult(
-        outputs, f"Saved {len(outputs)} image{'s' if len(outputs) != 1 else ''} as {key.upper()}."
+        outputs,
+        f"Saved {n} image{'s' if n != 1 else ''} as {key.upper()}: {', '.join(o.name for o in outputs[:3])}.",
     )
 
 
@@ -182,12 +166,12 @@ def resize_image(
 ) -> PixelResult:
     from PIL import Image
 
-    files = _need(files, IMAGE_EXTS, "image", many=True)
+    files = need(files, IMAGE_EXTS, "image", many=True)
     if not (width or height or percent):
         raise PixelError("How big? Give a width, a height or a percent.")
     outputs, sizes = [], []
     for p in files:
-        img = _open_image(p)
+        img = open_image(p)
         w0, h0 = img.size
         if percent:
             w, h = round(w0 * percent / 100), round(h0 * percent / 100)
@@ -200,24 +184,84 @@ def resize_image(
             w, h = round(w0 * height / h0), height  # type: ignore[operator]
         w, h = max(1, w), max(1, h)
         small = img.resize((w, h), Image.LANCZOS)
-        target = unique_path(out or out_dir_for(p), f"{p.stem} ({w}x{h}){p.suffix}")
+        suffix = ".jpg" if p.suffix.lower() in (".heic", ".heif") else p.suffix
+        target = unique_path(out or out_dir_for(p), f"{p.stem} ({w}x{h}){suffix}")
         if target.suffix.lower() in (".jpg", ".jpeg"):
-            small = _flat_rgb(small)
+            small = flat_rgb(small)
         small.save(target)
         outputs.append(target)
         sizes.append(f"{w0}x{h0} to {w}x{h}")
     return PixelResult(outputs, f"Resized {', '.join(sizes)}.")
 
 
+def compress_image(
+    files: list[Path], quality: int = 72, max_side: int = 2560, out: Path | None = None
+) -> PixelResult:
+    """Smaller images to send: scaled to max_side, metadata dropped, re-saved. Photos (and HEIC)
+    become JPG; PNGs with transparency stay PNG, optimised. Bigger results are thrown away."""
+    from PIL import Image
+
+    files = need(files, IMAGE_EXTS, "image", many=True)
+    outputs: list[Path] = []
+    lines, before_all, after_all = [], 0, 0
+    for p in files:
+        before = p.stat().st_size
+        img = open_image(p)
+        if (
+            before < 100_000
+            and max(img.size) <= max_side
+            and p.suffix.lower() not in (".heic", ".heif")
+        ):
+            lines.append(f"{p.name} was already small")  # under 100 KB: nothing worth saving
+            continue
+        if max(img.size) > max_side:
+            img.thumbnail((max_side, max_side), Image.LANCZOS)
+        alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
+        ext = p.suffix.lower()
+        buf = io.BytesIO()
+        if alpha and ext in (".png", ".webp", ".gif"):
+            if ext == ".webp":
+                img.save(buf, "WEBP", quality=quality)
+                out_ext = ".webp"
+            else:
+                img.convert("RGBA").quantize(256, method=Image.Quantize.FASTOCTREE).save(
+                    buf, "PNG", optimize=True
+                )
+                out_ext = ".png"
+        elif ext == ".webp":
+            flat_rgb(img).save(buf, "WEBP", quality=quality)
+            out_ext = ".webp"
+        else:
+            flat_rgb(img).save(buf, "JPEG", quality=quality, optimize=True, progressive=True)
+            out_ext = ".jpg"
+        after = buf.tell()
+        if after >= before * 0.95:
+            lines.append(f"{p.name} was already small")
+            continue
+        target = unique_path(out or out_dir_for(p), f"{p.stem} (smaller){out_ext}")
+        target.write_bytes(buf.getvalue())
+        outputs.append(target)
+        before_all, after_all = before_all + before, after_all + after
+        lines.append(f"{p.name} {size_text(before)} to {size_text(after)}")
+    if not outputs:
+        return PixelResult([], ". ".join(lines) + ". Nothing to shrink.")
+    saved = round(100 * (1 - after_all / before_all))
+    return PixelResult(
+        outputs,
+        f"Shrank {len(outputs)} image{'s' if len(outputs) != 1 else ''} by {saved}%: {'; '.join(lines[:3])}.",
+    )
+
+
 # ---------------------------------------------------------------------------- PDFs
 def merge_pdfs(files: list[Path], name: str | None = None, out: Path | None = None) -> PixelResult:
     from pypdf import PdfWriter
 
-    files = _need(files, {".pdf"}, "PDF", many=True)
+    files = need(files, {".pdf"}, "PDF", many=True)
     if len(files) < 2:
         raise PixelError("I need at least two PDFs to merge.")
     writer = PdfWriter()
     for p in files:
+        pixel_pdf._reader(p)  # a clear message for a locked or broken one
         writer.append(str(p))
     target = unique_path(out or out_dir_for(files[0]), f"{name or files[0].stem + ' (merged)'}.pdf")
     with target.open("wb") as fh:
@@ -228,31 +272,12 @@ def merge_pdfs(files: list[Path], name: str | None = None, out: Path | None = No
     )
 
 
-def parse_ranges(spec: str, pages: int) -> list[tuple[int, int]]:
-    """'1-3, 5, 7-' -> [(1, 3), (5, 5), (7, pages)], 1-based and inclusive."""
-    out = []
-    for part in re.split(r"[,;]\s*", spec.strip()):
-        if not part:
-            continue
-        m = re.fullmatch(r"(\d*)\s*(?:-|to)\s*(\d*)|(\d+)", part.strip())
-        if not m:
-            raise PixelError(f"I don't understand the page range {part!r}.")
-        if m.group(3):
-            a = b = int(m.group(3))
-        else:
-            a = int(m.group(1) or 1)
-            b = int(m.group(2) or pages)
-        if not 1 <= a <= b <= pages:
-            raise PixelError(f"Pages {part} aren't in this PDF (it has {pages}).")
-        out.append((a, b))
-    return out
-
-
 def split_pdf(files: list[Path], ranges: str = "", out: Path | None = None) -> PixelResult:
-    from pypdf import PdfReader, PdfWriter
+    """One PDF per range ('1-2, 3' makes two), or one per page when no ranges are given."""
+    from pypdf import PdfWriter
 
-    (src,) = _need(files, {".pdf"}, "PDF")
-    reader = PdfReader(str(src))
+    (src,) = need(files, {".pdf"}, "PDF")
+    reader = pixel_pdf._reader(src)
     n = len(reader.pages)
     parts = parse_ranges(ranges, n) if ranges.strip() else [(i, i) for i in range(1, n + 1)]
     folder = out or out_dir_for(src)
@@ -269,8 +294,9 @@ def split_pdf(files: list[Path], ranges: str = "", out: Path | None = None) -> P
         with target.open("wb") as fh:
             writer.write(fh)
         outputs.append(target)
+    pieces = ", ".join(o.name for o in outputs[:4]) + (", ..." if len(outputs) > 4 else "")
     return PixelResult(
-        outputs, f"Split {src.name} into {len(outputs)} PDFs.", {"folder": str(folder)}
+        outputs, f"Split {src.name} into {len(outputs)} PDFs: {pieces}.", {"folder": str(folder)}
     )
 
 
@@ -280,11 +306,11 @@ def compress_pdf(
     """Smaller PDFs: big images are scaled down and re-saved as JPEG, then streams are compressed
     and identical objects shared. Text stays text."""
     from PIL import Image
-    from pypdf import PdfReader, PdfWriter
+    from pypdf import PdfWriter
 
-    (src,) = _need(files, {".pdf"}, "PDF")
+    (src,) = need(files, {".pdf"}, "PDF")
     before = src.stat().st_size
-    writer = PdfWriter(clone_from=PdfReader(str(src)))
+    writer = PdfWriter(clone_from=pixel_pdf._reader(src))
     for page in writer.pages:
         for img in page.images:
             try:
@@ -293,13 +319,13 @@ def compress_pdf(
                     continue
                 if max(pic.size) > max_px:
                     pic.thumbnail((max_px, max_px), Image.LANCZOS)
-                img.replace(_flat_rgb(pic), quality=quality)
+                img.replace(flat_rgb(pic), quality=quality)
             except Exception:  # an image pypdf can't re-encode stays as it is
                 continue
         page.compress_content_streams()
     try:
         writer.compress_identical_objects(remove_duplicates=True, remove_unreferenced=True)
-    except TypeError:  # pypdf before 6.x names them differently
+    except TypeError:  # older pypdf names them differently
         writer.compress_identical_objects(remove_identicals=True, remove_orphans=True)
     buf = io.BytesIO()
     writer.write(buf)
@@ -307,7 +333,7 @@ def compress_pdf(
     if after >= before * 0.98:
         return PixelResult(
             [],
-            f"{src.name} is already about as small as it gets ({_size(before)}).",
+            f"{src.name} is already about as small as it gets ({size_text(before)}).",
             {"before": before, "after": before},
         )
     target = unique_path(out or out_dir_for(src), f"{src.stem} (smaller).pdf")
@@ -315,7 +341,7 @@ def compress_pdf(
     saved = round(100 * (1 - after / before))
     return PixelResult(
         [target],
-        f"Made {target.name}: {_size(before)} down to {_size(after)}, {saved}% smaller.",
+        f"Made {target.name}: {size_text(before)} down to {size_text(after)}, {saved}% smaller.",
         {"before": before, "after": after},
     )
 
@@ -325,11 +351,12 @@ def pdf_to_images(
 ) -> PixelResult:
     import pypdfium2 as pdfium
 
-    (src,) = _need(files, {".pdf"}, "PDF")
+    (src,) = need(files, {".pdf"}, "PDF")
     key = fmt.lower().lstrip(".")
     if key not in ("png", "jpg", "jpeg"):
         raise PixelError("PDF pages can come out as PNG or JPG.")
     pil_fmt, ext = IMAGE_FORMATS[key]
+    pixel_pdf._reader(src)
     doc = pdfium.PdfDocument(str(src))
     try:
         n = len(doc)
@@ -346,7 +373,7 @@ def pdf_to_images(
         for i in wanted:
             img = doc[i - 1].render(scale=dpi / 72).to_pil()
             if pil_fmt == "JPEG":
-                img = _flat_rgb(img)
+                img = flat_rgb(img)
             target = unique_path(folder, f"{src.stem} page {i}{ext}")
             img.save(target, pil_fmt, **({"quality": 90} if pil_fmt == "JPEG" else {}))
             outputs.append(target)
@@ -358,7 +385,7 @@ def pdf_to_images(
     )
 
 
-# ---------------------------------------------------------------------------- Word to PDF
+# ---------------------------------------------------------------------------- to PDF
 def libreoffice() -> str | None:
     """soffice, if LibreOffice is installed (it's optional)."""
     found = shutil.which("soffice") or shutil.which("soffice.exe")
@@ -370,26 +397,38 @@ def libreoffice() -> str | None:
     return None
 
 
-def word_to_pdf(
-    files: list[Path], out: Path | None = None, *, use_libreoffice: bool = True
-) -> PixelResult:
-    files = _need(files, {".docx", ".doc", ".odt", ".rtf"}, "Word document", many=True)
-    soffice = libreoffice() if use_libreoffice else None
-    outputs = []
-    how = "LibreOffice" if soffice else "the built-in converter"
+def to_pdf(files: list[Path], out: Path | None = None, *, sheet: str = "") -> PixelResult:
+    """Office files go through LibreOffice when it's installed (exact layout), otherwise through the
+    built-in renderer; Markdown, HTML and text always use the built-in one."""
+    files = need(files, TO_PDF, "document Pixel can turn into PDF", many=True)
+    soffice = libreoffice()
+    outputs, used_builtin = [], False
     for src in files:
+        ext = src.suffix.lower()
         target = unique_path(out or out_dir_for(src), f"{src.stem}.pdf")
-        if soffice:
+        if soffice and ext in OFFICE:
             _soffice_pdf(soffice, src, target)
-        elif src.suffix.lower() == ".docx":
-            _docx_pdf(src, target)
+        elif ext in BUILT_IN:
+            pixel_render.to_pdf(src, target, sheet=sheet)
+            used_builtin = used_builtin or ext in OFFICE
         else:
             raise PixelError(
-                f"{src.suffix} files need LibreOffice to turn into PDF; .docx works without it."
+                f"{ext} files need LibreOffice to turn into PDF; save it as {ext}x, or install LibreOffice."
             )
         outputs.append(target)
-    note = "" if soffice else " Install LibreOffice for an exact copy of the layout."
-    return PixelResult(outputs, f"Made {', '.join(o.name for o in outputs)} with {how}.{note}")
+    note = " Install LibreOffice for an exact copy of the Office layout." if used_builtin else ""
+    pages = []
+    for o in outputs:
+        try:
+            from pypdf import PdfReader
+
+            pages.append(len(PdfReader(str(o)).pages))
+        except Exception:
+            pages.append(0)
+    made = ", ".join(
+        f"{o.name} ({n} page{'s' if n != 1 else ''})" for o, n in zip(outputs, pages, strict=True)
+    )
+    return PixelResult(outputs, f"Made {made}.{note}")
 
 
 def _soffice_pdf(soffice: str, src: Path, target: Path) -> None:
@@ -416,98 +455,6 @@ def _soffice_pdf(soffice: str, src: Path, target: Path) -> None:
         shutil.move(str(made), target)
 
 
-def _docx_pdf(src: Path, target: Path) -> None:
-    """Headings, paragraphs (bold and italic runs), bullets and tables, in reading order."""
-    from xml.sax.saxutils import escape
-
-    from docx import Document
-    from docx.table import Table
-    from docx.text.paragraph import Paragraph
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4, letter
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib.units import inch
-    from reportlab.platypus import ListFlowable, ListItem, SimpleDocTemplate, Spacer, TableStyle
-    from reportlab.platypus import Paragraph as P
-    from reportlab.platypus import Table as T
-
-    doc = Document(str(src))
-    styles = getSampleStyleSheet()
-    sec = doc.sections[0] if doc.sections else None
-    size = (
-        A4
-        if sec is not None and sec.page_width and abs(sec.page_width.inches - 8.27) < 0.1
-        else letter
-    )
-
-    def rich(p: Paragraph) -> str:
-        out = []
-        for r in p.runs:
-            t = escape(r.text)
-            if r.bold:
-                t = f"<b>{t}</b>"
-            if r.italic:
-                t = f"<i>{t}</i>"
-            if r.underline:
-                t = f"<u>{t}</u>"
-            out.append(t)
-        return "".join(out) or escape(p.text)
-
-    story: list[Any] = []
-    bullets: list[Any] = []
-
-    def flush() -> None:
-        if bullets:
-            story.append(ListFlowable(list(bullets), bulletType="bullet", leftIndent=14))
-            bullets.clear()
-
-    body = doc.element.body
-    for child in body.iterchildren():
-        tag = child.tag.rsplit("}", 1)[-1]
-        if tag == "p":
-            p = Paragraph(child, doc)
-            style = (p.style.name if p.style is not None else "") or ""
-            if not p.text.strip():
-                flush()
-                story.append(Spacer(1, 6))
-                continue
-            if "List" in style:
-                bullets.append(ListItem(P(rich(p), styles["BodyText"])))
-                continue
-            flush()
-            m = re.match(r"Heading (\d)", style)
-            if style == "Title":
-                story.append(P(rich(p), styles["Title"]))
-            elif m:
-                story.append(P(rich(p), styles[f"Heading{min(int(m.group(1)), 6)}"]))
-            else:
-                story.append(P(rich(p), styles["BodyText"]))
-        elif tag == "tbl":
-            flush()
-            table = Table(child, doc)
-            rows = [
-                [P(escape(c.text), styles["BodyText"]) for c in row.cells] for row in table.rows
-            ]
-            if rows:
-                t = T(rows, repeatRows=1)
-                t.setStyle(
-                    TableStyle(
-                        [
-                            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eeeeee")),
-                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ]
-                    )
-                )
-                story += [t, Spacer(1, 8)]
-    flush()
-    if not story:
-        story.append(Spacer(1, 1))
-    SimpleDocTemplate(
-        str(target), pagesize=size, leftMargin=inch, rightMargin=inch, title=src.stem
-    ).build(story)
-
-
 # ---------------------------------------------------------------------------- CSV and Excel
 def _cell(value: str) -> Any:
     v = value.strip()
@@ -521,20 +468,23 @@ def _cell(value: str) -> Any:
     return value
 
 
+def read_csv(src: Path) -> list[list[str]]:
+    text = pixel_render.read_any_text(src)
+    try:
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|")
+    except csv.Error:
+        dialect = csv.excel_tab if src.suffix.lower() == ".tsv" else csv.excel
+    return list(csv.reader(io.StringIO(text), dialect))
+
+
 def csv_to_excel(files: list[Path], out: Path | None = None) -> PixelResult:
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
-    files = _need(files, {".csv", ".tsv", ".txt"}, "CSV file", many=True)
+    files = need(files, {".csv", ".tsv", ".txt"}, "CSV file", many=True)
     outputs = []
     for src in files:
-        raw = src.read_bytes()
-        text = raw.decode("utf-8-sig", errors="replace")
-        try:
-            dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|")
-        except csv.Error:
-            dialect = csv.excel_tab if src.suffix.lower() == ".tsv" else csv.excel
-        rows = list(csv.reader(io.StringIO(text), dialect))
+        rows = read_csv(src)
         wb = Workbook()
         ws = wb.active
         ws.title = re.sub(r"[\[\]:*?/\\]", "_", src.stem)[:31] or "Sheet1"
@@ -556,14 +506,14 @@ def csv_to_excel(files: list[Path], out: Path | None = None) -> PixelResult:
 def excel_to_csv(files: list[Path], sheet: str = "", out: Path | None = None) -> PixelResult:
     from openpyxl import load_workbook
 
-    (src,) = _need(files, {".xlsx", ".xlsm"}, "Excel workbook")
+    (src,) = need(files, {".xlsx", ".xlsm"}, "Excel workbook")
     wb = load_workbook(src, data_only=True, read_only=True)
     try:
-        names = [sheet] if sheet else wb.sheetnames[:1]
         if sheet and sheet not in wb.sheetnames:
             raise PixelError(
                 f"There's no sheet called {sheet!r}; it has {', '.join(wb.sheetnames)}."
             )
+        names = [sheet] if sheet else wb.sheetnames[:1]
         outputs = []
         for name in names:
             label = src.stem if len(wb.sheetnames) == 1 else f"{src.stem} ({name})"
@@ -573,9 +523,10 @@ def excel_to_csv(files: list[Path], sheet: str = "", out: Path | None = None) ->
                 for row in wb[name].iter_rows(values_only=True):
                     w.writerow(["" if v is None else v for v in row])
             outputs.append(target)
+        count = len(wb.sheetnames)
     finally:
         wb.close()
-    extra = f" (sheet {names[0]}; it has {len(wb.sheetnames)})" if len(wb.sheetnames) > 1 else ""
+    extra = f" (sheet {names[0]}; it has {count})" if count > 1 else ""
     return PixelResult(outputs, f"Made {outputs[0].name}{extra}.")
 
 
@@ -593,31 +544,78 @@ def run(
         if v in (None, ""):
             return None
         try:
-            return float(v) if key == "percent" else int(float(v))
+            return float(v) if key in ("percent", "opacity") else int(float(v))
         except (TypeError, ValueError):
             raise PixelError(f"{key} should be a number, not {v!r}.") from None
 
-    if operation == "images_to_pdf":
+    def pages(*keys: str) -> str:
+        for k in keys:
+            v = o.get(k)
+            if isinstance(v, list):
+                v = ", ".join(str(x) for x in v)
+            if v not in (None, ""):
+                return str(v)
+        return ""
+
+    op = {"word_to_pdf": "to_pdf", "heic_to_jpg": "convert_image"}.get(operation, operation)
+    if op == "images_to_pdf":
         return images_to_pdf(paths, o.get("name"), out)
-    if operation == "merge_pdfs":
+    if op == "to_pdf":
+        return to_pdf(paths, out, sheet=str(o.get("sheet") or ""))
+    if op == "pdf_to_word":
+        return pixel_pdf.pdf_to_word(paths, out)
+    if op == "merge_pdfs":
         return merge_pdfs(paths, o.get("name"), out)
-    if operation == "split_pdf":
-        return split_pdf(paths, str(o.get("pages") or ""), out)
-    if operation == "compress_pdf":
+    if op == "split_pdf":
+        return split_pdf(paths, pages("ranges", "pages"), out)
+    if op == "extract_pages":
+        return pixel_pdf.extract_pages(paths, pages("pages", "ranges"), out)
+    if op == "delete_pages":
+        return pixel_pdf.delete_pages(paths, pages("pages", "ranges"), out)
+    if op == "rotate_pages":
+        return pixel_pdf.rotate_pages(paths, pages("pages", "ranges"), o.get("angle") or 90, out)
+    if op == "reorder_pages":
+        return pixel_pdf.reorder_pages(paths, pages("order", "pages"), out)
+    if op == "compress_pdf":
         return compress_pdf(paths, num("quality") or 60, out=out)
-    if operation == "word_to_pdf":
-        return word_to_pdf(paths, out)
-    if operation == "pdf_to_images":
-        return pdf_to_images(
-            paths, str(o.get("format") or "png"), num("dpi") or 150, str(o.get("pages") or ""), out
+    if op == "add_page_numbers":
+        return pixel_pdf.add_page_numbers(
+            paths,
+            str(o.get("position") or "bottom center"),
+            num("start") or 1,
+            str(o.get("format") or ""),
+            out,
         )
-    if operation == "convert_image":
-        return convert_image(paths, str(o.get("format") or "png"), num("quality") or 90, out)
-    if operation == "resize_image":
+    if op == "add_watermark":
+        return pixel_pdf.add_watermark(
+            paths, str(o.get("text") or ""), num("opacity") or 0.15, out=out
+        )
+    if op == "protect_pdf":
+        return pixel_pdf.protect_pdf(paths, str(o.get("password") or ""), out)
+    if op == "unlock_pdf":
+        return pixel_pdf.unlock_pdf(paths, str(o.get("password") or ""), out)
+    if op == "fill_form":
+        values = o.get("values") if isinstance(o.get("values"), dict) else {}
+        return pixel_pdf.fill_form(paths, o.get("details") or {}, values, out)
+    if op == "extract_text":
+        return pixel_pdf.extract_text(paths, out)
+    if op == "make_searchable":
+        return pixel_pdf.make_searchable(paths, num("dpi") or 200, out)
+    if op == "compare_documents":
+        return pixel_pdf.compare_documents(paths, out)
+    if op == "pdf_to_images":
+        return pdf_to_images(
+            paths, str(o.get("format") or "png"), num("dpi") or 150, pages("pages", "ranges"), out
+        )
+    if op == "convert_image":
+        return convert_image(paths, str(o.get("format") or "jpg"), num("quality") or 90, out)
+    if op == "resize_image":
         return resize_image(paths, num("width"), num("height"), num("percent"), out)
-    if operation == "csv_to_excel":
+    if op == "compress_image":
+        return compress_image(paths, num("quality") or 72, num("max_side") or 2560, out)
+    if op == "csv_to_excel":
         return csv_to_excel(paths, out)
-    if operation == "excel_to_csv":
+    if op == "excel_to_csv":
         return excel_to_csv(paths, str(o.get("sheet") or ""), out)
     raise PixelError(f"I don't know how to {operation!r}. I can: {', '.join(OPERATIONS)}.")
 
@@ -626,24 +624,48 @@ def guess_operation(task: str, files: list[str]) -> str | None:
     """For a plain `delegate` to Pixel with no operation: pick one from the words and files."""
     t = task.lower()
     exts = {Path(f).suffix.lower() for f in files}
-    if re.search(r"smaller|compress|shrink|reduce", t) and ".pdf" in exts:
-        return "compress_pdf"
-    if re.search(r"merge|combine|join", t):
-        return "merge_pdfs" if exts <= {".pdf"} else "images_to_pdf"
-    if re.search(r"split|separate|each page", t) and ".pdf" in exts and "image" not in t:
-        return "split_pdf"
-    if exts & IMAGE_EXTS and "pdf" in t:
-        return "images_to_pdf"
-    if exts & {".docx", ".doc", ".odt", ".rtf"} and "pdf" in t:
-        return "word_to_pdf"
-    if ".pdf" in exts and re.search(r"image|png|jpe?g|picture", t):
-        return "pdf_to_images"
-    if exts & {".csv", ".tsv"}:
-        return "csv_to_excel"
-    if exts & {".xlsx", ".xlsm"} and "csv" in t:
-        return "excel_to_csv"
-    if exts & IMAGE_EXTS and re.search(r"resize|smaller|bigger|width|height|%|percent", t):
-        return "resize_image"
-    if exts & IMAGE_EXTS:
-        return "convert_image"
-    return None
+    pdf = ".pdf" in exts
+    images = bool(exts & IMAGE_EXTS)
+    rules: list[tuple[bool, str]] = [
+        (
+            len(files) == 2 and bool(re.search(r"compare|differen|what changed|diff\b", t)),
+            "compare_documents",
+        ),
+        (pdf and bool(re.search(r"unlock|remove (the )?password|decrypt", t)), "unlock_pdf"),
+        (pdf and bool(re.search(r"password|protect|lock|encrypt", t)), "protect_pdf"),
+        (pdf and bool(re.search(r"\bfill\b|form", t)), "fill_form"),
+        (pdf and bool(re.search(r"page numbers?|number the pages", t)), "add_page_numbers"),
+        (pdf and "watermark" in t, "add_watermark"),
+        (
+            pdf and bool(re.search(r"rotate|turn .*(page|sideways|upside)|sideways", t)),
+            "rotate_pages",
+        ),
+        (pdf and bool(re.search(r"reorder|re-order|move page|order of", t)), "reorder_pages"),
+        (pdf and bool(re.search(r"delete|remove|drop", t)) and "page" in t, "delete_pages"),
+        (
+            pdf and bool(re.search(r"extract|pull out|just pages?|only pages?", t)) and "page" in t,
+            "extract_pages",
+        ),
+        (bool(re.search(r"searchable|ocr", t)), "make_searchable"),
+        ((pdf or images) and bool(re.search(r"\btext\b|words|transcribe", t)), "extract_text"),
+        (pdf and bool(re.search(r"\bword\b|docx|editable", t)), "pdf_to_word"),
+        (pdf and bool(re.search(r"smaller|compress|shrink|reduce", t)), "compress_pdf"),
+        (
+            images and bool(re.search(r"compress|smaller to send|shrink|reduce", t)),
+            "compress_image",
+        ),
+        (
+            bool(re.search(r"merge|combine|join", t)),
+            "merge_pdfs" if exts <= {".pdf"} else "images_to_pdf",
+        ),
+        (pdf and bool(re.search(r"split|separate|each page", t)) and "image" not in t, "split_pdf"),
+        (images and "pdf" in t, "images_to_pdf"),
+        (bool(exts & (TO_PDF - {".csv"})) and "pdf" in t, "to_pdf"),
+        (pdf and bool(re.search(r"image|png|jpe?g|picture", t)), "pdf_to_images"),
+        (bool(exts & {".csv", ".tsv"}) and "pdf" not in t, "csv_to_excel"),
+        (bool(exts & {".xlsx", ".xlsm"}) and "csv" in t, "excel_to_csv"),
+        (images and bool(re.search(r"resize|bigger|width|height|%|percent|px", t)), "resize_image"),
+        (images and bool(re.search(r"smaller", t)), "compress_image"),
+        (images, "convert_image"),
+    ]
+    return next((op for ok, op in rules if ok), None)

@@ -417,8 +417,10 @@ COMPANION_TOOLS: list[ToolSpec] = [
             "files": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Paths of documents on this PC for a writer to fix (.docx, .txt, .md, .pdf); "
-                "the fixed copy is saved beside the original.",
+                "description": "Paths of documents on this PC for a writer to fix, translate or "
+                "rewrite (.docx, .txt, .md, .pdf) or summarize (also .xlsx, .pptx, .html); the new "
+                "copy is saved beside the original. Say what to do in task ('Summarize the key "
+                "dates', 'Translate into French').",
             },
         },
         ["agent", "task"],
@@ -880,11 +882,15 @@ COMPANION_TOOLS += [
     ),
     _tool(
         "convert_files",
-        "Pixel converts files in the background, in seconds, with no app window and without their mouse: "
-        "images to PDF, merge, split or shrink PDFs, Word to PDF, PDF pages to images, image format and "
-        "size, CSV to and from Excel. Needs real paths: from what's on screen (an Explorer window, an "
-        "attachment you downloaded), from search_files, or from them. The original is never changed; "
-        "the new file goes beside it. Say one short line ('On it.'); they get a notification.",
+        "Pixel does any file or PDF job in the background, in seconds, with no app window and without "
+        "their mouse: Word, Excel, PowerPoint, Markdown, HTML or text to PDF; PDF to Word; images to "
+        "PDF; merge, split, shrink, rotate, reorder, delete or extract pages; page numbers; a "
+        "watermark; lock or unlock with a password (they type it on a card: never ask for it or put "
+        "it in options); fill a PDF form from their saved details; text out of a PDF or photo (OCR "
+        "for scans); a searchable PDF from a scan; compare two documents; HEIC to JPG; resize or "
+        "shrink images; CSV and Excel. Needs real paths: from what's on screen (an Explorer window, "
+        "an attachment you downloaded), from search_files, or from them. The original is never "
+        "changed; the new file goes beside it. Say one short line ('On it.'); they get a notification.",
         {
             "operation": {
                 "type": "string",
@@ -898,9 +904,13 @@ COMPANION_TOOLS += [
             },
             "options": {
                 "type": "object",
-                "description": "Optional: name (new file's name, no extension), pages ('1-3, 5' "
-                "for split_pdf or pdf_to_images), format (png, jpg, webp...), quality (1-95), "
-                "width, height, percent, dpi, sheet.",
+                "description": "Optional: pages ('1-2, 3' for split_pdf, extract_pages, "
+                "delete_pages, rotate_pages, pdf_to_images; 'last' works), order ('3, 1-2' for "
+                "reorder_pages), angle (90, 180, 270, left, right), text (the watermark), "
+                "position ('bottom right', 'top center') and format ('Page {n} of {total}') for "
+                "page numbers, values ({field name: value} for fill_form, only what they told "
+                "you), name (new file's name, no extension), format (jpg, png, webp...), "
+                "quality (1-95), max_side, width, height, percent, dpi, sheet. Never a password.",
             },
         },
         ["operation", "files"],

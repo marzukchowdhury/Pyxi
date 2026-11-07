@@ -352,7 +352,7 @@ export type BrainEvent =
   | { type: "job_frame"; job_id: string; image: string }
   | { type: "handoff"; source: string; target: string; task: string }
   | { type: "confirm"; request_id: string; job_id: string; agent: string; action: string; reason: string; always?: string }
-  | { type: "ask"; request_id: string; job_id: string; agent: string; question: string; handover?: boolean }
+  | { type: "ask"; request_id: string; job_id: string; agent: string; question: string; handover?: boolean; secret?: boolean }
   | { type: "request_closed"; request_id: string }
   | { type: "driving"; doing: string | null }
   | { type: "agents"; agents: Agent[] }

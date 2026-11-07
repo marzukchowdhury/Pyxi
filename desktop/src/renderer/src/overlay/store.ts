@@ -62,6 +62,7 @@ export interface ChatLine {
 interface Request {
   kind: "confirm" | "ask";
   handover?: boolean; // their turn in the browser (paying): a Done button, no text box
+  secret?: boolean; // a password: typed into a masked box, sent straight to the teammate
   request_id: string;
   agent: string;
   action?: string;

@@ -300,6 +300,20 @@ SCENARIOS = [
     ('totals row', 'turn_f05f1ae6', 'Add a totals row to budget.xlsx.', 'ledger'),
     ('sheet pivot', 'turn_49b75541', 'Make a pivot of sales by region in my Google Sheet called Sales 2026.', 'ledger'),
     ('pdf question', 'turn_f05f1ae6', "What's the total on invoice 1182?", 'read'),
+    ('rotate page', 'turn_f05f1ae6', 'Page 2 of the lease scan on my desktop is sideways, can you rotate it?', 'pixel:rotate_pages'),
+    ('page numbers', 'turn_f05f1ae6', 'Add page numbers to my tax return PDF.', 'pixel:add_page_numbers'),
+    ('delete page', 'turn_f05f1ae6', 'Delete the last page of invoice 1182.', 'pixel:delete_pages'),
+    ('watermark', 'turn_f05f1ae6', 'Put a DRAFT watermark on my tax return PDF.', 'pixel:add_watermark'),
+    ('lock pdf', 'turn_f05f1ae6', 'Password-protect invoice 1182 before I email it.', 'pixel:protect_pdf'),
+    ('fill form', 'turn_f05f1ae6', 'Fill in the rental application PDF on my desktop with my details.', 'pixel:fill_form'),
+    ('slides to pdf', 'turn_f05f1ae6', 'Turn my Lecture 4 slides into a PDF.', 'pixel:to_pdf'),
+    ('pdf to word', 'turn_f05f1ae6', 'I need to edit the tax return PDF. Can you turn it into a Word document?', 'pixel:pdf_to_word'),
+    ('heic', 'turn_f05f1ae6', 'Convert the HEIC photo on my desktop to a JPG.', 'pixel:convert_image'),
+    ('shrink photos', 'turn_f05f1ae6', 'Make IMG_2041 and IMG_2042 smaller so I can email them.', 'pixel:compress_image'),
+    ('searchable scan', 'turn_f05f1ae6', 'Make the lease scan searchable so I can find words in it.', 'pixel:make_searchable'),
+    ('compare docs', 'turn_f05f1ae6', 'What changed between offer letter v1 and v2 on my desktop?', 'pixel:compare_documents'),
+    ('summarize doc', 'turn_f05f1ae6', 'Summarize my tax return PDF in three bullet points.', 'quill'),
+    ('translate doc', 'turn_f05f1ae6', 'Translate my PwC cover letter into French.', 'quill'),
     ('capcut new', 'turn_46ef6b02', 'Start a new project in CapCut for me.', 'hands'),
     ('guide capcut', 'turn_46ef6b02', 'Show me how to start a new video in CapCut, step by step. I want to learn.', 'teach'),
     ('guide youtube', 'turn_1f172cb9', 'Teach me how to make a YouTube playlist, one step at a time.', 'teach'),
@@ -504,6 +518,11 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         "invoice-1182.pdf",
         "receipt.jpg",
         "sales.csv",
+        "lease scan.pdf",
+        "IMG_2043.HEIC",
+        "Offer letter v1.docx",
+        "Offer letter v2.docx",
+        "rental application.pdf",
         "Maplewave bill Nov 2026.pdf",
     ]:
         (mess / fname).write_text("x")
@@ -767,6 +786,16 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("drove the mouse for file work")
     if expect == "pixel" and not any(b.startswith("delegate pixel") and "[" in b for b in background):
         problems.append("didn't hand it to Pixel with the file")
+    if expect.startswith("pixel:"):
+        op = expect.split(":", 1)[1].replace("_", " ")
+        if "use_computer" in tools:
+            problems.append("drove the mouse for file work")
+        if not any(b.startswith(f"delegate pixel: {op}") and "[" in b for b in background):
+            problems.append(f"didn't hand it to Pixel as {op}")
+        if re.search(r"password", said, re.I) and "?" in said and op == "protect pdf":
+            problems.append("asked for the password in chat")
+    if expect == "quill" and not any(b.startswith("delegate quill") and "[" in b for b in background):
+        problems.append("didn't hand the document to Quill")
     if expect == "ledger" and not any(b.startswith("delegate ledger") for b in background):
         problems.append("didn't hand it to Ledger")
     if expect == "ledger_or_ask" and not (any(b.startswith("delegate ledger") for b in background) or "?" in said):

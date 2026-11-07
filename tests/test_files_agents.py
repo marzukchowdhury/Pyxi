@@ -173,7 +173,7 @@ def test_guessing_the_operation_from_plain_words():
     assert g("make this PDF smaller", ["a.pdf"]) == "compress_pdf"
     assert g("convert this image to PDF", ["a.jpg"]) == "images_to_pdf"
     assert g("merge these", ["a.pdf", "b.pdf"]) == "merge_pdfs"
-    assert g("Word to PDF please", ["a.docx"]) == "word_to_pdf"
+    assert g("Word to PDF please", ["a.docx"]) == "to_pdf"
     assert g("turn into Excel", ["a.csv"]) == "csv_to_excel"
     assert g("hello", []) is None
 

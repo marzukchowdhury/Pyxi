@@ -33,7 +33,7 @@ export function Requests() {
               </div>
             </>
           ) : (
-            <Ask id={r.request_id} agent={r.agent} question={r.question ?? ""} onAnswer={answer} />
+            <Ask id={r.request_id} agent={r.agent} question={r.question ?? ""} secret={!!r.secret} onAnswer={answer} />
           )}
         </Interactive>
       ))}
@@ -41,14 +41,22 @@ export function Requests() {
   );
 }
 
-function Ask({ id, agent, question, onAnswer }: { id: string; agent: string; question: string; onAnswer: (id: string, v: unknown) => void }) {
+function Ask({ id, agent, question, secret, onAnswer }: { id: string; agent: string; question: string; secret: boolean; onAnswer: (id: string, v: unknown) => void }) {
   const [text, setText] = useState("");
   return (
     <>
-      <div className="req-title">{agent} has a question</div>
+      <div className="req-title">{secret ? `${agent} needs a password` : `${agent} has a question`}</div>
       <div className="req-action">{question}</div>
-      <form className="req-buttons" onSubmit={(e) => { e.preventDefault(); onAnswer(id, text); }}>
-        <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Your answer" />
+      {secret && <div className="req-reason">It goes straight to {agent} on this PC. Pyxi's model never sees it, and it isn't saved.</div>}
+      <form className="req-buttons" onSubmit={(e) => { e.preventDefault(); onAnswer(id, text); setText(""); }}>
+        <input
+          autoFocus
+          type={secret ? "password" : "text"}
+          autoComplete={secret ? "off" : undefined}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={secret ? "Password" : "Your answer"}
+        />
         <button className="yes" type="submit">Send</button>
         <button type="button" onClick={() => onAnswer(id, null)}>Skip</button>
       </form>

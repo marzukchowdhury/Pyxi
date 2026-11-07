@@ -35,6 +35,7 @@ dependencies = [
     "python-pptx>=1.0",
     "pypdfium2>=4.0",  # PDF pages to images
     "reportlab>=4.0",  # Word to PDF when LibreOffice isn't installed
+    "pillow-heif>=0.18",  # iPhone photos (HEIC)
     # Time zones on Windows (zoneinfo needs the IANA database)
     "tzdata>=2024.1",
     # Windows' built-in OCR: reads text inside images so Pyxi can underline it

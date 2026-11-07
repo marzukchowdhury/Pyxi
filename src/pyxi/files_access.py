@@ -167,10 +167,12 @@ def search_walk(
     budget_s: float = 3.0,
     kinds: set[str] | None = None,
 ) -> list[Hit]:
-    """Walk the allowed folders for names containing every word (newest first)."""
-    words = _words(query)
+    """Walk the allowed folders for names containing every word, newest first. When no name has
+    them all ("Resume v1 Resume v2"), names with the most of them come back instead."""
+    words = list(dict.fromkeys(_words(query)))
     deadline = time.monotonic() + budget_s
     hits: list[Hit] = []
+    partial: list[tuple[int, Hit]] = []
     for folder in folders:
         root = Path(folder)
         if not root.is_dir():
@@ -183,19 +185,30 @@ def search_walk(
                 low = name.lower()
                 if kinds and Path(low).suffix not in kinds:
                     continue
-                if words and not all(w in low for w in words):
+                score = sum(w in low for w in words)
+                if words and not score:
                     continue
                 p = Path(dirpath) / name
                 try:
                     st = p.stat()
                 except OSError:
                     continue
-                hits.append(Hit(str(p), st.st_size, st.st_mtime))
+                hit = Hit(str(p), st.st_size, st.st_mtime)
+                if score == len(words):
+                    hits.append(hit)
+                elif len(words) > 1 and len(partial) < limit * 20:
+                    partial.append((score, hit))
             if time.monotonic() > deadline or len(hits) > limit * 10:
                 break
         if time.monotonic() > deadline:
             break
     hits.sort(key=lambda h: h.modified, reverse=True)
+    if not hits and partial:
+        best = max(score for score, _ in partial)
+        floor = max(1, best - 1) if best > 1 else 1
+        partial = [(sc, h) for sc, h in partial if sc >= floor]
+        partial.sort(key=lambda sh: (-sh[0], -sh[1].modified))
+        return [h for _, h in partial[:limit]]
     return hits[:limit]
 
 

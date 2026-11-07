@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pyxi import files_access
-from pyxi.agents.pixel import OPERATIONS
+from pyxi.agents.pixel import NEEDS_PASSWORD, OPERATIONS
 
 if TYPE_CHECKING:
     from pyxi.companion.brain import Brain
@@ -75,7 +75,12 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
                 f"convert_files: I can't find {', '.join(Path(f).name for f in missing) or 'the file'}. "
                 "Find the exact path with search_files first, or ask them."
             )
-        options = args.get("options") if isinstance(args.get("options"), dict) else {}
+        raw = args.get("options") if isinstance(args.get("options"), dict) else {}
+        # A password never travels through the model or the job record: Pixel asks for it on a
+        # masked card. Saved details are read on this PC by the job itself.
+        options = {k: v for k, v in raw.items() if k not in ("password", "details", "out_dir")}
+        if op == "compare_documents" and len(files) != 2:
+            return "convert_files: compare_documents needs exactly two files, the old one first."
         names = ", ".join(Path(f).name for f in files[:3])
         job = await brain.jobs.start(
             "pixel",
@@ -83,6 +88,11 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             files=files,
             params={"operation": op, "options": options},
         )
+        if op in NEEDS_PASSWORD:
+            return (
+                f"Started {job.id}: a card is asking them to type the password (never ask for it "
+                "yourself). Say one short line, like 'Type the password on the card.'"
+            )
         return (
             f"Started {job.id}: {job.agent_name} is on it in the background. Say one short line "
             "('On it.'); they get a notification with the new file."

@@ -1,5 +1,5 @@
-"""Fix documents: grammar, spelling, clarity or whatever the instructions say, keeping the file a
-file. Word documents keep their paragraph styles (headings stay headings) and are saved as a
+"""Quill's document work: fix (grammar, spelling, clarity), translate, rewrite or summarize,
+keeping the file a file. Word documents keep their paragraph styles (headings stay headings) and are saved as a
 copy beside the original, "<name> (fixed by Pyxi).docx", so nothing is ever overwritten. Plain
 text and Markdown stay text; PDFs come back as an editable Word copy.
 """
@@ -29,6 +29,50 @@ EDITOR = (
     '"changes": [{"from": "<original words>", "to": "<new words>", "why": "<a few words>"}], '
     '"notes": ["<something worth a look>"]}. Include only paragraphs you changed.'
 )
+
+
+TRANSLATOR = (
+    "You are a professional translator. Translate each numbered paragraph as the user asks, "
+    "faithfully and naturally, the way a native speaker would write it. Keep names, numbers, dates, "
+    "email addresses and links exactly, keep each paragraph's meaning and tone, and never add or "
+    "drop content. No em dashes. "
+    'Return JSON only: {"edits": [{"i": <paragraph number>, "text": "<the translated paragraph>"}], '
+    '"notes": ["<a phrase with no good equivalent, if any>"]}. Include every paragraph that has words.'
+)
+
+REWRITER = (
+    "You are a skilled editor rewriting a document as the user asks (more formal, friendlier, "
+    "simpler, shorter, clearer...). Rewrite each numbered paragraph that needs it, keeping every fact, "
+    "name, number and date, and the paragraph's role (a heading stays a short heading). Never invent "
+    "content. No em dashes. "
+    'Return JSON only: {"edits": [{"i": <paragraph number>, "text": "<the rewritten paragraph>"}], '
+    '"changes": ["<what you changed, in a few words>"], "notes": []}. Include only paragraphs you changed.'
+)
+
+SUMMARIZER = (
+    "You summarize documents for a busy person. Lead with what it is and the one thing that matters "
+    "most (what's owed, decided, asked or due, with dates and amounts exactly as written). Then the key "
+    "points as short bullets. Use only what's in the document; say plainly if something they asked about "
+    "isn't in it. Follow the user's instructions on length and focus. No em dashes. Markdown, no preamble."
+)
+
+# What a Quill document job does, from the words of the task.
+MODES = {
+    "summarize": r"\b(summar|sum up|tl;?dr|gist|key points|main points|overview|brief me|digest)",
+    "translate": r"\b(translat|in(to)? (french|spanish|german|italian|portuguese|arabic|bengali|bangla|hindi|urdu|"
+    r"chinese|mandarin|japanese|korean|russian|turkish|dutch|polish|vietnamese|tagalog|punjabi|tamil|farsi|persian))",
+    "rewrite": r"\b(rewrite|re-write|rephrase|reword|simplif|shorten|make it (more|less|sound)|more (formal|"
+    r"professional|friendly|casual|concise)|friendlier|plain english|tone)",
+}
+
+
+def document_mode(task: str) -> str:
+    """fix, translate, rewrite or summarize."""
+    low = task.lower()
+    for mode in ("summarize", "translate", "rewrite"):
+        if re.search(MODES[mode], low):
+            return mode
+    return "fix"
 
 
 def _describe(change: object) -> str:
@@ -113,9 +157,15 @@ def _parse(text: str) -> dict:
         return {}
 
 
-async def fix_document(path: Path, instructions: str, llm: LLMProvider) -> FixResult:
+async def fix_document(
+    path: Path, instructions: str, llm: LLMProvider, *, mode: str = "fix"
+) -> FixResult:
+    """Fix (two passes: edit, then review), translate or rewrite (one pass) each paragraph, and
+    save a copy beside the original: "<name> (fixed by Pyxi)", "(translated by Pyxi)"..."""
     if path.suffix.lower() not in SUPPORTED:
-        raise ValueError(f"I can fix {', '.join(sorted(SUPPORTED))} files, not {path.suffix}.")
+        raise ValueError(f"I can work on {', '.join(sorted(SUPPORTED))} files, not {path.suffix}.")
+    system = {"translate": TRANSLATOR, "rewrite": REWRITER}.get(mode, EDITOR)
+    passes = 2 if mode == "fix" else 1
     texts, handle = _read(path)
     edits: dict[int, str] = {}
     changes: list[str] = []
@@ -124,7 +174,7 @@ async def fix_document(path: Path, instructions: str, llm: LLMProvider) -> FixRe
     for chunk in _chunks(texts):
         # Two passes: edit with a checklist, then review the result for anything still wrong.
         current = {i: texts[i] for i in chunk}
-        for attempt in range(2):
+        for attempt in range(passes):
             numbered = "\n".join(f"[{i}] {current[i]}" for i in chunk)
             ask = (
                 f"Instructions from the user: {instructions or 'Fix the grammar, spelling and punctuation.'}\n\n{numbered}"
@@ -133,7 +183,7 @@ async def fix_document(path: Path, instructions: str, llm: LLMProvider) -> FixRe
                 f"return empty edits.\n\n{numbered}"
             )
             response = await llm.complete(
-                system=EDITOR, messages=[Message.user(ask)], max_tokens=8000
+                system=system, messages=[Message.user(ask)], max_tokens=8000
             )
             cost += response.usage.cost_usd
             data = _parse(response.text)
@@ -151,7 +201,8 @@ async def fix_document(path: Path, instructions: str, llm: LLMProvider) -> FixRe
             if current[i].strip() != texts[i].strip():
                 edits[i] = current[i]
 
-    out = _write(path, texts, edits, handle)
+    label = {"translate": "translated by Pyxi", "rewrite": "rewritten by Pyxi"}.get(mode, "fixed by Pyxi")
+    out = _write(path, texts, edits, handle, label)
     return FixResult(
         path=out,
         changed=len(edits),
@@ -162,14 +213,19 @@ async def fix_document(path: Path, instructions: str, llm: LLMProvider) -> FixRe
     )
 
 
-def _write(path: Path, texts: list[str], edits: dict[int, str], handle) -> Path:
+def _write(
+    path: Path, texts: list[str], edits: dict[int, str], handle, label: str = "fixed by Pyxi"
+) -> Path:
+    from pyxi.agents.pixel_common import out_dir_for, unique_path
+
     stem = path.stem
     ext = path.suffix.lower()
+    folder = out_dir_for(path)
     if ext == ".docx" and handle is not None:
         doc, paras = handle
         for i, new in edits.items():
             _set_text(paras[i], new)
-        out = path.with_name(f"{stem} (fixed by Pyxi).docx")
+        out = unique_path(folder, f"{stem} ({label}).docx")
         doc.save(str(out))
         return out
     final = [edits.get(i, t) for i, t in enumerate(texts)]
@@ -179,9 +235,58 @@ def _write(path: Path, texts: list[str], edits: dict[int, str], handle) -> Path:
         doc = Document()
         for t in final:
             doc.add_paragraph(t)
-        out = path.with_name(f"{stem} (fixed by Pyxi).docx")
+        out = unique_path(folder, f"{stem} ({label}).docx")
         doc.save(str(out))
         return out
-    out = path.with_name(f"{stem} (fixed by Pyxi){path.suffix}")
+    out = unique_path(folder, f"{stem} ({label}){path.suffix}")
     out.write_text("\n".join(final), encoding="utf-8")
     return out
+
+
+SUMMARY_EXTS = {".docx", ".txt", ".md", ".pdf", ".xlsx", ".pptx", ".html", ".htm", ".csv"}
+
+
+@dataclass
+class SummaryResult:
+    path: Path
+    text: str
+    cost_usd: float = 0.0
+
+
+def document_text(path: Path, limit: int = 60000) -> str:
+    """The words of a document (PDF scans read with OCR), for summaries."""
+    ext = path.suffix.lower()
+    if ext == ".pdf":
+        from pyxi.agents.pixel_pdf import page_texts
+
+        texts, _ = page_texts(path)
+        text = "\n\n".join(f"[page {i}]\n{t}" for i, t in enumerate(texts, 1))
+    elif ext in (".docx", ".pptx", ".xlsx", ".html", ".htm"):
+        from pyxi.agents.pixel_pdf import document_lines
+
+        text = "\n".join(document_lines(path))
+    else:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    return text[:limit]
+
+
+async def summarize_document(path: Path, instructions: str, llm: LLMProvider) -> SummaryResult:
+    """A summary saved beside the document as "<name> (summary).md"; the text comes back too."""
+    from pyxi.agents.pixel_common import out_dir_for, unique_path
+
+    if path.suffix.lower() not in SUMMARY_EXTS:
+        raise ValueError(f"I can summarize {', '.join(sorted(SUMMARY_EXTS))} files, not {path.suffix}.")
+    text = document_text(path)
+    if not text.strip():
+        raise ValueError(f"I couldn't find any text in {path.name}.")
+    response = await llm.complete(
+        system=SUMMARIZER,
+        messages=[Message.user(f"Instructions: {instructions}\n\nDocument {path.name}:\n{text}")],
+        max_tokens=2000,
+    )
+    summary = response.text.strip()
+    if not summary:
+        raise RuntimeError("The summary came back empty.")
+    out = unique_path(out_dir_for(path), f"{path.stem} (summary).md")
+    out.write_text(summary, encoding="utf-8")
+    return SummaryResult(out, summary, response.usage.cost_usd)

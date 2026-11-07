@@ -36,7 +36,7 @@ from pydantic import BaseModel, Field
 from pyxi.agents.registry import AgentProfile, AgentRegistry
 from pyxi.booking import CHECKIN_PATTERNS, CHECKIN_SAFE, CONFIRM_PATTERNS, HANDOVER
 from pyxi.config import PyxiSettings
-from pyxi.docs import SUPPORTED, fix_document
+from pyxi.docs import SUMMARY_EXTS, SUPPORTED, document_mode, fix_document, summarize_document
 from pyxi.hub import Hub
 from pyxi.llm import otto_settings
 
@@ -390,9 +390,14 @@ class JobManager:
 
     async def _run_writer(self, job: Job, agent: AgentProfile) -> None:
         llm = self.llm_factory(agent)
-        docs = [Path(f) for f in job.files if Path(f).suffix.lower() in SUPPORTED]
+        mode = document_mode(job.task)  # fix, translate, rewrite or summarize
+        exts = SUMMARY_EXTS if mode == "summarize" else SUPPORTED
+        docs = [Path(f) for f in job.files if Path(f).suffix.lower() in exts]
+        if docs and mode == "summarize":
+            await self._summarize_documents(job, docs, llm)
+            return
         if docs:
-            await self._fix_documents(job, docs, llm)
+            await self._fix_documents(job, docs, llm, mode)
             return
         memories = "\n".join(
             m.render() for m in self.memory.search(agent.memory_scope, job.task, 5)
@@ -418,8 +423,24 @@ class JobManager:
         job.summary, job.data, job.outputs = text, {"draft": text}, [str(path)]
         job.cost_usd, job.status = response.usage.cost_usd, "done"
 
-    async def _fix_documents(self, job: Job, docs: list[Path], llm: LLMProvider) -> None:
-        """Fix each document and save a copy beside it; the originals are never touched."""
+    async def _summarize_documents(self, job: Job, docs: list[Path], llm: LLMProvider) -> None:
+        """A summary of each document, saved beside it as "<name> (summary).md"."""
+        parts, outputs, cost = [], [], 0.0
+        for doc in docs:
+            await self._status(job, f"Reading {doc.name}")
+            result = await summarize_document(doc, job.task, llm)
+            cost += result.cost_usd
+            outputs.append(str(result.path))
+            parts.append(result.text if len(docs) == 1 else f"{doc.name}: {result.text}")
+        job.summary = "\n\n".join(parts)
+        job.data = {"draft": job.summary, "outputs": outputs}
+        job.outputs, job.cost_usd, job.status = outputs, cost, "done"
+
+    async def _fix_documents(
+        self, job: Job, docs: list[Path], llm: LLMProvider, mode: str = "fix"
+    ) -> None:
+        """Fix, translate or rewrite each document and save a copy beside it; the originals are
+        never touched."""
         lines, outputs, cost = [], [], 0.0
         all_changes: list[str] = []
         all_notes: list[str] = []
@@ -429,20 +450,22 @@ class JobManager:
                 job_id=job.id,
                 agent=job.agent_name,
                 event="status",
-                data={"message": f"Editing {doc.name}"},
+                data={"message": f"{'Translating' if mode == 'translate' else 'Editing'} {doc.name}"},
             )
-            result = await fix_document(doc, job.task, llm)
+            result = await fix_document(doc, job.task, llm, mode=mode)
             cost += result.cost_usd
             outputs.append(str(result.path))
             all_changes += result.changes
             all_notes += result.notes
             notes = "; ".join(result.changes[:5])
+            verb = {"translate": "translated", "rewrite": "rewrote"}.get(mode, "fixed")
             lines.append(
-                f"{doc.name}: fixed {result.changed} of {result.total} paragraphs, saved as {result.path}"
+                f"{doc.name}: {verb} {result.changed} of {result.total} paragraphs, saved as {result.path}"
                 + (f". Notable: {notes}" if notes else "")
             )
         job.summary = " ".join(lines)
-        job.data = {"fixed": outputs, "changes": all_changes[:12], "notes": all_notes[:5]}
+        key = "fixed" if mode == "fix" else "outputs"  # "fixed" makes it a "Your document is fixed" card
+        job.data = {key: outputs, "changes": all_changes[:12], "notes": all_notes[:5]}
         job.outputs, job.cost_usd, job.status = outputs, cost, "done"
 
     async def _run_explainer(self, job: Job, agent: AgentProfile) -> None:
@@ -471,8 +494,26 @@ class JobManager:
                 "I couldn't tell which conversion you want: PDF, images, smaller, merge or split?"
             )
         names = ", ".join(Path(f).name for f in job.files[:3]) or "your files"
+        # Passwords and saved details never come from the model: a password is typed on a card,
+        # and form details are read from this PC. Neither is kept on the job.
+        options = {
+            k: v
+            for k, v in (job.params.get("options") or {}).items()
+            if k not in ("password", "details", "out_dir")
+        }
+        if op in pixel.NEEDS_PASSWORD:
+            password = await self._ask_password(job, agent, op, names)
+            if not password:
+                job.status, job.summary = "stopped", "No password, so I left it as it is."
+                return
+            options["password"] = password
+        if op == "fill_form":
+            from pyxi import booking
+
+            options["details"] = booking.load(self.settings.data_dir)
         await self._status(job, f"Working on {names}")
-        result = await asyncio.to_thread(pixel.run, op, job.files, job.params.get("options") or {})
+        result = await asyncio.to_thread(pixel.run, op, job.files, options)
+        options.pop("password", None)
         job.outputs = [str(p) for p in result.outputs]
         job.summary = result.summary
         if job.outputs:
@@ -480,6 +521,18 @@ class JobManager:
             job.summary += f" It's in {where}." if len(job.outputs) == 1 else f" They're in {where}."
         job.data = {"operation": op, "outputs": job.outputs, **result.details}
         job.status = "done"
+
+    async def _ask_password(self, job: Job, agent: AgentProfile, op: str, names: str) -> str:
+        """The user types the password on a masked card; it goes straight to Pixel."""
+        question = (
+            f"Type the password to lock {names} with. You'll need it to open the PDF."
+            if op == "protect_pdf"
+            else f"Type the password for {names}."
+        )
+        answer = await self.hub.request(
+            "ask", timeout=300, job_id=job.id, agent=agent.name, question=question, secret=True
+        )
+        return str(answer or "")
 
     def _google(self) -> Any:
         if getattr(self, "google", None) is None:

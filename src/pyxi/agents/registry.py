@@ -109,7 +109,7 @@ DEFAULT_ROSTER = [
         builtin=True,
         persona="Tidy, fast file wrangler. Converts, merges, splits and shrinks files in seconds, "
         "never touches the original, and says exactly where the new one is.",
-        skills=["image to PDF", "merge, split, shrink PDFs", "Word to PDF", "CSV and Excel"],
+        skills=["anything to PDF", "PDF pages, numbers, passwords", "scans to text (OCR)", "compare documents"],
         max_cost_usd=0.05,
     ),
     AgentProfile(
