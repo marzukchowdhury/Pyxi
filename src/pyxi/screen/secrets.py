@@ -24,6 +24,7 @@ _PATTERNS = [
     r"\b[A-Za-z0-9_]*(?i:api_?key|secret|token|password|passwd)[A-Za-z0-9_]*\s*[=:]\s*['\"]?[^\s'\"]{8,}",
 ]
 _SECRET = re.compile("|".join(f"(?:{p})" for p in _PATTERNS))
+PATTERN = _SECRET  # also scrubs logs (pyxi/logscrub.py)
 
 HIDDEN = "(hidden: looks like a key or token)"
 

@@ -6,6 +6,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { app, ipcMain } from "electron";
 import electronUpdater from "electron-updater";
+import { scrubLine } from "./scrub";
 
 const { autoUpdater } = electronUpdater;
 const EVERY = 4 * 60 * 60 * 1000; // check again every four hours while Pyxi is open
@@ -14,7 +15,7 @@ function note(line: string): void {
   try {
     const dir = join(app.getPath("userData"), ".pyxi");
     mkdirSync(dir, { recursive: true });
-    appendFileSync(join(dir, "updates.log"), `${new Date().toISOString()} ${line}\n`);
+    appendFileSync(join(dir, "updates.log"), `${new Date().toISOString()} ${scrubLine(line)}\n`);
   } catch {
     /* logging must never break updating */
   }

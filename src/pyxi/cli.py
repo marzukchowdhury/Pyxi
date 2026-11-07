@@ -62,8 +62,10 @@ def serve(
     """Start the backend the desktop app connects to."""
     import uvicorn
 
+    from pyxi import logscrub
     from pyxi.server import create_app
 
+    logscrub.install()  # brain.log: no emails, phone numbers, user names in paths or tokens
     _load_dotenv()
     from pyxi import cloud
 
