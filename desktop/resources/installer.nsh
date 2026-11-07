@@ -21,6 +21,41 @@
   Sleep 1000
 !macroend
 
+; An update (Pyxi runs the installer with --updated) is one small window: "Updating Pyxi" with
+; its progress bar, then Pyxi opens again by itself. No Finish page to click. A new install keeps
+; the usual Finish page with "Run Pyxi".
+!macro customPageAfterChangeDir
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW pyxiProgressShow
+  Function pyxiProgressShow
+    ${if} ${isUpdated}
+      !insertmacro MUI_HEADER_TEXT "Updating Pyxi" "Pyxi opens again by itself in a moment."
+    ${endif}
+  FunctionEnd
+!macroend
+
+!macro customFinishPage
+  Function pyxiStartApp
+    ${if} ${isUpdated}
+      StrCpy $1 "--updated"
+    ${else}
+      StrCpy $1 ""
+    ${endif}
+    ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
+  FunctionEnd
+
+  Function pyxiFinishPre
+    ${if} ${isUpdated}
+      Call pyxiStartApp
+      Abort
+    ${endif}
+  FunctionEnd
+
+  !define MUI_FINISHPAGE_RUN
+  !define MUI_FINISHPAGE_RUN_FUNCTION "pyxiStartApp"
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE pyxiFinishPre
+  !insertmacro MUI_PAGE_FINISH
+!macroend
+
 !macro customInstallMode
   StrCpy $isForceCurrentInstall "1"
 !macroend

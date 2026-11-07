@@ -275,6 +275,18 @@ function broadcast(channel: string, ...args: unknown[]): void {
 }
 
 /** The brain on our port: its version and whether it took our key, or null when nothing answers. */
+/** Is Pyxi busy for them: talking, listening, thinking, or a job running? An update waits. */
+async function brainBusy(): Promise<boolean> {
+  try {
+    const res = await fetch(`${BACKEND}/api/state`, keyed());
+    if (!res.ok) return false; // no brain of ours: nothing to interrupt
+    const s = (await res.json()) as { state?: string; jobs?: { status?: string }[] };
+    return (s.state ?? "idle") !== "idle" || (s.jobs ?? []).some((j) => j.status === "queued" || j.status === "running");
+  } catch {
+    return false;
+  }
+}
+
 async function brainHealth(): Promise<{ version: string; ours: boolean } | null> {
   try {
     const res = await fetch(`${BACKEND}/api/health`, keyed());
@@ -378,7 +390,7 @@ app.on("web-contents-created", (_e, contents) => {
 });
 
 app.whenReady().then(async () => {
-  startUpdates(broadcast);
+  startUpdates(broadcast, brainBusy);
   // The microphone, for Pyxi's own pages only; nothing else (camera, location, notifications...).
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) =>
     cb(permission === "media" && ownPage(details.requestingUrl ?? "")),

@@ -1,15 +1,20 @@
-// Updates without reinstalling: the installed app checks Pyxi's GitHub releases, downloads a new
-// version quietly in the background (only the changed parts, thanks to the blockmap), then the
-// notch offers "Restart to update". Nothing happens in development, or without a release.
+// Updates without reinstalling: the installed app checks Pyxi's GitHub releases and downloads a
+// new version quietly in the background (only the changed parts, thanks to the blockmap). The
+// notch then offers "Update app", and Pyxi also installs it by itself once the PC has been idle
+// for a few minutes and Pyxi isn't busy (talking, thinking, or running a job). Either way a small
+// "Updating Pyxi" window shows the progress, and Pyxi opens again on its own.
+// Nothing happens in development, or without a release.
 // What happened is written to .pyxi/updates.log in Pyxi's data folder, for support.
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { app, ipcMain } from "electron";
+import { app, ipcMain, powerMonitor } from "electron";
 import electronUpdater from "electron-updater";
 import { scrubLine } from "./scrub";
+import { goodMomentToUpdate } from "./updateTiming";
 
 const { autoUpdater } = electronUpdater;
 const EVERY = 4 * 60 * 60 * 1000; // check again every four hours while Pyxi is open
+const LOOK_EVERY = 30 * 1000;
 
 function note(line: string): void {
   try {
@@ -21,24 +26,38 @@ function note(line: string): void {
   }
 }
 
-export function startUpdates(tell: (channel: string, ...args: unknown[]) => void): void {
+export function startUpdates(
+  tell: (channel: string, ...args: unknown[]) => void,
+  busy: () => Promise<boolean> = async () => false,
+): void {
   if (!app.isPackaged) return;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true; // quitting Pyxi normally also applies a waiting update
+  let installing = false;
+  let watcher: NodeJS.Timeout | undefined;
+  const install = (why: string) => {
+    if (installing) return;
+    installing = true;
+    clearInterval(watcher);
+    note(`installing (${why})`);
+    // Not silent: the installer shows its "Updating Pyxi" progress window, then opens Pyxi again
+    // (resources/installer.nsh). The brain is stopped by before-quit.
+    autoUpdater.quitAndInstall(false, true);
+  };
   autoUpdater.on("checking-for-update", () => note(`checking (this is ${app.getVersion()})`));
   autoUpdater.on("update-not-available", () => note("up to date"));
   autoUpdater.on("update-available", (info) => note(`downloading ${info.version}`));
   autoUpdater.on("update-downloaded", (info) => {
     note(`ready: ${info.version}`);
     tell("update-ready", { version: info.version });
+    clearInterval(watcher);
+    watcher = setInterval(async () => {
+      if (await goodMomentToUpdate(powerMonitor.getSystemIdleTime(), busy)) install("idle");
+    }, LOOK_EVERY);
   });
   autoUpdater.on("error", (err) => note(`error: ${err?.message ?? err}`));
   const check = () => void autoUpdater.checkForUpdates().catch(() => undefined);
   setTimeout(check, 20_000); // after startup settles, not during it
   setInterval(check, EVERY);
-  ipcMain.on("install-update", () => {
-    note("installing");
-    // Silent install, then Pyxi opens again on its own. The brain is stopped by before-quit.
-    autoUpdater.quitAndInstall(true, true);
-  });
+  ipcMain.on("install-update", () => install("Update app"));
 }
