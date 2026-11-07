@@ -12,6 +12,15 @@
   ${endif}
 !macroend
 
+; A Pyxi brain left running (Pyxi crashed, or was ended in Task Manager) keeps its files open,
+; and the installer then leaves Pyxi half installed: it won't start ("No module named pyxi").
+; Stop that brain first. Only Pyxi's own: its bundled python.exe running "-m pyxi serve".
+!macro customInit
+  nsExec::Exec `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'python.exe' -and $$_.ExecutablePath -like '*\resources\python\python.exe' -and $$_.CommandLine -like '*-m pyxi serve*' } | Invoke-CimMethod -MethodName Terminate | Out-Null"`
+  Pop $0
+  Sleep 1000
+!macroend
+
 !macro customInstallMode
   StrCpy $isForceCurrentInstall "1"
 !macroend
