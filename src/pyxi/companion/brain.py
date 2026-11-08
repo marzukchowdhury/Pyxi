@@ -1983,6 +1983,8 @@ class Brain:
                     self._speak(f"Here's the gist. {points}")
                 elif self._visual_turn:
                     pass  # the drawing or model narrates itself; a canned line would only interrupt
+                elif any(c.get("tool") in _BACKGROUND_TOOLS for c in self._calls):
+                    self._speak("On it.")  # started, not finished: "Done." then a failure misleads
                 elif self._calls:
                     self._speak("Done.")
                 else:
@@ -2981,6 +2983,18 @@ _JUST_OPEN = re.compile(
     r"(?!.*\b(and|then|find|which|what|best|show me|tell me)\b)",
     re.I,
 )
+# Tools that start work which finishes later (the notification says how it went).
+_BACKGROUND_TOOLS = {
+    "edit_document",
+    "convert_files",
+    "delegate",
+    "errand",
+    "book",
+    "use_computer",
+    "tidy_folder",
+    "build_3d_model",
+    "explain_in_3d",
+}
 # "Find coffee near me": opening Maps isn't the answer, so Pyxi looks at what opened and
 # answers from it. "I said open Gmail, not GL" asks nothing: one model call, not two.
 _WANTS_ANSWER = re.compile(

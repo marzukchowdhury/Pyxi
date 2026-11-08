@@ -610,10 +610,14 @@ class WordDoc:
         if how is None:
             raise LedgerError("align should be left, center, right or justify.")
         try:
-            self.paras[int(op.get("i", op.get("paragraph")))].alignment = how
+            para = self.paras[int(op.get("i", op.get("paragraph")))]
         except (TypeError, ValueError, IndexError):
             raise LedgerError(f"There's no paragraph {op.get('i')}.") from None
-        return f"Aligned paragraph {op.get('i')}"
+        para.alignment = how
+        verb = {"CENTER": "Centred", "END": "Right-aligned", "JUSTIFIED": "Justified"}.get(
+            _ALIGN.get(str(op.get("align") or "").lower(), ""), "Left-aligned"
+        )
+        return f"{verb} '{para.text.strip()[:40]}'"
 
     def op_page_break(self, op: dict[str, Any]) -> str:
         from docx.enum.text import WD_BREAK
@@ -1353,17 +1357,37 @@ class GoogleDoc:
         if after in (None, "", "end"):
             return self._end()
         try:
-            return int(self._blocks()[int(after)]["endIndex"])
+            # Just before that paragraph's own newline: always inside a paragraph, even when a
+            # table comes next (the start of a table is no place to type, Google says 400).
+            return int(self._blocks()[int(after)]["endIndex"]) - 1
         except (ValueError, IndexError, KeyError):
             raise LedgerError(f"There's no paragraph {after}.") from None
 
     async def _insert(
         self, at: int, text: str, style: str | None = None, bullets: str | None = None
     ) -> None:
-        # At the very end, text goes before the doc's final newline: start with a newline so the
-        # new text is its own paragraph.
-        lead = "\n" if at == self._end() else ""
-        body = lead + text + ("" if lead else "\n")
+        # ``at`` is just before a paragraph's newline. An empty paragraph there (a blank first
+        # line, the one line of a new doc) is filled; otherwise the text becomes a new paragraph
+        # after it.
+        here = next(
+            (
+                b
+                for b in self._blocks()
+                if int(b.get("startIndex", 0)) <= at < int(b.get("endIndex", 0))
+            ),
+            None,
+        )
+        empty = (
+            here is not None
+            and not "".join(
+                e.get("textRun", {}).get("content", "")
+                for e in here["paragraph"].get("elements", [])
+            ).strip()
+        )
+        if empty:
+            at = int(here["startIndex"])
+        lead = "" if empty else "\n"
+        body = lead + text
         start = at + len(lead)
         end = start + len(text)
         reqs: list[dict[str, Any]] = [{"insertText": {"location": {"index": at}, "text": body}}]
@@ -1477,9 +1501,13 @@ class GoogleDoc:
                     "startIndex": start - 1 if last and start > 1 else start,
                     "endIndex": end - 1 if last else end,
                 }
+                gone = "".join(
+                    e.get("textRun", {}).get("content", "")
+                    for e in block["paragraph"].get("elements", [])
+                ).strip()
                 await self.google.docs_batch(self.id, [{"deleteContentRange": {"range": rng}}])
                 await self.load()
-                return f"Deleted paragraph {i}"
+                return f"Deleted '{gone[:40]}'" if gone else "Deleted an empty line"
             if name == "align":
                 how = _ALIGN.get(str(op.get("align") or "").lower())
                 if how is None:
@@ -1504,8 +1532,18 @@ class GoogleDoc:
                     }
                 ],
             )
+            text = "".join(
+                e.get("textRun", {}).get("content", "")
+                for e in block["paragraph"].get("elements", [])
+            ).strip()
             await self.load()
-            return f"{'Aligned' if name == 'align' else 'Restyled'} paragraph {i}"
+            what = f"'{text[:40]}'" if text else f"paragraph {int(i) + 1}"
+            if name == "align":
+                verb = {"CENTER": "Centred", "END": "Right-aligned", "JUSTIFIED": "Justified"}.get(
+                    style["alignment"], "Left-aligned"
+                )
+                return f"{verb} {what}"
+            return f"Made {what} {str(op.get('style') or '').strip() or 'normal text'}"
         if name == "format_text":
             ranges = self._ranges(op)
             if not ranges:
@@ -1541,7 +1579,11 @@ class GoogleDoc:
                 ],
             )
             await self.load()
-            return f"Formatted {len(ranges)} place{'s' if len(ranges) != 1 else ''}"
+            look = (
+                ", ".join(k for k in ("bold", "italic", "underline") if op.get(k)) or "the new look"
+            )
+            shown = f"'{str(op.get('find'))[:40]}'" if op.get("find") else "the line"
+            return f"Gave {shown} {look}" + (f" ({len(ranges)} places)" if len(ranges) > 1 else "")
         if name == "page_break":
             where = (
                 {"location": {"index": self._at(op)}}

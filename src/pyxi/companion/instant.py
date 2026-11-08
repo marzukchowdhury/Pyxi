@@ -25,7 +25,7 @@ _LEAD = (
     r"(?:(?:can|could|would|will) you\s+|please\s+|i (?:want|need) you to\s+|go ahead and\s+)?"
     r"(?:please\s+|just\s+)?"
 )
-_TAIL = r"(?:\s+(?:for me|please|now|real quick|quickly))*(?:\s+(?:in|on) a new (?:tab|chat|tap|tub|tad))?[\s.!?]*$"
+_TAIL = r"(?:\s+(?:for me|please|now|real quick|quickly))*(?:\s+(?:in|on) a new (?:tab|chat|tap|tub|tad|job))?[\s.!?]*$"
 _OPEN = r"(?:open(?: up)?|start|create|make|bring up|pull up|give me|launch|new)"
 
 _BLANK = {

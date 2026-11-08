@@ -980,3 +980,35 @@ def test_word_does_the_same_everyday_edits(tmp_path):
     w.apply({"op": "add_table", "n_rows": 3, "n_cols": 4})
     assert len(w.doc.tables) == 1 and len(w.doc.tables[0].columns) == 4
     assert w.apply({"op": "page_break"}) == "Added a page break"
+
+
+async def test_typing_into_a_blank_first_line_above_a_table():
+    # A new doc with a table: a blank first paragraph, then the table. Typing "team" into
+    # that line used to aim at the table's start, and Google answered 400.
+    from pyxi.agents.ledger import GoogleDoc
+
+    g = FakeGoogle()
+    g.doc["body"]["content"] = [
+        {"endIndex": 1, "sectionBreak": {}},
+        {"startIndex": 1, "endIndex": 2, "paragraph": {"elements": [{"startIndex": 1, "textRun": {"content": "\n"}}]}},
+        {"startIndex": 2, "endIndex": 40, "table": {"tableRows": []}},
+        {"startIndex": 40, "endIndex": 41, "paragraph": {"elements": [{"startIndex": 40, "textRun": {"content": "\n"}}]}},
+    ]
+    sent = []
+
+    async def docs_batch(did, requests):
+        sent.append(requests)
+        return {}
+
+    g.docs_batch = docs_batch
+    d = GoogleDoc(g, "doc1")
+    await d.load()
+    await d.apply({"op": "add_paragraph", "text": "team", "after": 0})
+    insert = sent[0][0]["insertText"]
+    assert insert == {"location": {"index": 1}, "text": "team"}  # into the blank line itself
+
+    g.doc["body"]["content"][1]["paragraph"]["elements"][0]["textRun"]["content"] = "Hello\n"
+    g.doc["body"]["content"][1]["endIndex"] = 7
+    await d.load()
+    await d.apply({"op": "add_paragraph", "text": "team", "after": 0})
+    assert sent[1][0]["insertText"] == {"location": {"index": 6}, "text": "\nteam"}  # after it
