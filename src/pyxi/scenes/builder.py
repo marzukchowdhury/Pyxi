@@ -21,7 +21,15 @@ from pydantic import ValidationError
 
 from pyxi.partial_json import complete_items, partial_string
 from pyxi.scenes.model_examples import EXAMPLES
-from pyxi.scenes.objects import Beat, ObjectScene, Part, build_tool_schema
+from pyxi.scenes.objects import (
+    Beat,
+    ObjectEdit,
+    ObjectScene,
+    Part,
+    apply_edit,
+    build_tool_schema,
+    edit_tool_schema,
+)
 
 SYSTEM = """\
 You are Pyxi's 3D modeller. You build one model per request with the build_3d_model tool. It \
@@ -43,6 +51,11 @@ as it is wide) and keep every part in that ratio; a heart is taller than wide.
 children of the part they sit on: bolts and rivets, rims, lips and flanges, vents and intakes, \
 rails, handles, seams, a hex nut, a nozzle ring, wingtip missiles, a pitot tube. Three or four \
 of these on the hero part do more than ten more big pieces.
+- Ready-made pieces: wheels, missiles, propellers, jet engines, RAM sticks, graphics cards, \
+chips (CPUs, AI chips), PC fans, screens, seats, people, bolts and houses are `kit` parts \
+(shape kit, kit=<name>, sized and placed like any part): detailed and real-looking, never \
+rebuild them from boxes. A computer is boards, chips and fans from the kit; a car is a body \
+extrude or lathe plus four kit wheels; a fighter is its outline plus kit missiles and a seat.
 - Materials: real ones, in contrast (painted body, dark_metal workings, brushed_metal moving \
 parts, rubber seals, glass); give painted and plastic parts a real colour, not default grey.
 - Inside and outside: outer shells get casing=true and the model gets cutaway=true when the \
@@ -129,6 +142,9 @@ class PartialModel:
                 parts=parts,
                 cutaway=bool(_CUTAWAY.search(raw.split('"parts"', 1)[0])),
                 beats=[Beat(title="Building", narration="", camera="iso")],
+                # Paused: a story with nothing to tell counts as finished, and a finished model
+                # tidies itself away; the narrated model that replaces it plays.
+                auto_play=False,
             )
         except ValidationError:
             return None
@@ -185,6 +201,82 @@ async def build_model(
                 Message.user(
                     f"{ask}\n\nYour last attempt was rejected: {errors}. Fix those and call "
                     "build_3d_model again with the complete model."
+                )
+            ]
+    result.seconds = time.monotonic() - started
+    return result
+
+
+EXPLAIN_SYSTEM = (
+    "You are Pyxi's 3D explainer. A real, detailed 3D model of the subject is already on the "
+    "user's screen (listed below with every part's id, centre and size, in stage units, y up). "
+    "You make the explanation on it with ONE explain_on_model call, the same format as an edit:\n"
+    "- update: give the 4-7 parts that matter a label (1-3 words each); never rename ids. Where the "
+    "model is one piece, add `marker` parts (invisible; just a label) on the spots that "
+    "matter, positioned on the real part's surface.\n"
+    "- add_motions: move real parts the way the real thing moves (a canopy lifts and flies off, "
+    "a rotor spins, a stage separates and falls away, a door opens). Keyframe positions are "
+    "absolute: start from the part's centre as listed. Spins and oscillations for anything "
+    "that turns.\n"
+    "- add_parts: only what the model doesn't have and the story needs, built from simple "
+    "shapes near the real parts: arrows for anything that flows (air, exhaust, blood, current, "
+    "light, data), a flame or plume (emissive cone), a parachute, a person, a stand. Few.\n"
+    "- cutaway true (with casing) only when the inside is the point and the shell is a part.\n"
+    "- beats: 3-5, each with a 2-4 word title ('First stage drops'), rising `at` times 2-3 s "
+    "apart, each focusing the parts it is about, camera "
+    "side/front/iso/close/top to show them best. Narration: one vivid spoken sentence each, a "
+    "concrete fact or analogy, never a description of the picture; the last lands the 'so "
+    "that's why', adds one related fun fact, and offers one specific thing to show next.\n"
+    "Be brief: leave out fields at their defaults."
+)
+
+
+def explain_tool() -> ToolSpec:
+    return ToolSpec(
+        "explain_on_model",
+        "Explain on the real model: labels, motions, the few extra parts the story needs, beats.",
+        edit_tool_schema(),
+    )
+
+
+async def explain_library_model(
+    llm: LLMProvider, model: ObjectScene, summary: str, brief: str, context: str = ""
+) -> BuildResult:
+    """Write the explanation for a real library model (an edit on it, so the real parts stay)."""
+    ask = f"{summary}\n\nExplain this on it:\n{brief}"
+    if context:
+        ask += f"\n\nWhat the user is looking at:\n{context[:1200]}"
+    result = BuildResult(model=None)
+    started = time.monotonic()
+    messages = [Message.user(ask)]
+    for _ in range(2):
+        result.attempts += 1
+        response = await llm.complete(
+            system=EXPLAIN_SYSTEM, messages=messages, tools=[explain_tool()], max_tokens=6000
+        )
+        result.cost_usd += response.usage.cost_usd
+        call = next((c for c in response.tool_calls if c.name == "explain_on_model"), None)
+        if call is None:
+            result.errors.append("no tool call")
+            messages = [Message.user(ask + "\n\nCall explain_on_model now.")]
+            continue
+        try:
+            edit = ObjectEdit.model_validate(dict(call.arguments))
+            # The real model's parts are never removed or reshaped by the explanation.
+            edit.remove = []
+            real = {p.id for p in model.parts if p.shape == "asset"}
+            for patch in edit.update:
+                if patch.id in real:
+                    patch.size = patch.material = patch.color = None
+            result.model = apply_edit(model, edit)
+            break
+        except ValidationError as exc:
+            errors = exc.errors()[:8]
+            result.errors.append(str(errors)[:400])
+            messages = [
+                Message.user(
+                    f"{ask}\n\nYour last attempt was rejected: {errors}. Fix those and call "
+                    "explain_on_model again."
                 )
             ]
     result.seconds = time.monotonic() - started

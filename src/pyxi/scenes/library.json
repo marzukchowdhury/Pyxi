@@ -1,0 +1,4531 @@
+{
+ "models": [
+  {
+   "id": "saturn_v",
+   "title": "Saturn V rocket",
+   "file": "saturn_v.glb",
+   "bytes": 1005360,
+   "triangles": 34814,
+   "about": "standing upright, y up: first stage at the bottom, the Apollo spacecraft and escape tower on top",
+   "keywords": [
+    "saturn v",
+    "apollo rocket",
+    "moon rocket",
+    "rocket stages",
+    "staging"
+   ],
+   "credit": "Saturn V, NASA 3D Resources",
+   "license": "Public domain (NASA media guidelines)",
+   "source": "https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Saturn%20V",
+   "parts": [
+    {
+     "id": "spacecraft",
+     "label": "Apollo spacecraft",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.001,
+      3.801,
+      -0.0
+     ],
+     "size": [
+      0.658,
+      2.399,
+      0.658
+     ],
+     "triangles": 1480
+    },
+    {
+     "id": "third_stage",
+     "label": "Third stage",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.001,
+      1.95,
+      -0.0
+     ],
+     "size": [
+      0.955,
+      1.76,
+      0.955
+     ],
+     "triangles": 340
+    },
+    {
+     "id": "second_stage",
+     "label": "Second stage",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.001,
+      -0.052,
+      -0.0
+     ],
+     "size": [
+      0.999,
+      2.245,
+      0.999
+     ],
+     "triangles": 840
+    },
+    {
+     "id": "first_stage",
+     "label": "First stage",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      -3.088,
+      0.0
+     ],
+     "size": [
+      1.551,
+      3.825,
+      1.551
+     ],
+     "triangles": 32154
+    }
+   ]
+  },
+  {
+   "id": "space_shuttle",
+   "title": "Space Shuttle at launch",
+   "file": "space_shuttle.glb",
+   "bytes": 6432656,
+   "triangles": 212970,
+   "about": "lying along z: nose toward -z, engines toward +z; tank and boosters under the orbiter (-y)",
+   "keywords": [
+    "space shuttle",
+    "orbiter",
+    "shuttle launch",
+    "solid rocket boosters",
+    "external tank"
+   ],
+   "credit": "Space Shuttle (A), NASA 3D Resources",
+   "license": "Public domain (NASA media guidelines)",
+   "source": "https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Space%20Shuttle%20(A)",
+   "parts": [
+    {
+     "id": "main_engines",
+     "label": "Main engines",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.014,
+      0.193,
+      3.751
+     ],
+     "size": [
+      1.411,
+      0.781,
+      0.936
+     ],
+     "triangles": 35168
+    },
+    {
+     "id": "external_tank",
+     "label": "External tank",
+     "note": null,
+     "casing": false,
+     "center": [
+      -0.001,
+      -0.888,
+      -0.563
+     ],
+     "size": [
+      1.623,
+      1.623,
+      8.874
+     ],
+     "triangles": 1520
+    },
+    {
+     "id": "boosters",
+     "label": "Rocket boosters",
+     "note": null,
+     "casing": false,
+     "center": [
+      -0.001,
+      -0.421,
+      0.87
+     ],
+     "size": [
+      3.394,
+      1.069,
+      8.259
+     ],
+     "triangles": 10642
+    },
+    {
+     "id": "orbiter",
+     "label": "Orbiter",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.736,
+      0.956
+     ],
+     "size": [
+      4.728,
+      1.928,
+      6.652
+     ],
+     "triangles": 165640
+    }
+   ]
+  },
+  {
+   "id": "perseverance",
+   "title": "Perseverance Mars rover",
+   "file": "perseverance.glb",
+   "bytes": 6437388,
+   "triangles": 199521,
+   "about": "y up, front toward +z; six wheels on rocker-bogie legs, camera mast at the front",
+   "keywords": [
+    "perseverance",
+    "mars rover",
+    "rover"
+   ],
+   "credit": "Mars 2020 Perseverance Rover, NASA 3D Resources",
+   "license": "Public domain (NASA media guidelines)",
+   "source": "https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Mars%202020%20Perseverance%20Rover",
+   "parts": [
+    {
+     "id": "wheels",
+     "label": "Six wheels",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      -2.123,
+      0.474
+     ],
+     "size": [
+      8.701,
+      1.692,
+      8.961
+     ],
+     "triangles": 68016
+    },
+    {
+     "id": "mast",
+     "label": "Camera mast",
+     "note": null,
+     "casing": false,
+     "center": [
+      -0.431,
+      1.083,
+      1.984
+     ],
+     "size": [
+      3.316,
+      0.996,
+      2.744
+     ],
+     "triangles": 13137
+    },
+    {
+     "id": "body",
+     "label": "Rover body",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.347,
+      0.0
+     ],
+     "size": [
+      7.508,
+      5.243,
+      10.0
+     ],
+     "triangles": 118368
+    }
+   ]
+  },
+  {
+   "id": "ingenuity",
+   "title": "Ingenuity Mars helicopter",
+   "file": "ingenuity.glb",
+   "bytes": 634628,
+   "triangles": 9124,
+   "about": "y up; two stacked rotors spin in opposite directions about the vertical axis",
+   "keywords": [
+    "ingenuity",
+    "mars helicopter",
+    "helicopter",
+    "coaxial rotor"
+   ],
+   "credit": "Ingenuity Mars Helicopter, NASA 3D Resources",
+   "license": "Public domain (NASA media guidelines)",
+   "source": "https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Ingenuity%20Mars%20Helicopter",
+   "parts": [
+    {
+     "id": "upper_rotor",
+     "label": "Upper rotor",
+     "note": null,
+     "casing": false,
+     "center": [
+      -0.0,
+      1.273,
+      0.0
+     ],
+     "size": [
+      4.57,
+      1.009,
+      10.0
+     ],
+     "triangles": 2122
+    },
+    {
+     "id": "lower_rotor",
+     "label": "Lower rotor",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.365,
+      0.0
+     ],
+     "size": [
+      8.916,
+      0.995,
+      6.545
+     ],
+     "triangles": 2090
+    },
+    {
+     "id": "solar_panel",
+     "label": "Solar panel",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      2.159,
+      -0.0
+     ],
+     "size": [
+      1.491,
+      0.763,
+      3.841
+     ],
+     "triangles": 536
+    },
+    {
+     "id": "legs",
+     "label": "Landing legs",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.015,
+      -1.331,
+      -0.004
+     ],
+     "size": [
+      5.812,
+      2.418,
+      5.811
+     ],
+     "triangles": 2648
+    },
+    {
+     "id": "body",
+     "label": "Body",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.002,
+      -0.009,
+      -0.0
+     ],
+     "size": [
+      1.636,
+      2.745,
+      1.786
+     ],
+     "triangles": 1728
+    }
+   ]
+  },
+  {
+   "id": "hubble",
+   "title": "Hubble Space Telescope",
+   "file": "hubble.glb",
+   "bytes": 401136,
+   "triangles": 7672,
+   "about": "tube upright, y up: the aperture (where light comes in) at the top, solar arrays on its sides",
+   "keywords": [
+    "hubble",
+    "space telescope",
+    "telescope"
+   ],
+   "credit": "Hubble Space Telescope (A), NASA 3D Resources",
+   "license": "Public domain (NASA media guidelines)",
+   "source": "https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Hubble%20Space%20Telescope%20(A)",
+   "parts": [
+    {
+     "id": "solar_arrays",
+     "label": "Solar arrays",
+     "note": null,
+     "casing": false,
+     "center": [
+      -0.0,
+      -2.518,
+      0.004
+     ],
+     "size": [
+      8.456,
+      4.248,
+      9.453
+     ],
+     "triangles": 92
+    },
+    {
+     "id": "telescope",
+     "label": "Telescope tube",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.721,
+      10.0,
+      9.54
+     ],
+     "triangles": 7580
+    }
+   ]
+  },
+  {
+   "id": "apollo_lm",
+   "title": "Apollo Lunar Module",
+   "file": "apollo_lm.glb",
+   "bytes": 2596176,
+   "triangles": 97588,
+   "about": "upright, y up: the gold descent stage with legs below, the crew's ascent stage on top",
+   "keywords": [
+    "lunar module",
+    "apollo lander",
+    "moon landing",
+    "eagle"
+   ],
+   "credit": "Apollo Lunar Module, NASA 3D Resources",
+   "license": "Public domain (NASA media guidelines)",
+   "source": "https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Apollo%20Lunar%20Module",
+   "parts": [
+    {
+     "id": "ascent_stage",
+     "label": "Ascent stage",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.128,
+      1.703,
+      0.226
+     ],
+     "size": [
+      5.237,
+      4.393,
+      5.157
+     ],
+     "triangles": 49692
+    },
+    {
+     "id": "descent_stage",
+     "label": "Descent stage",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      -1.601,
+      0.0
+     ],
+     "size": [
+      10.0,
+      4.598,
+      9.999
+     ],
+     "triangles": 47896
+    }
+   ]
+  },
+  {
+   "id": "global_hawk",
+   "title": "Global Hawk drone",
+   "file": "global_hawk.glb",
+   "bytes": 1062800,
+   "triangles": 37120,
+   "about": "",
+   "keywords": [
+    "global hawk",
+    "drone",
+    "uav",
+    "surveillance aircraft"
+   ],
+   "credit": "Global Hawk, NASA 3D Resources",
+   "license": "Public domain (NASA media guidelines)",
+   "source": "https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Global%20Hawk",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      -0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      1.788,
+      4.915
+     ],
+     "triangles": 37120
+    }
+   ]
+  },
+  {
+   "id": "voyager",
+   "title": "Voyager space probe",
+   "file": "voyager.glb",
+   "bytes": 1569252,
+   "triangles": 29911,
+   "about": "",
+   "keywords": [
+    "voyager",
+    "space probe",
+    "golden record"
+   ],
+   "credit": "Voyager Probe (A), NASA 3D Resources",
+   "license": "Public domain (NASA media guidelines)",
+   "source": "https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Voyager%20Probe%20(A)",
+   "parts": [
+    {
+     "id": "dish",
+     "label": "High-gain antenna",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      -0.859,
+      -1.926
+     ],
+     "size": [
+      2.97,
+      1.876,
+      2.97
+     ],
+     "triangles": 3872
+    },
+    {
+     "id": "probe",
+     "label": "Probe body",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      2.194,
+      6.215,
+      10.0
+     ],
+     "triangles": 26039
+    }
+   ]
+  },
+  {
+   "id": "astronaut",
+   "title": "Astronaut in a spacesuit",
+   "file": "astronaut.glb",
+   "bytes": 202192,
+   "triangles": 6381,
+   "about": "",
+   "keywords": [
+    "astronaut",
+    "spacesuit",
+    "space suit",
+    "spacewalk"
+   ],
+   "credit": "Astronaut, NASA 3D Resources",
+   "license": "Public domain (NASA media guidelines)",
+   "source": "https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Astronaut",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      9.279,
+      10.0,
+      3.717
+     ],
+     "triangles": 6381
+    }
+   ]
+  },
+  {
+   "id": "concept_car",
+   "title": "Sports car (concept)",
+   "file": "concept_car.glb",
+   "bytes": 6023904,
+   "triangles": 213347,
+   "about": "",
+   "keywords": [
+    "car",
+    "sports car",
+    "supercar"
+   ],
+   "credit": "Car Concept by Eric Chadwick (Khronos glTF Sample Assets, CC-BY-4.0)",
+   "license": "CC-BY-4.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      5.835,
+      2.637,
+      10.0
+     ],
+     "triangles": 213347
+    }
+   ]
+  },
+  {
+   "id": "chronograph_watch",
+   "title": "Chronograph wristwatch",
+   "file": "chronograph_watch.glb",
+   "bytes": 4723884,
+   "triangles": 100002,
+   "about": "",
+   "keywords": [
+    "watch",
+    "chronograph"
+   ],
+   "credit": "Chronograph Watch by Eric Chadwick (Khronos glTF Sample Assets, CC-BY-4.0)",
+   "license": "CC-BY-4.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ChronographWatch",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.076,
+      9.408,
+      10.0
+     ],
+     "triangles": 100002
+    }
+   ]
+  },
+  {
+   "id": "antique_camera",
+   "title": "Antique bellows camera",
+   "file": "antique_camera.glb",
+   "bytes": 1816232,
+   "triangles": 20066,
+   "about": "",
+   "keywords": [
+    "camera",
+    "photography"
+   ],
+   "credit": "Antique Camera by Maximillan Kamps (Khronos glTF Sample Assets, CC0-1.0)",
+   "license": "CC0-1.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/AntiqueCamera",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      3.603,
+      10.0,
+      4.709
+     ],
+     "triangles": 20066
+    }
+   ]
+  },
+  {
+   "id": "sunglasses",
+   "title": "Sunglasses",
+   "file": "sunglasses.glb",
+   "bytes": 302508,
+   "triangles": 13396,
+   "about": "",
+   "keywords": [
+    "sunglasses",
+    "lenses"
+   ],
+   "credit": "Sunglasses Khronos by Eric Chadwick (Khronos glTF Sample Assets, CC-BY-4.0)",
+   "license": "CC-BY-4.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SunglassesKhronos",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      9.321,
+      3.569,
+      10.0
+     ],
+     "triangles": 13396
+    }
+   ]
+  },
+  {
+   "id": "water_bottle",
+   "title": "Water bottle",
+   "file": "water_bottle.glb",
+   "bytes": 289616,
+   "triangles": 4510,
+   "about": "",
+   "keywords": [
+    "bottle"
+   ],
+   "credit": "Water Bottle by Microsoft (Khronos glTF Sample Assets, CC0-1.0)",
+   "license": "CC0-1.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/WaterBottle",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      4.181,
+      10.0,
+      4.181
+     ],
+     "triangles": 4510
+    }
+   ]
+  },
+  {
+   "id": "refrigerator",
+   "title": "Refrigerator",
+   "file": "refrigerator.glb",
+   "bytes": 5901924,
+   "triangles": 208679,
+   "about": "",
+   "keywords": [
+    "fridge",
+    "refrigerator"
+   ],
+   "credit": "Commercial Refrigerator by Eric Chadwick, Sean Thomas (Khronos glTF Sample Assets, CC-BY-4.0)",
+   "license": "CC-BY-4.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CommercialRefrigerator",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      3.912,
+      10.0,
+      4.323
+     ],
+     "triangles": 208679
+    }
+   ]
+  },
+  {
+   "id": "barn_lamp",
+   "title": "Barn lamp",
+   "file": "barn_lamp.glb",
+   "bytes": 672496,
+   "triangles": 10203,
+   "about": "",
+   "keywords": [
+    "lamp"
+   ],
+   "credit": "Anisotropy Barn Lamp by Eric Chadwick (Khronos glTF Sample Assets, CC-BY-4.0)",
+   "license": "CC-BY-4.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/AnisotropyBarnLamp",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.476,
+      10.0,
+      8.876
+     ],
+     "triangles": 10203
+    }
+   ]
+  },
+  {
+   "id": "shoe",
+   "title": "Sneaker",
+   "file": "shoe.glb",
+   "bytes": 1356192,
+   "triangles": 22700,
+   "about": "",
+   "keywords": [
+    "shoe",
+    "sneaker"
+   ],
+   "credit": "Materials Variants Shoe by Shopify (Khronos glTF Sample Assets, CC-BY-4.0)",
+   "license": "CC-BY-4.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/MaterialsVariantsShoe",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      5.14,
+      3.887
+     ],
+     "triangles": 22700
+    }
+   ]
+  },
+  {
+   "id": "sofa_velvet",
+   "title": "Velvet sofa",
+   "file": "sofa_velvet.glb",
+   "bytes": 610508,
+   "triangles": 4196,
+   "about": "",
+   "keywords": [
+    "sofa"
+   ],
+   "credit": "GlamVelvetSofa by Eric Chadwick (Khronos glTF Sample Assets, CC-BY-4.0)",
+   "license": "CC-BY-4.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/GlamVelvetSofa",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      3.599,
+      4.674
+     ],
+     "triangles": 4196
+    }
+   ]
+  },
+  {
+   "id": "chair_sheen",
+   "title": "Armchair (fabric)",
+   "file": "chair_sheen.glb",
+   "bytes": 1585776,
+   "triangles": 39936,
+   "about": "",
+   "keywords": [
+    "chair"
+   ],
+   "credit": "Sheen Chair by Eric Chadwick (Khronos glTF Sample Assets, CC0-1.0)",
+   "license": "CC0-1.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SheenChair",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      8.302,
+      6.899
+     ],
+     "triangles": 39936
+    }
+   ]
+  },
+  {
+   "id": "teacup",
+   "title": "Teacup",
+   "file": "teacup.glb",
+   "bytes": 1899748,
+   "triangles": 28184,
+   "about": "",
+   "keywords": [
+    "teacup"
+   ],
+   "credit": "Diffuse Transmission Teacup by Polyhaven.com, and Eric Chadwick (Khronos glTF Sample Assets, CC0-1.0)",
+   "license": "CC0-1.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/DiffuseTransmissionTeacup",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      9.667,
+      4.578,
+      10.0
+     ],
+     "triangles": 28184
+    }
+   ]
+  },
+  {
+   "id": "mosquito_amber",
+   "title": "Mosquito in amber",
+   "file": "mosquito_amber.glb",
+   "bytes": 1780552,
+   "triangles": 14349,
+   "about": "",
+   "keywords": [
+    "amber",
+    "fossil"
+   ],
+   "credit": "Mosquito In Amber by Loic Norgeot, Sketchfab (Khronos glTF Sample Assets, CC-BY-4.0)",
+   "license": "CC-BY-4.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/MosquitoInAmber",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      9.757,
+      10.0,
+      8.821
+     ],
+     "triangles": 14349
+    }
+   ]
+  },
+  {
+   "id": "fish",
+   "title": "Fish (barramundi)",
+   "file": "fish.glb",
+   "bytes": 1491460,
+   "triangles": 3864,
+   "about": "",
+   "keywords": [
+    "fish"
+   ],
+   "credit": "Barramundi Fish by Microsoft (Khronos glTF Sample Assets, CC0-1.0)",
+   "license": "CC0-1.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BarramundiFish",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      2.222,
+      4.471,
+      10.0
+     ],
+     "triangles": 3864
+    }
+   ]
+  },
+  {
+   "id": "traffic_cone",
+   "title": "Traffic cone",
+   "file": "traffic_cone.glb",
+   "bytes": 1790684,
+   "triangles": 17224,
+   "about": "",
+   "keywords": [
+    "cone"
+   ],
+   "credit": "Traffic Cone by Rob Tuytel, hinndia (Khronos glTF Sample Assets, CC-BY-4.0 + CC0-1.0)",
+   "license": "CC-BY-4.0 + CC0-1.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/TrafficCone",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      9.922,
+      2.181,
+      10.0
+     ],
+     "triangles": 17224
+    }
+   ]
+  },
+  {
+   "id": "vase_flowers",
+   "title": "Flowers in a glass vase",
+   "file": "vase_flowers.glb",
+   "bytes": 1999292,
+   "triangles": 14036,
+   "about": "",
+   "keywords": [
+    "flowers"
+   ],
+   "credit": "Glass Vase with Flowers by Eric Chadwick, Rico Cilliers (Khronos glTF Sample Assets, CC0-1.0)",
+   "license": "CC0-1.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/GlassVaseFlowers",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      9.353,
+      6.558
+     ],
+     "triangles": 14036
+    }
+   ]
+  },
+  {
+   "id": "plant_kh",
+   "title": "House plant",
+   "file": "plant_kh.glb",
+   "bytes": 5600212,
+   "triangles": 68409,
+   "about": "",
+   "keywords": [
+    "plant",
+    "photosynthesis"
+   ],
+   "credit": "Diffuse Transmission Plant by Eric Chadwick, Rico Cilliers (Khronos glTF Sample Assets, CC-BY-4.0 + CC0-1.0)",
+   "license": "CC-BY-4.0 + CC0-1.0",
+   "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/DiffuseTransmissionPlant",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.335,
+      10.0,
+      7.815
+     ],
+     "triangles": 68409
+    }
+   ]
+  },
+  {
+   "id": "circuit_board",
+   "title": "Circuit board",
+   "file": "circuit_board.glb",
+   "bytes": 4142524,
+   "triangles": 14430,
+   "about": "",
+   "keywords": [
+    "pcb",
+    "electronics",
+    "chip"
+   ],
+   "credit": "Circuit board, Poly Haven (polyhaven.com/a/circuit_board)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/circuit_board",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      1.94,
+      9.848
+     ],
+     "triangles": 14430
+    }
+   ]
+  },
+  {
+   "id": "laptop",
+   "title": "Laptop",
+   "file": "laptop.glb",
+   "bytes": 2179108,
+   "triangles": 14450,
+   "about": "",
+   "keywords": [
+    "computer"
+   ],
+   "credit": "Laptop, Poly Haven (polyhaven.com/a/classic_laptop)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/classic_laptop",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      8.326,
+      7.454
+     ],
+     "triangles": 14450
+    }
+   ]
+  },
+  {
+   "id": "game_console",
+   "title": "Game console",
+   "file": "game_console.glb",
+   "bytes": 2976736,
+   "triangles": 31710,
+   "about": "",
+   "keywords": [
+    "console",
+    "gaming"
+   ],
+   "credit": "Game console, Poly Haven (polyhaven.com/a/gaming_console)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/gaming_console",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      3.085,
+      9.801
+     ],
+     "triangles": 31710
+    }
+   ]
+  },
+  {
+   "id": "gamepad",
+   "title": "Game controller",
+   "file": "gamepad.glb",
+   "bytes": 1304996,
+   "triangles": 9546,
+   "about": "",
+   "keywords": [
+    "controller"
+   ],
+   "credit": "Game controller, Poly Haven (polyhaven.com/a/gamepad)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/gamepad",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      9.289,
+      0.435,
+      10.0
+     ],
+     "triangles": 9546
+    }
+   ]
+  },
+  {
+   "id": "camera",
+   "title": "Camera",
+   "file": "camera.glb",
+   "bytes": 2434900,
+   "triangles": 26987,
+   "about": "",
+   "keywords": [
+    "camera"
+   ],
+   "credit": "Camera, Poly Haven (polyhaven.com/a/Camera_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/Camera_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.139,
+      2.962,
+      10.0
+     ],
+     "triangles": 26987
+    }
+   ]
+  },
+  {
+   "id": "television",
+   "title": "Old television (CRT)",
+   "file": "television.glb",
+   "bytes": 514440,
+   "triangles": 1918,
+   "about": "",
+   "keywords": [
+    "tv",
+    "crt"
+   ],
+   "credit": "Old television (CRT), Poly Haven (polyhaven.com/a/Television_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/Television_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      7.614,
+      7.847
+     ],
+     "triangles": 1918
+    }
+   ]
+  },
+  {
+   "id": "television_2",
+   "title": "Television",
+   "file": "television_2.glb",
+   "bytes": 1239060,
+   "triangles": 2310,
+   "about": "",
+   "keywords": [
+    "tv"
+   ],
+   "credit": "Television, Poly Haven (polyhaven.com/a/television_02)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/television_02",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      9.716,
+      10.0,
+      8.512
+     ],
+     "triangles": 2310
+    }
+   ]
+  },
+  {
+   "id": "cassette_player",
+   "title": "Portable cassette player",
+   "file": "cassette_player.glb",
+   "bytes": 3161592,
+   "triangles": 13307,
+   "about": "",
+   "keywords": [
+    "walkman"
+   ],
+   "credit": "Portable cassette player, Poly Haven (polyhaven.com/a/portable_cassette_player)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/portable_cassette_player",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      7.565,
+      2.303
+     ],
+     "triangles": 13307
+    }
+   ]
+  },
+  {
+   "id": "radio",
+   "title": "Radio transceiver",
+   "file": "radio.glb",
+   "bytes": 6229032,
+   "triangles": 42350,
+   "about": "",
+   "keywords": [
+    "radio"
+   ],
+   "credit": "Radio transceiver, Poly Haven (polyhaven.com/a/vintage_radio_transceiver)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_radio_transceiver",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      7.568,
+      7.197
+     ],
+     "triangles": 42350
+    }
+   ]
+  },
+  {
+   "id": "video_camera",
+   "title": "Video camera",
+   "file": "video_camera.glb",
+   "bytes": 2708416,
+   "triangles": 18682,
+   "about": "",
+   "keywords": [
+    "camcorder"
+   ],
+   "credit": "Video camera, Poly Haven (polyhaven.com/a/vintage_video_camera)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_video_camera",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      4.911,
+      10.0,
+      9.144
+     ],
+     "triangles": 18682
+    }
+   ]
+  },
+  {
+   "id": "microwave",
+   "title": "Microwave oven",
+   "file": "microwave.glb",
+   "bytes": 2120564,
+   "triangles": 8120,
+   "about": "",
+   "keywords": [
+    "microwave"
+   ],
+   "credit": "Microwave oven, Poly Haven (polyhaven.com/a/vintage_microwave)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_microwave",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      4.897,
+      6.944
+     ],
+     "triangles": 8120
+    }
+   ]
+  },
+  {
+   "id": "multimeter",
+   "title": "Multimeter",
+   "file": "multimeter.glb",
+   "bytes": 1774864,
+   "triangles": 8948,
+   "about": "",
+   "keywords": [
+    "electricity"
+   ],
+   "credit": "Multimeter, Poly Haven (polyhaven.com/a/retro_multimeter)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/retro_multimeter",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.751,
+      10.0,
+      7.273
+     ],
+     "triangles": 8948
+    }
+   ]
+  },
+  {
+   "id": "security_camera",
+   "title": "Security camera",
+   "file": "security_camera.glb",
+   "bytes": 2278832,
+   "triangles": 13571,
+   "about": "",
+   "keywords": [
+    "cctv"
+   ],
+   "credit": "Security camera, Poly Haven (polyhaven.com/a/security_camera_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/security_camera_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      3.062,
+      5.166,
+      10.0
+     ],
+     "triangles": 13571
+    }
+   ]
+  },
+  {
+   "id": "lightbulb",
+   "title": "Light bulb",
+   "file": "lightbulb.glb",
+   "bytes": 1940024,
+   "triangles": 4372,
+   "about": "",
+   "keywords": [
+    "filament"
+   ],
+   "credit": "Light bulb, Poly Haven (polyhaven.com/a/lightbulb_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/lightbulb_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      5.982,
+      10.0,
+      5.982
+     ],
+     "triangles": 4372
+    }
+   ]
+  },
+  {
+   "id": "led_bulb",
+   "title": "LED bulb",
+   "file": "led_bulb.glb",
+   "bytes": 1224404,
+   "triangles": 6420,
+   "about": "",
+   "keywords": [
+    "led"
+   ],
+   "credit": "LED bulb, Poly Haven (polyhaven.com/a/lightbulb_led)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/lightbulb_led",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      6.129,
+      10.0,
+      6.129
+     ],
+     "triangles": 6420
+    }
+   ]
+  },
+  {
+   "id": "digital_watch",
+   "title": "Digital watch",
+   "file": "digital_watch.glb",
+   "bytes": 2700480,
+   "triangles": 10390,
+   "about": "",
+   "keywords": [
+    "watch"
+   ],
+   "credit": "Digital watch, Poly Haven (polyhaven.com/a/digital_wrist_watch)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/digital_wrist_watch",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      1.68,
+      0.384,
+      10.0
+     ],
+     "triangles": 10390
+    }
+   ]
+  },
+  {
+   "id": "alarm_clock",
+   "title": "Alarm clock",
+   "file": "alarm_clock.glb",
+   "bytes": 3014204,
+   "triangles": 8985,
+   "about": "",
+   "keywords": [
+    "clock"
+   ],
+   "credit": "Alarm clock, Poly Haven (polyhaven.com/a/alarm_clock_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/alarm_clock_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.559,
+      10.0,
+      3.833
+     ],
+     "triangles": 8985
+    }
+   ]
+  },
+  {
+   "id": "kettle",
+   "title": "Electric kettle",
+   "file": "kettle.glb",
+   "bytes": 2969904,
+   "triangles": 14838,
+   "about": "",
+   "keywords": [
+    "kettle"
+   ],
+   "credit": "Electric kettle, Poly Haven (polyhaven.com/a/vintage_electric_kettle)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_electric_kettle",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      9.497,
+      7.746
+     ],
+     "triangles": 14838
+    }
+   ]
+  },
+  {
+   "id": "stove",
+   "title": "Electric stove",
+   "file": "stove.glb",
+   "bytes": 2468624,
+   "triangles": 13914,
+   "about": "",
+   "keywords": [
+    "stove"
+   ],
+   "credit": "Electric stove, Poly Haven (polyhaven.com/a/electric_stove)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/electric_stove",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      5.853,
+      10.0,
+      7.542
+     ],
+     "triangles": 13914
+    }
+   ]
+  },
+  {
+   "id": "ceiling_fan",
+   "title": "Ceiling fan",
+   "file": "ceiling_fan.glb",
+   "bytes": 1869976,
+   "triangles": 16356,
+   "about": "",
+   "keywords": [
+    "fan"
+   ],
+   "credit": "Ceiling fan, Poly Haven (polyhaven.com/a/ceiling_fan)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/ceiling_fan",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      3.53,
+      10.0
+     ],
+     "triangles": 16356
+    }
+   ]
+  },
+  {
+   "id": "air_conditioner",
+   "title": "Air conditioner unit",
+   "file": "air_conditioner.glb",
+   "bytes": 7721812,
+   "triangles": 18986,
+   "about": "",
+   "keywords": [
+    "ac",
+    "heat pump"
+   ],
+   "credit": "Air conditioner unit, Poly Haven (polyhaven.com/a/exterior_aircon_unit)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/exterior_aircon_unit",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      5.155,
+      2.079
+     ],
+     "triangles": 18986
+    }
+   ]
+  },
+  {
+   "id": "generator",
+   "title": "Portable generator",
+   "file": "generator.glb",
+   "bytes": 4182964,
+   "triangles": 26419,
+   "about": "",
+   "keywords": [
+    "generator",
+    "engine"
+   ],
+   "credit": "Portable generator, Poly Haven (polyhaven.com/a/portable_generator)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/portable_generator",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      7.05,
+      6.892
+     ],
+     "triangles": 26419
+    }
+   ]
+  },
+  {
+   "id": "microscope",
+   "title": "Microscope",
+   "file": "microscope.glb",
+   "bytes": 2453628,
+   "triangles": 16598,
+   "about": "",
+   "keywords": [
+    "microscope"
+   ],
+   "credit": "Microscope, Poly Haven (polyhaven.com/a/industrial_microscope)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/industrial_microscope",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      4.307,
+      9.27,
+      10.0
+     ],
+     "triangles": 16598
+    }
+   ]
+  },
+  {
+   "id": "old_microscope",
+   "title": "Vintage microscope",
+   "file": "old_microscope.glb",
+   "bytes": 2861952,
+   "triangles": 20631,
+   "about": "",
+   "keywords": [
+    "microscope"
+   ],
+   "credit": "Vintage microscope, Poly Haven (polyhaven.com/a/vintage_microscope)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_microscope",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      2.673,
+      10.0,
+      4.552
+     ],
+     "triangles": 20631
+    }
+   ]
+  },
+  {
+   "id": "binoculars",
+   "title": "Binoculars",
+   "file": "binoculars.glb",
+   "bytes": 2233496,
+   "triangles": 19248,
+   "about": "",
+   "keywords": [
+    "binoculars"
+   ],
+   "credit": "Binoculars, Poly Haven (polyhaven.com/a/binoculars)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/binoculars",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      5.798,
+      2.301,
+      10.0
+     ],
+     "triangles": 19248
+    }
+   ]
+  },
+  {
+   "id": "magnifier",
+   "title": "Magnifying glass",
+   "file": "magnifier.glb",
+   "bytes": 486752,
+   "triangles": 7240,
+   "about": "",
+   "keywords": [
+    "lens"
+   ],
+   "credit": "Magnifying glass, Poly Haven (polyhaven.com/a/magnifying_glass_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/magnifying_glass_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      -0.0,
+      0.0
+     ],
+     "size": [
+      4.866,
+      10.0,
+      0.984
+     ],
+     "triangles": 7240
+    }
+   ]
+  },
+  {
+   "id": "projector",
+   "title": "Film projector",
+   "file": "projector.glb",
+   "bytes": 3628480,
+   "triangles": 32697,
+   "about": "",
+   "keywords": [
+    "projector"
+   ],
+   "credit": "Film projector, Poly Haven (polyhaven.com/a/filmstrip_projector_8mm)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/filmstrip_projector_8mm",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      4.21,
+      5.732,
+      10.0
+     ],
+     "triangles": 32697
+    }
+   ]
+  },
+  {
+   "id": "desk_lamp",
+   "title": "Desk lamp",
+   "file": "desk_lamp.glb",
+   "bytes": 2834040,
+   "triangles": 24102,
+   "about": "",
+   "keywords": [
+    "lamp"
+   ],
+   "credit": "Desk lamp, Poly Haven (polyhaven.com/a/desk_lamp_arm_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/desk_lamp_arm_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      2.26,
+      10.0,
+      6.877
+     ],
+     "triangles": 24102
+    }
+   ]
+  },
+  {
+   "id": "megaphone",
+   "title": "Megaphone",
+   "file": "megaphone.glb",
+   "bytes": 773236,
+   "triangles": 15814,
+   "about": "",
+   "keywords": [
+    "sound"
+   ],
+   "credit": "Megaphone, Poly Haven (polyhaven.com/a/Megaphone_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/Megaphone_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      8.096,
+      6.163
+     ],
+     "triangles": 15814
+    }
+   ]
+  },
+  {
+   "id": "smoke_alarm",
+   "title": "Fire alarm",
+   "file": "smoke_alarm.glb",
+   "bytes": 1946840,
+   "triangles": 2705,
+   "about": "",
+   "keywords": [
+    "smoke detector"
+   ],
+   "credit": "Fire alarm, Poly Haven (polyhaven.com/a/fire_alarm)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/fire_alarm",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      6.923,
+      10.0,
+      1.836
+     ],
+     "triangles": 2705
+    }
+   ]
+  },
+  {
+   "id": "flashlight",
+   "title": "Flashlight",
+   "file": "flashlight.glb",
+   "bytes": 2553756,
+   "triangles": 9730,
+   "about": "",
+   "keywords": [
+    "torch"
+   ],
+   "credit": "Flashlight, Poly Haven (polyhaven.com/a/signal_flashlight)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/signal_flashlight",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      4.735,
+      10.0,
+      2.971
+     ],
+     "triangles": 9730
+    }
+   ]
+  },
+  {
+   "id": "telephone",
+   "title": "Vintage telephone",
+   "file": "telephone.glb",
+   "bytes": 3252528,
+   "triangles": 15864,
+   "about": "",
+   "keywords": [
+    "phone"
+   ],
+   "credit": "Vintage telephone, Poly Haven (polyhaven.com/a/vintage_telephone_wall_clock)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_telephone_wall_clock",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      6.839,
+      10.0,
+      3.842
+     ],
+     "triangles": 15864
+    }
+   ]
+  },
+  {
+   "id": "boombox",
+   "title": "Boombox",
+   "file": "boombox.glb",
+   "bytes": 3065488,
+   "triangles": 10168,
+   "about": "",
+   "keywords": [
+    "speaker"
+   ],
+   "credit": "Boombox, Poly Haven (polyhaven.com/a/boombox)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/boombox",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      6.495,
+      2.576
+     ],
+     "triangles": 10168
+    }
+   ]
+  },
+  {
+   "id": "spacecraft_instrument",
+   "title": "Spacecraft instrument",
+   "file": "spacecraft_instrument.glb",
+   "bytes": 3077924,
+   "triangles": 13279,
+   "about": "",
+   "keywords": [
+    "spacecraft"
+   ],
+   "credit": "Spacecraft instrument, Poly Haven (polyhaven.com/a/vintage_spacecraft_instrument)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_spacecraft_instrument",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      6.563,
+      4.982
+     ],
+     "triangles": 13279
+    }
+   ]
+  },
+  {
+   "id": "apple",
+   "title": "Apple",
+   "file": "apple.glb",
+   "bytes": 472996,
+   "triangles": 7012,
+   "about": "",
+   "keywords": [
+    "fruit"
+   ],
+   "credit": "Apple, Poly Haven (polyhaven.com/a/food_apple_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/food_apple_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      8.752,
+      9.83
+     ],
+     "triangles": 7012
+    }
+   ]
+  },
+  {
+   "id": "avocado",
+   "title": "Avocado",
+   "file": "avocado.glb",
+   "bytes": 584336,
+   "triangles": 7743,
+   "about": "",
+   "keywords": [
+    "fruit"
+   ],
+   "credit": "Avocado, Poly Haven (polyhaven.com/a/food_avocado_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/food_avocado_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      6.645,
+      10.0,
+      6.602
+     ],
+     "triangles": 7743
+    }
+   ]
+  },
+  {
+   "id": "kiwi",
+   "title": "Kiwi fruit",
+   "file": "kiwi.glb",
+   "bytes": 793832,
+   "triangles": 7748,
+   "about": "",
+   "keywords": [
+    "fruit"
+   ],
+   "credit": "Kiwi fruit, Poly Haven (polyhaven.com/a/food_kiwi_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/food_kiwi_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.719,
+      10.0,
+      7.62
+     ],
+     "triangles": 7748
+    }
+   ]
+  },
+  {
+   "id": "lime",
+   "title": "Lime",
+   "file": "lime.glb",
+   "bytes": 578488,
+   "triangles": 8100,
+   "about": "",
+   "keywords": [
+    "citrus"
+   ],
+   "credit": "Lime, Poly Haven (polyhaven.com/a/food_lime_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/food_lime_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.963,
+      10.0,
+      8.131
+     ],
+     "triangles": 8100
+    }
+   ]
+  },
+  {
+   "id": "lemon",
+   "title": "Lemon",
+   "file": "lemon.glb",
+   "bytes": 1850876,
+   "triangles": 4012,
+   "about": "",
+   "keywords": [
+    "citrus"
+   ],
+   "credit": "Lemon, Poly Haven (polyhaven.com/a/lemon)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/lemon",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.202,
+      10.0,
+      7.157
+     ],
+     "triangles": 4012
+    }
+   ]
+  },
+  {
+   "id": "lychee",
+   "title": "Lychee",
+   "file": "lychee.glb",
+   "bytes": 770980,
+   "triangles": 6783,
+   "about": "",
+   "keywords": [
+    "fruit"
+   ],
+   "credit": "Lychee, Poly Haven (polyhaven.com/a/food_lychee_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/food_lychee_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.078,
+      10.0,
+      8.291
+     ],
+     "triangles": 6783
+    }
+   ]
+  },
+  {
+   "id": "pear",
+   "title": "Asian pear",
+   "file": "pear.glb",
+   "bytes": 1716080,
+   "triangles": 12572,
+   "about": "",
+   "keywords": [
+    "fruit"
+   ],
+   "credit": "Asian pear, Poly Haven (polyhaven.com/a/food_pears_asian_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/food_pears_asian_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.556,
+      4.263,
+      10.0
+     ],
+     "triangles": 12572
+    }
+   ]
+  },
+  {
+   "id": "pomegranate",
+   "title": "Pomegranate",
+   "file": "pomegranate.glb",
+   "bytes": 610016,
+   "triangles": 8142,
+   "about": "",
+   "keywords": [
+    "fruit"
+   ],
+   "credit": "Pomegranate, Poly Haven (polyhaven.com/a/food_pomegranate_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/food_pomegranate_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      9.906,
+      9.966,
+      10.0
+     ],
+     "triangles": 8142
+    }
+   ]
+  },
+  {
+   "id": "bananas",
+   "title": "Bananas",
+   "file": "bananas.glb",
+   "bytes": 2472560,
+   "triangles": 46868,
+   "about": "",
+   "keywords": [
+    "fruit"
+   ],
+   "credit": "Bananas, Poly Haven (polyhaven.com/a/bananas)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/bananas",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      2.979,
+      4.067
+     ],
+     "triangles": 46868
+    }
+   ]
+  },
+  {
+   "id": "ginger",
+   "title": "Ginger root",
+   "file": "ginger.glb",
+   "bytes": 586008,
+   "triangles": 7205,
+   "about": "",
+   "keywords": [
+    "root"
+   ],
+   "credit": "Ginger root, Poly Haven (polyhaven.com/a/food_ginger_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/food_ginger_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      4.176,
+      10.0,
+      2.565
+     ],
+     "triangles": 7205
+    }
+   ]
+  },
+  {
+   "id": "sweet_potato",
+   "title": "Sweet potato",
+   "file": "sweet_potato.glb",
+   "bytes": 1768624,
+   "triangles": 2042,
+   "about": "",
+   "keywords": [
+    "vegetable"
+   ],
+   "credit": "Sweet potato, Poly Haven (polyhaven.com/a/sweet_potato)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/sweet_potato",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      5.786,
+      10.0,
+      6.071
+     ],
+     "triangles": 2042
+    }
+   ]
+  },
+  {
+   "id": "onion",
+   "title": "Onion",
+   "file": "onion.glb",
+   "bytes": 1804520,
+   "triangles": 5444,
+   "about": "",
+   "keywords": [
+    "vegetable"
+   ],
+   "credit": "Onion, Poly Haven (polyhaven.com/a/yellow_onion)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/yellow_onion",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.392,
+      10.0,
+      7.946
+     ],
+     "triangles": 5444
+    }
+   ]
+  },
+  {
+   "id": "croissant",
+   "title": "Croissant",
+   "file": "croissant.glb",
+   "bytes": 2098004,
+   "triangles": 1990,
+   "about": "",
+   "keywords": [
+    "pastry"
+   ],
+   "credit": "Croissant, Poly Haven (polyhaven.com/a/croissant)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/croissant",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      3.1,
+      3.776
+     ],
+     "triangles": 1990
+    }
+   ]
+  },
+  {
+   "id": "burger_buns",
+   "title": "Burger buns",
+   "file": "burger_buns.glb",
+   "bytes": 2308948,
+   "triangles": 11588,
+   "about": "",
+   "keywords": [
+    "bread"
+   ],
+   "credit": "Burger buns, Poly Haven (polyhaven.com/a/hamburger_buns)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/hamburger_buns",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      1.596,
+      2.865
+     ],
+     "triangles": 11588
+    }
+   ]
+  },
+  {
+   "id": "carrot_cake",
+   "title": "Carrot cake",
+   "file": "carrot_cake.glb",
+   "bytes": 3362048,
+   "triangles": 13790,
+   "about": "",
+   "keywords": [
+    "cake"
+   ],
+   "credit": "Carrot cake, Poly Haven (polyhaven.com/a/carrot_cake)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/carrot_cake",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      4.328,
+      9.998
+     ],
+     "triangles": 13790
+    }
+   ]
+  },
+  {
+   "id": "chocolate_cake",
+   "title": "Chocolate cake",
+   "file": "chocolate_cake.glb",
+   "bytes": 3330672,
+   "triangles": 27054,
+   "about": "",
+   "keywords": [
+    "cake"
+   ],
+   "credit": "Chocolate cake, Poly Haven (polyhaven.com/a/strawberry_chocolate_cake)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/strawberry_chocolate_cake",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      3.242,
+      9.837
+     ],
+     "triangles": 27054
+    }
+   ]
+  },
+  {
+   "id": "drill",
+   "title": "Power drill",
+   "file": "drill.glb",
+   "bytes": 500268,
+   "triangles": 2926,
+   "about": "",
+   "keywords": [
+    "power tool"
+   ],
+   "credit": "Power drill, Poly Haven (polyhaven.com/a/Drill_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/Drill_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      9.882,
+      10.0,
+      2.832
+     ],
+     "triangles": 2926
+    }
+   ]
+  },
+  {
+   "id": "drill_press",
+   "title": "Drill press",
+   "file": "drill_press.glb",
+   "bytes": 4012576,
+   "triangles": 58526,
+   "about": "",
+   "keywords": [
+    "drill"
+   ],
+   "credit": "Drill press, Poly Haven (polyhaven.com/a/drill_press_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/drill_press_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      3.932,
+      10.0,
+      6.645
+     ],
+     "triangles": 58526
+    }
+   ]
+  },
+  {
+   "id": "hand_drill",
+   "title": "Hand drill",
+   "file": "hand_drill.glb",
+   "bytes": 3085960,
+   "triangles": 8338,
+   "about": "",
+   "keywords": [
+    "gears"
+   ],
+   "credit": "Hand drill, Poly Haven (polyhaven.com/a/vintage_hand_drill)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_hand_drill",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      2.702,
+      10.0,
+      2.576
+     ],
+     "triangles": 8338
+    }
+   ]
+  },
+  {
+   "id": "wrench",
+   "title": "Adjustable wrench",
+   "file": "wrench.glb",
+   "bytes": 2638432,
+   "triangles": 5390,
+   "about": "",
+   "keywords": [
+    "spanner"
+   ],
+   "credit": "Adjustable wrench, Poly Haven (polyhaven.com/a/adjustable_wrench)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/adjustable_wrench",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      2.689,
+      10.0,
+      1.204
+     ],
+     "triangles": 5390
+    }
+   ]
+  },
+  {
+   "id": "ratchet",
+   "title": "Ratchet wrench",
+   "file": "ratchet.glb",
+   "bytes": 1518876,
+   "triangles": 8796,
+   "about": "",
+   "keywords": [
+    "ratchet"
+   ],
+   "credit": "Ratchet wrench, Poly Haven (polyhaven.com/a/ratchet_wrench)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/ratchet_wrench",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      1.791,
+      10.0,
+      1.763
+     ],
+     "triangles": 8796
+    }
+   ]
+  },
+  {
+   "id": "hammer",
+   "title": "Hammer",
+   "file": "hammer.glb",
+   "bytes": 1507772,
+   "triangles": 2124,
+   "about": "",
+   "keywords": [
+    "hammer"
+   ],
+   "credit": "Hammer, Poly Haven (polyhaven.com/a/cross_pein_hammer)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/cross_pein_hammer",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      3.3,
+      10.0,
+      0.809
+     ],
+     "triangles": 2124
+    }
+   ]
+  },
+  {
+   "id": "screwdriver",
+   "title": "Screwdriver",
+   "file": "screwdriver.glb",
+   "bytes": 1535668,
+   "triangles": 3412,
+   "about": "",
+   "keywords": [
+    "screw"
+   ],
+   "credit": "Screwdriver, Poly Haven (polyhaven.com/a/screwdriver)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/screwdriver",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      1.298,
+      10.0,
+      1.278
+     ],
+     "triangles": 3412
+    }
+   ]
+  },
+  {
+   "id": "pliers",
+   "title": "Pliers",
+   "file": "pliers.glb",
+   "bytes": 2012624,
+   "triangles": 4540,
+   "about": "",
+   "keywords": [
+    "lever"
+   ],
+   "credit": "Pliers, Poly Haven (polyhaven.com/a/pliers)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/pliers",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      3.075,
+      10.0,
+      1.0
+     ],
+     "triangles": 4540
+    }
+   ]
+  },
+  {
+   "id": "saw",
+   "title": "Handsaw",
+   "file": "saw.glb",
+   "bytes": 2478336,
+   "triangles": 2548,
+   "about": "",
+   "keywords": [
+    "saw"
+   ],
+   "credit": "Handsaw, Poly Haven (polyhaven.com/a/handsaw_wood)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/handsaw_wood",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      0.645,
+      2.631,
+      10.0
+     ],
+     "triangles": 2548
+    }
+   ]
+  },
+  {
+   "id": "axe",
+   "title": "Hatchet",
+   "file": "axe.glb",
+   "bytes": 1967136,
+   "triangles": 5250,
+   "about": "",
+   "keywords": [
+    "axe"
+   ],
+   "credit": "Hatchet, Poly Haven (polyhaven.com/a/hatchet)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/hatchet",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      0.901,
+      10.0,
+      3.611
+     ],
+     "triangles": 5250
+    }
+   ]
+  },
+  {
+   "id": "tape_measure",
+   "title": "Tape measure",
+   "file": "tape_measure.glb",
+   "bytes": 445192,
+   "triangles": 2868,
+   "about": "",
+   "keywords": [
+    "measure"
+   ],
+   "credit": "Tape measure, Poly Haven (polyhaven.com/a/measuring_tape_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/measuring_tape_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      2.394,
+      4.333,
+      10.0
+     ],
+     "triangles": 2868
+    }
+   ]
+  },
+  {
+   "id": "vice",
+   "title": "Bench vice",
+   "file": "vice.glb",
+   "bytes": 2383920,
+   "triangles": 2864,
+   "about": "",
+   "keywords": [
+    "clamp",
+    "screw thread"
+   ],
+   "credit": "Bench vice, Poly Haven (polyhaven.com/a/bench_vice_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/bench_vice_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      5.066,
+      7.206,
+      10.0
+     ],
+     "triangles": 2864
+    }
+   ]
+  },
+  {
+   "id": "bolt_cutters",
+   "title": "Bolt cutters",
+   "file": "bolt_cutters.glb",
+   "bytes": 2496728,
+   "triangles": 3410,
+   "about": "",
+   "keywords": [
+    "leverage"
+   ],
+   "credit": "Bolt cutters, Poly Haven (polyhaven.com/a/bolt_cutters_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/bolt_cutters_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      1.882,
+      10.0,
+      0.449
+     ],
+     "triangles": 3410
+    }
+   ]
+  },
+  {
+   "id": "tire_pump",
+   "title": "Tyre pump",
+   "file": "tire_pump.glb",
+   "bytes": 1664056,
+   "triangles": 6572,
+   "about": "",
+   "keywords": [
+    "air pressure"
+   ],
+   "credit": "Tyre pump, Poly Haven (polyhaven.com/a/tire_pump)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/tire_pump",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      4.398,
+      10.0,
+      1.742
+     ],
+     "triangles": 6572
+    }
+   ]
+  },
+  {
+   "id": "blowtorch",
+   "title": "Blowtorch",
+   "file": "blowtorch.glb",
+   "bytes": 2327500,
+   "triangles": 11750,
+   "about": "",
+   "keywords": [
+    "flame"
+   ],
+   "credit": "Blowtorch, Poly Haven (polyhaven.com/a/brass_blowtorch)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/brass_blowtorch",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      4.992,
+      8.123,
+      10.0
+     ],
+     "triangles": 11750
+    }
+   ]
+  },
+  {
+   "id": "hand_plane",
+   "title": "Hand plane",
+   "file": "hand_plane.glb",
+   "bytes": 2551180,
+   "triangles": 8220,
+   "about": "",
+   "keywords": [
+    "woodwork"
+   ],
+   "credit": "Hand plane, Poly Haven (polyhaven.com/a/hand_plane_no4)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/hand_plane_no4",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      5.98,
+      2.549
+     ],
+     "triangles": 8220
+    }
+   ]
+  },
+  {
+   "id": "hand_truck",
+   "title": "Hand truck",
+   "file": "hand_truck.glb",
+   "bytes": 3138588,
+   "triangles": 13220,
+   "about": "",
+   "keywords": [
+    "lever"
+   ],
+   "credit": "Hand truck, Poly Haven (polyhaven.com/a/hand_truck)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/hand_truck",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      4.23,
+      10.0,
+      4.938
+     ],
+     "triangles": 13220
+    }
+   ]
+  },
+  {
+   "id": "fire_hydrant",
+   "title": "Fire hydrant",
+   "file": "fire_hydrant.glb",
+   "bytes": 5760292,
+   "triangles": 86316,
+   "about": "",
+   "keywords": [
+    "water pressure"
+   ],
+   "credit": "Fire hydrant, Poly Haven (polyhaven.com/a/fire_hydrant)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/fire_hydrant",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      9.141,
+      3.633
+     ],
+     "triangles": 86316
+    }
+   ]
+  },
+  {
+   "id": "fire_extinguisher",
+   "title": "Fire extinguisher",
+   "file": "fire_extinguisher.glb",
+   "bytes": 1615724,
+   "triangles": 9913,
+   "about": "",
+   "keywords": [
+    "fire"
+   ],
+   "credit": "Fire extinguisher, Poly Haven (polyhaven.com/a/korean_fire_extinguisher_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/korean_fire_extinguisher_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      4.247,
+      10.0,
+      5.574
+     ],
+     "triangles": 9913
+    }
+   ]
+  },
+  {
+   "id": "street_lamp",
+   "title": "Street lamp",
+   "file": "street_lamp.glb",
+   "bytes": 2471868,
+   "triangles": 30610,
+   "about": "",
+   "keywords": [
+    "street light"
+   ],
+   "credit": "Street lamp, Poly Haven (polyhaven.com/a/street_lamp_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/street_lamp_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      1.82,
+      10.0,
+      0.999
+     ],
+     "triangles": 30610
+    }
+   ]
+  },
+  {
+   "id": "grandfather_clock",
+   "title": "Grandfather clock",
+   "file": "grandfather_clock.glb",
+   "bytes": 2985120,
+   "triangles": 8582,
+   "about": "",
+   "keywords": [
+    "pendulum"
+   ],
+   "credit": "Grandfather clock, Poly Haven (polyhaven.com/a/vintage_grandfather_clock_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_grandfather_clock_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      2.856,
+      10.0,
+      1.947
+     ],
+     "triangles": 8582
+    }
+   ]
+  },
+  {
+   "id": "mantel_clock",
+   "title": "Mantel clock",
+   "file": "mantel_clock.glb",
+   "bytes": 3125712,
+   "triangles": 25721,
+   "about": "",
+   "keywords": [
+    "clock"
+   ],
+   "credit": "Mantel clock, Poly Haven (polyhaven.com/a/mantel_clock_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/mantel_clock_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      4.688,
+      3.685
+     ],
+     "triangles": 25721
+    }
+   ]
+  },
+  {
+   "id": "pocket_watch",
+   "title": "Pocket watch",
+   "file": "pocket_watch.glb",
+   "bytes": 1941156,
+   "triangles": 16098,
+   "about": "",
+   "keywords": [
+    "gears"
+   ],
+   "credit": "Pocket watch, Poly Haven (polyhaven.com/a/vintage_pocket_watch)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_pocket_watch",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.673,
+      10.0,
+      1.701
+     ],
+     "triangles": 16098
+    }
+   ]
+  },
+  {
+   "id": "compass",
+   "title": "Compass",
+   "file": "compass.glb",
+   "bytes": 2691524,
+   "triangles": 11645,
+   "about": "",
+   "keywords": [
+    "magnet",
+    "navigation"
+   ],
+   "credit": "Compass, Poly Haven (polyhaven.com/a/seadogs_compass)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/seadogs_compass",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      5.64,
+      6.01,
+      10.0
+     ],
+     "triangles": 11645
+    }
+   ]
+  },
+  {
+   "id": "oil_lamp",
+   "title": "Oil lamp",
+   "file": "oil_lamp.glb",
+   "bytes": 2159616,
+   "triangles": 7208,
+   "about": "",
+   "keywords": [
+    "lamp"
+   ],
+   "credit": "Oil lamp, Poly Haven (polyhaven.com/a/vintage_oil_lamp)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_oil_lamp",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      2.744,
+      10.0,
+      2.744
+     ],
+     "triangles": 7208
+    }
+   ]
+  },
+  {
+   "id": "gas_mask",
+   "title": "Gas mask",
+   "file": "gas_mask.glb",
+   "bytes": 2261104,
+   "triangles": 18900,
+   "about": "",
+   "keywords": [
+    "filter"
+   ],
+   "credit": "Gas mask, Poly Haven (polyhaven.com/a/old_gas_mask)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/old_gas_mask",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      1.87,
+      10.0,
+      2.743
+     ],
+     "triangles": 18900
+    }
+   ]
+  },
+  {
+   "id": "wheelchair",
+   "title": "Wheelchair",
+   "file": "wheelchair.glb",
+   "bytes": 1745476,
+   "triangles": 40252,
+   "about": "",
+   "keywords": [
+    "wheelchair"
+   ],
+   "credit": "Wheelchair, Poly Haven (polyhaven.com/a/wheelchair_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/wheelchair_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.468,
+      10.0,
+      9.886
+     ],
+     "triangles": 40252
+    }
+   ]
+  },
+  {
+   "id": "life_jacket",
+   "title": "Life jacket",
+   "file": "life_jacket.glb",
+   "bytes": 2324784,
+   "triangles": 8968,
+   "about": "",
+   "keywords": [
+    "buoyancy"
+   ],
+   "credit": "Life jacket, Poly Haven (polyhaven.com/a/life_jacket)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/life_jacket",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.01,
+      10.0,
+      1.856
+     ],
+     "triangles": 8968
+    }
+   ]
+  },
+  {
+   "id": "rubber_duck",
+   "title": "Rubber duck",
+   "file": "rubber_duck.glb",
+   "bytes": 733996,
+   "triangles": 4288,
+   "about": "",
+   "keywords": [
+    "float"
+   ],
+   "credit": "Rubber duck, Poly Haven (polyhaven.com/a/rubber_duck_toy)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/rubber_duck_toy",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.117,
+      9.517,
+      10.0
+     ],
+     "triangles": 4288
+    }
+   ]
+  },
+  {
+   "id": "suitcase",
+   "title": "Suitcase",
+   "file": "suitcase.glb",
+   "bytes": 4327948,
+   "triangles": 16474,
+   "about": "",
+   "keywords": [
+    "luggage"
+   ],
+   "credit": "Suitcase, Poly Haven (polyhaven.com/a/vintage_suitcase)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/vintage_suitcase",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      3.531,
+      1.487
+     ],
+     "triangles": 16474
+    }
+   ]
+  },
+  {
+   "id": "spectacles",
+   "title": "Glasses",
+   "file": "spectacles.glb",
+   "bytes": 2479028,
+   "triangles": 11810,
+   "about": "",
+   "keywords": [
+    "lens"
+   ],
+   "credit": "Glasses, Poly Haven (polyhaven.com/a/round_spectacles)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/round_spectacles",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      2.931,
+      9.443
+     ],
+     "triangles": 11810
+    }
+   ]
+  },
+  {
+   "id": "armchair",
+   "title": "Armchair",
+   "file": "armchair.glb",
+   "bytes": 767904,
+   "triangles": 5626,
+   "about": "",
+   "keywords": [
+    "chair"
+   ],
+   "credit": "Armchair, Poly Haven (polyhaven.com/a/ArmChair_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/ArmChair_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      7.966,
+      10.0,
+      7.19
+     ],
+     "triangles": 5626
+    }
+   ]
+  },
+  {
+   "id": "lounge_chair",
+   "title": "Lounge chair",
+   "file": "lounge_chair.glb",
+   "bytes": 2086080,
+   "triangles": 6148,
+   "about": "",
+   "keywords": [
+    "chair"
+   ],
+   "credit": "Lounge chair, Poly Haven (polyhaven.com/a/mid_century_lounge_chair)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/mid_century_lounge_chair",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.474,
+      9.822,
+      10.0
+     ],
+     "triangles": 6148
+    }
+   ]
+  },
+  {
+   "id": "sofa",
+   "title": "Sofa",
+   "file": "sofa.glb",
+   "bytes": 517040,
+   "triangles": 4101,
+   "about": "",
+   "keywords": [
+    "couch"
+   ],
+   "credit": "Sofa, Poly Haven (polyhaven.com/a/Sofa_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/Sofa_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      5.069,
+      4.187
+     ],
+     "triangles": 4101
+    }
+   ]
+  },
+  {
+   "id": "dining_table",
+   "title": "Dining table",
+   "file": "dining_table.glb",
+   "bytes": 2281632,
+   "triangles": 1048,
+   "about": "",
+   "keywords": [
+    "table"
+   ],
+   "credit": "Dining table, Poly Haven (polyhaven.com/a/dining_table)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/dining_table",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      3.888,
+      6.163
+     ],
+     "triangles": 1048
+    }
+   ]
+  },
+  {
+   "id": "treasure_chest",
+   "title": "Treasure chest",
+   "file": "treasure_chest.glb",
+   "bytes": 6096284,
+   "triangles": 103330,
+   "about": "",
+   "keywords": [
+    "chest"
+   ],
+   "credit": "Treasure chest, Poly Haven (polyhaven.com/a/treasure_chest)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/treasure_chest",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      6.454,
+      5.452
+     ],
+     "triangles": 103330
+    }
+   ]
+  },
+  {
+   "id": "barrel",
+   "title": "Wine barrel",
+   "file": "barrel.glb",
+   "bytes": 919892,
+   "triangles": 10820,
+   "about": "",
+   "keywords": [
+    "barrel"
+   ],
+   "credit": "Wine barrel, Poly Haven (polyhaven.com/a/wine_barrel_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/wine_barrel_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.515,
+      10.0,
+      8.677
+     ],
+     "triangles": 10820
+    }
+   ]
+  },
+  {
+   "id": "sailing_ship",
+   "title": "Sailing ship",
+   "file": "sailing_ship.glb",
+   "bytes": 10774300,
+   "triangles": 110616,
+   "about": "",
+   "keywords": [
+    "galleon",
+    "sails"
+   ],
+   "credit": "Sailing ship, Poly Haven (polyhaven.com/a/dutch_ship_large_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/dutch_ship_large_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      9.366,
+      2.449
+     ],
+     "triangles": 110616
+    }
+   ]
+  },
+  {
+   "id": "cannon",
+   "title": "Cannon",
+   "file": "cannon.glb",
+   "bytes": 3470704,
+   "triangles": 41444,
+   "about": "",
+   "keywords": [
+    "artillery"
+   ],
+   "credit": "Cannon, Poly Haven (polyhaven.com/a/cannon_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/cannon_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      5.364,
+      3.374,
+      10.0
+     ],
+     "triangles": 41444
+    }
+   ]
+  },
+  {
+   "id": "katana",
+   "title": "Katana",
+   "file": "katana.glb",
+   "bytes": 646228,
+   "triangles": 6670,
+   "about": "",
+   "keywords": [
+    "sword"
+   ],
+   "credit": "Katana, Poly Haven (polyhaven.com/a/antique_katana_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/antique_katana_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      0.931,
+      10.0,
+      0.931
+     ],
+     "triangles": 6670
+    }
+   ]
+  },
+  {
+   "id": "shield",
+   "title": "Kite shield",
+   "file": "shield.glb",
+   "bytes": 3813804,
+   "triangles": 10306,
+   "about": "",
+   "keywords": [
+    "medieval"
+   ],
+   "credit": "Kite shield, Poly Haven (polyhaven.com/a/kite_shield)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/kite_shield",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      3.897,
+      10.0,
+      0.966
+     ],
+     "triangles": 10306
+    }
+   ]
+  },
+  {
+   "id": "football",
+   "title": "Football",
+   "file": "football.glb",
+   "bytes": 2759552,
+   "triangles": 4296,
+   "about": "",
+   "keywords": [
+    "soccer"
+   ],
+   "credit": "Football, Poly Haven (polyhaven.com/a/football)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/football",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      4.36,
+      4.366
+     ],
+     "triangles": 4296
+    }
+   ]
+  },
+  {
+   "id": "american_football",
+   "title": "American football",
+   "file": "american_football.glb",
+   "bytes": 2669396,
+   "triangles": 4480,
+   "about": "",
+   "keywords": [
+    "football"
+   ],
+   "credit": "American football, Poly Haven (polyhaven.com/a/american_football)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/american_football",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      5.644,
+      5.644
+     ],
+     "triangles": 4480
+    }
+   ]
+  },
+  {
+   "id": "baseball",
+   "title": "Baseball",
+   "file": "baseball.glb",
+   "bytes": 1027984,
+   "triangles": 10848,
+   "about": "",
+   "keywords": [
+    "baseball"
+   ],
+   "credit": "Baseball, Poly Haven (polyhaven.com/a/baseball_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/baseball_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      9.76,
+      10.0,
+      9.979
+     ],
+     "triangles": 10848
+    }
+   ]
+  },
+  {
+   "id": "dartboard",
+   "title": "Dartboard",
+   "file": "dartboard.glb",
+   "bytes": 3030412,
+   "triangles": 6800,
+   "about": "",
+   "keywords": [
+    "darts"
+   ],
+   "credit": "Dartboard, Poly Haven (polyhaven.com/a/dartboard)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/dartboard",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      0.883
+     ],
+     "triangles": 6800
+    }
+   ]
+  },
+  {
+   "id": "chess_set",
+   "title": "Chess set (wooden)",
+   "file": "chess_set.glb",
+   "bytes": 7236524,
+   "triangles": 76920,
+   "about": "",
+   "keywords": [
+    "chess"
+   ],
+   "credit": "Chess set (wooden), Poly Haven (polyhaven.com/a/chess_set)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/chess_set",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      2.031,
+      10.0
+     ],
+     "triangles": 76920
+    }
+   ]
+  },
+  {
+   "id": "ukulele",
+   "title": "Ukulele",
+   "file": "ukulele.glb",
+   "bytes": 804448,
+   "triangles": 8912,
+   "about": "",
+   "keywords": [
+    "strings"
+   ],
+   "credit": "Ukulele, Poly Haven (polyhaven.com/a/Ukulele_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/Ukulele_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      3.375,
+      10.0,
+      0.963
+     ],
+     "triangles": 8912
+    }
+   ]
+  },
+  {
+   "id": "bunsen_burner",
+   "title": "Bunsen burner",
+   "file": "bunsen_burner.glb",
+   "bytes": 2131212,
+   "triangles": 8434,
+   "about": "",
+   "keywords": [
+    "lab"
+   ],
+   "credit": "Bunsen burner, Poly Haven (polyhaven.com/a/bunsen_burner)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/bunsen_burner",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.023,
+      10.0,
+      8.023
+     ],
+     "triangles": 8434
+    }
+   ]
+  },
+  {
+   "id": "chemistry_set",
+   "title": "Chemistry set",
+   "file": "chemistry_set.glb",
+   "bytes": 3681384,
+   "triangles": 41958,
+   "about": "",
+   "keywords": [
+    "lab"
+   ],
+   "credit": "Chemistry set, Poly Haven (polyhaven.com/a/chemistry_set)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/chemistry_set",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      3.978,
+      3.282
+     ],
+     "triangles": 41958
+    }
+   ]
+  },
+  {
+   "id": "marble_bust",
+   "title": "Marble bust",
+   "file": "marble_bust.glb",
+   "bytes": 897376,
+   "triangles": 17456,
+   "about": "",
+   "keywords": [
+    "sculpture"
+   ],
+   "credit": "Marble bust, Poly Haven (polyhaven.com/a/marble_bust_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/marble_bust_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      5.277,
+      10.0,
+      5.82
+     ],
+     "triangles": 17456
+    }
+   ]
+  },
+  {
+   "id": "spinning_wheel",
+   "title": "Spinning wheel",
+   "file": "spinning_wheel.glb",
+   "bytes": 2122756,
+   "triangles": 52023,
+   "about": "",
+   "keywords": [
+    "wheel"
+   ],
+   "credit": "Spinning wheel, Poly Haven (polyhaven.com/a/spinning_wheel_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/spinning_wheel_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      4.775,
+      9.428,
+      10.0
+     ],
+     "triangles": 52023
+    }
+   ]
+  },
+  {
+   "id": "moon_rock",
+   "title": "Moon rock",
+   "file": "moon_rock.glb",
+   "bytes": 1701900,
+   "triangles": 18668,
+   "about": "",
+   "keywords": [
+    "lunar"
+   ],
+   "credit": "Moon rock, Poly Haven (polyhaven.com/a/moon_rock_01)",
+   "license": "CC0-1.0",
+   "source": "https://polyhaven.com/a/moon_rock_01",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      3.545,
+      5.262
+     ],
+     "triangles": 18668
+    }
+   ]
+  },
+  {
+   "id": "bell_x1",
+   "title": "Bell X-1 rocket plane",
+   "file": "bell_x1.glb",
+   "bytes": 11138180,
+   "triangles": 99526,
+   "about": "",
+   "keywords": [
+    "bell x-1",
+    "sound barrier",
+    "supersonic",
+    "rocket plane",
+    "chuck yeager"
+   ],
+   "credit": "Bell X-1 rocket plane, Smithsonian Institution (Open Access, CC0)",
+   "license": "CC0-1.0",
+   "source": "https://3d.si.edu/object/3d/6c69a6bb-55e6-4356-8725-120ff7f8d652",
+   "parts": [
+    {
+     "id": "body",
+     "label": null,
+     "note": null,
+     "casing": false,
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.241,
+      3.073,
+      10.0
+     ],
+     "triangles": 99526
+    }
+   ]
+  }
+ ]
+}

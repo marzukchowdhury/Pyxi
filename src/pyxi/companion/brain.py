@@ -80,7 +80,8 @@ from pyxi.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, s
 from pyxi.partial_json import complete_items, first_chunk, partial_string, picture_head
 from pyxi.routines import RoutineStore
 from pyxi.scenes import SceneSpec, build_exploded_scene, get_scene, parse_scene
-from pyxi.scenes.builder import build_model
+from pyxi.scenes import library as model_library
+from pyxi.scenes.builder import build_model, explain_library_model
 from pyxi.scenes.object_gallery import OBJECT_GALLERY
 from pyxi.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summary
 from pyxi.scenes.sketch import Sketchboard, steps_from_speech
@@ -951,6 +952,9 @@ class Brain:
         context = ""
         if ctx is not None:
             context = f"{ctx.window.title}\n" + "\n".join(t.text for t in ctx.text[:40])
+        real = model_library.get(str(args.get("library") or ""))
+        if real is not None and await self._explain_on_library_model(real, subject, brief, context):
+            return
         job = await self.jobs.track("Pyxi", f"Building {subject} in 3D", role="model")
         await self.hub.emit(
             "job_event",
@@ -995,6 +999,47 @@ class Brain:
         if wait > 0:
             await asyncio.sleep(min(wait, 12.0))
         await self.show_object(result.model, restart=True, background=True)
+
+    async def _explain_on_library_model(
+        self, real: model_library.LibraryModel, subject: str, brief: str, context: str
+    ) -> bool:
+        """A real model from the library: on screen as soon as its file is here, then the
+        explanation (labels, motions, beats) written on top of it. False if the file can't be
+        had, so the caller builds one instead."""
+        fetch = asyncio.to_thread(
+            model_library.ensure, self.settings.library_dir, real, self.settings.library_url
+        )
+        at_rest = real.scene()
+        explain = asyncio.ensure_future(
+            explain_library_model(self._builder_llm(), at_rest, real.summary(), brief, context)
+        )
+        if await fetch is None:
+            explain.cancel()
+            return False
+        job = await self.jobs.track("Pyxi", f"Explaining {subject} in 3D", role="model")
+        # The real thing, straight away, still and silent while its explanation is written
+        # (paused: with nothing to tell it would count as finished and tidy itself away).
+        await self.show_object(at_rest.model_copy(update={"auto_play": False}), restart=False, background=True)
+        try:
+            result = await explain
+        except Exception:
+            log.exception("library explanation failed")
+            await self.jobs.settle(job, ok=False, summary="The explanation wouldn't come together.")
+            return True
+        self.turns.add_spend("model_3d", result.cost_usd)
+        await self.jobs.settle(job, ok=result.model is not None, summary=subject, cost=result.cost_usd)
+        if result.model is None:
+            return True  # the model stays on screen; Pyxi's own reply is the explanation
+        model_library.snap_markers(result.model, self.settings.library_dir)
+        if self._object is not None and self._object.id != at_rest.id:
+            return True  # something else took the stage meanwhile
+        if self._speech:
+            await asyncio.gather(self._speech, return_exceptions=True)
+        wait = self._talking_until - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(min(wait, 12.0))
+        await self.show_object(result.model, restart=True, background=True, keep_place=True)
+        return True
 
     def _errand_llm(self) -> LLMProvider:
         """Errands can use a stronger model than conversation (PYXI_JOB_MODEL), if set."""

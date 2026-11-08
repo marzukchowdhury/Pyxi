@@ -27,6 +27,7 @@ from pyxi.scenes.object_gallery import OBJECT_GALLERY, OBJECT_TITLES
 
 log = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"^[a-f0-9]{12}\.png$")
+_LIBRARY_NAME = re.compile(r"^[a-z0-9_]{1,60}\.glb$")
 
 # Who may talk to the brain. It sees the screen, drives the mouse and answers its own "Allow"
 # cards, so two checks guard every request:
@@ -283,6 +284,14 @@ def create_app(
             return get_scene(name).model_dump(by_alias=True, mode="json")
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/library/{name}")
+    async def library_model(name: str) -> FileResponse:
+        """A real 3D model from the library (downloaded into the data folder when first used)."""
+        path = settings.library_dir / name
+        if not _LIBRARY_NAME.match(name) or not path.is_file():
+            raise HTTPException(404)
+        return FileResponse(path, media_type="model/gltf-binary")
 
     @app.get("/crops/{name}")
     async def crop(name: str) -> FileResponse:

@@ -10,14 +10,16 @@
  */
 import { ContactShadows, Edges, Environment, Lightformer, OrbitControls, Outlines, PerformanceMonitor, RoundedBox } from "@react-three/drei";
 import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
-import { type MutableRefObject, useEffect, useMemo, useRef, useState } from "react";
+import { type MutableRefObject, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { Beat, ObjectScene, Part } from "../shared/protocol";
 import { fromOrbit, orbitSpring, type OrbitSpring, smoothDamp, stepOrbit, toOrbit } from "./camera";
 import { children, evaluate } from "./motion";
 import { usePace } from "./pace";
-import { buildGeometry, makeMaterial } from "./parts";
+import { useAsset } from "./assets";
+import { buildKit } from "./kit";
+import { buildGeometry, makeMaterial, prepareAssetMaterial } from "./parts";
 
 export interface Clock {
   story: number;
@@ -38,13 +40,22 @@ interface Props {
   onPick?: (part: Part) => void;
 }
 
+interface Layer {
+  mesh: THREE.Mesh;
+  mat: THREE.MeshStandardMaterial;
+}
+
 interface Registered {
   part: Part;
   group: THREE.Group;
+  /** The first layer (callouts and occlusion measure from it). */
   mesh: THREE.Mesh;
-  mat: THREE.MeshPhysicalMaterial;
+  mat: THREE.MeshStandardMaterial;
+  /** Every mesh of the part with its own material: one for a built part; a real model's piece
+   * keeps each of its original materials (painted metal, glass, decals...). */
+  layers: Layer[];
   edges: THREE.Object3D | null;
-  center: THREE.Vector3; // local bounding-box centre of the geometry
+  center: THREE.Vector3; // centre of the part, in the first layer's local space
 }
 
 const FOV = 32;
@@ -269,37 +280,51 @@ function Model({ scene, clock, beat, cutaway, registry, onPick }: {
       const ghost = cutaway && p.casing;
       const f = (fade.current.get(p.id) ?? 1) + ((blocking.has(p.id) ? 0.08 : 1) - (fade.current.get(p.id) ?? 1)) * k;
       fade.current.set(p.id, f);
-      const shown = (ghost ? 0.3 : 1) * op * f * (reg.mat.userData.factor as number);
-      // A see-through shell is pale silver, not its real paint: dark metal at low opacity on a
-      // transparent stage reads as a smudge, and the outline of the thing gets lost.
-      const ud = reg.mat.userData as { baseColor?: THREE.Color; baseMetal?: number };
-      ud.baseColor ??= reg.mat.color.clone();
-      ud.baseMetal ??= reg.mat.metalness;
-      reg.mat.color.lerp(ghost ? GHOST : ud.baseColor, k);
-      reg.mat.metalness += ((ghost ? 0.05 : ud.baseMetal) - reg.mat.metalness) * k;
-      reg.mat.opacity = shown;
-      const transparent = shown < 0.995;
-      if (reg.mat.transparent !== transparent) {
-        reg.mat.transparent = transparent;
-        reg.mat.needsUpdate = true;
+      for (const { mesh, mat } of reg.layers) {
+        const ud = mat.userData as {
+          baseColor?: THREE.Color;
+          baseMetal?: number;
+          baseGlow?: THREE.Color;
+          baseTransparent?: boolean;
+          factor: number;
+          baseEmissive: number;
+        };
+        const shown = (ghost ? 0.3 : 1) * op * f * ud.factor;
+        // A see-through shell is pale silver, not its real paint: dark metal at low opacity on a
+        // transparent stage reads as a smudge, and the outline of the thing gets lost.
+        ud.baseColor ??= mat.color.clone();
+        ud.baseMetal ??= mat.metalness;
+        ud.baseGlow ??= mat.emissive.clone();
+        mat.color.lerp(ghost ? GHOST : ud.baseColor, k);
+        mat.metalness += ((ghost ? 0.05 : ud.baseMetal) - mat.metalness) * k;
+        mat.opacity = shown;
+        // A real model's glass stays glass: what was see-through is never made solid.
+        const transparent = !!ud.baseTransparent || shown < 0.995;
+        if (mat.transparent !== transparent) {
+          mat.transparent = transparent;
+          mat.needsUpdate = true;
+        }
+        mat.depthWrite = !transparent || shown > 0.6;
+        // A see-through shell would still black out the parts it's meant to reveal.
+        mesh.userData.casts ??= mesh.castShadow;
+        mesh.castShadow = (mesh.userData.casts as boolean) && shown > 0.6;
+        // A marker is only a place for a tag: never drawn, but it keeps its opacity for the tag.
+        mesh.visible = shown > 0.004 && p.shape !== "marker";
+        // Focus: a quiet ice-blue glow that breathes; pulses brighten emissive parts.
+        if (p.material === "emissive" && p.shape !== "asset") mat.emissiveIntensity = ud.baseEmissive * (st.glow ? 0.55 + 0.9 * st.glow : 1);
+        else if (isFocus && op > 0.05) {
+          mat.emissive.copy(ICE);
+          mat.emissiveIntensity = 0.16 + 0.08 * Math.sin(t * 3.2) + st.glow * 0.4;
+        } else if (st.glow) {
+          mat.emissive.copy(ICE);
+          mat.emissiveIntensity = st.glow * 0.5;
+        } else {
+          mat.emissive.copy(ud.baseGlow); // a real model's own lights and screens keep glowing
+          mat.emissiveIntensity = ud.baseEmissive;
+        }
       }
-      reg.mat.depthWrite = !transparent || shown > 0.6;
-      // A see-through shell would still black out the parts it's meant to reveal.
-      reg.mesh.userData.casts ??= reg.mesh.castShadow;
-      reg.mesh.castShadow = (reg.mesh.userData.casts as boolean) && shown > 0.6;
-      reg.mesh.visible = shown > 0.004;
       // Ghosts (cutaway casing, or a part faded out of the way) keep their outline.
       if (reg.edges) reg.edges.visible = ((ghost || f < 0.5) && op > 0.05) || ((scene.style === "blueprint" || scene.style === "xray") && op > 0.05);
-      // Focus: a quiet ice-blue glow that breathes; pulses brighten emissive parts.
-      const base = reg.mat.userData.baseEmissive as number;
-      if (p.material === "emissive") reg.mat.emissiveIntensity = base * (st.glow ? 0.55 + 0.9 * st.glow : 1);
-      else if (isFocus && op > 0.05) {
-        reg.mat.emissive.copy(ICE);
-        reg.mat.emissiveIntensity = 0.16 + 0.08 * Math.sin(t * 3.2) + st.glow * 0.4;
-      } else {
-        reg.mat.emissiveIntensity = st.glow * 0.5;
-        if (st.glow) reg.mat.emissive.copy(ICE);
-      }
     }
   });
 
@@ -350,8 +375,13 @@ function occluders(registry: Map<string, Registered>, focus: Set<string>, camera
   ray.far = dist;
   for (const [id, r] of registry) {
     if (subject.has(id) || !r.mesh.visible) continue;
-    const hit = ray.intersectObject(r.mesh, false)[0];
-    if (hit && hit.distance < dist * 0.92) out.add(id);
+    for (const { mesh } of r.layers) {
+      const hit = mesh.visible ? ray.intersectObject(mesh, false)[0] : undefined;
+      if (hit && hit.distance < dist * 0.92) {
+        out.add(id);
+        break;
+      }
+    }
   }
   return out;
 }
@@ -373,14 +403,52 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
   const built = useMemo(() => buildGeometry(part), [sig]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const mat = useMemo(() => makeMaterial(part, style), [sig, style]);
+  const asset = part.shape === "asset" && !!part.asset;
+  const [assetLayers, setAssetLayers] = useState<Layer[] | null>(null);
+  // A kit piece: several meshes, each with its own material (a tyre's rubber, its rim's metal).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const kit = useMemo(() => (part.shape === "kit" && part.kit ? buildKit(part.kit, part.size, part.axis, part.teeth) : null), [sig]);
+  const kitMats = useMemo(
+    () => kit?.map((l) => makeMaterial({ ...part, shape: "box", material: l.material, color: l.main ? (part.color ?? l.color ?? null) : (l.color ?? null) }, style)) ?? null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [kit, style],
+  );
+  const kitMeshes = useRef<(THREE.Mesh | null)[]>([]);
+  useEffect(() => () => { kit?.forEach((l) => l.geometry.dispose()); kitMats?.forEach((m) => m.dispose()); }, [kit, kitMats]);
   useEffect(() => {
-    built.geometry.computeBoundingBox();
-    const center = built.geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3();
-    if (group.current && mesh.current) registry.current.set(part.id, { part, group: group.current, mesh: mesh.current, mat, edges: edges.current, center });
+    if (!group.current) return;
+    let layers: Layer[];
+    let center: THREE.Vector3;
+    if (kit && kitMats) {
+      layers = kitMeshes.current.flatMap((m, i) => (m ? [{ mesh: m, mat: kitMats[i] }] : []));
+      if (!layers.length) return;
+      const box = new THREE.Box3();
+      for (const l of layers) {
+        l.mesh.geometry.computeBoundingBox();
+        box.union(l.mesh.geometry.boundingBox!);
+      }
+      center = box.getCenter(new THREE.Vector3());
+    } else if (asset) {
+      if (!assetLayers?.length) return; // still loading
+      layers = assetLayers;
+      const box = new THREE.Box3();
+      for (const l of layers) {
+        l.mesh.geometry.computeBoundingBox();
+        box.union(l.mesh.geometry.boundingBox!.clone().applyMatrix4(l.mesh.matrix));
+      }
+      // The first layer's local frame is the part's own (the piece sits at the part's centre).
+      center = box.getCenter(new THREE.Vector3()).applyMatrix4(layers[0].mesh.matrix.clone().invert());
+    } else {
+      if (!mesh.current) return;
+      built.geometry.computeBoundingBox();
+      center = built.geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3();
+      layers = [{ mesh: mesh.current, mat }];
+    }
+    registry.current.set(part.id, { part, group: group.current, mesh: layers[0].mesh, mat: layers[0].mat, layers, edges: asset || kit ? null : edges.current, center });
     return () => {
       registry.current.delete(part.id);
     };
-  }, [part, built, mat, registry]);
+  }, [part, built, mat, registry, asset, assetLayers, kit, kitMats]);
   useEffect(() => () => { built.geometry.dispose(); mat.dispose(); }, [built, mat]);
   // Flows and glowing parts are light, not matter: they never throw a shadow.
   const casts = part.shape !== "arrow" && part.material !== "emissive" && part.material !== "glass";
@@ -392,7 +460,18 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
   const radius = Math.min(...part.size) * 0.2;
   return (
     <group ref={group}>
-      {rounded ? (
+      {kit && kitMats ? (
+        <group>
+          {kit.map((l, i) => (
+            <mesh key={i} ref={(m) => { kitMeshes.current[i] = m; }} geometry={l.geometry} material={kitMats[i]} castShadow={casts} receiveShadow
+              onClick={click} onPointerOver={hover?.(true)} onPointerOut={hover?.(false)} />
+          ))}
+        </group>
+      ) : asset ? (
+        <Suspense fallback={null}>
+          <AssetPiece part={part} style={style} onLayers={setAssetLayers} onClick={click} onHover={hover} />
+        </Suspense>
+      ) : rounded ? (
         <RoundedBox ref={mesh as never} args={part.size} radius={radius} smoothness={3} material={mat} castShadow={casts} receiveShadow onClick={click} onPointerOver={hover?.(true)} onPointerOut={hover?.(false)}>
           <Edges ref={edges as never} threshold={25} color={lineColor} visible={false} />
           {style === "sticker" && <Outlines thickness={2.5} screenspace color="#ffffff" />}
@@ -408,6 +487,43 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
   );
 }
 
+/** A piece of a real model from the library: the file's own meshes and materials (cloned, so
+ * this part can fade and glow on its own), centred on the part. */
+function AssetPiece({ part, style, onLayers, onClick, onHover }: {
+  part: Part;
+  style: ObjectScene["style"];
+  onLayers: (layers: Layer[] | null) => void;
+  onClick?: (e: ThreeEvent<MouseEvent>) => void;
+  onHover?: (on: boolean) => (e: ThreeEvent<PointerEvent>) => void;
+}) {
+  const gltf = useAsset(part.asset!);
+  const piece = useMemo(() => {
+    const src = gltf.scene.getObjectByName(`part_${part.node ?? part.id}`);
+    if (!src) return null;
+    const copy = src.clone(true);
+    copy.position.set(0, 0, 0);
+    copy.quaternion.identity();
+    copy.scale.set(1, 1, 1);
+    copy.updateMatrixWorld(true);
+    const layers: Layer[] = [];
+    copy.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.material = prepareAssetMaterial(m.material as THREE.MeshStandardMaterial, style);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      layers.push({ mesh: m, mat: m.material as THREE.MeshStandardMaterial });
+    });
+    return { copy, layers };
+  }, [gltf, part.node, part.id, part.asset, style]);
+  useEffect(() => {
+    onLayers(piece?.layers ?? null);
+    return () => piece?.layers.forEach((l) => l.mat.dispose()); // the geometry is the file's, shared
+  }, [piece, onLayers]);
+  if (!piece) return null;
+  return <primitive object={piece.copy} onClick={onClick} onPointerOver={onHover?.(true)} onPointerOut={onHover?.(false)} />;
+}
+
 /** World-space bounds of the visible parts (or just the focus), recomputed every frame. */
 function boundsOf(registry: Map<string, Registered>, ids: Set<string> | null, out: THREE.Box3): THREE.Box3 {
   out.makeEmpty();
@@ -415,10 +531,12 @@ function boundsOf(registry: Map<string, Registered>, ids: Set<string> | null, ou
   for (const [id, r] of registry) {
     if (ids && !ids.has(id)) continue;
     if (!r.mesh.visible || r.mat.opacity < 0.05) continue;
-    const g = r.mesh.geometry;
-    if (!g.boundingBox) g.computeBoundingBox();
-    box.copy(g.boundingBox!).applyMatrix4(r.mesh.matrixWorld);
-    out.union(box);
+    for (const { mesh } of r.layers) {
+      const g = mesh.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      box.copy(g.boundingBox!).applyMatrix4(mesh.matrixWorld);
+      out.union(box);
+    }
   }
   return out;
 }
@@ -433,30 +551,31 @@ function samplePoints(registry: Map<string, Registered>, ids: Set<string> | null
   for (const [id, r] of registry) {
     if (ids && !ids.has(id)) continue;
     if (!r.mesh.visible || r.mat.opacity < 0.05) continue;
-    const g = r.mesh.geometry;
-    let local = SAMPLES.get(g);
-    if (!local) {
-      const pos = g.getAttribute("position");
-      const n = Math.min(60, pos.count);
-      local = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) {
-        const k = Math.floor((i * pos.count) / n);
-        local[i * 3] = pos.getX(k);
-        local[i * 3 + 1] = pos.getY(k);
-        local[i * 3 + 2] = pos.getZ(k);
+    for (const { mesh } of r.layers) {
+      const g = mesh.geometry;
+      let local = SAMPLES.get(g);
+      if (!local) {
+        const pos = g.getAttribute("position");
+        const n = Math.min(60, pos.count);
+        local = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          const k = Math.floor((i * pos.count) / n);
+          local[i * 3] = pos.getX(k);
+          local[i * 3 + 1] = pos.getY(k);
+          local[i * 3 + 2] = pos.getZ(k);
+        }
+        SAMPLES.set(g, local);
       }
-      SAMPLES.set(g, local);
-    }
-    for (let i = 0; i < local.length; i += 3) {
-      const v = pool[n] ?? (pool[n] = new THREE.Vector3());
-      v.set(local[i], local[i + 1], local[i + 2]).applyMatrix4(r.mesh.matrixWorld);
-      n++;
+      for (let i = 0; i < local.length; i += 3) {
+        const v = pool[n] ?? (pool[n] = new THREE.Vector3());
+        v.set(local[i], local[i + 1], local[i + 2]).applyMatrix4(mesh.matrixWorld);
+        n++;
+      }
     }
   }
   return pool.slice(0, n);
 }
 
-/** Frames the beat's subject from the beat's angle and follows it; hands over when you drag. */
 /** Frames on demand: every frame while the model plays, a few seconds after anything changes
  * (fades, ghosting, a part arriving), and nothing once it's paused or done. */
 function Pace({ clock, deps }: { clock: MutableRefObject<Clock>; deps: unknown[] }) {
@@ -474,6 +593,7 @@ function Pace({ clock, deps }: { clock: MutableRefObject<Clock>; deps: unknown[]
   return null;
 }
 
+/** Frames the beat's subject from the beat's angle and follows it; hands over when you drag. */
 function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObject<Map<string, Registered>>; beat: Beat; beatIndex: number; sceneId: string }) {
   const controls = useRef<OrbitControlsImpl>(null);
   const { camera, size, invalidate } = useThree();
@@ -667,7 +787,7 @@ function CalloutDriver({ registry, callouts, beat, width, height }: {
       const behind = v.z > 1;
       const ax = (v.x * 0.5 + 0.5) * width;
       const ay = (-v.y * 0.5 + 0.5) * height;
-      const op = r.mesh.visible ? Math.min(1, r.mat.opacity / Math.max(0.05, r.mat.userData.factor as number)) : 0;
+      const op = r.mesh.visible || r.part.shape === "marker" ? Math.min(1, r.mat.opacity / Math.max(0.05, r.mat.userData.factor as number)) : 0;
       // A ghosted casing still gets its tag; only parts that are really gone lose theirs.
       if (behind || op < 0.12 || ax < 0 || ax > width || ay < 0 || ay > height) {
         hide(slotted);

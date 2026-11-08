@@ -74,6 +74,7 @@ def test_the_model_so_far_has_every_finished_part_and_no_narration():
     assert ids and "piston" not in ids
     assert all(x.parent is None or x.parent in ids for x in scene.parts)  # children wait for parents
     assert [b.narration for b in scene.beats] == [""]  # nothing is said while it assembles
+    assert scene.auto_play is False  # paused, so the panel doesn't take it for finished and close it
     assert p.update(raw[:cut], force=True) is None  # nothing new, nothing sent
     more = p.update(raw, force=True)
     assert more is not None and len(more.parts) > len(scene.parts)

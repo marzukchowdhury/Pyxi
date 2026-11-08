@@ -13,6 +13,7 @@ import { brain } from "../shared/socket";
 import { type Clock, ObjectView } from "../scene/ObjectView";
 import { storyDuration } from "../scene/motion";
 import { Interactive } from "./Interactive";
+import "./objectPanel.css";
 import { useLinger } from "./linger";
 import { useOverlay, voice } from "./store";
 
@@ -180,6 +181,8 @@ export function ObjectPanel() {
           <button className="icon" onClick={() => seek(beat + 1)} disabled={beat >= spec.beats.length - 1} aria-label="Next"><Next /></button>
         </div>
       </div>
+      {/* A real model from the library is someone's work: say whose (CC-BY asks for it). */}
+      {spec.credit && <div className="object-credit">Model: {spec.credit}</div>}
     </Interactive>
   );
 }

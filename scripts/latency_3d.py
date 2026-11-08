@@ -39,6 +39,8 @@ REQUESTS = [
     ("explain", "explain_in_3d", "Explain in 3D how a DNS lookup works, step by step."),
     ("gallery", "show_scene", "Play your ejection seat 3D model from the gallery."),
     # A big edit: new parts and a new explanation (the kind that came back as broken JSON).
+    # A subject the real-model library has: should be explained on the real Saturn V.
+    ("library", "build_3d_model", "Show me in 3D how the Saturn V's stages separate on the way to the Moon."),
     ("bigedit", "edit_3d_model", "Change the model on screen: add a second seat behind the pilot for a back-seater, paint the jet "
      "dark blue, and replace the explanation with four steps on how the parachute is packed and opens."),
 ]

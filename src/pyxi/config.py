@@ -144,6 +144,11 @@ class PyxiSettings(BaseSettings):
     job_model: str | None = Field(
         None, description="Model for agent jobs (defaults to the main model)."
     )
+    library_url: str | None = Field(
+        "https://github.com/marzukchowdhury/Pyxi/releases/download/library-v1",
+        description="Where real 3D models from Pyxi's library are downloaded from, the first "
+        "time each is needed (PYXI_LIBRARY_URL). Empty: only models already on disk.",
+    )
     model_3d: str | None = Field(
         "anthropic/claude-sonnet-5.5",
         description="Model that builds 3D models (PYXI_MODEL_3D). A stronger modeller makes far "
@@ -203,6 +208,10 @@ class PyxiSettings(BaseSettings):
     @property
     def crops_dir(self) -> Path:
         return self.data_dir / "crops"
+
+    @property
+    def library_dir(self) -> Path:
+        return self.data_dir / "library"
 
     @property
     def palace_dir(self) -> Path:

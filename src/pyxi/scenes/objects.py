@@ -37,6 +37,24 @@ PartShape = Literal[
     "spring",
     "plane",
     "arrow",
+    "marker",
+    "kit",
+    "asset",
+]
+Kit = Literal[
+    "wheel",
+    "missile",
+    "propeller",
+    "jet_engine",
+    "ram_stick",
+    "gpu",
+    "chip",
+    "pc_fan",
+    "screen",
+    "seat",
+    "person",
+    "bolt",
+    "house",
 ]
 Material = Literal[
     "metal",
@@ -140,6 +158,18 @@ class Part(BaseModel):
         None, ge=3, le=80, description="gear: number of teeth (or fan blades)."
     )
     turns: float | None = Field(None, ge=1, le=40, description="spring: number of coils.")
+    # A piece of a real, ready-made model from Pyxi's library (set by Pyxi, never by the model):
+    # the library model's id and the part's name in it. Its geometry and textures come from the
+    # file; position is its centre, size its extent, and it moves like any other part.
+    asset: str | None = None
+    node: str | None = None
+    kit: Kit | None = Field(
+        None,
+        description="shape kit: a ready-made detailed piece that fills the size box: wheel (tyre "
+        "+ spoked rim; axis = axle), missile, propeller (teeth = blades), jet_engine, ram_stick, "
+        "gpu (graphics card), chip (processor / AI chip), pc_fan, screen, seat, person, bolt, "
+        "house. Far more real than building these from boxes.",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -262,9 +292,14 @@ class Beat(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _clamp(cls, data: Any) -> Any:
-        return _clamp_fields(data, {"at": (0, 600)})
+        data = _clamp_fields(data, {"at": (0, 600)})
+        # A beat without a title takes the first words of what it says (not worth a retry).
+        if isinstance(data, dict) and not str(data.get("title") or "").strip():
+            words = str(data.get("narration") or "").split()[:4]
+            data = {**data, "title": " ".join(words).rstrip(".,;:") or "Step"}
+        return data
 
-    title: str
+    title: str = ""
     narration: str = Field(
         description="One or two short spoken sentences in your voice: what is happening and why it matters, "
         "with a concrete fact or vivid analogy, never a description of the picture."
@@ -290,6 +325,7 @@ class ObjectScene(BaseModel):
     beats: list[Beat] = Field(default_factory=list)
     cutaway: bool = False
     auto_play: bool = True
+    credit: str | None = Field(None, description="Set by Pyxi: who made the real model it uses.")
     notes: list[str] = Field(
         default_factory=list, description="Repairs made during validation (set by Pyxi)."
     )
@@ -318,6 +354,12 @@ class ObjectScene(BaseModel):
             if p.shape == "arrow" and p.color is None:
                 # Flows read best as one glowing colour, set apart from the machine.
                 p = p.model_copy(update={"color": "#7fbaff", "material": "emissive"})
+            if p.shape == "asset" and not (p.asset and _ID.sub("", p.asset) == p.asset):
+                notes.append(f"{pid}: asset without a library model became a box")
+                p = p.model_copy(update={"shape": "box", "asset": None})
+            if p.shape == "kit" and not p.kit:
+                notes.append(f"{pid}: kit without a piece became a box")
+                p = p.model_copy(update={"shape": "box"})
             if p.shape == "lathe" and not p.profile:
                 notes.append(f"{pid}: lathe without profile became a cylinder")
                 p = p.model_copy(update={"shape": "cylinder"})
@@ -476,12 +518,29 @@ def _inline(schema: dict[str, Any]) -> dict[str, Any]:
     return walk(schema)
 
 
+def _pyxi_only(node: Any) -> Any:
+    """Drop what only Pyxi sets (library parts and credits) from a schema the model sees."""
+    if isinstance(node, dict):
+        props = node.get("properties")
+        if isinstance(props, dict):
+            for key in ("asset", "node", "credit"):
+                props.pop(key, None)
+        if isinstance(node.get("enum"), list) and "arrow" in node["enum"]:
+            node["enum"] = [v for v in node["enum"] if v != "asset"]
+        for v in node.values():
+            _pyxi_only(v)
+    elif isinstance(node, list):
+        for v in node:
+            _pyxi_only(v)
+    return node
+
+
 def build_tool_schema() -> dict[str, Any]:
     schema = _inline(ObjectScene.model_json_schema())
     for key in ("id", "notes"):
         schema["properties"].pop(key, None)
-    return schema
+    return _pyxi_only(schema)
 
 
 def edit_tool_schema() -> dict[str, Any]:
-    return _inline(ObjectEdit.model_json_schema())
+    return _pyxi_only(_inline(ObjectEdit.model_json_schema()))

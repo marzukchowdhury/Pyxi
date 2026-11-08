@@ -190,6 +190,8 @@ export function buildGeometry(p: Part): Built {
     }
     case "arrow":
       return { geometry: arrowGeometry(p), scale: [1, 1, 1] };
+    case "marker":
+      return { geometry: new THREE.SphereGeometry(0.01, 4, 2), scale: [1, 1, 1] };
     case "plane":
       return { geometry: new THREE.BoxGeometry(1, 1, 1), scale: [sx, Math.max(0.004, sy), sz] };
     case "rounded_box":
@@ -235,7 +237,7 @@ export const MATERIALS: Record<Material, Preset> = {
  * shared program, no extra pass), so it costs next to nothing.
  */
 const RIM = new THREE.Color("#9ecbff");
-function addRim(m: THREE.MeshPhysicalMaterial, strength: number) {
+function addRim(m: THREE.MeshStandardMaterial, strength: number) {
   const rim = { value: strength };
   m.userData.rim = rim;
   m.onBeforeCompile = (shader) => {
@@ -254,6 +256,42 @@ function addRim(m: THREE.MeshPhysicalMaterial, strength: number) {
       );
   };
   m.customProgramCacheKey = () => "pyxi-rim";
+}
+
+/**
+ * A real model's own material, made ready for the stage: its own copy (so this part can fade,
+ * ghost and glow by itself), the same edge light as everything else, and a note of what it was
+ * (see-through glass stays see-through; its own glow is kept).
+ */
+export function prepareAssetMaterial(src: THREE.Material, style: string): THREE.MeshStandardMaterial {
+  const base = (src as THREE.MeshStandardMaterial).isMeshStandardMaterial
+    ? (src as THREE.MeshStandardMaterial).clone()
+    : new THREE.MeshStandardMaterial({ color: (src as THREE.MeshBasicMaterial).color ?? new THREE.Color("#c9ced6"), map: (src as THREE.MeshBasicMaterial).map ?? null });
+  // Transmission glass (a bulb, a clock face, a visor) needs a render pass of what's behind it,
+  // and on a transparent stage that comes out black: make it plain see-through glass instead.
+  const phys = base as THREE.MeshPhysicalMaterial;
+  if (phys.isMeshPhysicalMaterial && phys.transmission > 0) {
+    phys.transmission = 0;
+    phys.transparent = true;
+    phys.opacity = Math.min(phys.opacity, 0.32);
+    phys.roughness = Math.min(phys.roughness, 0.15);
+    phys.depthWrite = false;
+  }
+  base.userData = {
+    factor: base.transparent ? base.opacity : 1,
+    baseTransparent: base.transparent,
+    baseEmissive: base.emissiveIntensity,
+  };
+  if (style === "blueprint") {
+    base.color.set("#1d3557");
+    base.map = null;
+    base.metalness = 0;
+    base.roughness = 1;
+  }
+  base.envMapIntensity = 1;
+  addRim(base, style === "blueprint" ? 0.9 : style === "xray" ? 0.7 : 0.16);
+  if (style === "xray") base.userData.factor *= 0.28;
+  return base;
 }
 
 export function makeMaterial(p: Part, style: string): THREE.MeshPhysicalMaterial {

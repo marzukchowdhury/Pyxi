@@ -7,6 +7,7 @@ from otto.llm.base import ToolSpec
 from pyxi.agents.pixel import OPERATIONS as PIXEL_OPERATIONS
 from pyxi.companion.notes import DIAGRAM_SCHEMA
 from pyxi.scenes import TITLES, tool_schema
+from pyxi.scenes import library as model_library
 from pyxi.scenes.object_gallery import OBJECT_TITLES
 from pyxi.scenes.objects import build_tool_schema, edit_tool_schema
 from pyxi.scenes.sketch import SKETCH_TOOL_SCHEMA
@@ -80,6 +81,20 @@ BUILD_BRIEF = _tool(
             "items": {"type": "string"},
             "description": "3-5 step ideas in order, a few words each.",
         },
+        **(
+            {
+                "library": {
+                    "type": "string",
+                    "enum": list(model_library.models()),
+                    "description": "A real, ready-made 3D model of exactly this subject (photo-real, "
+                    "far better than one built from shapes, and on screen in a second): give its id "
+                    "whenever the subject is one of these, or close enough to explain on: "
+                    + model_library.menu(),
+                }
+            }
+            if model_library.models()
+            else {}
+        ),
     },
     ["subject", "show"],
 )

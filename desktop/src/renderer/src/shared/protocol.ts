@@ -105,7 +105,7 @@ export interface SceneSpec {
 export type Vec3 = [number, number, number];
 export type PartShape =
   | "box" | "rounded_box" | "sphere" | "cylinder" | "cone" | "capsule" | "torus" | "ring" | "wedge"
-  | "tube" | "extrude" | "lathe" | "gear" | "spring" | "plane" | "arrow";
+  | "tube" | "extrude" | "lathe" | "gear" | "spring" | "plane" | "arrow" | "marker" | "kit" | "asset";
 export type Material =
   | "metal" | "brushed_metal" | "dark_metal" | "gold" | "plastic" | "rubber" | "glass" | "painted"
   | "fabric" | "wood" | "ceramic" | "skin" | "emissive";
@@ -132,6 +132,11 @@ export interface Part {
   profile: [number, number][] | null;
   teeth: number | null;
   turns: number | null;
+  /** shape "asset": a piece of a real model from Pyxi's library (its id, and the part's name in it). */
+  asset?: string | null;
+  node?: string | null;
+  /** shape "kit": a ready-made detailed piece (scene/kit.ts). */
+  kit?: string | null;
 }
 
 export interface Key {
@@ -201,6 +206,8 @@ export interface ObjectScene {
   beats: Beat[];
   cutaway: boolean;
   auto_play: boolean;
+  /** Who made the real model it uses, when it uses one (shown small under the stage). */
+  credit?: string | null;
 }
 
 export interface TimelineMoment {
