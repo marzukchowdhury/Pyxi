@@ -59,6 +59,11 @@ class VoiceConfig(BaseModel):
         "the cloud can't be reached.",
     )
     speed: float = 1.0
+    unload_after_s: float = Field(
+        300.0,
+        description="Let the speech and voice models go after this many idle seconds (they load "
+        "again when the talk key goes down, while you speak). 0 keeps them loaded.",
+    )
     chatterbox_reference: Path | None = Field(
         None, description="Reference clip for Chatterbox voice cloning."
     )

@@ -112,14 +112,25 @@ def create_app(
             except Exception:
                 log.exception("routine failed")
 
-    async def _warm_ears() -> None:
+    async def _prepare_ears() -> None:
+        """Have the speech model (and the libraries it needs) on the PC, so the first push-to-talk
+        doesn't wait for a download. It isn't loaded until the talk key goes down."""
         try:
             studio = brain.studio
             if studio and studio.wants_bengali():
-                studio.prepare_bengali()  # the Bengali voice, downloaded once (108 MB)
-            await brain.stt.self_test(studio.prefs.language if studio else "en")
+                await studio.bengali.fetch()  # the Bengali voice, downloaded once (108 MB)
+            await asyncio.to_thread(brain.stt.prepare, studio.prefs.language if studio else "en")
         except Exception as exc:  # never block startup on the microphone model
-            log.warning("speech model warm-up failed: %s", exc)
+            log.warning("speech model check failed: %s", exc)
+
+    async def _let_go_when_idle() -> None:
+        """Speech, voice and OCR models leave memory after a few idle minutes."""
+        while True:
+            await asyncio.sleep(30)
+            try:
+                brain.release_idle(settings.voice.unload_after_s)
+            except Exception:
+                log.exception("releasing idle models failed")
 
     async def _beta_join(code: str) -> None:
         """An invite code from Settings: get a token, then restart the brain so every model call
@@ -174,9 +185,10 @@ def create_app(
         )
         ambient = asyncio.create_task(tracker.run())
         routines = asyncio.create_task(_routine_clock())
-        # Load the speech model now (in the background), so the first push-to-talk is quick.
+        # Fetch the speech model now if it's missing, so the first push-to-talk is quick.
         # The OS-voice setup used by tests skips it.
-        warm = asyncio.create_task(_warm_ears()) if settings.voice.tts != "client" else None
+        warm = asyncio.create_task(_prepare_ears()) if settings.voice.tts != "client" else None
+        idle = asyncio.create_task(_let_go_when_idle())
         voice = asyncio.create_task(_fetch_voice()) if settings.voice.tts == "kokoro" else None
         yield
         if warm:
@@ -185,6 +197,7 @@ def create_app(
             voice.cancel()
         ambient.cancel()
         routines.cancel()
+        idle.cancel()
         hub.cancel_all()
         if demo_site:
             demo_site.stop()

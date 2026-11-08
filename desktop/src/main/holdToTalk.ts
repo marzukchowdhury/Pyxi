@@ -19,7 +19,12 @@ export interface HoldToTalkEvents {
   doubleTap(): void;
   /** Left clicks, physical screen px. Only forwarded while a guide is waiting for one. */
   click?(x: number, y: number): void;
+  /** The mouse moved (or dragged). Called very often while it moves: keep it cheap. */
+  move?(): void;
 }
+
+/** libuiohook's mouse moved and mouse dragged events (uiohook-napi names only the first). */
+const MOUSE_MOVES = new Set<number>([9, 10]);
 
 const CTRL = new Set<number>([UiohookKey.Ctrl, UiohookKey.CtrlRight]);
 const LEFT_ALT = UiohookKey.Alt;
@@ -114,6 +119,13 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
   uIOhook.on("mousedown", safe((e) => {
     if (e.button === 1) events.click?.(e.x, e.y);
   }));
+
+  if (events.move) {
+    const move = events.move;
+    uIOhook.on("input", safe((e: { type: number }) => {
+      if (MOUSE_MOVES.has(e.type)) move();
+    }));
+  }
 
   try {
     uIOhook.start();

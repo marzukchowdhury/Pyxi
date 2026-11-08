@@ -358,14 +358,34 @@ async function ensureBrain(): Promise<void> {
   });
 }
 
+/** Wakes the cursor feed (the mouse hook calls it on every move). */
+let wakeCursorFeed = (): void => undefined;
+
+/** The cursor, to every overlay, about 60 times a second while the mouse moves. Once it has
+ * been still for half a second the feed stops until the mouse hook reports a move, so an idle
+ * Pyxi doesn't wake 60 times a second. Without the hook it checks four times a second. */
 function startCursorFeed(): void {
   let last = { x: -1, y: -1 };
-  setInterval(() => {
+  let timer: NodeJS.Timeout | null = null;
+  let still = 0;
+  const tick = (): void => {
     const p = screen.getCursorScreenPoint();
-    if (p.x === last.x && p.y === last.y) return;
-    last = p;
-    for (const win of liveOverlays()) win.webContents.send("cursor", p);
-  }, 16);
+    if (p.x !== last.x || p.y !== last.y) {
+      last = p;
+      still = 0;
+      for (const win of liveOverlays()) win.webContents.send("cursor", p);
+    } else if (++still > 30 && timer) {
+      clearInterval(timer);
+      timer = null;
+      if (!holdToTalk) setTimeout(wakeCursorFeed, 250);
+    }
+  };
+  wakeCursorFeed = () => {
+    if (timer) return;
+    still = 0;
+    timer = setInterval(tick, 16);
+  };
+  wakeCursorFeed();
 }
 
 function trayIcon(): Electron.NativeImage {
@@ -438,6 +458,7 @@ app.whenReady().then(async () => {
       const win = overlays.get(primaryId);
       if (win && !win.isDestroyed()) win.webContents.send("global-click", { x, y });
     },
+    move: () => wakeCursorFeed(),
   });
   registerHotkeys({
     talk: () => broadcast("ptt"),

@@ -28,7 +28,7 @@ Today Windows SmartScreen shows "Windows protected your PC: unknown publisher" f
 - Its certificates are short-lived (a few days), and timestamping keeps signed files valid afterwards. SmartScreen reputation still builds up over the first downloads, so expect the warning to fade over a few weeks rather than vanish on day one.
 - To wire it in:
   - electron-builder supports Azure signing through `win.azureSignOptions` in `desktop/package.json`.
-  - Today `signAndEditExecutable` is `false`; set it to `true`.
+  - Today `signExecutable` is `false` (the exe gets its name, version and icon, but no signature); remove it.
   - Sign `Pyxi-Setup.exe`, `Pyxi.exe` and the bundled `python.exe`.
   - Give the signing step an Azure service principal, kept out of the repo. `desktop/build-secrets` is already ignored by git.
 - Updates: electron-updater checks the publisher of a new version against the installed one, so the first signed release should be one that every beta tester installs. After that, keep the same publisher name.

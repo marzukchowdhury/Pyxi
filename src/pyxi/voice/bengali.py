@@ -279,6 +279,8 @@ class BengaliVoice:
         self._lock = asyncio.Lock()
         self._failed_at = 0.0
         self.error: str | None = None
+        self._used = 0.0
+        self._busy = 0
 
     def installed(self) -> bool:
         return (self.dir / "model.onnx").exists() and (self.dir / "tokens.txt").exists()
@@ -302,6 +304,26 @@ class BengaliVoice:
                     raise RuntimeError(self.error) from exc
             self._session, self._tokens = await asyncio.to_thread(self._load)
             self.error = None
+            self._used = time.monotonic()
+
+    async def fetch(self) -> None:
+        """Download the voice (once) without loading it. Raises RuntimeError if it can't."""
+        async with self._lock:
+            if self.installed():
+                return
+            try:
+                log.info("downloading the Bengali voice (%s MB) to %s", VOICE_MB, self.dir)
+                await download_bengali_voice(self.dir.parent)
+            except Exception as exc:
+                self._failed_at = time.monotonic()
+                self.error = f"Couldn't download the Bengali voice ({exc.__class__.__name__})"
+                raise RuntimeError(self.error) from exc
+
+    def release_idle(self, idle_s: float) -> bool:
+        if self._session is None or self._busy or time.monotonic() - self._used < idle_s:
+            return False
+        self._session = None
+        return True
 
     def _load(self):
         import onnxruntime as ort
@@ -363,7 +385,12 @@ class BengaliVoice:
     async def synthesize(self, text: str, speed: float = 1.0) -> Speech:
         await self.ensure()
         clean = strip_tags(text)
-        samples = await asyncio.to_thread(self._render, speakable_bengali(clean), speed)
+        self._busy += 1
+        try:
+            samples = await asyncio.to_thread(self._render, speakable_bengali(clean), speed)
+        finally:
+            self._busy -= 1
+            self._used = time.monotonic()
         if not samples.size:
             return Speech(text=clean, wav=None)
         peak = float(np.max(np.abs(samples))) or 1.0

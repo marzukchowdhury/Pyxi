@@ -19,6 +19,7 @@ import asyncio
 import io
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -136,6 +137,9 @@ class KokoroTTS:
         self.models_dir = models_dir
         self._engine = None
         self._lock = asyncio.Lock()
+        self._used = 0.0  # monotonic time of the last line spoken
+        self._busy = 0
+        self._warming: asyncio.Task | None = None
 
     @property
     def model_paths(self) -> tuple[Path, Path]:
@@ -155,7 +159,35 @@ class KokoroTTS:
 
                 model, voices = self.model_paths
                 self._engine = await asyncio.to_thread(Kokoro, str(model), str(voices))
+            self._used = time.monotonic()
         return self._engine
+
+    def warm(self) -> None:
+        """Load the voice in the background (a question is coming). Never blocks."""
+        self._used = time.monotonic()
+        if self._engine is not None or not self.installed():
+            return
+        if self._warming and not self._warming.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def run() -> None:
+            try:
+                await self._ensure()
+            except Exception as exc:  # the first real line reports it
+                log.debug("voice warm-up failed: %s", exc)
+
+        self._warming = loop.create_task(run())
+
+    def release_idle(self, idle_s: float) -> bool:
+        """Let the voice model go (about 400 MB) after ``idle_s`` quiet seconds."""
+        if self._engine is None or self._busy or time.monotonic() - self._used < idle_s:
+            return False
+        self._engine = None
+        return True
 
     async def synthesize(self, text: str, voice: str | None = None) -> Speech:
         voice = voice or self.config.voice
@@ -165,9 +197,14 @@ class KokoroTTS:
     async def synthesize_with(self, text: str, *, voice: str, speed: float, lang: str) -> Speech:
         engine = await self._ensure()
         clean = strip_tags(text)
-        samples, rate = await asyncio.to_thread(
-            engine.create, speakable(clean), voice=voice, speed=speed, lang=lang
-        )
+        self._busy += 1
+        try:
+            samples, rate = await asyncio.to_thread(
+                engine.create, speakable(clean), voice=voice, speed=speed, lang=lang
+            )
+        finally:
+            self._busy -= 1
+            self._used = time.monotonic()
         samples = _breathe(samples, rate)
         return Speech(text=clean, wav=_wav_bytes(samples, rate), duration_s=len(samples) / rate)
 
@@ -219,6 +256,17 @@ class FallbackTTS:
         self.client = ClientTTS()
         self.failed: str | None = None
         self.name = primary.name
+
+    def warm(self) -> None:
+        if self.failed is None and hasattr(self.primary, "warm"):
+            self.primary.warm()
+
+    def release_idle(self, idle_s: float) -> list[str]:
+        release = getattr(self.primary, "release_idle", None)
+        if release is None:
+            return []
+        out = release(idle_s)
+        return out if isinstance(out, list) else ([self.primary.name] if out else [])
 
     async def synthesize(self, text: str, voice: str | None = None) -> Speech:
         if not strip_tags(text):

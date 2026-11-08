@@ -57,6 +57,9 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .mode-paused .ff-core { fill: #b9b4aa; filter: drop-shadow(0 0 0.8px rgba(0,0,0,.8)); opacity: .55; }
 .mode-paused .ff-halo { opacity: 0; }
 .mode-paused .ff-bug { opacity: .6; }
+/* Resting (Presence.tsx): the glow holds steady, so the overlay draws no frames at all. */
+.presence.resting .ff-halo { animation: none; opacity: .8; }
+.presence.resting .ff-core { animation: none; opacity: .92; }
 @keyframes glow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 @keyframes glow-core { 0%, 100% { opacity: .78; } 50% { opacity: 1; } }
 @keyframes flicker { 0% { opacity: 1; } 18% { opacity: .55; } 30% { opacity: 1; } 62% { opacity: .7; } 74% { opacity: 1; } }

@@ -22,6 +22,7 @@ from pyxi.screen.ocr import TextLine
 
 _rapid: Any = None
 _rapid_failed_at: float | None = None
+_rapid_used = 0.0  # monotonic time it was last asked for
 RETRY_AFTER_S = 60.0
 _lock = threading.Lock()
 
@@ -33,7 +34,7 @@ def _engine_choice() -> str:
 
 def rapid_engine() -> Any:
     """RapidOCR, loaded once. A failed load (no voice pack yet, offline) is retried after a minute."""
-    global _rapid, _rapid_failed_at
+    global _rapid, _rapid_failed_at, _rapid_used
     with _lock:
         recently = (
             _rapid_failed_at is not None and time.monotonic() - _rapid_failed_at < RETRY_AFTER_S
@@ -46,7 +47,19 @@ def rapid_engine() -> Any:
                 _rapid_failed_at = None
             except Exception:
                 _rapid_failed_at = time.monotonic()
+        _rapid_used = time.monotonic()
     return _rapid
+
+
+def release_idle(idle_s: float) -> bool:
+    """Let RapidOCR go (its models and onnxruntime buffers) after ``idle_s`` unused seconds; the
+    next scan loads it again."""
+    global _rapid
+    with _lock:
+        if _rapid is None or time.monotonic() - _rapid_used < idle_s:
+            return False
+        _rapid = None
+        return True
 
 
 def pack_pending() -> bool:

@@ -8,6 +8,11 @@ English uses the small, fast English-only model. Any other language, or "Automat
 multilingual model (downloaded once, on first use) that also reports which language you spoke,
 so Pyxi can answer in it.
 
+Memory: a model loads when the talk key goes down (it is ready before the user stops speaking),
+only one stays loaded at a time, and it is let go after a few idle minutes
+(``voice.unload_after_s``), so an idle Pyxi holds none. The GPU is used only when its CUDA
+libraries are really there: just trying it costs about 500 MB that never comes back.
+
 Bengali is different: every stock Whisper model tested on real Bengali speech either looped or
 misheard most words (small: 168% character errors, large-v3: 35%). So Bengali goes to a cloud
 model that hears it well (Gemini 3.1 Flash-Lite via OpenRouter: 14%, about $0.001 a minute),
@@ -22,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import io
 import logging
 import os
@@ -87,6 +93,29 @@ def _find_nvidia_libraries() -> None:
                 os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
 
 
+def _cuda_usable() -> bool:
+    """An NVIDIA GPU whose CUDA libraries Whisper can load. Without cuBLAS a model loads on the
+    GPU and fails on first use, and the CUDA runtime it started keeps about 500 MB for good."""
+    try:
+        import ctranslate2
+
+        if ctranslate2.get_cuda_device_count() <= 0:
+            return False
+    except Exception:
+        return False
+    import sys
+
+    if sys.platform != "win32":
+        return True
+    import ctypes
+
+    try:
+        ctypes.WinDLL("cublas64_12.dll")
+        return True
+    except OSError:
+        return False
+
+
 # Languages the local multilingual model hears well (the ones offered in the voice settings).
 LOCAL_LANGUAGES = {"en", "es", "fr", "hi", "it", "pt", "ja", "zh"}
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
@@ -107,6 +136,16 @@ def _cached(repo: str) -> bool:
         from huggingface_hub import try_to_load_from_cache
 
         return isinstance(try_to_load_from_cache(repo, "model.bin"), str)
+    except Exception:
+        return False
+
+
+def _cached_whisper(name: str) -> bool:
+    """Whether faster-whisper's model ``name`` (a size like "base.en" or a repo id) is here."""
+    try:
+        from faster_whisper.utils import _MODELS
+
+        return _cached(_MODELS.get(name, name))
     except Exception:
         return False
 
@@ -200,30 +239,96 @@ class Transcriber:
     def __init__(self, config: VoiceConfig) -> None:
         self.config = config
         self._models: dict[str, object] = {}
+        self._used: dict[str, float] = {}  # name -> when it was last used
+        self._busy: dict[str, int] = {}  # name -> transcriptions running on it now
         self._lock = asyncio.Lock()
+        self._warming: asyncio.Task | None = None
         self.ears = CloudEars(config.stt_cloud_model)
 
-    def _load(self, name: str):
-        _find_nvidia_libraries()
-        from faster_whisper import WhisperModel
-
+    def _device(self) -> str:
         device = self.config.stt_device
         if device == "auto":
-            try:
-                import ctranslate2
+            _find_nvidia_libraries()
+            device = "cuda" if _cuda_usable() else "cpu"
+            self.config.stt_device = device  # decided once: the answer doesn't change
+        elif device == "cuda":
+            _find_nvidia_libraries()
+        return device
 
-                device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
-            except Exception:
-                device = "cpu"
+    def _load(self, name: str):
+        from faster_whisper import WhisperModel
+
+        device = self._device()
+        started = time.monotonic()
+
+        def make(device: str):
+            kind = "float16" if device == "cuda" else "int8"
+            try:  # already on this PC: no round trip to Hugging Face on every reload
+                return WhisperModel(name, device=device, compute_type=kind, local_files_only=True)
+            except Exception as exc:
+                if re.search(r"cublas|cudnn|cuda", str(exc), re.I):
+                    raise
+                return WhisperModel(name, device=device, compute_type=kind)
+
         try:
-            return WhisperModel(
-                name,
-                device=device,
-                compute_type="float16" if device == "cuda" else "int8",
-            )
+            model = make(device)
         except Exception as exc:  # CUDA libs missing etc: CPU always works
+            if device == "cpu":
+                raise
             log.warning("Whisper on %s failed (%s); using CPU.", device, exc)
-            return WhisperModel(name, device="cpu", compute_type="int8")
+            self.config.stt_device = "cpu"
+            model = make("cpu")
+        log.info("speech model %s loaded in %.1f s", name, time.monotonic() - started)
+        return model
+
+    def prepare(self, language: str = "en") -> None:
+        """At start-up: make sure the speech libraries and this language's model are on the PC
+        (a fresh install downloads them here), without loading the model into memory."""
+        if language == "bn" and (self.ears.available() or not self.bengali_offline()):
+            return
+        from faster_whisper.utils import download_model
+
+        name = self.model_for(language)
+        if not Path(name).exists() and not _cached_whisper(name):
+            log.info("downloading the speech model %s", name)
+            download_model(name)
+
+    def warm(self, language: str = "en") -> None:
+        """The talk key went down: load the model now, while they speak. Never blocks."""
+        if language == "bn" and (self.ears.available() or not self.bengali_offline()):
+            return
+        name = self.model_for(language)
+        if name in self._models or (self._warming and not self._warming.done()):
+            self._used[name] = time.monotonic()
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def run() -> None:
+            try:
+                await self._get(name)
+            except Exception as exc:  # the real request reports it
+                log.debug("speech warm-up failed: %s", exc)
+
+        self._warming = loop.create_task(run())
+
+    def release_idle(self, idle_s: float) -> list[str]:
+        """Let go of models nobody has used for ``idle_s`` seconds. Returns their names."""
+        now = time.monotonic()
+        gone = [
+            n
+            for n in list(self._models)
+            if not self._busy.get(n) and now - self._used.get(n, 0.0) >= idle_s
+        ]
+        for n in gone:
+            self._models.pop(n, None)
+            self._used.pop(n, None)
+        return gone
+
+    def loaded(self) -> list[str]:
+        return list(self._models)
 
     def bengali_offline(self) -> bool:
         return _cached(self.config.stt_bengali_model)
@@ -241,8 +346,23 @@ class Transcriber:
     async def _get(self, name: str):
         async with self._lock:
             if name not in self._models:
+                # One model at a time: switching language swaps it rather than adding one.
+                for other in [n for n in self._models if not self._busy.get(n)]:
+                    del self._models[other]
                 self._models[name] = await asyncio.to_thread(self._load, name)
-        return self._models[name]
+            self._used[name] = time.monotonic()
+            return self._models[name]
+
+    @contextlib.asynccontextmanager
+    async def hold(self, language: str):
+        """The model for ``language``, kept loaded until the block ends (a long recording)."""
+        name = self.model_for(language)
+        self._busy[name] = self._busy.get(name, 0) + 1
+        try:
+            yield await self._get(name)
+        finally:
+            self._busy[name] -= 1
+            self._used[name] = time.monotonic()
 
     async def warm_up(self, language: str = "en"):
         return await self._get(self.model_for(language))
@@ -257,35 +377,11 @@ class Transcriber:
         self._models.clear()
         return True
 
-    async def self_test(self, language: str = "en") -> None:
-        """Run half a second of silence through the model at startup, so a GPU that can't
-        actually run (missing CUDA libraries) is found now, not on the user's first question."""
-        import numpy as np
-
-        if language == "bn" and (self.ears.available() or not self.bengali_offline()):
-            return  # Bengali is heard in the cloud: nothing to load on this PC
-        name = self.model_for(language)
-        model = await self._get(name)
-
-        def run() -> None:
-            segments, _ = model.transcribe(
-                np.zeros(8000, dtype=np.float32),
-                language="en" if name.endswith(".en") else None,
-                beam_size=1,
-            )
-            list(segments)
-
-        try:
-            await asyncio.to_thread(run)
-        except RuntimeError as exc:
-            if not self._gpu_failed(exc):
-                raise
-            await self._get(name)
-
     async def _local(self, name: str, samples, language: str | None) -> tuple[str, str]:
         """Transcribe on this PC. Returns (text, language spoken)."""
         for attempt in (1, 2):
             model = await self._get(name)
+            self._busy[name] = self._busy.get(name, 0) + 1
 
             def run(model=model) -> tuple[str, str]:
                 segments, info = model.transcribe(
@@ -303,6 +399,9 @@ class Transcriber:
             except RuntimeError as exc:
                 if attempt == 2 or not self._gpu_failed(exc):
                     raise
+            finally:
+                self._busy[name] -= 1
+                self._used[name] = time.monotonic()
         raise AssertionError("unreachable")
 
     async def _bengali(self, samples) -> str:

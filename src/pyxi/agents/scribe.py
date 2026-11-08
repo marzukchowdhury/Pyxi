@@ -154,10 +154,20 @@ def out_dir() -> Path:
 
 # ------------------------------------------------------------------------------ transcribing
 async def transcribe(stt: Any, path: Path, language: str, progress: Any = None) -> list[Segment]:
-    """Timestamped segments, from the warm faster-whisper model. ``progress(done_s, total_s)``."""
+    """Timestamped segments, from the warm faster-whisper model. ``progress(done_s, total_s)``.
+    The model stays loaded until the whole recording is done (Pyxi lets idle models go)."""
+    hold = getattr(stt, "hold", None)
+    if hold is None:
+        return await _transcribe(await stt.warm_up(language), stt, path, language, progress)
+    async with hold(language) as model:
+        return await _transcribe(model, stt, path, language, progress)
+
+
+async def _transcribe(
+    model: Any, stt: Any, path: Path, language: str, progress: Any
+) -> list[Segment]:
     from pyxi.voice.stt import decode_audio
 
-    model = await stt.warm_up(language)
     name = stt.model_for(language)
     try:  # read from the file itself: a two-hour video never sits in memory twice
         audio = await asyncio.to_thread(decode_audio, path)

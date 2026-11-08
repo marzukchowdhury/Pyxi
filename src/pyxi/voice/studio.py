@@ -350,6 +350,22 @@ class VoiceStudio:
 
         self._prep = loop.create_task(run())
 
+    def warm(self) -> None:
+        """A question is coming: load the voice that will answer it, in the background."""
+        if self.wants_bengali():
+            self.prepare_bengali()
+        elif self.prefs.engine == "kokoro" or not self.available().get(self.prefs.engine):
+            self.kokoro.warm()
+
+    def release_idle(self, idle_s: float) -> list[str]:
+        """Let go of voices that have been quiet for ``idle_s`` seconds."""
+        gone = []
+        if self.kokoro.release_idle(idle_s):
+            gone.append("kokoro")
+        if self.bengali.release_idle(idle_s):
+            gone.append("bengali")
+        return gone
+
     async def _bengali(self, text: str, speed: float) -> Speech:
         """Mitali reads it. If she can't (no download yet, offline), the words still show as a
         caption and the panel says why: never an English voice mangling Bengali."""

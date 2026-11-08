@@ -10,6 +10,11 @@
  *
  * When Pyxi targets something, a thin thread of light runs from the firefly to the target,
  * recomputed every frame so it stays attached while you move the mouse.
+ *
+ * Resting: a few seconds after the mouse stops, with Pyxi idle, the firefly settles and holds
+ * still, and its frame loop stops. The overlay is a transparent window over the whole screen,
+ * and every frame it draws costs the GPU process about a third of a core, so a firefly that
+ * hovered forever kept Pyxi busy while nothing happened. Any mouse move or state change wakes it.
  */
 import { useEffect, useRef } from "react";
 import { bridge, cursorToLocal, toLocal } from "../shared/bridge";
@@ -19,6 +24,8 @@ const OFFSET = { x: 18, y: 6 };
 /** Where the firefly's core sits inside the presence box. */
 const CORE = { x: 6, y: 16 };
 const TRAIL = 12;
+/** Still this long (Pyxi idle, no voice, no thread) and the firefly settles. */
+const REST_MS = 4000;
 
 export function Presence({ micLevel }: { micLevel: () => number }) {
   const root = useRef<HTMLDivElement>(null);
@@ -37,19 +44,28 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
   const working = useOverlay((s) => Object.values(s.jobs).some((j) => j.status === "running"));
   const target = useOverlay((s) => s.flyTo);
   const driving = useOverlay((s) => s.driving);
+  /** Starts the frame loop if it's asleep (set by the loop's effect). */
+  const wake = useRef<() => void>(() => undefined);
+  /** Pyxi is doing something (not idle), so the firefly never rests. */
+  const busy = useRef(false);
 
   useEffect(
     () =>
       bridge.onCursor((p) => {
         const local = cursorToLocal(p);
+        const was = onScreen.current;
         onScreen.current = local !== null;
         if (local) goal.current = { x: local[0] + OFFSET.x, y: local[1] + OFFSET.y };
+        // A screen the cursor isn't on draws nothing, except once to hide the firefly.
+        if (local || was) wake.current();
       }),
     [],
   );
 
   useEffect(() => {
     let raf = 0;
+    let stillSince = performance.now();
+    let hover = 0; // 0 at rest, 1 hovering: eases, so settling and waking never jump
     const tick = (time: number) => {
       const p = pos.current;
       // A stiff, well-damped spring: it keeps up with the cursor and settles without wobble.
@@ -57,10 +73,16 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
       p.vy = (p.vy + (goal.current.y - p.y) * 0.22) * 0.62;
       p.x += p.vx;
       p.y += p.vy;
-      // Hovering: a slow, lazy figure of eight, the way a firefly hangs in the air.
-      const hx = p.x + Math.sin(time / 820) * 2.2;
-      const hy = p.y + Math.sin(time / 1270) * 2.8;
       const level = Math.max(voice.level(), micLevel());
+      const t = useOverlay.getState().flyTo;
+      const threadLive = !!t && performance.now() < t.until;
+      const moving = Math.hypot(p.vx, p.vy) > 0.05 || Math.hypot(goal.current.x - p.x, goal.current.y - p.y) > 0.5;
+      if (moving || level > 0.002 || busy.current || threadLive) stillSince = time;
+      const resting = !onScreen.current || time - stillSince > REST_MS;
+      hover += ((resting ? 0 : 1) - hover) * 0.06;
+      // Hovering: a slow, lazy figure of eight, the way a firefly hangs in the air.
+      const hx = p.x + Math.sin(time / 820) * 2.2 * hover;
+      const hy = p.y + Math.sin(time / 1270) * 2.8 * hover;
       const el = root.current;
       if (el) {
         el.style.transform = `translate3d(${hx}px, ${hy}px, 0)`;
@@ -69,6 +91,7 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
         // Near an edge, labels by the firefly flip to the side with room.
         el.classList.toggle("near-right", p.x > innerWidth - 240);
         el.classList.toggle("near-bottom", p.y > innerHeight - 90);
+        el.classList.toggle("resting", resting);
       }
       if (ring.current) ring.current.setAttribute("r", (13 + level * 9).toFixed(2));
       if (halo.current) halo.current.setAttribute("r", (10 + level * 8).toFixed(2));
@@ -88,7 +111,6 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
         dot.style.opacity = onScreen.current ? (Math.min(1, speed / 6) * fade * 0.7).toFixed(3) : "0";
       });
       // The thread: firefly -> target, a gentle curve, alive only while the target is fresh.
-      const t = useOverlay.getState().flyTo;
       const path = thread.current;
       if (path) {
         const now = performance.now();
@@ -111,15 +133,31 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
           }
         } else path.style.opacity = "0";
       }
+      // Settled (or on another screen) and the trail has faded: stop drawing until woken.
+      if (resting && (hover < 0.02 || !onScreen.current) && speed < 0.05 && !threadLive) {
+        raf = 0;
+        return;
+      }
       raf = requestAnimationFrame(tick);
     };
+    wake.current = () => {
+      stillSince = performance.now();
+      if (!raf) raf = requestAnimationFrame(tick);
+    };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      raf = 0;
+      wake.current = () => undefined;
+    };
   }, [micLevel]);
 
   const mode = paused ? "paused" : state === "listening" ? "listening"
     : state === "thinking" || state === "looking" || state === "transcribing" ? "thinking"
     : state === "speaking" || working ? "acting" : "idle";
+  // Anything but idle keeps the firefly awake; any change (a target, a caption) wakes it.
+  busy.current = (mode !== "idle" && mode !== "paused") || !!driving;
+  useEffect(() => wake.current(), [mode, driving, target, caption, paused]);
   // While Pyxi has the mouse, the firefly rides with it and says what it's doing.
 
   return (

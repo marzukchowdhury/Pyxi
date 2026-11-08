@@ -25,6 +25,7 @@ import json
 import logging
 import re
 import secrets
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -228,11 +229,45 @@ class Brain:
         self.interrupt()
         self._prefetch = asyncio.create_task(self._capture())
         self._spawn(self.set_state("listening"))
+        self.warm_voice(listening=True)
 
     def look_ahead(self) -> None:
         """They started typing to Pyxi: capture the screen now, so the answer starts sooner."""
         if self._prefetch is None and not self._lock.locked():
             self._prefetch = asyncio.create_task(self._capture())
+        self.warm_voice()
+
+    def warm_voice(self, *, listening: bool = False) -> None:
+        """Load the models a question needs while it is still being asked: the ears while they
+        speak, the voice before the first sentence of the answer. Idle, Pyxi lets them go."""
+        try:
+            if listening:
+                studio = self.studio
+                self.stt.warm(studio.prefs.language if studio else "en")
+            warm = getattr(self.tts, "warm", None)
+            if warm:
+                warm()
+        except Exception as exc:  # never in the way of the question itself
+            log.debug("warm-up failed: %s", exc)
+
+    def release_idle(self, idle_s: float) -> list[str]:
+        """Let go of speech, voice and OCR models nobody has used for ``idle_s`` seconds.
+        Never in the middle of a turn. Returns what was let go."""
+        if idle_s <= 0 or self.state != "idle" or self._lock.locked():
+            return []
+        gone = [f"ears {n}" for n in self.stt.release_idle(idle_s)]
+        release = getattr(self.tts, "release_idle", None)
+        if release:
+            gone += [f"voice {n}" for n in release(idle_s)]
+        ocr = sys.modules.get("pyxi.agents.pixel_ocr")
+        if ocr is not None and ocr.release_idle(idle_s):
+            gone.append("ocr")
+        if gone:
+            import gc
+
+            gc.collect()
+            log.info("idle: let go of %s", ", ".join(gone))
+        return gone
 
     async def hear(self, audio: bytes) -> None:
         await self.set_state("transcribing")
@@ -1416,6 +1451,7 @@ class Brain:
     ) -> None:
         """``synthetic``: a routine or a guide step, not words the user actually said (so an
         address in it never counts as the user naming that person)."""
+        self.warm_voice()  # the voice loads while the model thinks, if it was let go
         async with self._lock:
             self._ctx, self._images, self._usage, self._said, self._calls = (
                 None,
