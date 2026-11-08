@@ -208,3 +208,20 @@ async def test_the_card_talks_through_its_points_after_the_opener(settings):
     assert not any("reportedly" in t for t, _ in spoken)  # no point is said twice
     # It lands with a related fact and an offer instead of just stopping.
     assert spoken[-1][0].endswith("Want me to sketch where it all goes?")
+
+
+async def test_a_reply_with_no_next_step_ends_the_coaching(settings):
+    # "3/3 Press Escape" stayed on screen after "I can't confirm it from here" (they had
+    # switched to another app): a reply with no next step clears the coaching.
+    llm = Scripted(
+        [
+            ("guide", {"goal": "make a pivot", "action": "press", "text": "Escape", "label": "Escape"}),
+            ("say", {"text": "Press Escape."}),
+        ],
+        [("say", {"text": "I can't see the sheet from here."})],
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("how do I close this menu?")
+    assert rec.of("guide")[-1]["active"] is True and brain._guide is not None
+    await brain.guide_clicked("done")
+    assert rec.of("guide")[-1]["active"] is False and brain._guide is None

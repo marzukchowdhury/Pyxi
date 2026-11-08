@@ -1363,6 +1363,10 @@ class Brain:
         guess = resolve_rect(ctx, None, args.get("box"))
         if guess is None or self.settings.local_mode:
             return guess
+        if args.get("action") == "drag" and args.get("to_box"):
+            # From one cell to another: a label like "Select A1 to C13" isn't written anywhere,
+            # so checking it on screen fails, and the second guess was the fill handle.
+            return guess
         x, y, w, h = guess
         if w * h >= 240 * 120:
             return guess
@@ -1581,6 +1585,11 @@ class Brain:
                 log.exception("turn failed")
                 error = f"{type(exc).__name__}: {exc}"
                 await self.say_line("Oops, my brain hiccupped. Mind trying that again?")
+            if self._guide is not None and not any(c.get("tool") == "guide" for c in self._calls):
+                # A reply with no next step ends the coaching: an arrow and "3/3 Press Escape"
+                # left on screen for 15 minutes after "I can't confirm it from here" was worse.
+                self._guide, self._guide_trail = None, []
+                await self.hub.emit("guide", active=False, finished=False, at=None)
             said = " ".join(self._said)
             self.history = [*self.history[-11:], (user_text, said)]
             ctx = self._ctx

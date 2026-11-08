@@ -188,7 +188,7 @@ When every page is open in the target window, close the old window (alt+f4 on it
 to move those tabs, so that's allowed, and only that window.
 - Google Sheets (cells are drawn, not elements): ctrl+home goes to A1; Tab and Enter move \
 between cells as you type; to select a range, type it (A1:C6) into the Name box at the far \
-left of the formula bar and press enter; alt+/ searches every menu (type "pivot table", enter). \
+left of the formula bar and press enter (or click the first cell, then shift+click the last). Never drag the small square on a selection's corner: that's the fill handle, and it copies a cell over everything it's dragged across. alt+/ searches every menu (type "pivot table", enter). \
 Rename the file by clicking its title at the top left. A pivot table's editor opens from \
 the small green pencil (Edit) button just below the pivot; in it, "Add" beside Rows or Values \
 opens a list of the columns to pick from.

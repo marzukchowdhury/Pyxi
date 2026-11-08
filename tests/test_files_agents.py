@@ -874,30 +874,45 @@ async def test_a_sheet_in_another_google_account(monkeypatch):
     assert not started and "different Google account" in note and "me@example.com" in note
 
 
-async def test_google_sheet_pivot_on_its_own_tab_and_a_chart():
+async def test_google_sheet_pivot_on_its_own_tab():
     g = FakeGoogle()
     edits = json.dumps(
-        {
-            "edits": [
-                {"file": 0, "op": "pivot", "group_by": "Region", "value": "Sales", "target": "Pivot"},
-                {"file": 0, "op": "chart", "labels": "Region", "values": "Sales"},
-            ]
-        }
+        {"edits": [{"file": 0, "op": "pivot", "group_by": "Region", "value": "Sales", "target": "Pivot"}]}
     )
 
     async def ask(system, prompt):
         return edits, 0.0
 
     url = "https://docs.google.com/spreadsheets/d/abc123/edit"
-    r = await run_ledger("pivot on a new tab and a chart", files=[], google=g, google_refs=[url], ask=ask)
-    assert not r.problems
-    add, pivot, chart = g.calls
-    assert add[1][0]["addSheet"]["properties"]["title"] == "Pivot"
+    r = await run_ledger("pivot on a new tab", files=[], google=g, google_refs=[url], ask=ask)
+    add, pivot = g.calls
+    assert add[1][0]["addSheet"]["properties"]["title"] == "Pivot" and not r.problems
     assert pivot[1][0]["updateCells"]["start"]["sheetId"] == 99
-    spec = chart[1][0]["addChart"]["chart"]["spec"]
-    assert spec["basicChart"]["chartType"] == "COLUMN"
-    series = spec["basicChart"]["series"][0]["series"]
-    assert series["aggregateType"] == "SUM"  # West appears twice: one bar, summed
-    assert series["sourceRange"]["sources"][0]["startColumnIndex"] == 2
+
+
+async def test_a_chart_of_repeated_regions_draws_the_pivot_totals_beside_everything():
+    # West is on two rows: a plain chart draws a bar per row, so the chart reads the pivot's
+    # totals (E1:F3 here), and sits right of the pivot instead of covering it.
+    g = FakeGoogle()
+    g.rows = [
+        ["Region", "Rep", "Sales", "", "Region", "SUM of Sales"],
+        ["West", "Ana", "1200", "", "East", "800"],
+        ["East", "Bo", "800", "", "West", "1500"],
+        ["West", "Cy", "300", "", "Grand Total", "2300"],
+    ]
+    edits = json.dumps({"edits": [{"file": 0, "op": "chart", "labels": "Region", "values": "Sales"}]})
+
+    async def ask(system, prompt):
+        return edits, 0.0
+
+    url = "https://docs.google.com/spreadsheets/d/abc123/edit"
+    r = await run_ledger("chart of sales by region", files=[], google=g, google_refs=[url], ask=ask)
+    [chart] = g.calls  # no second pivot: the one there is used
+    assert not r.problems
+    spec = chart[1][0]["addChart"]["chart"]["spec"]["basicChart"]
+    domain = spec["domains"][0]["domain"]["sourceRange"]["sources"][0]
+    series = spec["series"][0]["series"]["sourceRange"]["sources"][0]
+    assert (domain["startColumnIndex"], domain["startRowIndex"], domain["endRowIndex"]) == (4, 0, 3)
+    assert series["startColumnIndex"] == 5  # SUM of Sales, Grand Total left out
     anchor = chart[1][0]["addChart"]["chart"]["position"]["overlayPosition"]["anchorCell"]
-    assert anchor == {"sheetId": 7, "rowIndex": 0, "columnIndex": 4}  # beside the data
+    assert anchor["columnIndex"] == 7  # right of the pivot, not on top of it

@@ -1002,6 +1002,7 @@ class GoogleSheet:
             vc = self._col(rows, op.get("values"), head)
             if vc is None:
                 raise LedgerError("chart needs values: the column to plot.")
+            label_name, value_name = str(rows[head][lc]), str(rows[head][vc])
             last = len(rows)  # one past the last data row (the API's end is exclusive)
             while last > head + 1 and str((rows[last - 1] or [""])[0]).strip().lower() in (
                 "total",
@@ -1012,6 +1013,22 @@ class GoogleSheet:
                 last -= 1
             while last > head + 1 and all(c in (None, "") for c in rows[last - 1][: vc + 1]):
                 last -= 1
+            # Where it reads from: the column itself, or, when a label repeats (North on several
+            # rows), a pivot's totals: a plain chart draws one bar per row, never per region.
+            r0, r1, dc, sc = head, last, lc, vc
+            labels = [str(r[lc]) for r in rows[head + 1 : last] if len(r) > lc]
+            shown = await self.google.sheets_values(self.id, f"'{title}'!A1:Z500")
+            if len(set(labels)) < len(labels):
+                block = _summary_block(shown, label_name, avoid=lc)
+                if block is None:
+                    await self.apply(
+                        {"op": "pivot", "sheet": title, "group_by": label_name, "value": value_name}
+                    )
+                    shown = await self.google.sheets_values(self.id, f"'{title}'!A1:Z500")
+                    block = _summary_block(shown, label_name, avoid=lc)
+                if block is not None:
+                    r0, r1, dc = block
+                    sc = dc + 1
 
             def col(c: int) -> dict[str, Any]:
                 return {
@@ -1019,8 +1036,8 @@ class GoogleSheet:
                         "sources": [
                             {
                                 "sheetId": sheet_id,
-                                "startRowIndex": head,
-                                "endRowIndex": last,
+                                "startRowIndex": r0,
+                                "endRowIndex": r1,
                                 "startColumnIndex": c,
                                 "endColumnIndex": c + 1,
                             }
@@ -1028,18 +1045,15 @@ class GoogleSheet:
                     }
                 }
 
-            labels = [str(r[lc]) for r in rows[head + 1 : last] if len(r) > lc]
-            repeats = len(set(labels)) < len(labels)  # North twice: one bar per region, summed
-            series = col(vc) | ({"aggregateType": "SUM"} if repeats else {})
             kind = str(op.get("type") or "bar").lower()
-            chart_title = str(op.get("title") or f"{rows[head][vc]} by {rows[head][lc]}")[:100]
+            chart_title = str(op.get("title") or f"{value_name} by {label_name}")[:100]
             if kind == "pie":
                 spec = {
                     "title": chart_title,
                     "pieChart": {
                         "legendPosition": "RIGHT_LEGEND",
-                        "domain": col(lc),
-                        "series": series,
+                        "domain": col(dc),
+                        "series": col(sc),
                     },
                 }
             else:
@@ -1049,11 +1063,12 @@ class GoogleSheet:
                         "chartType": "LINE" if kind == "line" else "COLUMN",
                         "legendPosition": "NO_LEGEND",
                         "headerCount": 1,
-                        "domains": [{"domain": col(lc)}],
-                        "series": [{"series": series, "targetAxis": "LEFT_AXIS"}],
+                        "domains": [{"domain": col(dc)}],
+                        "series": [{"series": col(sc), "targetAxis": "LEFT_AXIS"}],
                     },
                 }
-            free = max(len(r) for r in rows) + 1  # right of everything there (data, a pivot)
+            # Right of everything shown there (the data and a pivot's cells), so nothing is covered.
+            free = max([len(r) for r in shown] + [len(r) for r in rows]) + 1
             anchor = {"sheetId": sheet_id, "rowIndex": head, "columnIndex": free}
             await self.google.sheets_batch(
                 self.id,
@@ -1068,7 +1083,7 @@ class GoogleSheet:
                     }
                 ],
             )
-            return f"Added a {kind} chart of {rows[head][vc]} by {rows[head][lc]} on {title}"
+            return f"Added a {kind} chart of {value_name} by {label_name} on {title}"
         if name == "format":
             title, sheet_id, _ = self._tab(op.get("sheet"))
             grid = _a1_grid(str(op.get("range") or "A1"), sheet_id)
@@ -1106,6 +1121,24 @@ class GoogleSheet:
                 )
             return f"Added tab {title}"
         raise LedgerError(f"Google Sheets doesn't have an edit called {name!r} here.")
+
+
+def _summary_block(grid: list[list[Any]], label: str, avoid: int) -> tuple[int, int, int] | None:
+    """A pivot's output in the shown grid: a header cell named like the labels column (not that
+    column itself), a number column to its right, and one row per group until Grand Total.
+    Returns (header row, one past the last group row, label column)."""
+    for r, row in enumerate(grid[:60]):
+        for c, v in enumerate(row):
+            if c == avoid or c + 1 >= len(row) or str(v).strip().lower() != label.strip().lower():
+                continue
+            end = r + 1
+            while end < len(grid) and len(grid[end]) > c + 1 and str(grid[end][c]).strip():
+                if str(grid[end][c]).strip().lower() in ("grand total", "total"):
+                    break
+                end += 1
+            if end > r + 1:
+                return r, end, c
+    return None
 
 
 def _num(v: Any) -> float | None:

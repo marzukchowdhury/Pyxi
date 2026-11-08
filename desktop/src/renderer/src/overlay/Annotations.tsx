@@ -161,6 +161,9 @@ function GuideShape({ a }: { a: LiveAnnotation }) {
   const cx = x + w / 2, cy = y + h / 2;
   // The pointer as it was when this step appeared: the arrow doesn't chase the mouse around.
   const from = useRef<[number, number] | null>(lastCursor ?? [innerWidth / 2, innerHeight * 0.8]).current;
+  // A key to press has nothing on screen to point at: just the step's pill, no box round the
+  // whole window.
+  if (a.action === "press") return null;
   let arrow = "";
   let head = "";
   const curve = (x1: number, y1: number, x2: number, y2: number) => {

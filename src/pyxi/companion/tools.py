@@ -276,7 +276,14 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "the goal is reached (done=true, with a cheerful line). Use `use_computer` instead when they want "
         "you to do it for them. If you're not sure where things are in this version of the app, web_search "
         "the current steps first. Before a step that inserts or pastes something at the cursor, first "
-        "guide them to put the cursor where it belongs (e.g. click at the end of a line, press Enter).",
+        "guide them to put the cursor where it belongs (e.g. click at the end of a line, press Enter). "
+        "In a spreadsheet (Google Sheets, Excel) never point at or mention the small square or blue dot "
+        "on a selection's corner: that's the fill handle, and dragging it copies one cell over all their "
+        "data. To select a range, they click the first cell, then Shift+click the last one (or type the "
+        "range, like A1:C13, in the Name box at the top left). Call done=true only when the screen shows "
+        "the finished result (a pivot with its rows and values filled in, not just the empty editor). "
+        "If the app isn't on screen any more (they switched away), don't guess: say one short line and "
+        "stop calling guide, which ends the coaching.",
         {
             "action": {
                 "type": "string",
