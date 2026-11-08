@@ -4,6 +4,7 @@ the parts kit, and explaining on a real model in a turn."""
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import struct
 import threading
@@ -24,7 +25,7 @@ def test_the_catalog_is_complete_and_only_takes_licences_we_can_ship():
     models = library.models()
     assert len(models) >= 100
     for m in models.values():
-        assert m.file == f"{m.id}.glb" and m.title and m.parts
+        assert m.file in (f"{m.id}.glb", *(f"{m.id}_v{v}.glb" for v in range(2, 10))) and m.title and m.parts
         assert m.license in ALLOWED, (m.id, m.license)
         assert m.credit and m.source.startswith("https://")
         for p in m.parts:
@@ -81,6 +82,13 @@ def _glb(path: Path, points: list[list[float]], translation: list[float]) -> Non
     path.write_bytes(blob)
 
 
+def _as_catalogued(monkeypatch, model_id: str, path: Path):
+    """Make the catalog's size match a test file, the way a real download matches it."""
+    m = dataclasses.replace(library.get(model_id), bytes=path.stat().st_size)
+    monkeypatch.setitem(library.models(), model_id, m)
+    return m
+
+
 def test_markers_are_pinned_onto_the_real_surface(tmp_path):
     m = library.get("perseverance")
     _glb(tmp_path / m.file, [[0, 0, 0], [1, 0, 0], [0, 1, 0]], [2, 0, 0])
@@ -95,7 +103,7 @@ def test_markers_are_pinned_onto_the_real_surface(tmp_path):
     assert kid.position == [9, 9, 9]  # attached markers move with their parent instead
 
 
-def test_a_model_downloads_once_and_a_missing_one_falls_back(tmp_path):
+def test_a_model_downloads_once_and_a_missing_one_falls_back(tmp_path, monkeypatch):
     m = library.get("apple")
     served = tmp_path / "served"
     served.mkdir()
@@ -103,6 +111,7 @@ def test_a_model_downloads_once_and_a_missing_one_falls_back(tmp_path):
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(SimpleHTTPRequestHandler, directory=str(served)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
+        m = _as_catalogued(monkeypatch, "apple", served / m.file)
         base = f"http://127.0.0.1:{server.server_address[1]}"
         dest = tmp_path / "library"
         assert library.ensure(dest, m, base) == dest / m.file
@@ -131,6 +140,7 @@ async def test_a_turn_explains_on_the_real_model(settings, monkeypatch):
     path = settings.library_dir / m.file
     path.parent.mkdir(parents=True, exist_ok=True)
     _glb(path, [[0, 0, 0], [1, 0, 0], [0, 1, 0]], [0, 0, 0])
+    m = _as_catalogued(monkeypatch, "ingenuity", path)
 
     async def explain(llm, model, summary, brief, context=""):
         assert "Ingenuity" in summary and "rotor" in brief
@@ -179,3 +189,48 @@ def test_the_server_only_serves_library_files(name):
 
     assert not _LIBRARY_NAME.match(name)
     assert _LIBRARY_NAME.match("saturn_v.glb")
+
+
+def test_an_old_copy_of_a_rebuilt_model_is_fetched_again(tmp_path, monkeypatch):
+    m = library.get("apple")
+    served, dest = tmp_path / "served", tmp_path / "library"
+    served.mkdir()
+    dest.mkdir()
+    _glb(served / m.file, [[0, 0, 0], [1, 0, 0], [0, 1, 0]], [0, 0, 0])
+    m = _as_catalogued(monkeypatch, "apple", served / m.file)
+    (dest / m.file).write_bytes(b"glTF old one-piece version")
+    assert library.ensure(dest, m, None) is None  # the wrong size is never used as it is
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(SimpleHTTPRequestHandler, directory=str(served)))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        assert library.ensure(dest, m, f"http://127.0.0.1:{server.server_address[1]}") == dest / m.file
+        assert (dest / m.file).stat().st_size == m.bytes
+    finally:
+        server.shutdown()
+
+
+def test_the_rebuilt_car_has_moving_parts_under_a_new_file_name():
+    car = library.get("concept_car")
+    assert car.file == "concept_car_v2.glb"  # library-v1 has the old one-piece car as concept_car.glb
+    ids = {p.id for p in car.parts}
+    assert {"front_left_wheel", "rear_right_wheel", "left_door", "headlights", "body"} <= ids
+
+
+def test_a_car_shows_a_few_different_tags_and_the_story_s_come_first():
+    from pyxi.scenes.objects import Beat
+
+    at_rest = library.get("concept_car").scene()
+    tags = [p.label for p in at_rest.parts if p.label]
+    assert len(tags) <= library.MOST_LABELS and len(set(tags)) == len(tags)  # no two "Door"s
+
+    scene = library.get("concept_car").scene()
+    for p in scene.parts:
+        p.label = p.id
+    scene.beats = [Beat(title="Lights", narration="x", focus=["tail_lights", "cabin"])]
+    library.few_labels(scene, most=3)
+    assert {p.id for p in scene.parts if p.label} == {"tail_lights", "cabin", "front_left_wheel"}
+
+
+def test_the_models_see_title_fields_in_their_tools():
+    beat = edit_tool_schema()["properties"]["beats"]["items"]["properties"]
+    assert "title" in beat and "title" in build_tool_schema()["properties"]

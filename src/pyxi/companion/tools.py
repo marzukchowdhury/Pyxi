@@ -88,7 +88,8 @@ BUILD_BRIEF = _tool(
                     "enum": list(model_library.models()),
                     "description": "A real, ready-made 3D model of exactly this subject (photo-real, "
                     "far better than one built from shapes, and on screen in a second): give its id "
-                    "whenever the subject is one of these, or close enough to explain on: "
+                    "whenever the subject is one of these, or close enough to explain on (any car, "
+                    "of any brand or model, BMW, Ferrari, Supra, a sedan: concept_car): "
                     + model_library.menu(),
                 }
             }

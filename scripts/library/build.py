@@ -125,7 +125,10 @@ def main() -> None:
         if args and recipe["id"] not in args:
             continue
         try:
-            entry = pack(source(recipe), OUT / f"{recipe['id']}.glb", recipe)
+            # A model rebuilt after it was published gets a new file name (``version``), so the app
+            # fetches the new file instead of the one already in the release.
+            v = recipe.get("version")
+            entry = pack(source(recipe), OUT / f"{recipe['id']}{f'_v{v}' if v else ''}.glb", recipe)
         except Exception as exc:  # one broken source mustn't stop the rest
             print(f"FAILED {recipe['id']}: {exc}")
             continue

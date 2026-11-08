@@ -20,6 +20,7 @@ from otto.llm.base import LLMProvider, Message, ToolSpec
 from pydantic import ValidationError
 
 from pyxi.partial_json import complete_items, partial_string
+from pyxi.scenes.library import few_labels
 from pyxi.scenes.model_examples import EXAMPLES
 from pyxi.scenes.objects import (
     Beat,
@@ -50,12 +51,15 @@ as it is wide) and keep every part in that ratio; a heart is taller than wide.
 - Detail sells it: after the main parts, add the small things that make it read as real, as \
 children of the part they sit on: bolts and rivets, rims, lips and flanges, vents and intakes, \
 rails, handles, seams, a hex nut, a nozzle ring, wingtip missiles, a pitot tube. Three or four \
-of these on the hero part do more than ten more big pieces.
+of these on the hero part do more than ten more big pieces. Every small piece touches what it \
+sits on: a headlight or grille is set into the body's front face, never floating in front of \
+it; wheels tuck up into the body, their tops inside the wheel arches.
 - Ready-made pieces: wheels, missiles, propellers, jet engines, RAM sticks, graphics cards, \
 chips (CPUs, AI chips), PC fans, screens, seats, people, bolts and houses are `kit` parts \
 (shape kit, kit=<name>, sized and placed like any part): detailed and real-looking, never \
-rebuild them from boxes. A computer is boards, chips and fans from the kit; a car is a body \
-extrude or lathe plus four kit wheels; a fighter is its outline plus kit missiles and a seat.
+rebuild them from boxes. A computer is boards, chips and fans from the kit; a vehicle is a body \
+extrude or lathe plus kit wheels (a wheel's size is [diameter, diameter, width] with its thin \
+side across the vehicle); a fighter is its outline plus kit missiles and a seat.
 - Materials: real ones, in contrast (painted body, dark_metal workings, brushed_metal moving \
 parts, rubber seals, glass); give painted and plastic parts a real colour, not default grey.
 - Inside and outside: outer shells get casing=true and the model gets cutaway=true when the \
@@ -268,7 +272,7 @@ async def explain_library_model(
             for patch in edit.update:
                 if patch.id in real:
                     patch.size = patch.material = patch.color = None
-            result.model = apply_edit(model, edit)
+            result.model = few_labels(apply_edit(model, edit))
             break
         except ValidationError as exc:
             errors = exc.errors()[:8]

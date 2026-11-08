@@ -23,6 +23,7 @@ from pyxi.config import PyxiSettings
 from pyxi.hub import Hub
 from pyxi.palace.tracker import PalaceTracker
 from pyxi.scenes import TITLES, get_scene
+from pyxi.scenes import library as model_library
 from pyxi.scenes.object_gallery import OBJECT_GALLERY, OBJECT_TITLES
 
 log = logging.getLogger(__name__)
@@ -288,7 +289,9 @@ def create_app(
     @app.get("/library/{name}")
     async def library_model(name: str) -> FileResponse:
         """A real 3D model from the library (downloaded into the data folder when first used)."""
-        path = settings.library_dir / name
+        # Asked for by model id ("concept_car.glb"); the file on disk may carry a version.
+        model = model_library.get(name[:-4]) if _LIBRARY_NAME.match(name) else None
+        path = settings.library_dir / (model.file if model else name)
         if not _LIBRARY_NAME.match(name) or not path.is_file():
             raise HTTPException(404)
         return FileResponse(path, media_type="model/gltf-binary")

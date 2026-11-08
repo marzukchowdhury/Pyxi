@@ -19,7 +19,10 @@ class Handler(SimpleHTTPRequestHandler):
         path = path.split("?", 1)[0]
         if not path.startswith("/library/") or ".." in path:
             return str(ROOT / "nothing-here")
-        return str(ROOT / "library" / Path(path).name)
+        name = Path(path).name
+        # Asked for by model id, like the brain: a rebuilt model's file carries a version.
+        versions = sorted((ROOT / "library").glob(f"{Path(name).stem}_v*.glb"))
+        return str(versions[-1] if versions else ROOT / "library" / name)
 
     def end_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")

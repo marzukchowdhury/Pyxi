@@ -580,36 +580,231 @@
   },
   {
    "id": "concept_car",
-   "title": "Sports car (concept)",
-   "file": "concept_car.glb",
-   "bytes": 6023904,
+   "title": "Sports car",
+   "file": "concept_car_v2.glb",
+   "bytes": 6060200,
    "triangles": 213347,
-   "about": "",
+   "about": "y up, front of the car towards +z (headlights at +z, tail lights at -z); wheels turn about the x axis; the doors hinge at their front edge",
    "keywords": [
     "car",
     "sports car",
-    "supercar"
+    "supercar",
+    "sedan",
+    "coupe",
+    "bmw",
+    "mercedes",
+    "ferrari",
+    "porsche",
+    "audi",
+    "toyota"
    ],
    "credit": "Car Concept by Eric Chadwick (Khronos glTF Sample Assets, CC-BY-4.0)",
    "license": "CC-BY-4.0",
    "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept",
    "parts": [
     {
-     "id": "body",
-     "label": null,
+     "id": "front_left_wheel",
+     "label": "Front wheel",
      "note": null,
      "casing": false,
      "center": [
-      0.0,
-      0.0,
-      0.0
+      2.239,
+      -0.437,
+      2.862
      ],
      "size": [
-      5.835,
-      2.637,
-      10.0
+      1.356,
+      1.763,
+      1.792
      ],
-     "triangles": 213347
+     "triangles": 16310
+    },
+    {
+     "id": "front_right_wheel",
+     "label": "Front wheel",
+     "note": null,
+     "casing": false,
+     "center": [
+      -2.241,
+      -0.437,
+      2.858
+     ],
+     "size": [
+      1.353,
+      1.756,
+      1.786
+     ],
+     "triangles": 16310
+    },
+    {
+     "id": "rear_left_wheel",
+     "label": "Rear wheel",
+     "note": null,
+     "casing": false,
+     "center": [
+      2.26,
+      -0.437,
+      -3.563
+     ],
+     "size": [
+      0.652,
+      1.763,
+      1.763
+     ],
+     "triangles": 16310
+    },
+    {
+     "id": "rear_right_wheel",
+     "label": "Rear wheel",
+     "note": null,
+     "casing": false,
+     "center": [
+      -2.258,
+      -0.437,
+      -3.563
+     ],
+     "size": [
+      0.654,
+      1.756,
+      1.756
+     ],
+     "triangles": 16310
+    },
+    {
+     "id": "left_door",
+     "label": "Door",
+     "note": null,
+     "casing": false,
+     "center": [
+      2.185,
+      0.14,
+      -0.181
+     ],
+     "size": [
+      0.997,
+      2.201,
+      3.831
+     ],
+     "triangles": 12040
+    },
+    {
+     "id": "right_door",
+     "label": "Door",
+     "note": null,
+     "casing": false,
+     "center": [
+      -2.184,
+      0.14,
+      -0.181
+     ],
+     "size": [
+      0.997,
+      2.202,
+      3.831
+     ],
+     "triangles": 11904
+    },
+    {
+     "id": "headlights",
+     "label": "Headlights",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.001,
+      0.188,
+      4.459
+     ],
+     "size": [
+      3.694,
+      0.161,
+      0.393
+     ],
+     "triangles": 288
+    },
+    {
+     "id": "tail_lights",
+     "label": "Tail lights",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.001,
+      0.905,
+      -3.885
+     ],
+     "size": [
+      3.822,
+      0.112,
+      0.761
+     ],
+     "triangles": 376
+    },
+    {
+     "id": "grille",
+     "label": "Grille",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.001,
+      0.477,
+      3.605
+     ],
+     "size": [
+      2.346,
+      0.217,
+      1.036
+     ],
+     "triangles": 2672
+    },
+    {
+     "id": "bonnet",
+     "label": "Bonnet",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.001,
+      -0.163,
+      3.567
+     ],
+     "size": [
+      5.077,
+      1.719,
+      2.866
+     ],
+     "triangles": 13686
+    },
+    {
+     "id": "cabin",
+     "label": "Cabin",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.001,
+      0.094,
+      0.026
+     ],
+     "size": [
+      5.113,
+      2.398,
+      9.84
+     ],
+     "triangles": 37659
+    },
+    {
+     "id": "body",
+     "label": "Body",
+     "note": null,
+     "casing": false,
+     "center": [
+      0.001,
+      0.102,
+      -0.021
+     ],
+     "size": [
+      5.132,
+      2.433,
+      9.957
+     ],
+     "triangles": 69482
     }
    ]
   },

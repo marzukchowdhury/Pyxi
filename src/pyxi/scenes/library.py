@@ -67,11 +67,13 @@ class LibraryModel:
             )
             for p in self.parts
         ]
-        return ObjectScene(
-            title=self.title,
-            parts=parts,
-            beats=[Beat(title=self.title, narration="", camera="iso")],
-            credit=self.credit,
+        return few_labels(
+            ObjectScene(
+                title=self.title,
+                parts=parts,
+                beats=[Beat(title=self.title, narration="", camera="iso")],
+                credit=self.credit,
+            )
         )
 
     def summary(self) -> str:
@@ -137,8 +139,8 @@ def local_path(library_dir: Path, model: LibraryModel) -> Path:
 def ensure(library_dir: Path, model: LibraryModel, base_url: str | None) -> Path | None:
     """The model's file on disk, downloading it the first time. None if it can't be had."""
     path = local_path(library_dir, model)
-    if path.is_file() and path.stat().st_size > 0:
-        return path
+    if path.is_file() and path.stat().st_size == model.bytes:
+        return path  # the size tells an old copy of a since-rebuilt model from the right one
     if not base_url:
         return None
     url = base_url.rstrip("/") + "/" + model.file
@@ -157,6 +159,32 @@ def ensure(library_dir: Path, model: LibraryModel, base_url: str | None) -> Path
         log.warning("library model %s unavailable: %s", model.id, exc)
         tmp.unlink(missing_ok=True)
         return None
+
+
+MOST_LABELS = 7
+
+
+def few_labels(scene: ObjectScene, most: int = MOST_LABELS) -> ObjectScene:
+    """At most ``most`` tags, each saying something different: a car tagged on all twelve of its
+    parts (two "Door"s, two "Front wheel"s) is a cloud of stickers, not an explanation. Tags the
+    story talks about stay first: markers (they exist only for their tag), then the parts the
+    beats focus on, then the rest in order."""
+    focus = {pid for b in scene.beats for pid in b.focus}
+    ranked = sorted(
+        (p for p in scene.parts if p.label),
+        key=lambda p: (p.shape != "marker", p.id not in focus),
+    )
+    keep: set[str] = set()
+    said: set[str] = set()
+    for p in ranked:
+        text = (p.label or "").strip().lower()
+        if len(keep) < most and text not in said:
+            keep.add(p.id)
+            said.add(text)
+    for p in scene.parts:
+        if p.label and p.id not in keep:
+            p.label = None
+    return scene
 
 
 def scene_json(model_id: str) -> dict[str, Any] | None:

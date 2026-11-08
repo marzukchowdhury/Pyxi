@@ -299,7 +299,7 @@ class Beat(BaseModel):
             data = {**data, "title": " ".join(words).rstrip(".,;:") or "Step"}
         return data
 
-    title: str = ""
+    title: str = Field("", description="A 2-4 word heading for this step ('First stage drops').")
     narration: str = Field(
         description="One or two short spoken sentences in your voice: what is happening and why it matters, "
         "with a concrete fact or vivid analogy, never a description of the picture."
@@ -504,7 +504,14 @@ def _inline(schema: dict[str, Any]) -> dict[str, Any]:
         if isinstance(node, dict):
             if "$ref" in node:
                 return walk(dict(defs[node["$ref"].split("/")[-1]]))
-            node = {k: walk(v) for k, v in node.items() if k != "title"}
+            # Drop pydantic's "title" labels, but never a field that is called title (a model's
+            # or a beat's): those the model has to be able to see and fill in.
+            props = node.get("properties")
+            node = {
+                k: ({pk: walk(pv) for pk, pv in v.items()} if k == "properties" and v is props else walk(v))
+                for k, v in node.items()
+                if k != "title" or not isinstance(v, str)
+            }
             # Optional fields come out as anyOf[T, null]; a flat T is friendlier to every provider.
             any_of = node.get("anyOf")
             if isinstance(any_of, list) and len(any_of) == 2 and {"type": "null"} in any_of:

@@ -37,7 +37,29 @@ def _kh(rid: str, name: str, title: str, keywords: list[str] | None = None, **kw
 
 MORE: list[dict] = [
     # Khronos showcase models.
-    _kh("concept_car", "CarConcept", "Sports car (concept)", ["car", "sports car", "supercar"]),
+    _kh(
+        "concept_car",
+        "CarConcept",
+        "Sports car",
+        ["car", "sports car", "supercar", "sedan", "coupe", "bmw", "mercedes", "ferrari", "porsche", "audi", "toyota"],
+        version=2,  # split into wheels, doors, lights after library-v1 shipped it in one piece
+        about="y up, front of the car towards +z (headlights at +z, tail lights at -z); wheels turn "
+        "about the x axis; the doors hinge at their front edge",
+        parts=[
+            {"id": "front_left_wheel", "label": "Front wheel", "match": {"node": "WheelFrontL"}},
+            {"id": "front_right_wheel", "label": "Front wheel", "match": {"node": "WheelFrontR"}},
+            {"id": "rear_left_wheel", "label": "Rear wheel", "match": {"node": "WheelRearL"}},
+            {"id": "rear_right_wheel", "label": "Rear wheel", "match": {"node": "WheelRearR"}},
+            {"id": "left_door", "label": "Door", "match": {"node": "BodyDoorL"}},
+            {"id": "right_door", "label": "Door", "match": {"node": "BodyDoorR"}},
+            {"id": "headlights", "label": "Headlights", "match": {"node": "BodyHeadlights"}},
+            {"id": "tail_lights", "label": "Tail lights", "match": {"node": "BodyTaillights$|BodyTurnsignalsRear"}},
+            {"id": "grille", "label": "Grille", "match": {"node": "BodyHoodTopgrill"}},
+            {"id": "bonnet", "label": "Bonnet", "match": {"node": "BodyHood$|BodyHoodUnder"}},
+            {"id": "cabin", "label": "Cabin", "match": {"node": "Interior"}},
+            {"id": "body", "label": "Body", "rest": True},
+        ],
+    ),
     _kh("chronograph_watch", "ChronographWatch", "Chronograph wristwatch", ["watch", "chronograph"]),
     _kh("antique_camera", "AntiqueCamera", "Antique bellows camera", ["camera", "photography"]),
     _kh("sunglasses", "SunglassesKhronos", "Sunglasses", ["sunglasses", "lenses"]),

@@ -267,8 +267,27 @@ function house(): KitLayer[] {
   ];
 }
 
+/**
+ * The axis a piece's own shape says it has, whatever the builder wrote: a wheel, fan or propeller
+ * turns about its thinnest side, a missile, engine or bolt lies along its longest one. Otherwise a
+ * wheel left on the default axis is squashed flat into its box and lies on its side.
+ */
+export function kitAxis(kit: string, size: [number, number, number], axis: Axis): Axis {
+  const names: Axis[] = ["x", "y", "z"];
+  const order = [0, 1, 2].sort((a, b) => size[a] - size[b]);
+  const clear = (a: number, b: number) => size[a] < size[b] * 0.8;
+  if (kit === "wheel" || kit === "pc_fan" || kit === "propeller") {
+    return clear(order[0], order[1]) ? names[order[0]] : axis;
+  }
+  if (kit === "missile" || kit === "jet_engine" || kit === "bolt") {
+    return clear(order[1], order[2]) ? names[order[2]] : axis;
+  }
+  return axis;
+}
+
 /** The kit piece, fitted to the part's box. */
 export function buildKit(kit: string, size: [number, number, number], axis: Axis, teeth?: number | null): KitLayer[] | null {
+  axis = kitAxis(kit, size, axis);
   const layers =
     kit === "wheel" ? wheel(axis)
     : kit === "missile" ? missile(axis)
