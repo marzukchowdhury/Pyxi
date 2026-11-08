@@ -284,6 +284,28 @@ class JobManager:
     # ------------------------------------------------------------------ running
     async def _update(self, job: Job) -> None:
         await self.hub.emit("job", job=job.model_dump(mode="json"))
+        if job.status in ("done", "failed", "stopped"):
+            self._log_finished(job)
+
+    def _log_finished(self, job: Job) -> None:
+        """One line per finished job in .pyxi/jobs.jsonl (status, seconds, summary; never the
+        files' contents), so a slow or failing teammate shows up when testing."""
+        try:
+            line = {
+                "ts": time.time(),
+                "id": job.id,
+                "agent": job.agent_name,
+                "status": job.status,
+                "secs": round(time.time() - job.created_at, 1),
+                "task": job.task[:160],
+                "summary": (job.summary or "")[:300],
+                "cost": round(job.cost_usd or 0, 4),
+            }
+            path = self.settings.data_dir / "jobs.jsonl"
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(line) + chr(10))
+        except Exception:  # a log line is never worth breaking a job
+            log.debug("couldn't log the finished job", exc_info=True)
 
     async def _run(self, job: Job, agent: AgentProfile) -> None:
         job.status = "running"
