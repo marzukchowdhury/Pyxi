@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from otto.llm.base import ToolSpec
 
-from pyxi.companion.notes import DIAGRAM_SCHEMA
 from pyxi.agents.pixel import OPERATIONS as PIXEL_OPERATIONS
+from pyxi.companion.notes import DIAGRAM_SCHEMA
 from pyxi.scenes import TITLES, tool_schema
 from pyxi.scenes.object_gallery import OBJECT_TITLES
 from pyxi.scenes.objects import build_tool_schema, edit_tool_schema
@@ -106,13 +106,15 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "Explain something that's on screen by writing on it: a note card beside the content whose points "
         "write themselves as you speak, each framing the exact paragraph, row or control it's about, plus "
         "freehand sketches over real content. Use it whenever they ask what's on screen, what something "
-        "says or means, or to explain a post, meme, chart, page or error. Be thorough: 4-6 points that "
-        "together really answer the question (what it is, the why, the catch, what it means for them), each "
+        "says or means, or to explain a post, meme, chart, page or error. Be brief: 3-4 points (3 for "
+        "something simple like a meme or a post) that together really answer the question (what it is, the "
+        "why, the catch, what it means for them), each "
         "card text under 10 words; an 'aside' point can carry a joke. Each point frames its "
         "own specific thing (one cell, one line, one control): never reuse the same frame. Give `quote` (exact "
         "words from the OCR list) to mark words precisely, with mark 'underline' for a phrase and 'frame' for "
-        "a block; the card places itself where it hides nothing. Give every point a `say`: the one sentence you "
-        "speak as it appears (its mark draws at that moment), explaining it in your voice, not reading the card. "
+        "a block; the card places itself where it hides nothing. Give every point a `say`: one short sentence "
+        "(under 15 words) you speak as it appears (its mark draws at that moment), in your voice, not reading "
+        "the card. "
         "Your separate `say` call is only the opener (the verdict and a hook, no [note:N] markers); Pyxi then "
         "talks through the points in order. Answer their actual question in the points (the why, the catch). "
         "Finish with `closing`, so the explanation lands instead of stopping. "
@@ -166,9 +168,8 @@ COMPANION_TOOLS: list[ToolSpec] = [
             "title": {"type": "string", "description": "2-4 words, e.g. 'Why this is funny'."},
             "closing": {
                 "type": "string",
-                "description": "Said after the last point: one related surprising or funny fact (or the "
-                "'so that's why'), then ONE specific offer of what to show next, e.g. 'Want me to sketch how "
-                "the money burns, or a fun fact about what training one model costs?'",
+                "description": "Said after the last point: ONE short sentence, either the 'so that's why' "
+                "or one specific offer of what to show next, e.g. 'Want me to sketch how the money burns?'",
             },
             "diagram": DIAGRAM_SCHEMA,
             "items": {
@@ -182,7 +183,8 @@ COMPANION_TOOLS: list[ToolSpec] = [
                         },
                         "say": {
                             "type": "string",
-                            "description": "One spoken sentence for this point, said as its mark draws.",
+                            "description": "One short spoken sentence (under 15 words) for this point, "
+                            "said as its mark draws.",
                         },
                         "kind": {"type": "string", "enum": ["point", "step", "formula", "aside"]},
                         "part": {

@@ -114,9 +114,11 @@ async def test_meeting_errand_is_quiet_checked_and_lands_in_the_notch(settings):
             break
         await asyncio.sleep(0.02)
     says = rec.of("say")
-    assert [s["text"] for s in says] == [
-        "On it, I'll let you know when it's set."
-    ]  # and nothing else
+    from pyxi.companion.brain import ACKS
+
+    [said_back] = [s["text"] for s in says]  # and nothing else
+    ack, rest = said_back.split(",", 1)  # a fresh acknowledgement each time, then the same line
+    assert ack in ACKS and rest == " I'll let you know when it's set."
     assert not rec.of("confirm")  # the user named this address: no approval card needed
     [made] = cal.created
     # Google wants full RFC 3339 times, seconds included (without them it answers 400).

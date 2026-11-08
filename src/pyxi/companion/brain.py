@@ -22,6 +22,7 @@ import base64
 import dataclasses
 import io
 import json
+import random
 import logging
 import re
 import secrets
@@ -189,6 +190,7 @@ class Brain:
         self._images: list[bytes] = []
         self._usage = Usage()
         self._said: list[str] = []
+        self._recent_acks: list[str] = []  # the last few acknowledgements (vary_ack)
         self._calls: list[dict[str, Any]] = []
         self._scene_retry = False
         self._turn_card = None  # the note card drawn this turn, if any
@@ -2401,6 +2403,7 @@ class Brain:
         lines (a finished build, an error) that aren't part of the current turn."""
         if record and agent == "Pyxi":
             text = trim_chatter(text, said_before=bool(self._said))
+            text = vary_ack(text, self._recent_acks)
         if not text.strip():
             return
         if record:
@@ -2959,6 +2962,43 @@ _NARRATION = re.compile(
     r"[^,;:]{0,70}(?:,\s*then\b[^;:]{0,60})?$",
     re.IGNORECASE,
 )
+
+
+# Said when Pyxi takes a job on. A different one each time, never one of the last few, so it
+# doesn't say "On it" on every job. None of them claims the job is done.
+ACKS = [
+    "On it",
+    "Roger that",
+    "You got it",
+    "Copy that",
+    "Will do",
+    "Leave it with me",
+    "Say no more",
+    "Right away",
+    "Coming right up",
+    "On the case",
+    "Got you",
+    "Aye aye",
+]
+# The model's own acknowledgement at the start of a line ("On it.", "On it, I'll let you know.").
+# English only: a reply in another language keeps its own words.
+_ACK_LEAD = re.compile(
+    r"^(\W*)(on it|got it|sure thing|will do|roger that|you got it|copy that|on my way)(?=[\s,.!]|$)",
+    re.IGNORECASE,
+)
+
+
+def vary_ack(text: str, recent: list[str], pick: Any = random.choice) -> str:
+    """Swap a stock acknowledgement at the start of what Pyxi says for a fresh one (remembered in
+    ``recent``, so the next few differ)."""
+    m = _ACK_LEAD.match(text)
+    if not m:
+        return text
+    used = {r.lower() for r in recent}
+    ack = pick([a for a in ACKS if a.lower() not in used] or ACKS)
+    recent.append(ack)
+    del recent[:-4]
+    return m.group(1) + ack + text[m.end() :]
 
 
 def trim_chatter(text: str, said_before: bool) -> str:

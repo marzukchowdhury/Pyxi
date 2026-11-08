@@ -325,7 +325,10 @@ async def test_finding_subscriptions_is_quiet_in_the_tray_and_one_card(settings)
     brain, rec, gmail = connected(settings, receipts(), llm)
     await brain.turn("find subscriptions I forgot about")
     [ready] = await until(rec, "job_ready")
-    assert [s["text"] for s in rec.of("say")] == ["On it."]
+    from pyxi.companion.brain import ACKS
+
+    [said] = [s["text"] for s in rec.of("say")]
+    assert said.rstrip(".") in ACKS  # one short acknowledgement, a different one each time
     assert ready["ok"] and ready["title"] == "$110.45 a month in subscriptions"
     assert ready["changes"][0].startswith("FitLife Gym")
     jobs = [e["job"] for e in rec.of("job")]

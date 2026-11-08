@@ -42,3 +42,24 @@ def test_commentary_with_then_and_first_also_goes() -> None:
         assert trim_chatter(line, said_before=True) == "", line
     kept = "I'll schedule check-in for Skyward flight SK 482 to Toronto."
     assert trim_chatter(kept, said_before=True) == kept
+
+
+def test_on_it_becomes_a_different_acknowledgement_each_time() -> None:
+    from pyxi.companion.brain import ACKS, vary_ack
+
+    recent: list[str] = []
+    said = [vary_ack("On it.", recent) for _ in range(8)]
+    assert all(s.rstrip(".") in ACKS for s in said)
+    # never the same as any of the few before it
+    for i, s in enumerate(said):
+        assert s not in said[max(0, i - 4) : i], said
+    # the rest of the line stays
+    line = vary_ack("On it, I'll let you know when it's ready.", recent)
+    assert line.endswith(", I'll let you know when it's ready.") and line.split(",")[0] in ACKS
+
+
+def test_only_a_leading_acknowledgement_is_swapped() -> None:
+    from pyxi.companion.brain import vary_ack
+
+    for text in ["Online banking is safer than it looks.", "It's on it's way.", "Kolkata is on it."]:
+        assert vary_ack(text, []) == text

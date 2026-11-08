@@ -617,7 +617,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         else:
             n = len(card["items"])
             unaimed = sum(1 for it in card["items"] if it["mark"] != "none" and not it["rect"])
-            if n < 4:
+            if n < 3:  # 3-4 points: brief on purpose
                 problems.append(f"thin card ({n})")
             if not card.get("closing"):
                 problems.append("no closing")
