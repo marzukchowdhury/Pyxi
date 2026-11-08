@@ -424,6 +424,47 @@ class Workbook:
         return out
 
 
+_ALIGN = {
+    "left": "START",
+    "start": "START",
+    "center": "CENTER",
+    "centre": "CENTER",
+    "right": "END",
+    "end": "END",
+    "justify": "JUSTIFIED",
+    "justified": "JUSTIFIED",
+}
+_NAMED = {
+    "title": "TITLE",
+    "subtitle": "SUBTITLE",
+    "normal": "NORMAL_TEXT",
+    "normal text": "NORMAL_TEXT",
+    "body": "NORMAL_TEXT",
+}
+
+
+def _rgb(color: Any) -> tuple[float, float, float] | None:
+    """'#1A73E8', 'red', 'blue' -> 0-1 floats."""
+    names = {
+        "red": "#D93025",
+        "blue": "#1A73E8",
+        "green": "#188038",
+        "orange": "#E8710A",
+        "purple": "#8E24AA",
+        "black": "#000000",
+        "gray": "#5F6368",
+        "grey": "#5F6368",
+        "yellow": "#FBBC04",
+        "white": "#FFFFFF",
+    }
+    c = names.get(str(color or "").strip().lower(), str(color or "").strip())
+    m = re.fullmatch(r"#?([0-9a-fA-F]{6})", c)
+    if not m:
+        return None
+    h = m.group(1)
+    return tuple(int(h[i : i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
+
+
 # ============================================================================ Word
 def _move_after(new_el, anchor_el) -> None:
     anchor_el.addnext(new_el)
@@ -487,6 +528,102 @@ class WordDoc:
             raise LedgerError(f"Word documents don't have an edit called {name!r}.")
         return fn(op)
 
+    def op_format_text(self, op: dict[str, Any]) -> str:
+        from docx.shared import Pt, RGBColor
+
+        runs = self._runs_for(op)
+        if not runs:
+            raise LedgerError(f"'{str(op.get('find') or '')[:40]}' isn't in the document.")
+        for run in runs:
+            for key in ("bold", "italic", "underline"):
+                if op.get(key) is not None:
+                    setattr(run, key, bool(op[key]))
+            if op.get("strikethrough") is not None:
+                run.font.strike = bool(op["strikethrough"])
+            if op.get("size"):
+                run.font.size = Pt(float(op["size"]))
+            if op.get("font"):
+                run.font.name = str(op["font"])
+            if op.get("color") and (rgb := _rgb(op["color"])):
+                run.font.color.rgb = RGBColor(*(round(v * 255) for v in rgb))
+            if op.get("highlight"):
+                from docx.enum.text import WD_COLOR_INDEX
+
+                run.font.highlight_color = getattr(
+                    WD_COLOR_INDEX, str(op["highlight"]).upper(), WD_COLOR_INDEX.YELLOW
+                )
+        return f"Formatted {len(runs)} run{'s' if len(runs) != 1 else ''}"
+
+    def _runs_for(self, op: dict[str, Any]) -> list:
+        """The runs to format: a whole paragraph ("i"), or exactly the words ("find"), splitting
+        a run around them so the rest of the line keeps its look."""
+        import copy
+
+        if op.get("i") is not None:
+            try:
+                return list(self.paras[int(op["i"])].runs)
+            except (ValueError, IndexError):
+                raise LedgerError(f"There's no paragraph {op['i']}.") from None
+        find = str(op.get("find") or "")
+        if not find:
+            raise LedgerError("format_text needs find (the words) or i (a paragraph number).")
+        out = []
+        for p in self.paras:
+            if find.lower() not in p.text.lower():
+                continue
+            for run in list(p.runs):
+                at = run.text.lower().find(find.lower())
+                if at < 0:
+                    continue
+                before, middle, after = (
+                    run.text[:at],
+                    run.text[at : at + len(find)],
+                    run.text[at + len(find) :],
+                )
+                run.text = middle
+                if before:
+                    el = copy.deepcopy(run._r)
+                    run._r.addprevious(el)
+                    from docx.text.run import Run
+
+                    Run(el, p).text = before
+                if after:
+                    el = copy.deepcopy(run._r)
+                    run._r.addnext(el)
+                    from docx.text.run import Run
+
+                    Run(el, p).text = after
+                out.append(run)
+            if not out:  # spread over several runs: format the whole line
+                out.extend(p.runs)
+        return out
+
+    def op_align(self, op: dict[str, Any]) -> str:
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+        how = {
+            "START": WD_ALIGN_PARAGRAPH.LEFT,
+            "CENTER": WD_ALIGN_PARAGRAPH.CENTER,
+            "END": WD_ALIGN_PARAGRAPH.RIGHT,
+            "JUSTIFIED": WD_ALIGN_PARAGRAPH.JUSTIFY,
+        }.get(_ALIGN.get(str(op.get("align") or "").lower(), ""))
+        if how is None:
+            raise LedgerError("align should be left, center, right or justify.")
+        try:
+            self.paras[int(op.get("i", op.get("paragraph")))].alignment = how
+        except (TypeError, ValueError, IndexError):
+            raise LedgerError(f"There's no paragraph {op.get('i')}.") from None
+        return f"Aligned paragraph {op.get('i')}"
+
+    def op_page_break(self, op: dict[str, Any]) -> str:
+        from docx.enum.text import WD_BREAK
+
+        anchor = self._anchor(op)
+        p = self.doc.add_paragraph()
+        p.add_run().add_break(WD_BREAK.PAGE)
+        self._place(p._p, anchor, [])
+        return "Added a page break"
+
     def op_add_heading(self, op: dict[str, Any]) -> str:
         level = max(0, min(int(op.get("level") or 1), 6))
         text = str(op.get("text") or "").strip()
@@ -527,6 +664,8 @@ class WordDoc:
 
     def op_add_table(self, op: dict[str, Any]) -> str:
         rows = [list(r) for r in op.get("rows") or [] if isinstance(r, list | tuple)]
+        if not rows and op.get("n_rows") and op.get("n_cols"):
+            rows = [[""] * min(int(op["n_cols"]), 20) for _ in range(min(int(op["n_rows"]), 50))]
         if not rows:
             raise LedgerError("add_table needs rows (the first row is the header).")
         cols = max(len(r) for r in rows)
@@ -1285,7 +1424,160 @@ class GoogleDoc:
             if not n:
                 raise LedgerError(f"'{find[:40]}' isn't in the doc.")
             return f"Replaced '{find[:40]}' {n} times"
+        if name == "add_table":
+            rows = [[str(c) for c in r] for r in op.get("rows") or [] if isinstance(r, list)]
+            n_rows = len(rows) or int(op.get("n_rows") or 0)
+            n_cols = max((len(r) for r in rows), default=0) or int(op.get("n_cols") or 0)
+            if not (1 <= n_rows <= 50 and 1 <= n_cols <= 20):
+                raise LedgerError(
+                    "add_table needs rows (the cells) or n_rows and n_cols (up to 50 x 20)."
+                )
+            where: dict[str, Any] = (
+                {"location": {"index": self._at(op)}}
+                if op.get("after") is not None
+                else {"endOfSegmentLocation": {}}
+            )
+            await self.google.docs_batch(
+                self.id, [{"insertTable": {"rows": n_rows, "columns": n_cols, **where}}]
+            )
+            await self.load()
+            if rows:
+                tables = [b for b in self.doc.get("body", {}).get("content", []) if "table" in b]
+                if op.get("after") is not None:
+                    at = self._at(op)
+                    tables = [t for t in tables if t.get("startIndex", 0) >= at] or tables
+                    table = tables[0]
+                else:
+                    table = tables[-1]
+                fills = []
+                for r, tr in enumerate(table["table"].get("tableRows", [])):
+                    for c, cell in enumerate(tr.get("tableCells", [])):
+                        text = rows[r][c] if r < len(rows) and c < len(rows[r]) else ""
+                        if text:
+                            fills.append((cell["content"][0]["startIndex"], text))
+                # Last cell first: text typed into an earlier cell would move every later index.
+                reqs = [
+                    {"insertText": {"location": {"index": i}, "text": t}}
+                    for i, t in sorted(fills, reverse=True)
+                ]
+                if reqs:
+                    await self.google.docs_batch(self.id, reqs)
+                    await self.load()
+            return f"Added a {n_rows} x {n_cols} table"
+        if name in ("set_style", "delete_paragraph", "align"):
+            i = op.get("i", op.get("paragraph"))
+            try:
+                block = self._blocks()[int(i)]
+            except (TypeError, ValueError, IndexError):
+                raise LedgerError(f"There's no paragraph {i}.") from None
+            start, end = int(block["startIndex"]), int(block["endIndex"])
+            if name == "delete_paragraph":
+                last = end >= self._end()
+                rng = {
+                    "startIndex": start - 1 if last and start > 1 else start,
+                    "endIndex": end - 1 if last else end,
+                }
+                await self.google.docs_batch(self.id, [{"deleteContentRange": {"range": rng}}])
+                await self.load()
+                return f"Deleted paragraph {i}"
+            if name == "align":
+                how = _ALIGN.get(str(op.get("align") or "").lower())
+                if how is None:
+                    raise LedgerError("align should be left, center, right or justify.")
+                style, fields = {"alignment": how}, "alignment"
+            else:
+                want = str(op.get("style") or "").strip().lower()
+                m = re.fullmatch(r"heading\s*([1-6])", want)
+                named = f"HEADING_{m.group(1)}" if m else _NAMED.get(want)
+                if named is None:
+                    raise LedgerError("style should be Heading 1-6, Title, Subtitle or Normal.")
+                style, fields = {"namedStyleType": named}, "namedStyleType"
+            await self.google.docs_batch(
+                self.id,
+                [
+                    {
+                        "updateParagraphStyle": {
+                            "range": {"startIndex": start, "endIndex": end},
+                            "paragraphStyle": style,
+                            "fields": fields,
+                        }
+                    }
+                ],
+            )
+            await self.load()
+            return f"{'Aligned' if name == 'align' else 'Restyled'} paragraph {i}"
+        if name == "format_text":
+            ranges = self._ranges(op)
+            if not ranges:
+                raise LedgerError(f"'{str(op.get('find') or '')[:40]}' isn't in the doc.")
+            style: dict[str, Any] = {}
+            for key in ("bold", "italic", "underline", "strikethrough"):
+                if op.get(key) is not None:
+                    style[key] = bool(op[key])
+            if op.get("size"):
+                style["fontSize"] = {"magnitude": float(op["size"]), "unit": "PT"}
+            if op.get("font"):
+                style["weightedFontFamily"] = {"fontFamily": str(op["font"])}
+            for key, api in (("color", "foregroundColor"), ("highlight", "backgroundColor")):
+                if op.get(key) and (rgb := _rgb(op[key])):
+                    style[api] = {
+                        "color": {"rgbColor": {"red": rgb[0], "green": rgb[1], "blue": rgb[2]}}
+                    }
+            if op.get("link"):
+                style["link"] = {"url": str(op["link"])}
+            if not style:
+                raise LedgerError("format_text needs something to change (bold, size, color...).")
+            await self.google.docs_batch(
+                self.id,
+                [
+                    {
+                        "updateTextStyle": {
+                            "range": {"startIndex": a, "endIndex": b},
+                            "textStyle": style,
+                            "fields": ",".join(style),
+                        }
+                    }
+                    for a, b in ranges
+                ],
+            )
+            await self.load()
+            return f"Formatted {len(ranges)} place{'s' if len(ranges) != 1 else ''}"
+        if name == "page_break":
+            where = (
+                {"location": {"index": self._at(op)}}
+                if op.get("after") is not None
+                else {"endOfSegmentLocation": {}}
+            )
+            await self.google.docs_batch(self.id, [{"insertPageBreak": where}])
+            await self.load()
+            return "Added a page break"
         raise LedgerError(f"Google Docs doesn't have an edit called {name!r} here.")
+
+    def _ranges(self, op: dict[str, Any]) -> list[tuple[int, int]]:
+        """Where a format applies: a whole paragraph ("i"), or every place the words appear."""
+        blocks = self._blocks()
+        if op.get("i") is not None:
+            try:
+                b = blocks[int(op["i"])]
+            except (ValueError, IndexError):
+                raise LedgerError(f"There's no paragraph {op['i']}.") from None
+            return [(int(b["startIndex"]), max(int(b["startIndex"]) + 1, int(b["endIndex"]) - 1))]
+        find = str(op.get("find") or "")
+        if not find:
+            raise LedgerError("format_text needs find (the words) or i (a paragraph number).")
+        out = []
+        for b in blocks:
+            elements = b["paragraph"].get("elements", [])
+            if not elements:
+                continue
+            text = "".join(e.get("textRun", {}).get("content", "") for e in elements)
+            base = int(elements[0].get("startIndex", b["startIndex"]))
+            hay, needle = (text, find) if find in text else (text.lower(), find.lower())
+            at = hay.find(needle)
+            while at >= 0:
+                out.append((base + at, base + at + len(find)))
+                at = hay.find(needle, at + len(find))
+        return out
 
 
 # ============================================================================ the job
@@ -1306,10 +1598,12 @@ Word (.docx) and Google Docs ("after" is a paragraph number from the outline; le
 - {"op": "add_paragraph", "text": "..", "after"?: 3}
 - {"op": "add_bullets", "items": [".."], "numbered"?: false, "after"?: 3}
 - {"op": "replace_text", "find": "..", "replace": ".."}
-Word only:
-- {"op": "add_table", "rows": [["Header", ".."], ["..", ".."]], "after"?: 3}
-- {"op": "set_style", "i": 4, "style": "Heading 2"}
+- {"op": "add_table", "rows": [["Header", ".."], ["..", ".."]], "after"?: 3}  (or "n_rows" and "n_cols" for an empty table of that size)
+- {"op": "set_style", "i": 4, "style": "Heading 2"|"Title"|"Subtitle"|"Normal"}
 - {"op": "delete_paragraph", "i": 4}
+- {"op": "format_text", "find"?: "exact words" | "i"?: 4, "bold"?: true, "italic"?: true, "underline"?: true, "strikethrough"?: true, "size"?: 14, "color"?: "#1A73E8"|"red", "highlight"?: "yellow", "font"?: "Arial", "link"?: "https://.."}  (find formats every place the words appear; i a whole paragraph)
+- {"op": "align", "i": 4, "align": "left"|"center"|"right"|"justify"}
+- {"op": "page_break", "after"?: 3}
 PowerPoint (.pptx) (slides are numbered from 1):
 - {"op": "add_slide", "title": "..", "bullets"?: [".."], "after"?: 2, "notes"?: ".."}
 - {"op": "set_title", "slide": 2, "text": ".."}

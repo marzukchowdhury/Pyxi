@@ -81,3 +81,20 @@ def install() -> None:
         sys.stdout = ScrubbingStream(sys.stdout)  # type: ignore[assignment]
     if not isinstance(sys.stderr, ScrubbingStream) and sys.stderr is not None:
         sys.stderr = ScrubbingStream(sys.stderr)  # type: ignore[assignment]
+
+
+# Strings shaped like API keys and tokens (Google AIza..., OpenAI/Anthropic sk-..., GitHub ghp_...,
+# Slack xox..., AWS AKIA..., long JWTs). Pyxi reads them off the screen like any other text
+# ("The existing first line (the AIz...") and must never repeat them in a card, a notification
+# or out loud.
+_SECRET = re.compile(
+    r"\b(?:AIza[0-9A-Za-z_-]{20,}|sk-(?:ant-|proj-|or-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}"
+    r"|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})"
+)
+_SECRET_START = re.compile(r"\b(?:AIz[a-zA-Z0-9_-]*|sk-[A-Za-z0-9_-]{4,}|gh[pousr]_[A-Za-z0-9]{4,})")
+
+
+def hide_secrets(text: str) -> str:
+    """Key-like strings become "(a key, hidden)", even cut short ("the AIz...")."""
+    text = _SECRET.sub("(a key, hidden)", text)
+    return _SECRET_START.sub("(a key, hidden)", text)

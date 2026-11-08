@@ -74,6 +74,7 @@ from pyxi.config import PyxiSettings
 from pyxi.connectors import Connectors, Outgoing
 from pyxi.hub import Hub
 from pyxi.llm import make_llm
+from pyxi.logscrub import hide_secrets
 from pyxi.mailwatch import MailWatchStore
 from pyxi.memory import SpatialMemory
 from pyxi.palace import ActivityLog, causal_scene, parse_when, snapshot_scene, strip_when
@@ -2490,6 +2491,8 @@ class Brain:
         lines (a finished build, an error) that aren't part of the current turn."""
         if record and agent == "Pyxi":
             text = trim_chatter(text, said_before=bool(self._said))
+            text = strip_filler(text)  # "There you go, I have done this."
+            text = hide_secrets(text)
             text = drop_repeats(text, self._said)
             text = vary_ack(text, self._recent_acks)
         if not text.strip():

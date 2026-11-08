@@ -109,7 +109,8 @@ async def _reachable(brain: Brain, ref: str) -> bool:
 
 
 async def _open_when_done(brain: Brain, job_id: str) -> None:
-    """A sheet Pyxi made because the open one was out of reach: put it on their screen."""
+    """A sheet or doc Pyxi made (asked for, or because the open one was out of reach): put it
+    on their screen when it's ready."""
     job = await brain.jobs.wait(job_id)
     links = (job.data or {}).get("links") or []
     if job.status == "done" and links:
@@ -191,6 +192,9 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             google = [f"new {kind}: {title}" if g in out_of_reach else g for g in google]
             made_instead = True
         job = await brain.jobs.start("ledger", task, files=files, params={"google": google})
+        if not made_instead and any(g.lower().startswith("new ") for g in google):
+            # "Open a new Google Doc and write...": a file made in their Drive goes on screen.
+            brain._spawn(_open_when_done(brain, job.id))
         if made_instead:
             brain._spawn(_open_when_done(brain, job.id))
             brain._speak(

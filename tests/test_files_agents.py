@@ -916,3 +916,67 @@ async def test_a_chart_of_repeated_regions_draws_the_pivot_totals_beside_everyth
     assert series["startColumnIndex"] == 5  # SUM of Sales, Grand Total left out
     anchor = chart[1][0]["addChart"]["chart"]["position"]["overlayPosition"]["anchorCell"]
     assert anchor["columnIndex"] == 7  # right of the pivot, not on top of it
+
+
+# ------------------------------------------------- Google Docs and Word: the same everyday edits
+async def test_google_docs_does_the_everyday_edits():
+    from pyxi.agents.ledger import GoogleDoc
+
+    g = FakeGoogle()
+    g.doc["body"]["content"][1]["paragraph"]["elements"][0]["startIndex"] = 1
+    sent: list[list[dict]] = []
+
+    async def docs_batch(did, requests):
+        sent.append(requests)
+        if "insertTable" in requests[0]:  # the doc now ends with a 2 x 2 table
+            cells = [
+                {"tableCells": [{"content": [{"startIndex": 15 + 3 * (2 * r + c)}]} for c in range(2)]}
+                for r in range(2)
+            ]
+            g.doc["body"]["content"].append({"startIndex": 13, "table": {"tableRows": cells}})
+        return {}
+
+    g.docs_batch = docs_batch
+    d = GoogleDoc(g, "doc1")
+    await d.load()
+    assert await d.apply({"op": "add_table", "rows": [["Name", "Role"], ["Sam", "Design"]]}) == "Added a 2 x 2 table"
+    fill = [r["insertText"] for r in sent[1]]
+    assert [f["text"] for f in fill] == ["Design", "Sam", "Role", "Name"]  # last cell first
+    assert fill[0]["location"]["index"] > fill[-1]["location"]["index"]
+    assert "5 x 5" in await d.apply({"op": "add_table", "n_rows": 5, "n_cols": 5})
+
+    await d.apply({"op": "format_text", "find": "line", "bold": True, "color": "red", "size": 14})
+    style = sent[-1][0]["updateTextStyle"]
+    assert style["range"] == {"startIndex": 7, "endIndex": 11}  # "line" in "First line"
+    assert style["textStyle"]["bold"] and style["textStyle"]["fontSize"]["magnitude"] == 14
+    assert set(style["fields"].split(",")) == {"bold", "fontSize", "foregroundColor"}
+
+    await d.apply({"op": "set_style", "i": 0, "style": "Heading 2"})
+    assert sent[-1][0]["updateParagraphStyle"]["paragraphStyle"] == {"namedStyleType": "HEADING_2"}
+    await d.apply({"op": "align", "i": 0, "align": "center"})
+    assert sent[-1][0]["updateParagraphStyle"]["paragraphStyle"] == {"alignment": "CENTER"}
+    await d.apply({"op": "page_break"})
+    assert sent[-1] == [{"insertPageBreak": {"endOfSegmentLocation": {}}}]
+    await d.apply({"op": "delete_paragraph", "i": 0})
+    assert "deleteContentRange" in sent[-1][0]
+
+
+def test_word_does_the_same_everyday_edits(tmp_path):
+    from pyxi.agents.ledger import WordDoc
+
+    doc = Document()
+    doc.add_paragraph("Welcome to the team, Sam.")
+    doc.add_paragraph("Second line")
+    doc.save(tmp_path / "note.docx")
+    w = WordDoc(tmp_path / "note.docx")
+    assert w.apply({"op": "format_text", "find": "Sam", "bold": True, "color": "blue"}).startswith("Formatted 1")
+    runs = w.paras[0].runs
+    assert [r.text for r in runs] == ["Welcome to the team, ", "Sam", "."]  # only the name
+    assert runs[1].bold and not runs[0].bold
+    w.apply({"op": "align", "i": 1, "align": "center"})
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    assert w.paras[1].alignment == WD_ALIGN_PARAGRAPH.CENTER
+    w.apply({"op": "add_table", "n_rows": 3, "n_cols": 4})
+    assert len(w.doc.tables) == 1 and len(w.doc.tables[0].columns) == 4
+    assert w.apply({"op": "page_break"}) == "Added a page break"

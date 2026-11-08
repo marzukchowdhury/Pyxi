@@ -81,3 +81,12 @@ def test_a_line_is_said_once_and_tool_names_never_leak():
     earlier = ["I'll make a small sales table and a pivot in this sheet."]
     assert drop_repeats("I'll make a small sales table and a pivot on this sheet.", earlier) == ""
     assert drop_repeats("Done. The pivot is on a new tab.", earlier) == "Done. The pivot is on a new tab."
+
+
+def test_a_key_read_off_the_screen_is_never_repeated():
+    from pyxi.logscrub import hide_secrets
+
+    said = "I added three lines. The existing first line (the AIz"
+    assert "AIz" not in hide_secrets(said) and "(a key, hidden)" in hide_secrets(said)
+    assert "sk-ant" not in hide_secrets("it says sk-ant-api03-abcdefghijklmnopqrs")
+    assert hide_secrets("Ask a skilled person to sketch it") == "Ask a skilled person to sketch it"

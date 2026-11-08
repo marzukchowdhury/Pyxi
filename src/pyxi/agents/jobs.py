@@ -84,6 +84,24 @@ class Job(BaseModel):
         )
 
 
+def _tally(changes: list[str]) -> list[str]:
+    """'Added a paragraph' three times reads as 'Added 3 paragraphs'."""
+    out: list[str] = []
+    counts: dict[str, int] = {}
+    for c in changes:
+        counts[c] = counts.get(c, 0) + 1
+    for c, n in counts.items():
+        if n == 1:
+            out.append(c)
+            continue
+        words = c.split(" ")
+        if len(words) == 3 and words[1] in ("a", "an"):  # "Added a paragraph"
+            out.append(f"{words[0]} {n} {words[2]}s")
+        else:
+            out.append(f"{c} (x{n})")
+    return out
+
+
 def describe_failure(exc: BaseException) -> str:
     """What went wrong, the way you'd tell a person (the notch shows this, never a stack)."""
     text = str(exc)
@@ -283,6 +301,10 @@ class JobManager:
 
     # ------------------------------------------------------------------ running
     async def _update(self, job: Job) -> None:
+        if job.summary:
+            from pyxi.logscrub import hide_secrets
+
+            job.summary = hide_secrets(job.summary)  # a key read off the screen is never repeated
         await self.hub.emit("job", job=job.model_dump(mode="json"))
         if job.status in ("done", "failed", "stopped"):
             self._log_finished(job)
@@ -731,11 +753,14 @@ class JobManager:
             job.status = "failed"
             job.summary = result.summary or "I couldn't make that change."
             return
-        parts = [". ".join(result.changes[:4]) + "."]
+        parts = [". ".join(_tally(result.changes)[:4]) + "."]
         if result.outputs:
             names = ", ".join(Path(o).name for o in result.outputs)
             parts.append(f"Saved as {names}, beside the original.")
-        if result.links:
+        made = any(str(g).lower().startswith("new ") for g in job.params.get("google") or [])
+        if result.links and made:
+            parts.append("It's a new file in your Google Drive: " + " ".join(result.links))
+        elif result.links:
             parts.append("Edited in Google (File > Version history has the old one): " + " ".join(result.links))
         if result.problems:
             parts.append(f"{len(result.problems)} edit(s) didn't work.")
