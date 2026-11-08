@@ -1337,14 +1337,31 @@ class GoogleDoc:
 
     def describe(self, max_chars: int = 9000) -> str:
         out = [f"Google Doc '{self.title}'."]
-        size = 0
-        for i, b in enumerate(self._blocks()):
-            p = b["paragraph"]
-            style = p.get("paragraphStyle", {}).get("namedStyleType", "")
-            text = "".join(
-                e.get("textRun", {}).get("content", "") for e in p.get("elements", [])
-            ).rstrip("\n")
-            line = f"[{i}] ({style}) {text}"
+        size, i = 0, 0
+        for b in self.doc.get("body", {}).get("content", []):
+            if "table" in b:  # where a table sits, between the numbered paragraphs
+                t = b["table"]
+                rows = t.get("tableRows", [])
+                first = [
+                    "".join(
+                        e.get("textRun", {}).get("content", "")
+                        for c in cell.get("content", [])
+                        for e in c.get("paragraph", {}).get("elements", [])
+                    ).strip()
+                    for cell in (rows[0].get("tableCells", []) if rows else [])
+                ]
+                filled = " | ".join(first) if any(first) else "empty"
+                line = f"    (a table here: {t.get('rows', len(rows))} rows x {t.get('columns', len(first))} columns; first row: {filled})"
+            elif "paragraph" in b:
+                p = b["paragraph"]
+                style = p.get("paragraphStyle", {}).get("namedStyleType", "")
+                text = "".join(
+                    e.get("textRun", {}).get("content", "") for e in p.get("elements", [])
+                ).rstrip("\n")
+                line = f"[{i}] ({style}) {text}" if text.strip() else f"[{i}] (empty line)"
+                i += 1
+            else:
+                continue
             size += len(line)
             if size > max_chars:
                 out.append("  ...")
@@ -1352,10 +1369,17 @@ class GoogleDoc:
             out.append(line[:400])
         return "\n".join(out)
 
+    @staticmethod
+    def _top(op: dict[str, Any]) -> bool:
+        return str(op.get("after")).strip().lower() in ("start", "top", "-1", "before")
+
     def _at(self, op: dict[str, Any]) -> int:
         after = op.get("after")
         if after in (None, "", "end"):
             return self._end()
+        if self._top(op):
+            blocks = self._blocks()
+            return int(blocks[0]["startIndex"]) if blocks else 1
         try:
             # Just before that paragraph's own newline: always inside a paragraph, even when a
             # table comes next (the start of a table is no place to type, Google says 400).
@@ -1364,7 +1388,12 @@ class GoogleDoc:
             raise LedgerError(f"There's no paragraph {after}.") from None
 
     async def _insert(
-        self, at: int, text: str, style: str | None = None, bullets: str | None = None
+        self,
+        at: int,
+        text: str,
+        style: str | None = None,
+        bullets: str | None = None,
+        top: bool = False,
     ) -> None:
         # ``at`` is just before a paragraph's newline. An empty paragraph there (a blank first
         # line, the one line of a new doc) is filled; otherwise the text becomes a new paragraph
@@ -1386,8 +1415,8 @@ class GoogleDoc:
         )
         if empty:
             at = int(here["startIndex"])
-        lead = "" if empty else "\n"
-        body = lead + text
+        lead = "" if empty or top else "\n"
+        body = lead + text + ("\n" if top and not empty else "")  # at the top: a line of its own
         start = at + len(lead)
         end = start + len(text)
         reqs: list[dict[str, Any]] = [{"insertText": {"location": {"index": at}, "text": body}}]
@@ -1411,11 +1440,11 @@ class GoogleDoc:
         if name == "add_heading":
             level = max(1, min(int(op.get("level") or 1), 6))
             text = str(op.get("text") or "").strip()
-            await self._insert(self._at(op), text, f"HEADING_{level}")
+            await self._insert(self._at(op), text, f"HEADING_{level}", top=self._top(op))
             return f"Added heading '{text[:60]}'"
         if name == "add_paragraph":
             text = str(op.get("text") or "")
-            await self._insert(self._at(op), text)
+            await self._insert(self._at(op), text, top=self._top(op))
             return "Added a paragraph"
         if name == "add_bullets":
             items = [str(x) for x in op.get("items") or [] if str(x).strip()]
@@ -1426,7 +1455,7 @@ class GoogleDoc:
                 if op.get("numbered")
                 else "BULLET_DISC_CIRCLE_SQUARE"
             )
-            await self._insert(self._at(op), "\n".join(items), bullets=preset)
+            await self._insert(self._at(op), "\n".join(items), bullets=preset, top=self._top(op))
             return f"Added {len(items)} bullets"
         if name == "replace_text":
             find = str(op.get("find") or "")
@@ -1635,7 +1664,7 @@ Excel (.xlsx) and Google Sheets:
 Excel only:
 - {"op": "add_column", "sheet"?: name, "header": "Total", "formula": "=B{r}*C{r}"}  ({r} is each data row)
 - {"op": "make_table", "sheet"?: name}
-Word (.docx) and Google Docs ("after" is a paragraph number from the outline; leave it out for the end):
+Word (.docx) and Google Docs ("after" is a paragraph number from the outline; leave it out for the end; "after": "start" puts it at the very top; text placed after an empty line fills that line):
 - {"op": "add_heading", "text": "..", "level": 1, "after"?: 3}
 - {"op": "add_paragraph", "text": "..", "after"?: 3}
 - {"op": "add_bullets", "items": [".."], "numbered"?: false, "after"?: 3}

@@ -1012,3 +1012,29 @@ async def test_typing_into_a_blank_first_line_above_a_table():
     await d.load()
     await d.apply({"op": "add_paragraph", "text": "team", "after": 0})
     assert sent[1][0]["insertText"] == {"location": {"index": 6}, "text": "\nteam"}  # after it
+
+
+async def test_the_outline_shows_the_table_and_text_can_go_at_the_very_top():
+    from pyxi.agents.ledger import GoogleDoc
+
+    g = FakeGoogle()
+    g.doc["body"]["content"] = [
+        {"endIndex": 1, "sectionBreak": {}},
+        {"startIndex": 1, "endIndex": 7, "paragraph": {"elements": [{"startIndex": 1, "textRun": {"content": "Hello\n"}}]}},
+        {"startIndex": 7, "endIndex": 40, "table": {"rows": 5, "columns": 5, "tableRows": []}},
+        {"startIndex": 40, "endIndex": 41, "paragraph": {"elements": [{"startIndex": 40, "textRun": {"content": "\n"}}]}},
+    ]
+    sent = []
+
+    async def docs_batch(did, requests):
+        sent.append(requests)
+        return {}
+
+    g.docs_batch = docs_batch
+    d = GoogleDoc(g, "doc1")
+    await d.load()
+    outline = d.describe()
+    assert "[0] (" in outline and "a table here: 5 rows x 5 columns" in outline and "[1] (empty line)" in outline
+    assert outline.index("Hello") < outline.index("a table here") < outline.index("[1] (empty line)")
+    await d.apply({"op": "add_heading", "text": "team", "level": 1, "after": "start"})
+    assert sent[0][0]["insertText"] == {"location": {"index": 1}, "text": "team\n"}  # above Hello
