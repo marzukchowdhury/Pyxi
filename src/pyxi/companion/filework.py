@@ -8,6 +8,7 @@ moves the user's mouse.
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -61,6 +62,28 @@ async def consent(brain: Brain) -> files_access.FileAccess | str:
     if not ok:
         return "they said no to file search. Ask them where the file is instead."
     return access
+
+
+_GOOGLE_LINK = re.compile(r"/(spreadsheets|document)/d/[\w-]+")
+_THIS = re.compile(r"(?i)^\W*(this|the open|the current|current|open|my open)\b")
+
+
+async def _open_google_file(brain: Brain, ref: str) -> str:
+    """'this sheet', 'Untitled spreadsheet': the Sheet or Doc open in their browser, by its real
+    link from the address bar. A name alone fails for a new file (they're all called Untitled)
+    and the screen shows the link cut short."""
+    if _GOOGLE_LINK.search(ref) or ref.lower().startswith("new "):
+        return ref
+    w = brain._ctx.window if brain._ctx else None
+    if not w or not w.hwnd:
+        return ref
+    title = w.title.lower()
+    if not (_THIS.match(ref) or (ref.strip() and ref.strip().lower() in title)):
+        return ref
+    from pyxi.screen import uia
+
+    url = await asyncio.to_thread(uia.browser_url, w.hwnd)
+    return url if url and _GOOGLE_LINK.search(url) else ref
 
 
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
@@ -120,6 +143,7 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             return (
                 "edit_document: Google isn't connected. Tell them to connect it in Settings first."
             )
+        google = [await _open_google_file(brain, g) for g in google]
         job = await brain.jobs.start("ledger", task, files=files, params={"google": google})
         return (
             f"Started {job.id}: {job.agent_name} is on it in the background. Say one short line "

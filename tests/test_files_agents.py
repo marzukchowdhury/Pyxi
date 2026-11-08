@@ -704,3 +704,48 @@ def test_summaries_show_whole_amounts_without_a_trailing_zero(tmp_path):
     book = LedgerBook(budget(tmp_path / "b.xlsx"))
     said = book.apply({"op": "pivot", "group_by": "Category", "value": "Amount", "agg": "sum"})
     assert "Home 1,200" in said and "1,200.0" not in said and "Living 455.5" in said
+
+
+async def test_sample_data_then_a_pivot_on_an_empty_sheet_in_one_go():
+    # "Make a small sample and pivot it" on a blank sheet: the pivot must see the new data.
+    g = FakeGoogle()
+    g.rows = []
+    written: dict[str, object] = {}
+
+    async def write(sid, data):
+        g.calls.append(("write", data))
+        for d in data:
+            written[d["range"].split("!")[1]] = d["values"][0][0]
+
+    async def values(sid, a1, formulas=False):
+        if not written:
+            return []
+        grid = [["", "", ""] for _ in range(7)]
+        for ref, v in written.items():
+            grid[int(ref[1:]) - 1]["ABC".index(ref[0])] = v
+        return grid
+
+    g.sheets_write, g.sheets_values = write, values
+    cells = {"A1": "Region", "B1": "Product", "C1": "Sales"}
+    for i, (r, p, s) in enumerate(
+        [("North", "A", 120), ("North", "B", 80), ("South", "A", 150), ("South", "B", 60),
+         ("East", "A", 90), ("East", "B", 110)], start=2):
+        cells |= {f"A{i}": r, f"B{i}": p, f"C{i}": s}
+    edits = json.dumps(
+        {
+            "edits": [
+                {"file": 0, "op": "set_cells", "cells": cells},
+                {"file": 0, "op": "pivot", "group_by": "Region", "value": "Sales", "agg": "sum"},
+            ]
+        }
+    )
+    asked = []
+
+    async def ask(system, prompt):
+        asked.append(prompt)
+        return edits, 0.0
+
+    url = "https://docs.google.com/spreadsheets/d/blank123/edit"
+    r = await run_ledger("sample sales and a pivot", files=[], google=g, google_refs=[url], ask=ask)
+    assert not r.problems and len(asked) == 1  # one model call, nothing to fix afterwards
+    assert any(c[0] == "batch" and "updateCells" in c[1][0] for c in g.calls)  # the pivot

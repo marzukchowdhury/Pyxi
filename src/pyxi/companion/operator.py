@@ -179,6 +179,13 @@ window that's behind to the front.
 - Browsers: ctrl+l the address bar, ctrl+t a new tab, alt+left back, ctrl+tab next tab, \
 ctrl+shift+a to search open tabs (Firefox and Chrome). Never ctrl+w a tab you didn't open in \
 this task. Bookmarks sit just above the page: never click near them when you mean the page.
+- Moving tabs into another browser window: `drag` the tab by its title and drop it on the \
+other window's tab row, right beside its last tab (both windows visible). A tab's right-click \
+"Move Tab" menu only moves it to a NEW window or along its own row, never into a window that's \
+already open: don't use it for this. If a drag didn't work once, stop dragging and copy it over \
+instead: click the tab, ctrl+l, ctrl+c, click the other window's tab row, ctrl+t, ctrl+v, enter. \
+When every page is open in the target window, close the old window (alt+f4 on it): they asked \
+to move those tabs, so that's allowed, and only that window.
 - Google Sheets (cells are drawn, not elements): ctrl+home goes to A1; Tab and Enter move \
 between cells as you type; to select a range, type it (A1:C6) into the Name box at the far \
 left of the formula bar and press enter; alt+/ searches every menu (type "pivot table", enter). \
@@ -265,6 +272,8 @@ class Operator:
         repeats: dict[str, int] = {}
         last_look: Image.Image | None = None
         still = 0  # looks in a row where nothing on screen changed
+        seen: list[Image.Image] = []  # every look so far, to notice going round in circles
+        laps = 0  # times the screen came back to how it was a few steps earlier
         for n in range(1, self.max_steps + 1):
             if self.cancelled or (h.interrupted() and not await self._yield(h, window)):
                 log.info("hands stopped: %s", h.reason or "cancelled")
@@ -283,7 +292,24 @@ class Operator:
                     ).strip()
             else:
                 still = 0
+                if look is not None and steps and any(_alike(look, o) for o in seen[-8:-1]):
+                    laps += 1
+                    steps[-1].note = (
+                        f"{steps[-1].note} The screen is back to how it was a few steps ago: what "
+                        "you tried since then doesn't work here. Don't try it again, not even on "
+                        "another spot. Use a completely different way (the keyboard, another "
+                        "route to the same result), or call done with ok=false."
+                    ).strip()
             last_look = look
+            if look is not None:
+                seen.append(look)
+            if laps >= 3:
+                return Outcome(
+                    False,
+                    "I kept going round in circles, so I stopped rather than keep guessing. "
+                    f"Last thing I tried: {steps[-1].actions[:120]}.",
+                    steps,
+                )
             if still >= 5:
                 return Outcome(
                     False,
@@ -299,7 +325,7 @@ class Operator:
                     "your credits. Want me to keep going?",
                     steps,
                 )
-            stuck = still >= 2 or sum("skipped" in s.note for s in steps[-3:]) >= 2
+            stuck = still >= 2 or laps >= 1 or sum("skipped" in s.note for s in steps[-3:]) >= 2
             if stuck and self.strong_llm is not None and not self.escalated:
                 self.escalated = True  # the careful model takes it from here
                 log.info("hands: stuck after %d looks, handing over to the stronger model", n)
@@ -566,6 +592,15 @@ def _same(a: Image.Image, b: Image.Image) -> bool:
         return False
     changed = ImageChops.difference(a, b).point(lambda v: 255 if v > 28 else 0)
     return ImageStat.Stat(changed).sum[0] / 255 < 6
+
+
+def _alike(a: Image.Image, b: Image.Image) -> bool:
+    """Back where it was: looser than `_same`, so a hover highlight or a blinking caret doesn't
+    hide that a menu was opened and closed again with nothing to show for it."""
+    if a.size != b.size:
+        return False
+    changed = ImageChops.difference(a, b).point(lambda v: 255 if v > 28 else 0)
+    return ImageStat.Stat(changed).sum[0] / 255 < 60
 
 
 def _open_url(url: str) -> None:

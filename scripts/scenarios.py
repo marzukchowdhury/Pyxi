@@ -366,6 +366,25 @@ SCENARIOS = [
 ]
 SCENARIOS += SPECIALIST_SCENARIOS  # Atlas and the other specialists: specialist_scenarios.py
 
+# Simple everyday tasks (real screens from a tester's session): done, not coached, in seconds.
+SHEETS_HOME, BLANK_SHEET, FIREFOX = "turn_eecb0725", "turn_b8742733", "turn_76c4fc89"
+SIMPLE_SCENARIOS = [
+    ("simple blank sheet", SHEETS_HOME, "Open up blank spreadsheet.", "instant"),
+    ("simple sheets tab", FIREFOX, "Can you open Google sheets on a new tab?", "instant"),
+    ("simple youtube", FIREFOX, "Go to YouTube.", "instant"),
+    ("simple notepad", FIREFOX, "Open notepad.", "instant"),
+    ("simple open it", SHEETS_HOME, "Can you open a blank one for me?", "do"),
+    ("simple pivot", BLANK_SHEET, "Create a pivot table.", "ledger_now"),
+    ("simple sample pivot", BLANK_SHEET, "Just make a small sample and a pivot table, that's all.", "ledger_now"),
+    ("simple bold row", BLANK_SHEET, "Make the first row bold.", "do"),
+    ("simple chart", BLANK_SHEET, "Put some sample monthly sales in and make a chart.", "ledger_now"),
+    ("simple new doc", FIREFOX, "Open a new Google Doc and write a short welcome note for my team.", "do"),
+    ("simple merge windows", FIREFOX, "Put all the tabs from both Firefox windows into one window.", "do"),
+    ("simple zoom", FIREFOX, "Zoom in on this page a bit.", "do"),
+    ("simple how pivot", BLANK_SHEET, "How do I make a pivot table here?", "teach"),
+]
+SCENARIOS += SIMPLE_SCENARIOS
+
 
 # What each sample bill must get right: the amount owed, and the thing that looks wrong.
 BILL_FACTS = {
@@ -607,8 +626,8 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     card = cards[-1] if cards else None  # the finished card (it fills in point by point)
     problems = []
     three_d = any(t in tools for t in ("build_3d_model", "explain_in_3d", "edit_3d_model"))
-    if not said.strip():
-        problems.append("said nothing")
+    if not said.strip() and not (expect == "media" and any(c.get("instant") for c in brain._calls)):
+        problems.append("said nothing")  # pausing or skipping the music says it all
     if re.search(r"there you go|i have done this|\{\s*\"", said, re.I):
         problems.append("filler or raw text")
     if expect == "card":
@@ -663,6 +682,22 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("said it can't click")
     if expect == "media" and not any(b.startswith("media") for b in background):
         problems.append("no media key")
+    if expect in ("instant", "do", "ledger_now"):
+        acted = bool(background) or bool(set(tools) - {"say", "look_again", "guide"})
+        if "guide" in tools or re.search(r"(click|tap|hit|press|select) (it|the|on)", said, re.I):
+            problems.append("coached instead of doing it")
+        if not acted:
+            problems.append("did nothing")
+        if "?" in said:
+            problems.append("asked instead of doing it")
+        if took > (1.5 if expect == "instant" else 6):
+            problems.append(f"slow ({took:.1f}s)")
+    if expect == "instant" and not any(c.get("instant") for c in brain._calls):
+        problems.append("missed the instant route")
+    if expect == "ledger_now" and (
+        not any(b.startswith("delegate ledger") for b in background) or "use_computer" in tools
+    ):
+        problems.append("didn't hand it to Ledger")
     if expect == "teach":
         if any(b.startswith("hands") for b in background):
             problems.append("did it instead of teaching")

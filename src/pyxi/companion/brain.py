@@ -22,8 +22,8 @@ import base64
 import dataclasses
 import io
 import json
-import random
 import logging
+import random
 import re
 import secrets
 import sys
@@ -42,7 +42,7 @@ from pydantic import ValidationError
 from pyxi import booking, hands, media, safety, tidy, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
-from pyxi.companion import filework, paperwork, pricecheck, prompts, specialists
+from pyxi.companion import filework, instant, paperwork, pricecheck, prompts, specialists
 from pyxi.companion.actions import app_target, open_app, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
@@ -176,7 +176,9 @@ class Brain:
         # What Pyxi did on their behalf, with undo (pyxi/audit.py): the panel's Activity tab.
         from pyxi.audit import AuditLog
 
-        self.audit = AuditLog(settings.data_dir / "audit.jsonl", settings.screen.turn_retention_days)
+        self.audit = AuditLog(
+            settings.data_dir / "audit.jsonl", settings.screen.turn_retention_days
+        )
         self.jobs.audit = self.audit
         self.history: list[tuple[str, str]] = []
         self.state: State = "idle"
@@ -615,7 +617,11 @@ class Brain:
         from pyxi.limits import Limits
 
         Limits(self.settings.data_dir, self.settings.limits).record("booking")
-        self.audit.add("booked", f"Started booking {what}{place} (Scout asks before the final click)", detail=url)
+        self.audit.add(
+            "booked",
+            f"Started booking {what}{place} (Scout asks before the final click)",
+            detail=url,
+        )
         await self.jobs.start(
             "scout",
             booking.brief(args, profile, await self._now()),
@@ -970,7 +976,9 @@ class Brain:
             nonlocal shown_partial
             if self._object is not None and self._object.id != partial.id and shown_partial:
                 return  # something else took the stage meanwhile
-            await self.show_object(partial, restart=False, background=True, keep_place=shown_partial)
+            await self.show_object(
+                partial, restart=False, background=True, keep_place=shown_partial
+            )
             shown_partial = True
 
         try:
@@ -1019,7 +1027,9 @@ class Brain:
         job = await self.jobs.track("Pyxi", f"Explaining {subject} in 3D", role="model")
         # The real thing, straight away, still and silent while its explanation is written
         # (paused: with nothing to tell it would count as finished and tidy itself away).
-        await self.show_object(at_rest.model_copy(update={"auto_play": False}), restart=False, background=True)
+        await self.show_object(
+            at_rest.model_copy(update={"auto_play": False}), restart=False, background=True
+        )
         try:
             result = await explain
         except Exception:
@@ -1027,7 +1037,9 @@ class Brain:
             await self.jobs.settle(job, ok=False, summary="The explanation wouldn't come together.")
             return True
         self.turns.add_spend("model_3d", result.cost_usd)
-        await self.jobs.settle(job, ok=result.model is not None, summary=subject, cost=result.cost_usd)
+        await self.jobs.settle(
+            job, ok=result.model is not None, summary=subject, cost=result.cost_usd
+        )
         if result.model is None:
             return True  # the model stays on screen; Pyxi's own reply is the explanation
         model_library.snap_markers(result.model, self.settings.library_dir)
@@ -1423,7 +1435,13 @@ class Brain:
 
     def memories_public(self) -> list[dict[str, Any]]:
         return [
-            {"store": name, "scope": m.scope, "key": m.key, "content": m.content, "at": m.created_at}
+            {
+                "store": name,
+                "scope": m.scope,
+                "key": m.key,
+                "content": m.content,
+                "at": m.created_at,
+            }
             for name, store in self._memory_stores()
             for m in store.all(None, 500)
         ]
@@ -1458,7 +1476,9 @@ class Brain:
         self.activity.forget_all()
         self.turns.prune(0)
         self.history = []
-        self.audit.add("wrote", "Wiped every memory, the Memory Palace and the conversations", agent="You")
+        self.audit.add(
+            "wrote", "Wiped every memory, the Memory Palace and the conversations", agent="You"
+        )
         return "Done: Pyxi has forgotten everything it remembered."
 
     async def stop_everything(self) -> str:
@@ -1482,7 +1502,9 @@ class Brain:
             parts.append("the mouse and keyboard")
         if queued:
             parts.append(f"{queued} waiting action{'s' if queued != 1 else ''}")
-        message = "Stopped everything" + (f": {', '.join(parts)}." if parts else ". Nothing was running.")
+        message = "Stopped everything" + (
+            f": {', '.join(parts)}." if parts else ". Nothing was running."
+        )
         self.audit.add("clicked", message, agent="You (Stop everything)")
         await self.hub.emit("notice", message=message)
         return message
@@ -1535,16 +1557,18 @@ class Brain:
             await self.hub.emit("user", text=shown or user_text, turn_id=turn_id)
             error = None
             try:
-                await self._graph.ainvoke(
-                    {
-                        "user_text": user_text,
-                        "turn_id": turn_id,
-                        "round": 0,
-                        "notes": [],
-                        "needs_more": False,
-                        "stop": None,
-                    }
-                )
+                hit = None if synthetic else instant.match(user_text)
+                if hit is None or not await self._instant(hit):
+                    await self._graph.ainvoke(
+                        {
+                            "user_text": user_text,
+                            "turn_id": turn_id,
+                            "round": 0,
+                            "notes": [],
+                            "needs_more": False,
+                            "stop": None,
+                        }
+                    )
             except Exception as exc:
                 log.exception("turn failed")
                 error = f"{type(exc).__name__}: {exc}"
@@ -2462,6 +2486,25 @@ class Brain:
 
         self._speech = asyncio.create_task(run())
 
+    async def _instant(self, hit: instant.Instant) -> bool:
+        """A simple request done at once, without the model (pyxi/companion/instant.py). False
+        when it didn't work, so the model takes it from there."""
+        note = await self._quick_action(hit.action, hit.value)
+        self._calls.append(
+            {
+                "round": 1,
+                "tool": "quick_action",
+                "arguments": {"action": hit.action, "value": hit.value},
+                "instant": True,
+            }
+        )
+        if note:
+            log.info("instant route didn't work (%s), asking the model", note)
+            return False
+        if hit.action != "media":  # music stopping or skipping says it all
+            self._speak(f"On it, {hit.line}" if hit.line else "On it.")
+        return True
+
     async def say_line(
         self, text: str, *, agent: str = "Pyxi", voice: str | None = None, record: bool = True
     ) -> None:
@@ -2543,7 +2586,10 @@ class Brain:
         """An explain_in_3d scene from its streaming JSON once its nodes and edges are complete:
         one silent step until the real steps arrive (under its own id, so the full scene that
         replaces it is narrated from the top)."""
-        data: dict[str, Any] = {"nodes": complete_items(raw, "nodes"), "edges": complete_items(raw, "edges")}
+        data: dict[str, Any] = {
+            "nodes": complete_items(raw, "nodes"),
+            "edges": complete_items(raw, "edges"),
+        }
         for key in ("title", "subtitle", "layout", "mode", "theme"):
             got = partial_string(raw, key)
             if got and got[1]:
@@ -3055,8 +3101,7 @@ def trim_chatter(text: str, said_before: bool) -> str:
     for i, s in enumerate(sentences):
         others = said_before or kept or i < len(sentences) - 1
         if not MARKER.search(s) and (
-            (_ACK.match(s) and said_before)
-            or (_NARRATION.match(s) and others)
+            (_ACK.match(s) and said_before) or (_NARRATION.match(s) and others)
         ):
             continue
         kept.append(s)

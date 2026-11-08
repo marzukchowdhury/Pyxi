@@ -180,3 +180,31 @@ async def test_touching_the_mouse_pauses_it_and_it_carries_on():
     out = await op.run("type hello")
     assert box[-1].waited == 1 and ("type", "Hello") in box[-1].did
     assert out.ok and not out.stopped
+
+
+async def test_going_round_in_circles_is_noticed_and_stopped():
+    # What happened merging Firefox windows: right-click a tab, open "Move Tab", Escape, and
+    # again on a slightly different spot each time, so no two attempts were exactly the same.
+    box = []
+    looks = iter(["white", "black", "white", "black", "white", "black", "white"] * 3)
+    tries = [
+        ("act", {"actions": [{"do": "click", "element_id": 3, "button": "right"}]}),
+        ("act", {"actions": [{"do": "press", "keys": "escape"}]}),
+        ("act", {"actions": [{"do": "click", "element_id": 3, "button": "right", "why": "again"}]}),
+        ("act", {"actions": [{"do": "press", "keys": "escape"}]}),
+    ] * 5
+    op = operator(Scripted(*tries), box, capture=lambda: screen(next(looks)))
+    out = await op.run("move the tabs into the other window")
+    assert not out.ok and "circles" in out.summary
+    assert len(out.steps) <= 7  # a few laps, not twenty
+    assert any("back to how it was" in s.note for s in out.steps)  # and the model was told
+    assert op.escalated or op.strong_llm is None
+
+
+async def test_real_progress_is_not_mistaken_for_circles():
+    box = []
+    shades = iter(["#ffffff", "#000000", "#808080", "#404040", "#c0c0c0", "#202020", "#e0e0e0"])
+    steps = [("act", {"actions": [{"do": "click", "element_id": 3, "n": i}]}) for i in range(5)]
+    op = operator(Scripted(*steps), box, capture=lambda: screen(next(shades)))
+    out = await op.run("do something")
+    assert out.ok and not any("back to how it was" in s.note for s in out.steps)

@@ -890,12 +890,14 @@ class GoogleSheet:
             cells = op.get("cells") or {}
             data = [{"range": f"'{title}'!{ref}", "values": [[v]]} for ref, v in cells.items()]
             await self.google.sheets_write(self.id, data)
+            await self.load()  # a pivot or totals row in the same batch reads what's there now
             return f"Set {len(data)} cells on {title}"
         if name == "append_row":
             title, _, _ = self._tab(op.get("sheet"))
             await self.google.sheets_append(
                 self.id, f"'{title}'!A1", [list(op.get("values") or [])]
             )
+            await self.load()
             return f"Added a row on {title}"
         if name == "totals_row":
             title, _, rows = self._tab(op.get("sheet"))

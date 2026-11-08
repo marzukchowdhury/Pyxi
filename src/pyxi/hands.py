@@ -347,15 +347,33 @@ class Hands:
         self.guard_point(x0, y0)
         self._send(self._mouse(MOUSEEVENTF_LEFTDOWN))
         try:
-            time.sleep(0.12)
-            old, self.glide_s = self.glide_s, max(0.5, self.glide_s * 2)  # slower, so apps keep up
+            time.sleep(0.15)
+            # Pull a little first: apps only start a drag once the pointer passes a few pixels
+            # with the button held (a tab, a file), and a glide that starts slow can miss that.
+            dx = 1 if x1 >= x0 else -1
+            for i in range(1, 4):
+                self._nudge(x0 + dx * 6 * i, y0)
+                time.sleep(0.03)
+            time.sleep(0.15)
+            old, self.glide_s = self.glide_s, max(0.7, self.glide_s * 2)  # slower, so apps keep up
             try:
                 self.move(x1, y1)
             finally:
                 self.glide_s = old
-            time.sleep(0.12)
+            # Hover over the drop spot a moment: another window only takes the drop once it
+            # has seen the pointer arrive (a tab row shows where the tab will land).
+            for ox in (3, -3, 0):
+                self._nudge(x1 + ox, y1)
+                time.sleep(0.12)
         finally:
             self._send(self._mouse(MOUSEEVENTF_LEFTUP))
+
+    def _nudge(self, x: int, y: int) -> None:
+        ax, ay = self._absolute(x, y)
+        self._send(
+            self._mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, ax, ay)
+        )
+        self._trail.append((x, y))
 
     def scroll(self, x: int, y: int, direction: str = "down", notches: int = 5) -> None:
         self.move(x, y)

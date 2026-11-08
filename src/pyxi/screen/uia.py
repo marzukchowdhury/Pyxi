@@ -339,3 +339,40 @@ def read_focus() -> RawFocus | None:
     except Exception as exc:
         log.debug("focus read failed: %s", exc)
         return None
+
+
+_ADDRESS_BARS = ("enter address", "address and search bar", "address bar", "search or enter")
+
+
+def browser_url(hwnd: int, budget_s: float = 0.5) -> str | None:
+    """The full address in a browser window's address bar (Firefox, Chrome, Edge, Brave), read
+    from the bar itself: the screen shows it cut short, and OCR garbles a long id. Never raises."""
+    if not available():
+        return None
+    try:
+        import uiautomation as auto
+
+        deadline = time.monotonic() + budget_s
+        with auto.UIAutomationInitializerInThread(debug=False):
+            top = auto.ControlFromHandle(hwnd)
+            if top is None:
+                return None
+            for control, _depth in auto.WalkControl(top, maxDepth=12):
+                if time.monotonic() > deadline:
+                    return None
+                if control.ControlTypeName not in ("EditControl", "ComboBoxControl"):
+                    continue
+                if not any(k in (control.Name or "").lower() for k in _ADDRESS_BARS):
+                    continue
+                for c in (control, *control.GetChildren()):
+                    try:
+                        value = c.GetValuePattern().Value
+                    except Exception:
+                        continue
+                    if value and "." in value and " " not in value.strip():
+                        v = value.strip()
+                        return v if "://" in v else "https://" + v
+            return None
+    except Exception as exc:
+        log.debug("address bar read failed: %s", exc)
+        return None

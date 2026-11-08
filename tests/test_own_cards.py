@@ -89,3 +89,17 @@ def test_a_card_answer_during_pyxis_own_input_is_ignored(settings, monkeypatch):
         ws.send_text(json.dumps({"type": "routines"}))
         assert json.loads(ws.receive_text())["type"] == "routines"
     assert resolved == [("r1", True)]
+
+
+def test_a_drag_pulls_first_and_waits_over_the_drop_spot(h, monkeypatch):
+    # Firefox only picks a tab up once the pointer moves a few pixels with the button held,
+    # and another window only takes the drop once it has seen the pointer arrive.
+    monkeypatch.setattr(hands, "window_at", lambda x, y: 1)
+    monkeypatch.setattr(hands, "is_own", lambda hwnd: False)
+    monkeypatch.setattr(hands.time, "sleep", lambda s: None)
+    h.drag(100, 50, 900, 60)
+    flags = [i.u.mi.dwFlags for i in h.sent]
+    down = flags.index(hands.MOUSEEVENTF_LEFTDOWN)
+    up = flags.index(hands.MOUSEEVENTF_LEFTUP)
+    moves = [f for f in flags[down + 1 : up] if f & hands.MOUSEEVENTF_MOVE]
+    assert down < up and len(moves) >= 6  # a pull of three, then three over the drop spot
