@@ -29,7 +29,11 @@ export function Connections() {
               <b>{c.name}</b>
               <span>{c.detail}</span>
             </div>
-            {c.connected ? (
+            {c.connected && c.needs && SIGN_IN.has(c.id) ? (
+              <button className="primary" disabled={busy === c.id} onClick={() => { setBusy(c.id); brain.send({ type: "connect", id: c.id }); }}>
+                {busy === c.id ? "Check your browser" : c.needs}
+              </button>
+            ) : c.connected ? (
               SIGN_IN.has(c.id) && <button className="ghost" onClick={() => brain.send({ type: "disconnect", id: c.id })}>Disconnect</button>
             ) : SIGN_IN.has(c.id) && c.detail.startsWith("Ready") ? (
               <button className="primary" disabled={busy === c.id} onClick={() => { setBusy(c.id); brain.send({ type: "connect", id: c.id }); }}>

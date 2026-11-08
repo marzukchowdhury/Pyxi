@@ -52,6 +52,7 @@ class Status:
     connected: bool
     detail: str = ""
     setup: list[str] = field(default_factory=list)
+    needs: str = ""  # connected, but one more OK is needed: the button's label ("Allow Sheets")
 
 
 def tool(

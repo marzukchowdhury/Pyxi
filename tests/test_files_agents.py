@@ -461,12 +461,47 @@ def test_google_asks_to_reconnect_for_sheets(tmp_path):
     old = [s for s in SCOPES if "spreadsheets" not in s and "metadata" not in s]
     g.token_path.write_text(json.dumps({"scopes": old, "pyxi_email": "me@example.com"}))
     status = g.status()
-    assert status.connected and "Connect again" in status.detail
+    # Connected already, so Settings shows a button that asks Google for the one missing OK
+    # (only Disconnect used to show, and "press Connect again" had nothing to press).
+    assert status.connected and status.needs == "Allow Sheets" and "Allow Sheets" in status.detail
     assert "sheets_read" in {t.spec.name for t in g.tools()}
-    with pytest.raises(RuntimeError, match="Connect next to Google"):
+    with pytest.raises(RuntimeError, match="press Allow Sheets next to Google"):
         g._need_sheets()
     g.token_path.write_text(json.dumps({"scopes": SCOPES, "pyxi_email": "me@example.com"}))
     assert g.status().detail == "me@example.com" and not g.missing_scopes()
+    assert not g.status().needs
+
+
+def test_sheets_unticked_on_googles_page_is_caught_at_once(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    g = GoogleConnector(tmp_path / "connectors", tmp_path / "dl")
+    g.token_path.parent.mkdir(parents=True)
+    monkeypatch.setattr(g, "client_config", lambda: {"installed": {}})
+
+    class Creds:
+        token = "t"
+        granted_scopes = " ".join(s for s in SCOPES if "spreadsheets" not in s)
+
+        def to_json(self):
+            return json.dumps({"scopes": SCOPES})  # what was asked for, not what was given
+
+    class Flow:
+        @staticmethod
+        def from_client_config(config, scopes):
+            return Flow()
+
+        def run_local_server(self, **kw):
+            return Creds()
+
+    monkeypatch.setitem(
+        sys.modules, "google_auth_oauthlib.flow", types.SimpleNamespace(InstalledAppFlow=Flow)
+    )
+    monkeypatch.setattr("pyxi.connectors.google.httpx.get", lambda *a, **k: 1 / 0)
+    with pytest.raises(RuntimeError, match="tick the Google Sheets box"):
+        g.sign_in()
+    assert g.status().needs == "Allow Sheets"  # and Settings still offers the button
 
 
 # ---------------------------------------------------------------------------- file access

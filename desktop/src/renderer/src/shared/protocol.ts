@@ -309,6 +309,8 @@ export interface ConnectorStatus {
   connected: boolean;
   detail: string;
   setup: string[];
+  /** Connected, but one more OK is needed: the button's label ("Allow Sheets"). */
+  needs?: string;
 }
 
 export interface Hello {

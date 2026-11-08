@@ -374,7 +374,8 @@ class GoogleConnector(Connector):
         if self.connected():
             detail = self._saved_email() or "Connected"
             if self.missing_scopes():
-                detail += ". Press Connect again to let Pyxi work in Google Sheets"
+                detail += ". Press Allow Sheets so Pyxi can work in Google Sheets too"
+                return Status(self.id, self.name, True, detail, needs="Allow Sheets")
             return Status(self.id, self.name, True, detail)
         setup = [
             "Open console.cloud.google.com and create a project (free).",
@@ -430,8 +431,18 @@ class GoogleConnector(Connector):
             pass
         data = json.loads(creds.to_json())
         data["pyxi_email"] = email
+        # What Google really granted: on its consent page each permission can be unticked, and
+        # the requested list would pretend Sheets is allowed until the first Sheets job fails.
+        granted = getattr(creds, "granted_scopes", None)
+        if granted:
+            data["scopes"] = sorted(granted.split() if isinstance(granted, str) else granted)
         secretstore.write_json(self.token_path, data)
         self._creds = None
+        if SHEETS_SCOPE in self.missing_scopes():
+            raise RuntimeError(
+                "Google didn't give the Sheets permission. Press Allow Sheets and tick the "
+                "Google Sheets box when Google asks"
+            )
         return email or "your Google account"
 
     def disconnect(self) -> None:
@@ -934,8 +945,8 @@ class GoogleConnector(Connector):
     def _need_sheets(self) -> None:
         if SHEETS_SCOPE in self.missing_scopes():
             raise RuntimeError(
-                "Pyxi needs your OK to work in Google Sheets: press Connect next to Google in "
-                "Settings once more."
+                "Pyxi needs one more OK from Google to work in Sheets: in Settings, press "
+                "Allow Sheets next to Google."
             )
 
     async def sheets_meta(self, sheet_id: str) -> dict[str, Any]:
