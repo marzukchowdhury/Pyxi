@@ -26,6 +26,9 @@ const CORE = { x: 6, y: 16 };
 const TRAIL = 12;
 /** Still this long (Pyxi idle, no voice, no thread) and the firefly settles. */
 const REST_MS = 4000;
+/** How often the firefly is drawn while it moves (about 30 a second), and its spring's step. */
+const FRAME_MS = 30;
+const STEP_MS = 1000 / 60;
 
 export function Presence({ micLevel }: { micLevel: () => number }) {
   const root = useRef<HTMLDivElement>(null);
@@ -33,6 +36,9 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
   const spark = useRef<SVGCircleElement>(null);
   const ring = useRef<SVGCircleElement>(null);
   const halo = useRef<SVGCircleElement>(null);
+  const coreEl = useRef<SVGEllipseElement>(null);
+  /** The firefly's mood, for the frame loop (the idle glow is drawn there, not by CSS). */
+  const modeRef = useRef("idle");
   const trail = useRef<(SVGCircleElement | null)[]>([]);
   const history = useRef<{ x: number; y: number }[]>([]);
   const goal = useRef({ x: innerWidth - 80, y: innerHeight - 120 });
@@ -66,32 +72,58 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
     let raf = 0;
     let stillSince = performance.now();
     let hover = 0; // 0 at rest, 1 hovering: eases, so settling and waking never jump
+    let lastDraw = 0;
+    let lastLevel = -1;
+    let lastGlow = -1;
     const tick = (time: number) => {
+      // Drawn about 30 times a second, not 60: each frame repaints a window the size of the
+      // screen, and following the cursor at 60 cost a fifth of a core in the GPU process.
+      if (lastDraw && time - lastDraw < FRAME_MS) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      const steps = lastDraw ? Math.min(4, Math.max(1, Math.round((time - lastDraw) / STEP_MS))) : 1;
+      lastDraw = time;
       const p = pos.current;
       // A stiff, well-damped spring: it keeps up with the cursor and settles without wobble.
-      p.vx = (p.vx + (goal.current.x - p.x) * 0.22) * 0.62;
-      p.vy = (p.vy + (goal.current.y - p.y) * 0.22) * 0.62;
-      p.x += p.vx;
-      p.y += p.vy;
+      // Stepped at its usual 60 a second, so it moves the same however often it's drawn.
+      for (let i = 0; i < steps; i++) {
+        p.vx = (p.vx + (goal.current.x - p.x) * 0.22) * 0.62;
+        p.vy = (p.vy + (goal.current.y - p.y) * 0.22) * 0.62;
+        p.x += p.vx;
+        p.y += p.vy;
+      }
       const level = Math.max(voice.level(), micLevel());
       const t = useOverlay.getState().flyTo;
       const threadLive = !!t && performance.now() < t.until;
       const moving = Math.hypot(p.vx, p.vy) > 0.05 || Math.hypot(goal.current.x - p.x, goal.current.y - p.y) > 0.5;
       if (moving || level > 0.002 || busy.current || threadLive) stillSince = time;
       const resting = !onScreen.current || time - stillSince > REST_MS;
-      hover += ((resting ? 0 : 1) - hover) * 0.06;
+      hover += ((resting ? 0 : 1) - hover) * (1 - Math.pow(0.94, steps));
       // Hovering: a slow, lazy figure of eight, the way a firefly hangs in the air.
       const hx = p.x + Math.sin(time / 820) * 2.2 * hover;
       const hy = p.y + Math.sin(time / 1270) * 2.8 * hover;
       const el = root.current;
       if (el) {
         el.style.transform = `translate3d(${hx}px, ${hy}px, 0)`;
-        el.style.setProperty("--level", level.toFixed(3));
+        // The glow follows the voice; untouched while it's steady (it restyles the whole bug).
+        if (Math.abs(level - lastLevel) > 0.004) {
+          lastLevel = level;
+          el.style.setProperty("--level", level.toFixed(3));
+        }
         el.style.opacity = onScreen.current ? "" : "0";
         // Near an edge, labels by the firefly flip to the side with room.
         el.classList.toggle("near-right", p.x > innerWidth - 240);
         el.classList.toggle("near-bottom", p.y > innerHeight - 90);
         el.classList.toggle("resting", resting);
+      }
+      // Idle and awake, the glow breathes slowly (3.6 s). Drawn here with the rest of the frame:
+      // as a CSS animation it ran 60 times a second and re-rendered the core's three glows.
+      const glow = modeRef.current === "idle" && !resting ? 0.5 - 0.5 * Math.cos((time / 3600) * Math.PI * 2) : -1;
+      if ((glow < 0) !== (lastGlow < 0) || Math.abs(glow - lastGlow) > 0.03) {
+        lastGlow = glow;
+        if (halo.current) halo.current.style.opacity = glow < 0 ? "" : (0.55 + 0.45 * glow).toFixed(2);
+        if (coreEl.current) coreEl.current.style.opacity = glow < 0 ? "" : (0.78 + 0.22 * glow).toFixed(2);
       }
       if (ring.current) ring.current.setAttribute("r", (13 + level * 9).toFixed(2));
       if (halo.current) halo.current.setAttribute("r", (10 + level * 8).toFixed(2));
@@ -136,6 +168,7 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
       // Settled (or on another screen) and the trail has faded: stop drawing until woken.
       if (resting && (hover < 0.02 || !onScreen.current) && speed < 0.05 && !threadLive) {
         raf = 0;
+        lastDraw = 0;
         return;
       }
       raf = requestAnimationFrame(tick);
@@ -157,6 +190,7 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
     : state === "speaking" || working ? "acting" : "idle";
   // Anything but idle keeps the firefly awake; any change (a target, a caption) wakes it.
   busy.current = (mode !== "idle" && mode !== "paused") || !!driving;
+  modeRef.current = driving ? "driving" : mode;
   useEffect(() => wake.current(), [mode, driving, target, caption, paused]);
   // While Pyxi has the mouse, the firefly rides with it and says what it's doing.
 
@@ -204,7 +238,7 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
             <g transform="rotate(38 2.4 -5)"><ellipse className="ff-wing" cx="2.4" cy="-5" rx="3.8" ry="1.7" /></g>
             <ellipse className="ff-body" cx="0" cy="-5" rx="2.3" ry="2.6" />
             <circle className="ff-body" cx="0" cy="-8.3" r="1.6" />
-            <ellipse className="ff-core" cx="0" cy="0" rx="3" ry="3.7" />
+            <ellipse ref={coreEl} className="ff-core" cx="0" cy="0" rx="3" ry="3.7" />
           </g>
           <g className="ff-orbit"><circle r="10" fill="none" /><circle className="mote" cx="8.5" cy="0" r="1.2" /></g>
         </svg>

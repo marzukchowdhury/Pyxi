@@ -46,8 +46,7 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .ff-trail circle { fill: var(--fly); filter: drop-shadow(0 0 3px rgba(255,190,80,.9)) !important; }
 .ff-trail.off { display: none; }
 
-.mode-idle .ff-halo { animation: glow 3.6s ease-in-out infinite; }
-.mode-idle .ff-core { animation: glow-core 3.6s ease-in-out infinite; }
+/* The idle glow breathes from Presence's frame loop (30 a second), not a 60 fps CSS animation. */
 .mode-listening .ff-halo { opacity: 1; }
 .mode-listening .ff-core { transform: scale(calc(1 + var(--level) * .45)); }
 .mode-thinking .ff-core { animation: flicker .9s steps(1) infinite; }

@@ -374,7 +374,7 @@ function startCursorFeed(): void {
       last = p;
       still = 0;
       for (const win of liveOverlays()) win.webContents.send("cursor", p);
-    } else if (++still > 30 && timer) {
+    } else if (++still > 15 && timer) {
       clearInterval(timer);
       timer = null;
       if (!holdToTalk) setTimeout(wakeCursorFeed, 250);
@@ -383,7 +383,8 @@ function startCursorFeed(): void {
   wakeCursorFeed = () => {
     if (timer) return;
     still = 0;
-    timer = setInterval(tick, 16);
+    // About 30 times a second: the firefly is drawn that often, and hover needs no more.
+    timer = setInterval(tick, 33);
   };
   wakeCursorFeed();
 }

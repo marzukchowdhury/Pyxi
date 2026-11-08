@@ -50,10 +50,18 @@ let feeding = false;
 function startFeed(): void {
   if (feeding) return;
   feeding = true;
+  // At most once a frame, with the latest position: measuring every element on every cursor
+  // message (several a frame) was most of the overlay's work while the mouse moved.
+  let latest: [number, number] = [-1e6, -1e6];
+  let queued = false;
   bridge.onCursor((p) => {
-    const local = cursorToLocal(p);
-    if (local) hitTest(local[0], local[1]);
-    else hitTest(-1e6, -1e6); // the cursor is on another display
+    latest = cursorToLocal(p) ?? [-1e6, -1e6]; // off this display: nothing here is hovered
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      hitTest(latest[0], latest[1]);
+    });
   });
 }
 
