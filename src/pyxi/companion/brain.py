@@ -43,7 +43,7 @@ from pyxi import booking, hands, media, safety, tidy, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
 from pyxi.companion import filework, instant, paperwork, pricecheck, prompts, specialists
-from pyxi.companion.actions import app_target, open_app, safe_url
+from pyxi.companion.actions import app_target, in_account, open_app, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
     MARKER,
@@ -703,6 +703,8 @@ class Brain:
             url = safe_url(value)
             if url is None:
                 return "open_url: that isn't a web address."
+            g = self.connectors.google
+            url = in_account(url, g._saved_email() if g.connected() else None)
             await self.hub.emit("action", kind="open_url", value=url)
             return None
         if action == "open_app":

@@ -101,7 +101,7 @@ def _alts(words: list[str]) -> str:
 
 _BLANK_RE = re.compile(
     _LEAD
-    + rf"(?:{_OPEN})\s+(?:me\s+)?(?:up\s+)?(?:a\s+|an\s+|the\s+)?(?:new|blank|empty|fresh)"
+    + rf"(?:{_OPEN})\s+(?:me\s+)?(?:up\s+)?(?:a\s+|an\s+|the\s+)?(?:new|blank|empty|fresh|bank|plank)"
     + rf"(?:\s+(?:new|blank|empty))?\s+({_alts(list(_BLANK))})s?"
     + _TAIL,
     re.I,

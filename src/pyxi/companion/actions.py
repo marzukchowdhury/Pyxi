@@ -75,3 +75,33 @@ async def open_app(name: str) -> str:
     except (OSError, AttributeError) as exc:
         return f"open_app: Windows couldn't open {name} ({exc})."
     return f"Opened {name}."
+
+
+_NEW_GOOGLE_FILE = {
+    "sheets.new": "https://docs.google.com/spreadsheets/create",
+    "docs.new": "https://docs.google.com/document/create",
+    "slides.new": "https://docs.google.com/presentation/create",
+    "forms.new": "https://docs.google.com/forms/create",
+}
+_GOOGLE_HOSTS = ("docs.google.com", "drive.google.com", "mail.google.com", "calendar.google.com")
+
+
+def in_account(url: str, email: str | None) -> str:
+    """Open a Google page in the account Pyxi is connected to, not whichever account the browser
+    signs in first: a sheet made in another account is one Pyxi's Ledger can't edit."""
+    if not email:
+        return url
+    parsed = urlparse(url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    if host in _NEW_GOOGLE_FILE and parsed.path in ("", "/"):
+        url, host = _NEW_GOOGLE_FILE[host], "docs.google.com"
+        parsed = urlparse(url)
+    if host not in _GOOGLE_HOSTS or "authuser=" in parsed.query:
+        return url
+    if host == "mail.google.com" and parsed.path in ("", "/"):
+        url, parsed = "https://mail.google.com/mail/", urlparse("https://mail.google.com/mail/")
+    from urllib.parse import quote
+
+    sep = "&" if parsed.query else "?"
+    base, _, frag = url.partition("#")
+    return f"{base}{sep}authuser={quote(email)}" + (f"#{frag}" if frag else "")

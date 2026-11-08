@@ -64,3 +64,27 @@ async def test_a_blank_sheet_opens_without_asking_the_model(settings):
     [opened] = rec.of("action")
     assert opened["kind"] == "open_url" and opened["value"] == "https://sheets.new"
     assert not llm.prompts and rec.of("say")  # done, said, and the model never asked
+
+
+def test_google_pages_open_in_the_account_pyxi_is_connected_to():
+    # Firefox signed in as ...21 first; Pyxi is connected as ...23, and only that account's
+    # sheets can be edited by Ledger.
+    from pyxi.companion.actions import in_account
+
+    me = "marzuk23@example.com"
+    assert in_account("https://sheets.new", me) == (
+        "https://docs.google.com/spreadsheets/create?authuser=marzuk23%40example.com"
+    )
+    assert in_account("https://mail.google.com", me) == (
+        "https://mail.google.com/mail/?authuser=marzuk23%40example.com"
+    )
+    assert in_account("https://docs.google.com/spreadsheets/d/x/edit#gid=0", me).endswith(
+        "edit?authuser=marzuk23%40example.com#gid=0"
+    )
+    assert in_account("https://www.youtube.com", me) == "https://www.youtube.com"
+    assert in_account("https://sheets.new", None) == "https://sheets.new"  # not connected
+
+
+def test_speech_hearing_bank_for_blank_still_takes_the_instant_route():
+    hit = match("Open a bank spreadsheet.")
+    assert hit is not None and hit.value == "https://sheets.new"
