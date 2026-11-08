@@ -409,7 +409,16 @@ app.on("web-contents-created", (_e, contents) => {
   contents.on("will-attach-webview", (e) => e.preventDefault());
 });
 
+// One Pyxi at a time: opening it again (a second double-click) unfolds the notch of the one
+// that's running instead of starting a second notch, hotkeys and brain.
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0);
+} else {
+  app.on("second-instance", () => toggleNotch());
+}
+
 app.whenReady().then(async () => {
+  if (!app.hasSingleInstanceLock()) return;
   startUpdates(broadcast, brainBusy);
   // The microphone, for Pyxi's own pages only; nothing else (camera, location, notifications...).
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) =>
