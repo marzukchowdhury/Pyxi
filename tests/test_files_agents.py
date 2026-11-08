@@ -811,3 +811,64 @@ def test_a_switched_off_google_api_says_which_and_where_to_turn_it_on():
     assert friendly_error(RuntimeError(said)) == said
     other = google_error(404, json.dumps({"error": {"message": "Requested entity was not found."}}))
     assert other == "Google said 404: Requested entity was not found."
+
+
+async def test_a_sheet_in_another_google_account(monkeypatch):
+    """The Sheet open in Firefox belongs to another of their Google accounts: Google only says
+    'The caller does not have permission'. Sample data goes in a new sheet in the connected
+    account, which opens on their screen; real data is never guessed at."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from pyxi.companion import filework
+    from pyxi.screen import uia
+
+    link = "https://docs.google.com/spreadsheets/d/theirOtherAccount123/edit?gid=0"
+    monkeypatch.setattr(uia, "browser_url", lambda hwnd, budget_s=0.5: link)
+
+    class G:
+        def connected(self):
+            return True
+
+        def _saved_email(self):
+            return "me@example.com"
+
+        async def sheets_meta(self, sid):
+            raise RuntimeError("Google said 403: The caller does not have permission")
+
+    started, opened, said, spawned = [], [], [], []
+
+    class Jobs:
+        async def start(self, agent, task, files=(), params=None):
+            started.append(params["google"])
+            return SimpleNamespace(id="job_1", agent_name="Ledger")
+
+        async def wait(self, job_id):
+            return SimpleNamespace(
+                status="done", data={"links": ["https://docs.google.com/spreadsheets/d/new1/edit"]}
+            )
+
+    async def quick(action, value):
+        opened.append(value)
+
+    brain = SimpleNamespace(
+        _ctx=SimpleNamespace(window=SimpleNamespace(hwnd=5, title="Untitled spreadsheet - Google Sheets")),
+        connectors=SimpleNamespace(google=G()),
+        jobs=Jobs(),
+        _quick_action=quick,
+        _speak=said.append,
+        _spawn=lambda coro: spawned.append(asyncio.ensure_future(coro)),
+    )
+    note = await filework.handle(
+        brain, "edit_document", {"task": "sample sales table and a pivot", "google": ["this sheet"]}
+    )
+    await asyncio.gather(*spawned)
+    assert started == [["new sheet: Sample data"]] and "making a new sheet" in note
+    assert opened == ["https://docs.google.com/spreadsheets/d/new1/edit"]  # on their screen
+    assert "different Google account" in said[0]
+
+    started.clear()
+    note = await filework.handle(
+        brain, "edit_document", {"task": "pivot of sales by region", "google": ["this sheet"]}
+    )
+    assert not started and "different Google account" in note and "me@example.com" in note

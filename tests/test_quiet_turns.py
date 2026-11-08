@@ -63,3 +63,21 @@ def test_only_a_leading_acknowledgement_is_swapped() -> None:
 
     for text in ["Online banking is safer than it looks.", "It's on it's way.", "Kolkata is on it."]:
         assert vary_ack(text, []) == text
+
+
+def test_a_line_is_said_once_and_tool_names_never_leak():
+    from pyxi.companion.brain import drop_repeats
+
+    said = drop_repeats(
+        "On it. I'll fill the blank sheet with sample sales data and build the pivot table from "
+        "it. I'll fill the open sheet with sample sales data and build the pivot table. [say] "
+        "It opens in a few seconds.",
+        [],
+    )
+    assert said == (
+        "On it. I'll fill the blank sheet with sample sales data and build the pivot table from "
+        "it. It opens in a few seconds."
+    )
+    earlier = ["I'll make a small sales table and a pivot in this sheet."]
+    assert drop_repeats("I'll make a small sales table and a pivot on this sheet.", earlier) == ""
+    assert drop_repeats("Done. The pivot is on a new tab.", earlier) == "Done. The pivot is on a new tab."

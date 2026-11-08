@@ -2472,6 +2472,7 @@ class Brain:
         lines (a finished build, an error) that aren't part of the current turn."""
         if record and agent == "Pyxi":
             text = trim_chatter(text, said_before=bool(self._said))
+            text = drop_repeats(text, self._said)
             text = vary_ack(text, self._recent_acks)
         if not text.strip():
             return
@@ -3079,6 +3080,29 @@ _ACK_LEAD = re.compile(
     r"^(\W*)(on it|got it|sure thing|will do|roger that|you got it|copy that|on my way)(?=[\s,.!]|$)",
     re.IGNORECASE,
 )
+
+
+_TOOL_TAG = re.compile(r"\[(?:say|[a-z]+_[a-z_]+)\]\s*")
+_WORD = re.compile(r"[a-z0-9']+")
+
+
+def drop_repeats(text: str, earlier: list[str]) -> str:
+    """Say each thing once. A model sometimes writes its line in the reply and again in `say`,
+    reworded ("I'll fill the blank sheet..." then "I'll fill the open sheet..."), or leaks a
+    tool's name ("[say] Ledger can't..."). A sentence that mostly repeats one already said this
+    turn, or earlier in the same text, is dropped."""
+    text = _TOOL_TAG.sub("", text)
+    seen = [set(_WORD.findall(s.lower())) for e in earlier for s in split_sentences(e)]
+    kept = []
+    for sentence in split_sentences(text):
+        words = set(_WORD.findall(split_markers(sentence)[0].lower()))
+        if len(words) >= 4 and any(
+            len(words & w) / len(words | w) >= 0.6 for w in seen if len(w) >= 4
+        ):
+            continue
+        kept.append(sentence)
+        seen.append(words)
+    return " ".join(kept)
 
 
 def vary_ack(text: str, recent: list[str], pick: Any = random.choice) -> str:

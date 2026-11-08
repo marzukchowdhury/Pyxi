@@ -86,6 +86,36 @@ async def _open_google_file(brain: Brain, ref: str) -> str:
     return url if url and _GOOGLE_LINK.search(url) else ref
 
 
+_SAMPLE = re.compile(r"(?i)\b(sample|example|dummy|made[- ]up|fake|test|demo|practice)\b")
+
+
+async def _reachable(brain: Brain, ref: str) -> bool:
+    """Can the connected Google account open this link? A Sheet open in their browser may
+    belong to another of their Google accounts, and Google then says only "The caller does
+    not have permission"."""
+    m = _GOOGLE_LINK.search(ref)
+    if not m:
+        return True  # a name or "new sheet:": Ledger finds or makes it in the connected account
+    file_id = ref[m.start() :].split("/")[3]
+    g = brain.connectors.google
+    try:
+        if m.group(1) == "spreadsheets":
+            await g.sheets_meta(file_id)
+        else:
+            await g._api("GET", f"https://docs.googleapis.com/v1/documents/{file_id}", params={"fields": "title"})
+    except Exception as exc:
+        return not re.search(r"\b(403|404)\b", str(exc))
+    return True
+
+
+async def _open_when_done(brain: Brain, job_id: str) -> None:
+    """A sheet Pyxi made because the open one was out of reach: put it on their screen."""
+    job = await brain.jobs.wait(job_id)
+    links = (job.data or {}).get("links") or []
+    if job.status == "done" and links:
+        await brain._quick_action("open_url", links[0])
+
+
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
     if name == "convert_files":
         op = str(args.get("operation") or "")
@@ -144,7 +174,34 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
                 "edit_document: Google isn't connected. Tell them to connect it in Settings first."
             )
         google = [await _open_google_file(brain, g) for g in google]
+        out_of_reach = [g for g in google if not await _reachable(brain, g)]
+        made_instead = False
+        if out_of_reach:
+            who = brain.connectors.google._saved_email() or "the connected Google account"
+            kind = "doc" if "/document/" in out_of_reach[0] else "sheet"
+            if not _SAMPLE.search(task):
+                return (
+                    f"edit_document: the {kind} open on their screen is in a different Google "
+                    f"account; Pyxi is connected as {who}, which can't open it. Tell them in one "
+                    f"short line, and offer to make a new {kind} in {who} instead (or they can "
+                    "connect the other account in Settings)."
+                )
+            # Sample data doesn't need that file: make a new one where Pyxi can, and show it.
+            title = "Sample data" if kind == "sheet" else "Sample document"
+            google = [f"new {kind}: {title}" if g in out_of_reach else g for g in google]
+            made_instead = True
         job = await brain.jobs.start("ledger", task, files=files, params={"google": google})
+        if made_instead:
+            brain._spawn(_open_when_done(brain, job.id))
+            brain._speak(
+                f"That {kind} is in a different Google account, so I'm making a fresh one in "
+                "yours and opening it."
+            )
+            return (
+                f"Started {job.id}: the {kind} on their screen is in another Google account, so "
+                f"{job.agent_name} is making a new {kind} in {who} and it opens on their screen "
+                "in a few seconds. Say that in one short line."
+            )
         return (
             f"Started {job.id}: {job.agent_name} is on it in the background. Say one short line "
             "('On it.'); they get a notification when it's done."
