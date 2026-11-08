@@ -740,8 +740,8 @@
     },
     {
      "id": "grille",
-     "label": "Grille",
-     "note": null,
+     "label": "Bonnet vent",
+     "note": "an air vent on top of the bonnet; this car has no front grille",
      "casing": false,
      "center": [
       0.001,

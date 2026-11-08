@@ -83,7 +83,8 @@ class LibraryModel:
             c = ", ".join(f"{v:.2f}" for v in p.center)
             s = ", ".join(f"{v:.2f}" for v in p.size)
             name = f" '{p.label}'" if p.label else ""
-            lines.append(f"- {p.id}{name}: [{c}], size [{s}]" + (" (outer shell)" if p.casing else ""))
+            note = f" ({p.note})" if p.note else ""
+            lines.append(f"- {p.id}{name}{note}: [{c}], size [{s}]" + (" (outer shell)" if p.casing else ""))
         return "\n".join(lines)
 
 

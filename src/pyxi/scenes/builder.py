@@ -222,9 +222,16 @@ EXPLAIN_SYSTEM = (
     "a rotor spins, a stage separates and falls away, a door opens). Keyframe positions are "
     "absolute: start from the part's centre as listed. Spins and oscillations for anything "
     "that turns.\n"
-    "- add_parts: only what the model doesn't have and the story needs, built from simple "
-    "shapes near the real parts: arrows for anything that flows (air, exhaust, blood, current, "
-    "light, data), a flame or plume (emissive cone), a parachute, a person, a stand. Few.\n"
+    "- The model may be a stand-in for something more specific (a generic sports car for a BMW "
+    "M3): tag and focus only what it really has, its listed parts or markers on its real "
+    "surface. Never tag a feature it lacks (a kidney grille, a spoiler, red calipers) and never "
+    "build one from shapes; talk about the real one in the narration instead, and say once, "
+    "lightly, that this is a stand-in shape.\n"
+    "- add_parts: only effects the story needs, never pieces of the object itself: thin arrows "
+    "for anything that flows (air, exhaust, blood, current, light, data), at most a third of the "
+    "model's length; a flame or plume (emissive cone); a parachute, person or stand away from "
+    "the model. Few.\n"
+    "- title: what the user asked about, 2-5 words ('BMW M3 CS'), not the model's own name.\n"
     "- cutaway true (with casing) only when the inside is the point and the shell is a part.\n"
     "- beats: 3-5, each with a 2-4 word title ('First stage drops'), rising `at` times 2-3 s "
     "apart, each focusing the parts it is about, camera "
@@ -233,6 +240,37 @@ EXPLAIN_SYSTEM = (
     "that's why', adds one related fun fact, and offers one specific thing to show next.\n"
     "Be brief: leave out fields at their defaults."
 )
+
+
+_EFFECTS = {"arrow", "marker", "kit"}
+
+
+def _effects_only(model: ObjectScene, added: list[Part]) -> list[Part]:
+    """What an explanation may add to a real model: arrows, tags, glowing flames and plumes, kit
+    pieces, and props standing clear of it. A plain block on the model (a "spoiler" on a car that
+    has none, a box for a brake caliper) only makes a real model look fake, so it goes; and
+    nothing added may dwarf the model (a giant airflow beam across the screen)."""
+    lo = [min(p.position[i] - p.size[i] / 2 for p in model.parts) for i in range(3)]
+    hi = [max(p.position[i] + p.size[i] / 2 for p in model.parts) for i in range(3)]
+    extent = max(h - l for l, h in zip(lo, hi))
+    near = [0.08 * (h - l) for l, h in zip(lo, hi)]
+    real = {p.id: p for p in model.parts}
+    keep: list[Part] = []
+    for p in added:
+        if p.parent and p.parent not in real and p.parent not in {k.id for k in keep}:
+            continue  # its parent was dropped
+        # Positions under a parent are relative to it.
+        base = real[p.parent].position if p.parent in real else [0.0, 0.0, 0.0]
+        at = [base[i] + p.position[i] for i in range(3)]
+        on_model = all(lo[i] - near[i] <= at[i] <= hi[i] + near[i] for i in range(3))
+        added_child = p.parent is not None and p.parent not in real
+        if on_model and not added_child and p.shape not in _EFFECTS and p.material != "emissive":
+            continue
+        biggest = max(p.size)
+        if biggest > extent / 3:
+            p.size = [v * extent / 3 / biggest for v in p.size]
+        keep.append(p)
+    return keep
 
 
 def explain_tool() -> ToolSpec:
@@ -272,6 +310,7 @@ async def explain_library_model(
             for patch in edit.update:
                 if patch.id in real:
                     patch.size = patch.material = patch.color = None
+            edit.add_parts = _effects_only(model, edit.add_parts)
             result.model = few_labels(apply_edit(model, edit))
             break
         except ValidationError as exc:

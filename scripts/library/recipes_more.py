@@ -54,7 +54,7 @@ MORE: list[dict] = [
             {"id": "right_door", "label": "Door", "match": {"node": "BodyDoorR"}},
             {"id": "headlights", "label": "Headlights", "match": {"node": "BodyHeadlights"}},
             {"id": "tail_lights", "label": "Tail lights", "match": {"node": "BodyTaillights$|BodyTurnsignalsRear"}},
-            {"id": "grille", "label": "Grille", "match": {"node": "BodyHoodTopgrill"}},
+            {"id": "grille", "label": "Bonnet vent", "note": "an air vent on top of the bonnet; this car has no front grille", "match": {"node": "BodyHoodTopgrill"}},
             {"id": "bonnet", "label": "Bonnet", "match": {"node": "BodyHood$|BodyHoodUnder"}},
             {"id": "cabin", "label": "Cabin", "match": {"node": "Interior"}},
             {"id": "body", "label": "Body", "rest": True},

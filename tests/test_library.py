@@ -234,3 +234,20 @@ def test_a_car_shows_a_few_different_tags_and_the_story_s_come_first():
 def test_the_models_see_title_fields_in_their_tools():
     beat = edit_tool_schema()["properties"]["beats"]["items"]["properties"]
     assert "title" in beat and "title" in build_tool_schema()["properties"]
+
+
+def test_an_explanation_never_fakes_parts_onto_a_real_model():
+    from pyxi.scenes.builder import _effects_only
+
+    car = library.get("concept_car").scene()  # 10 long, no spoiler, no red calipers
+    added = [
+        Part(id="spoiler", shape="box", position=[0, 1.4, -4.6], size=[3, 0.1, 0.6], label="Spoiler"),
+        Part(id="caliper", shape="box", parent="front_left_wheel", position=[0.2, 0.2, 0], size=[0.2, 0.4, 0.3]),
+        Part(id="air", shape="arrow", position=[0, 2, 0], size=[14, 0.6, 0.6], label="Airflow"),
+        Part(id="flame", shape="cone", material="emissive", position=[0, 0, -5], size=[0.5, 1, 0.5]),
+        Part(id="person", shape="kit", kit="person", position=[5, 0, 0], size=[0.5, 1.8, 0.4]),
+        Part(id="stand", shape="cylinder", position=[0, -4, 0], size=[3, 0.3, 3]),
+    ]
+    kept = {p.id: p for p in _effects_only(car, added)}
+    assert set(kept) == {"air", "flame", "person", "stand"}  # no blocks posing as car parts
+    assert max(kept["air"].size) <= 10 / 3 + 1e-6  # and no beam bigger than the car

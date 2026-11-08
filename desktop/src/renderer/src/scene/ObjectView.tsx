@@ -314,7 +314,8 @@ function Model({ scene, clock, beat, cutaway, registry, onPick }: {
         if (p.material === "emissive" && p.shape !== "asset") mat.emissiveIntensity = ud.baseEmissive * (st.glow ? 0.55 + 0.9 * st.glow : 1);
         else if (isFocus && op > 0.05) {
           mat.emissive.copy(ICE);
-          mat.emissiveIntensity = 0.16 + 0.08 * Math.sin(t * 3.2) + st.glow * 0.4;
+          // A real model's paint is already lit and glossy: the full glow washes it out pale.
+          mat.emissiveIntensity = (p.shape === "asset" ? 0.3 : 1) * (0.16 + 0.08 * Math.sin(t * 3.2) + st.glow * 0.4);
         } else if (st.glow) {
           mat.emissive.copy(ICE);
           mat.emissiveIntensity = st.glow * 0.5;
