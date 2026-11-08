@@ -39,7 +39,7 @@ from otto.types import ToolCall, Usage
 from PIL import Image
 from pydantic import ValidationError
 
-from pyxi import booking, hands, media, safety, tidy, web, windows
+from pyxi import booking, hands, media, safety, tidy, weather, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
 from pyxi.companion import filework, instant, paperwork, pricecheck, prompts, specialists
@@ -650,9 +650,12 @@ class Brain:
 
         async def go() -> None:
             try:
-                played = await media.play(
-                    query, music=args.get("app") == "youtube_music", back_to=here
-                )
+                app = str(args.get("app") or "youtube_music")
+                played = None
+                if app == "spotify":
+                    played = await media.play_spotify(query, back_to=here)
+                if played is None:  # no Spotify here: the song still plays, in Pyxi's player
+                    played = await media.play(query, music=app != "youtube", back_to=here)
             except Exception as exc:  # never leave the notch saying it's still starting
                 log.warning("play_music failed", exc_info=True)
                 await self.jobs.settle(job, ok=False, summary=f"Couldn't play that: {exc}")
@@ -1571,7 +1574,22 @@ class Brain:
             error = None
             try:
                 hit = None if synthetic else instant.match(user_text)
-                if hit is None or not await self._instant(hit):
+                asked = None if synthetic or hit else weather.simple_question(user_text)
+                song = None if synthetic or hit or asked else instant.play_request(user_text)
+                if asked is not None and await self._weather_now(*asked):
+                    pass  # answered from the forecast in about a second
+                elif song is not None:
+                    self._calls.append(
+                        {
+                            "round": 1,
+                            "tool": "play_music",
+                            "arguments": {"query": song[0], "app": song[1]},
+                            "instant": True,
+                        }
+                    )
+                    self._speak("On it.")
+                    await self._play_music({"query": song[0], "app": song[1]})
+                elif hit is None or not await self._instant(hit):
                     await self._graph.ainvoke(
                         {
                             "user_text": user_text,
@@ -2283,6 +2301,12 @@ class Brain:
                 files=files,
             )
             return f"Started {job.id}: {job.agent_name} is on it."
+        if name == "weather":
+            place = str(args.get("place") or "").strip() or await self._home_city()
+            if not place:
+                return "weather: which city? Ask them in a few words."
+            f = await weather.forecast(place)
+            return f.describe() if f else f"weather: couldn't find a forecast for {place!r}."
         if name == "web_search":
             self._searches = getattr(self, "_searches", 0) + 1
             if self._searches > 3:
@@ -2509,6 +2533,34 @@ class Brain:
             await self._stream_speech(text, agent=agent, voice=voice, gen=gen, ctx=ctx)
 
         self._speech = asyncio.create_task(run())
+
+    async def _home_city(self) -> str:
+        if self.connectors.google.connected():
+            try:
+                return weather.city_of(await self.connectors.google.time_zone())
+            except Exception:
+                return ""
+        return ""
+
+    async def _weather_now(self, place: str, when: str) -> bool:
+        """'What's the weather tomorrow?' answered straight from the forecast, no model and no
+        web search. False when the place isn't known or found, so the model takes it."""
+        place = place or await self._home_city()
+        if not place:
+            return False
+        f = await weather.forecast(place)
+        if f is None:
+            return False
+        self._calls.append(
+            {
+                "round": 1,
+                "tool": "weather",
+                "arguments": {"place": place, "when": when},
+                "instant": True,
+            }
+        )
+        self._speak(f.say(when))
+        return True
 
     async def _instant(self, hit: instant.Instant) -> bool:
         """A simple request done at once, without the model (pyxi/companion/instant.py). False

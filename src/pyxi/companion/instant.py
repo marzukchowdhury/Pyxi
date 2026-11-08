@@ -153,3 +153,30 @@ def match(text: str) -> Instant | None:
     if m := _MEDIA_RE.match(t):
         return Instant("media", _MEDIA[m.group(1).lower()], "")
     return None
+
+
+# "Play Blinding Lights by The Weeknd", "can you play some lofi on Spotify": straight to the
+# player. Anything with more to it ("play it a bit quieter and then...") goes to the model.
+_PLAY = re.compile(
+    _LEAD
+    + r"play\s+(?:me\s+)?(?P<q>.+?)(?:\s+(?:on|in)\s+(?:my\s+)?(?P<app>youtube music|youtube|spotify)(?:\s+app)?)?"
+    + r"(?:\s+(?:for me|please|now))*[\s.!?]*$",
+    re.I,
+)
+_NOT_A_SONG = re.compile(
+    r"^(?:it|it again|that|this|the music|music|something|again|a game|the video|the next one)$"
+    r"|\b(?:and|then|volume|quieter|louder|lower|higher|game|games|with me|with us|along)\b",
+    re.I,
+)
+
+
+def play_request(text: str) -> tuple[str, str] | None:
+    """(what to play, app) for a plain "play X", else None."""
+    m = _PLAY.match(" ".join(text.split()))
+    if not m:
+        return None
+    q = m.group("q").strip(" .,!?")
+    if not q or _NOT_A_SONG.search(q):
+        return None
+    app = (m.group("app") or "").lower().replace(" ", "_") or "youtube_music"
+    return q, app

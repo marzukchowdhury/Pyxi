@@ -152,7 +152,10 @@ COMPANION_TOOLS: list[ToolSpec] = [
                 "description": "Bills only, given first: the verdict for the task tray.",
                 "properties": {
                     "from": {"type": "string", "description": "Who sent it, e.g. 'Telus', 'CRA'."},
-                    "owe": {"type": "string", "description": "Amount to pay, e.g. '$84.12' ('$0' if nothing)."},
+                    "owe": {
+                        "type": "string",
+                        "description": "Amount to pay, e.g. '$84.12' ('$0' if nothing).",
+                    },
                     "due": {"type": "string", "description": "Pay by, e.g. '28 Nov'."},
                     "flags": {
                         "type": "array",
@@ -451,9 +454,23 @@ COMPANION_TOOLS: list[ToolSpec] = [
         ["agent", "task"],
     ),
     _tool(
+        "weather",
+        "The forecast from a weather service, with real numbers: now, and each day for a week (high, "
+        "low, sky, chance of rain). Use it for ANY weather question (today, tomorrow, the weekend, "
+        "'should I bring an umbrella', 'is it cold out'), never web_search. Answer in one short "
+        "sentence with the numbers that matter.",
+        {
+            "place": {
+                "type": "string",
+                "description": "The city they asked about; leave it empty for where they are.",
+            }
+        },
+        [],
+    ),
+    _tool(
         "web_search",
         "Search the web (about a second). Use it for anything that changes or that you're not sure of: "
-        "news, prices, scores, results, weather, release dates, who runs what, whether a claim or quote is "
+        "news, prices, scores, results, release dates, who runs what, whether a claim or quote is "
         "real, facts about a specific person, product or place. Searches the web and the news together, and "
         "news comes with its outlet and age. In the reply where you search, say at most a few words ('Checking "
         "the news.'), never the answer; answer once the results are back, naming the sources. One search is "
@@ -530,7 +547,10 @@ COMPANION_TOOLS += [
         "final button. Say one short line ('On it.'); the result comes as a notification.",
         {
             "action": {"type": "string", "enum": ["find", "cancel"]},
-            "service": {"type": "string", "description": "For cancel: the service, as they said it."},
+            "service": {
+                "type": "string",
+                "description": "For cancel: the service, as they said it.",
+            },
         },
     ),
     _tool(
@@ -632,7 +652,10 @@ COMPANION_TOOLS += [
         {
             "airline": {"type": "string", "description": "e.g. 'Air Canada'."},
             "flight": {"type": "string", "description": "e.g. 'AC 123'."},
-            "confirmation": {"type": "string", "description": "The booking reference, e.g. 'K7Q2ZP'."},
+            "confirmation": {
+                "type": "string",
+                "description": "The booking reference, e.g. 'K7Q2ZP'.",
+            },
             "last_name": {"type": "string", "description": "As on the booking, if not theirs."},
             "departure": {
                 "type": "string",
@@ -643,7 +666,10 @@ COMPANION_TOOLS += [
                 "type": "string",
                 "description": "The airline's check-in page if you know it (from the email).",
             },
-            "notes": {"type": "string", "description": "e.g. 'both passengers', 'window seat if free'."},
+            "notes": {
+                "type": "string",
+                "description": "e.g. 'both passengers', 'window seat if free'.",
+            },
         },
         ["confirmation", "departure"],
     ),
@@ -658,9 +684,10 @@ COMPANION_TOOLS += [
     ),
     _tool(
         "play_music",
-        "Play a song, album or video right now: finds it on YouTube, opens it in a window behind the one "
-        "they're in (so they keep working), checks it's really playing, and sets the volume if they "
-        "asked. Takes a couple of seconds, no mouse: always use this for 'play X', never use_computer.",
+        "Play a song, album or video right now, in the background: Pyxi's own player opens minimised "
+        "(they keep working, nothing takes their screen), checks it's really playing, and sets the "
+        "volume if they asked. About 4 seconds, no mouse: always use this for 'play X', never "
+        "use_computer. Afterwards, pause, next and previous are quick_action media keys.",
         {
             "query": {
                 "type": "string",
@@ -668,8 +695,9 @@ COMPANION_TOOLS += [
             },
             "app": {
                 "type": "string",
-                "enum": ["youtube", "youtube_music"],
-                "description": "youtube_music when they say YouTube Music, else youtube.",
+                "enum": ["youtube_music", "youtube", "spotify"],
+                "description": "spotify when they say Spotify; youtube when they want the video; "
+                "else youtube_music (songs, with a queue so 'next' works).",
             },
             "volume": {
                 "type": "string",
@@ -1004,6 +1032,7 @@ COMPANION_TOOLS += [
 
 INFO_TOOLS = {
     "look_again",
+    "weather",
     "web_search",
     "read_page",
     "list_routines",

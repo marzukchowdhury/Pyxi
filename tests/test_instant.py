@@ -101,3 +101,29 @@ async def test_one_request_never_opens_the_same_page_twice(settings):
     await brain.turn("make me a doc thing for the team")
     assert len(rec.of("action")) == 1
     assert len(llm.prompts) <= 2  # no round after round of opening it again
+
+
+def test_a_plain_play_request_goes_straight_to_the_player():
+    from pyxi.companion.instant import play_request as p
+
+    assert p("Play Blinding Lights by The Weeknd.") == ("Blinding Lights by The Weeknd", "youtube_music")
+    assert p("can you play some lofi on Spotify") == ("some lofi", "spotify")
+    assert p("play billie jean in my youtube music app") == ("billie jean", "youtube_music")
+    for more in ("Play it again.", "play it a bit quieter", "play billie jean and turn it down", "Play a game with me"):
+        assert p(more) is None, more
+
+
+async def test_play_skips_the_model(settings):
+    from test_brain_and_server import make_brain
+    from test_connectors_and_docs import Script
+
+    llm = Script()
+    brain, rec = make_brain(settings, llm=llm)
+    asked = []
+
+    async def fake_play(args):
+        asked.append(args)
+
+    brain._play_music = fake_play
+    await brain.turn("Play Blinding Lights by The Weeknd")
+    assert asked == [{"query": "Blinding Lights by The Weeknd", "app": "youtube_music"}] and not llm.prompts
