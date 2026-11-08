@@ -389,7 +389,9 @@ class Transcriber:
                     language=language,
                     vad_filter=True,
                     beam_size=1,
-                    hotwords="Pyxi",  # "Hi Pyxi" was heard as "Hi Wes"
+                    # Words people say to Pyxi that Whisper mishears without a hint: "Hi Pyxi"
+                    # came out "Hi Wes", "Open Gmail" came out "OpenGL" and "open G means".
+                    hotwords="Pyxi, Gmail, Google Sheets, Google Docs, spreadsheet, YouTube, Notepad",
                 )
                 text = " ".join(s.text.strip() for s in segments).strip()
                 return text, language or getattr(info, "language", "en") or "en"

@@ -705,6 +705,11 @@ class Brain:
                 return "open_url: that isn't a web address."
             g = self.connectors.google
             url = in_account(url, g._saved_email() if g.connected() else None)
+            opened = getattr(self, "_opened_urls", set())
+            if url in opened:  # a looping model once made six new docs for one "new doc"
+                return "open_url: that's already open from this request. Don't open it again; answer or stop."
+            opened.add(url)
+            self._opened_urls = opened
             await self.hub.emit("action", kind="open_url", value=url)
             return None
         if action == "open_app":
@@ -1543,6 +1548,7 @@ class Brain:
             if not synthetic:
                 self._guide_fresh = True  # a new request: a guide in it counts from step 1
             self._pending_say = ""  # an answer held back during a lookup round
+            self._opened_urls: set[str] = set()  # pages opened by this request: each once
             # Mail, pages and documents this turn read: after any, every outward action asks on
             # a fresh card, and its card says what came from them (pyxi/safety.py).
             self._turn_reads: safety.Reads = []
@@ -1908,6 +1914,7 @@ class Brain:
                 and all(c.name in ("say", "quick_action") for c in calls)
                 and not needs_more
                 and not _JUST_OPEN.match(self._user_text or "")
+                and _WANTS_ANSWER.search(self._user_text or "")
                 and round_no < self.settings.budget.max_tool_rounds
             ):
                 # "Find coffee near me": opening Maps isn't the answer. Look at what opened and
@@ -2960,6 +2967,13 @@ _FILLER = re.compile(
 _JUST_OPEN = re.compile(
     r"^\W*(hey,? )?(pyxi,? )?(can you |could you |please )?(open|go to|launch|start|bring up|pull up)\b"
     r"(?!.*\b(and|then|find|which|what|best|show me|tell me)\b)",
+    re.I,
+)
+# "Find coffee near me": opening Maps isn't the answer, so Pyxi looks at what opened and
+# answers from it. "I said open Gmail, not GL" asks nothing: one model call, not two.
+_WANTS_ANSWER = re.compile(
+    r"\b(find|best|which|what|where|who|when|how|show me|tell me|near me|nearby|cheapest|"
+    r"compare|reviews?|open now|rating|price|look up|search|check)\b",
     re.I,
 )
 # Names models sometimes invent for a real tool (from its options), and what they mean.

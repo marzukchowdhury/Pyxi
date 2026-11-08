@@ -88,3 +88,16 @@ def test_google_pages_open_in_the_account_pyxi_is_connected_to():
 def test_speech_hearing_bank_for_blank_still_takes_the_instant_route():
     hit = match("Open a bank spreadsheet.")
     assert hit is not None and hit.value == "https://sheets.new"
+
+
+async def test_one_request_never_opens_the_same_page_twice(settings):
+    # "Create a new dot" (misheard): the model opened docs.new six times in 40 s.
+    from test_brain_and_server import make_brain
+    from test_connectors_and_docs import Script
+
+    again = [("say", {"text": "Opening a new doc."}), ("quick_action", {"action": "open_url", "value": "https://docs.new"})]
+    llm = Script(*[list(again) for _ in range(6)])
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("make me a doc thing for the team")
+    assert len(rec.of("action")) == 1
+    assert len(llm.prompts) <= 2  # no round after round of opening it again

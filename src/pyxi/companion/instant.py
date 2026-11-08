@@ -25,7 +25,7 @@ _LEAD = (
     r"(?:(?:can|could|would|will) you\s+|please\s+|i (?:want|need) you to\s+|go ahead and\s+)?"
     r"(?:please\s+|just\s+)?"
 )
-_TAIL = r"(?:\s+(?:for me|please|now|real quick|quickly))*(?:\s+(?:in|on) a new tab)?[\s.!?]*$"
+_TAIL = r"(?:\s+(?:for me|please|now|real quick|quickly))*(?:\s+(?:in|on) a new (?:tab|chat|tap|tub|tad))?[\s.!?]*$"
 _OPEN = r"(?:open(?: up)?|start|create|make|bring up|pull up|give me|launch|new)"
 
 _BLANK = {
@@ -33,6 +33,7 @@ _BLANK = {
     "sheet": "https://sheets.new",
     "google sheet": "https://sheets.new",
     "doc": "https://docs.new",
+    "dot": "https://docs.new",  # what speech recognition makes of "a new doc"
     "document": "https://docs.new",
     "google doc": "https://docs.new",
     "slides": "https://slides.new",
@@ -101,7 +102,7 @@ def _alts(words: list[str]) -> str:
 
 _BLANK_RE = re.compile(
     _LEAD
-    + rf"(?:{_OPEN})\s+(?:me\s+)?(?:up\s+)?(?:a\s+|an\s+|the\s+)?(?:new|blank|empty|fresh|bank|plank)"
+    + rf"(?:{_OPEN})\s+(?:me\s+)?(?:up\s+)?(?:a\s+|an\s+|the\s+)?(?:[a-z]+\s+)?(?:new|blank|empty|fresh|bank|plank)"
     + rf"(?:\s+(?:new|blank|empty))?\s+({_alts(list(_BLANK))})s?"
     + _TAIL,
     re.I,
@@ -122,9 +123,17 @@ _APP_RE = re.compile(
 _MEDIA_RE = re.compile(_LEAD + rf"({_alts(list(_MEDIA))})" + r"[\s.!?]*$", re.I)
 
 
+# What speech recognition makes of "Gmail" after "open": nobody asks Pyxi to open OpenGL.
+_GMAIL_MISHEARD = re.compile(
+    r"^(\W*(?:(?:no,?\s+)?i said\s+)?)(?:open\s+)?(?:open ?gl|open g ?means?|open g ?mail|open gee ?mail)\b",
+    re.I,
+)
+
+
 def match(text: str) -> Instant | None:
     """The instant route for this request, or None when it needs the model."""
-    t = " ".join(text.split())
+    t = _GMAIL_MISHEARD.sub(r"\1open gmail", " ".join(text.split()))
+    t = re.sub(r"(?i)^\W*(?:no,?\s+)?i said\s+", "", t)  # "No, I said open Gmail"
     if not t or len(t) > 80:
         return None
     if m := _BLANK_RE.match(t):
