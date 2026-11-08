@@ -414,12 +414,12 @@ async def test_google_sheet_pivot_and_totals(tmp_path):
         ask=ask,
     )
     assert r.links == ["https://docs.google.com/spreadsheets/d/found123/edit"]
-    add, pivot, write = g.calls
-    assert add[1][0]["addSheet"]["properties"]["title"] == "Pivot"
+    pivot, write = g.calls  # no new tab: beside the data, where they're looking
     table = pivot[1][0]["updateCells"]["rows"][0]["values"][0]["pivotTable"]
     assert table["source"]["sheetId"] == 7 and table["rows"][0]["sourceColumnOffset"] == 0
     assert table["values"][0] == {"summarizeFunction": "SUM", "sourceColumnOffset": 2}
-    assert pivot[1][0]["updateCells"]["start"]["sheetId"] == 99
+    assert pivot[1][0]["updateCells"]["start"] == {"sheetId": 7, "rowIndex": 0, "columnIndex": 4}
+    assert "beside the data on Data, from E1" in r.changes[0]
     assert write[1][0] == {"range": "'Data'!A5", "values": [["Total", "", "=SUM(C2:C4)"]]}
     assert "Sales 2,300" in r.changes[1]
 
@@ -872,3 +872,32 @@ async def test_a_sheet_in_another_google_account(monkeypatch):
         brain, "edit_document", {"task": "pivot of sales by region", "google": ["this sheet"]}
     )
     assert not started and "different Google account" in note and "me@example.com" in note
+
+
+async def test_google_sheet_pivot_on_its_own_tab_and_a_chart():
+    g = FakeGoogle()
+    edits = json.dumps(
+        {
+            "edits": [
+                {"file": 0, "op": "pivot", "group_by": "Region", "value": "Sales", "target": "Pivot"},
+                {"file": 0, "op": "chart", "labels": "Region", "values": "Sales"},
+            ]
+        }
+    )
+
+    async def ask(system, prompt):
+        return edits, 0.0
+
+    url = "https://docs.google.com/spreadsheets/d/abc123/edit"
+    r = await run_ledger("pivot on a new tab and a chart", files=[], google=g, google_refs=[url], ask=ask)
+    assert not r.problems
+    add, pivot, chart = g.calls
+    assert add[1][0]["addSheet"]["properties"]["title"] == "Pivot"
+    assert pivot[1][0]["updateCells"]["start"]["sheetId"] == 99
+    spec = chart[1][0]["addChart"]["chart"]["spec"]
+    assert spec["basicChart"]["chartType"] == "COLUMN"
+    series = spec["basicChart"]["series"][0]["series"]
+    assert series["aggregateType"] == "SUM"  # West appears twice: one bar, summed
+    assert series["sourceRange"]["sources"][0]["startColumnIndex"] == 2
+    anchor = chart[1][0]["addChart"]["chart"]["position"]["overlayPosition"]["anchorCell"]
+    assert anchor == {"sheetId": 7, "rowIndex": 0, "columnIndex": 4}  # beside the data

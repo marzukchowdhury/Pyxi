@@ -949,15 +949,20 @@ class GoogleSheet:
             if fn is None:
                 raise LedgerError("pivot agg should be sum, count or average.")
             width = max(len(r) for r in rows)
-            target = str(op.get("target") or "Pivot")[:90]
-            existing = {s["properties"]["title"] for s in self.meta.get("sheets", [])}
-            name_, n = target, 2
-            while name_ in existing:
-                name_, n = f"{target} {n}", n + 1
-            added = await self.google.sheets_batch(
-                self.id, [{"addSheet": {"properties": {"title": name_}}}]
-            )
-            new_id = added["replies"][0]["addSheet"]["properties"]["sheetId"]
+            if op.get("target"):  # they asked for it on its own tab
+                target = str(op["target"])[:90]
+                existing = {s["properties"]["title"] for s in self.meta.get("sheets", [])}
+                name_, n = target, 2
+                while name_ in existing:
+                    name_, n = f"{target} {n}", n + 1
+                added = await self.google.sheets_batch(
+                    self.id, [{"addSheet": {"properties": {"title": name_}}}]
+                )
+                new_id = added["replies"][0]["addSheet"]["properties"]["sheetId"]
+                at_row, at_col, where = 0, 0, f"on tab {name_}"
+            else:  # beside the data, where they're already looking (a new tab goes unseen)
+                new_id, at_row, at_col = sheet_id, head, width + 1
+                where = f"beside the data on {title}, from {get_column_letter(width + 2)}{head + 1}"
             pivot = {
                 "source": {
                     "sheetId": sheet_id,
@@ -978,15 +983,92 @@ class GoogleSheet:
                     {
                         "updateCells": {
                             "rows": [{"values": [{"pivotTable": pivot}]}],
-                            "start": {"sheetId": new_id, "rowIndex": 0, "columnIndex": 0},
+                            "start": {"sheetId": new_id, "rowIndex": at_row, "columnIndex": at_col},
                             "fields": "pivotTable",
                         }
                     }
                 ],
             )
+            await self.load()  # a chart in the same batch goes beside the pivot, not under it
             g_name = rows[head][g] if g < len(rows[head]) else get_column_letter(g + 1)
             v_name = rows[head][v] if v is not None and v < len(rows[head]) else "rows"
-            return f"Made a pivot table on tab {name_}: {agg} of {v_name} by {g_name}"
+            return f"Made a pivot table {where}: {agg} of {v_name} by {g_name}"
+        if name == "chart":
+            title, sheet_id, rows = self._tab(op.get("sheet"))
+            if not rows:
+                raise LedgerError(f"{title} is empty, so there's nothing to chart yet.")
+            head = self._header(rows)
+            lc = self._col(rows, op.get("labels") or "A", head) or 0
+            vc = self._col(rows, op.get("values"), head)
+            if vc is None:
+                raise LedgerError("chart needs values: the column to plot.")
+            last = len(rows)  # one past the last data row (the API's end is exclusive)
+            while last > head + 1 and str((rows[last - 1] or [""])[0]).strip().lower() in (
+                "total",
+                "totals",
+                "grand total",
+                "sum",
+            ):
+                last -= 1
+            while last > head + 1 and all(c in (None, "") for c in rows[last - 1][: vc + 1]):
+                last -= 1
+
+            def col(c: int) -> dict[str, Any]:
+                return {
+                    "sourceRange": {
+                        "sources": [
+                            {
+                                "sheetId": sheet_id,
+                                "startRowIndex": head,
+                                "endRowIndex": last,
+                                "startColumnIndex": c,
+                                "endColumnIndex": c + 1,
+                            }
+                        ]
+                    }
+                }
+
+            labels = [str(r[lc]) for r in rows[head + 1 : last] if len(r) > lc]
+            repeats = len(set(labels)) < len(labels)  # North twice: one bar per region, summed
+            series = col(vc) | ({"aggregateType": "SUM"} if repeats else {})
+            kind = str(op.get("type") or "bar").lower()
+            chart_title = str(op.get("title") or f"{rows[head][vc]} by {rows[head][lc]}")[:100]
+            if kind == "pie":
+                spec = {
+                    "title": chart_title,
+                    "pieChart": {
+                        "legendPosition": "RIGHT_LEGEND",
+                        "domain": col(lc),
+                        "series": series,
+                    },
+                }
+            else:
+                spec = {
+                    "title": chart_title,
+                    "basicChart": {
+                        "chartType": "LINE" if kind == "line" else "COLUMN",
+                        "legendPosition": "NO_LEGEND",
+                        "headerCount": 1,
+                        "domains": [{"domain": col(lc)}],
+                        "series": [{"series": series, "targetAxis": "LEFT_AXIS"}],
+                    },
+                }
+            free = max(len(r) for r in rows) + 1  # right of everything there (data, a pivot)
+            anchor = {"sheetId": sheet_id, "rowIndex": head, "columnIndex": free}
+            await self.google.sheets_batch(
+                self.id,
+                [
+                    {
+                        "addChart": {
+                            "chart": {
+                                "spec": spec,
+                                "position": {"overlayPosition": {"anchorCell": anchor}},
+                            }
+                        }
+                    }
+                ],
+            )
+            return f"Added a {kind} chart of {rows[head][vc]} by {rows[head][lc]} on {title}"
         if name == "format":
             title, sheet_id, _ = self._tab(op.get("sheet"))
             grid = _a1_grid(str(op.get("range") or "A1"), sheet_id)
@@ -1177,7 +1259,8 @@ class GoogleDoc:
 EDITS = """Edits you can use (each is a JSON object with "file": <file number> and "op"):
 Excel (.xlsx) and Google Sheets:
 - {"op": "totals_row", "sheet"?: name, "columns"?: ["B", "Amount"], "function"?: "SUM"|"AVERAGE"|"COUNT"|"MAX"|"MIN", "label"?: "Total"}  (finds the number columns and the last row itself)
-- {"op": "pivot", "sheet"?: name, "group_by": column header or letter, "value"?: column, "agg": "sum"|"count"|"average", "target"?: "Pivot"}  (a summary on a new sheet)
+- {"op": "pivot", "sheet"?: name, "group_by": column header or letter, "value"?: column, "agg": "sum"|"count"|"average", "target"?: "Pivot"}  (Google Sheets: beside the data, where they can see it; give "target" only when they asked for a new tab. Excel: on a new sheet)
+- {"op": "chart", "sheet"?: name, "labels": column, "values": column, "type": "bar"|"line"|"pie", "title"?: ".."}  (placed beside the data; repeated labels are summed)
 - {"op": "set_cells", "sheet"?: name, "cells": {"B5": 120, "C5": "=B5*1.13"}}
 - {"op": "append_row", "sheet"?: name, "values": [..]}
 - {"op": "format", "sheet"?: name, "range": "A1:D1", "bold"?: true, "number_format"?: "$#,##0.00", "fill"?: "#FFF2CC"}
@@ -1185,7 +1268,6 @@ Excel (.xlsx) and Google Sheets:
 Excel only:
 - {"op": "add_column", "sheet"?: name, "header": "Total", "formula": "=B{r}*C{r}"}  ({r} is each data row)
 - {"op": "make_table", "sheet"?: name}
-- {"op": "chart", "sheet"?: name, "labels": column, "values": column, "type": "bar"|"line"|"pie", "title"?: ".."}
 Word (.docx) and Google Docs ("after" is a paragraph number from the outline; leave it out for the end):
 - {"op": "add_heading", "text": "..", "level": 1, "after"?: 3}
 - {"op": "add_paragraph", "text": "..", "after"?: 3}
