@@ -20,6 +20,14 @@ export interface FileInfo {
   icon: string | null;
 }
 
+/** What the firefly shows: its mood, the voice level (0-1), and hidden while Pyxi takes its own
+ * screenshot. */
+export interface FireflyState {
+  mode: "idle" | "listening" | "thinking" | "acting" | "paused" | "driving";
+  level: number;
+  hidden: boolean;
+}
+
 export interface Bridge {
   electron: boolean;
   /** The brain's launch key: every request to the brain must carry it (see pyxi/brainkey.py). */
@@ -74,6 +82,11 @@ export interface Bridge {
   onSayStarted(fn: (key: string) => void): () => void;
   /** Hand the keyboard back to the app the user was in. */
   releaseFocus(): void;
+  /** The firefly window moves itself (top-left, screen DIP); only the firefly page may. */
+  fireflyMove(x: number, y: number): void;
+  /** The main screen's overlay tells the firefly Pyxi's mood and voice level. */
+  fireflyState(s: FireflyState): void;
+  onFireflyState(fn: (s: FireflyState) => void): () => void;
   hotkeys(): Promise<Record<"talk" | "panel" | "dismiss" | "privacy" | "stop" | "hold", string | null>>;
 }
 
@@ -96,6 +109,9 @@ function mockBridge(): Bridge {
     sayStarted: () => {},
     onSayStarted: noop,
     releaseFocus: () => {},
+    fireflyMove: () => {},
+    fireflyState: () => {},
+    onFireflyState: noop,
     electron: false,
     // Browser preview: pass the key of a brain started by hand (.pyxi/brain.key) as ?key=.
     brainKey: new URLSearchParams(location.search).get("key") ?? "",

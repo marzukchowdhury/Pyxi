@@ -1,0 +1,35 @@
+/* The firefly: its own small window (firefly.html), or drawn in the overlay in a browser preview. */
+:root { --fly: #ffc861; --fly-hi: #fff3cf; --spring: cubic-bezier(0.2, 0.9, 0.25, 1.15); --ease: cubic-bezier(0.2, 0.8, 0.2, 1); }
+html.firefly-page, html.firefly-page body, html.firefly-page #root { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; pointer-events: none; }
+/* Hidden for the instant Pyxi takes its own screenshot. */
+.ff-window.hidden { opacity: 0 !important; transition: none !important; }
+.ff-window { position: fixed; left: 0; top: 0; width: 160px; height: 160px; pointer-events: none; transition: opacity .3s var(--ease); }
+/* The core sits at the window's centre (80, 80): the bug box is placed so its core lands there. */
+.ff-root { position: absolute; left: 74px; top: 64px; will-change: transform; --level: 0; }
+.ff-root .presence-svg { position: absolute; left: -24px; top: -14px; overflow: visible; }
+.ff-core, .ff-wing, .ff-halo, .presence-ring, .ff-orbit { transform-box: fill-box; transform-origin: center; }
+.ff-core { fill: url(#ff-tail); filter: drop-shadow(0 0 0.8px rgba(40,24,0,.85)) drop-shadow(0 0 3px #ffd27a) drop-shadow(0 0 9px rgba(255,190,80,.8)); transition: fill .3s, opacity .3s; }
+.ff-halo { transition: opacity .3s var(--ease); }
+.ff-wing { fill: rgba(255,252,242,.5); stroke: rgba(60,45,20,.45); stroke-width: .45; transition: opacity .3s; }
+.ff-body { fill: #2b2416; stroke: rgba(255,236,190,.45); stroke-width: .45; }
+.ff-feeler { fill: none; stroke: #2b2416; stroke-width: .6; stroke-linecap: round; filter: drop-shadow(0 0 .6px rgba(255,236,190,.6)); }
+.ff-orbit { opacity: 0; transition: opacity .3s; }
+.ff-orbit .mote { fill: var(--fly-hi); filter: drop-shadow(0 0 3px var(--fly)); }
+.presence-ring { fill: none; stroke: var(--fly); stroke-width: .8; opacity: 0; transition: opacity .3s var(--ease); }
+/* The idle glow breathes from the frame loop (Firefly.tsx), not a 60 fps CSS animation. */
+.mode-listening .ff-halo { opacity: 1; }
+.mode-listening .ff-core { transform: scale(calc(1 + var(--level) * .45)); }
+.mode-thinking .ff-core { animation: ff-flicker .9s steps(1) infinite; }
+.mode-thinking .ff-orbit { opacity: 1; animation: ff-spin 1.1s linear infinite; }
+.mode-acting .ff-wing, .mode-driving .ff-wing { animation: ff-buzz .09s linear infinite alternate; }
+.mode-acting .presence-ring { opacity: .85; stroke-dasharray: 2 4.2; animation: ff-ring-in .5s var(--spring), ff-spin 9s linear infinite; }
+.mode-paused .ff-core { fill: #b9b4aa; filter: drop-shadow(0 0 0.8px rgba(0,0,0,.8)); opacity: .55; }
+.mode-paused .ff-halo { opacity: 0; }
+.mode-paused .ff-bug { opacity: .6; }
+/* Resting: the glow holds steady, so nothing is drawn at all. */
+.ff-root.resting .ff-halo { animation: none; opacity: .8; }
+.ff-root.resting .ff-core { animation: none; opacity: .92; }
+@keyframes ff-flicker { 0% { opacity: 1; } 18% { opacity: .55; } 30% { opacity: 1; } 62% { opacity: .7; } 74% { opacity: 1; } }
+@keyframes ff-buzz { to { transform: scaleY(.35); } }
+@keyframes ff-ring-in { from { transform: scale(.4); opacity: 0; } }
+@keyframes ff-spin { to { transform: rotate(360deg); } }

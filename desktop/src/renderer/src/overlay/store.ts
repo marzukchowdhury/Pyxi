@@ -78,6 +78,8 @@ interface OverlayState {
   paused: boolean;
   /** Background watching is on (the Memory Palace): a steady dot on the notch says so. */
   watching: boolean;
+  /** Pyxi is taking its own screenshot: everything it draws (the firefly too) steps aside. */
+  capturing: boolean;
   caption: { text: string; agent: string } | null;
   annotations: LiveAnnotation[];
   flyTo: { x: number; y: number; label: string | null; until: number } | null;
@@ -132,6 +134,7 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   state: "idle",
   paused: false,
   watching: false,
+  capturing: false,
   caption: null,
   annotations: [],
   flyTo: null,
@@ -290,7 +293,10 @@ function sceneOnThisDisplay(spec: SceneSpec, place?: [number, number, number, nu
 
 brain.onStatus((up) => {
   useOverlay.setState({ connected: up });
-  if (!up) document.documentElement.classList.remove("capturing");
+  if (!up) {
+    document.documentElement.classList.remove("capturing");
+    useOverlay.setState({ capturing: false });
+  }
 });
 
 let lineId = 0;
@@ -383,11 +389,16 @@ brain.on((e: BrainEvent) => {
       break;
     case "capture_hide":
       document.documentElement.classList.add("capturing");
+      useOverlay.setState({ capturing: true });
       // Never stay invisible if the "show" is lost (a reconnect mid-capture).
-      window.setTimeout(() => document.documentElement.classList.remove("capturing"), 1500);
+      window.setTimeout(() => {
+        document.documentElement.classList.remove("capturing");
+        useOverlay.setState({ capturing: false });
+      }, 1500);
       break;
     case "capture_show":
       document.documentElement.classList.remove("capturing");
+      useOverlay.setState({ capturing: false });
       break;
     case "capture":
       useOverlay.setState({ captureFlash: performance.now(), seeing: e.excluded ? "" : prettyApp(e.app) });

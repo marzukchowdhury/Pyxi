@@ -15,6 +15,7 @@ export default defineConfig({
         input: {
           overlay: resolve(__dirname, "src/renderer/overlay.html"),
           panel: resolve(__dirname, "src/renderer/panel.html"),
+          firefly: resolve(__dirname, "src/renderer/firefly.html"),
         },
       },
     },

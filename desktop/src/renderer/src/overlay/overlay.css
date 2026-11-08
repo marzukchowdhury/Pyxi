@@ -33,34 +33,8 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 /* ============================================================ presence */
 :root { --fly: #ffc861; --fly-hi: #fff3cf; }
 .presence { position: fixed; left: 0; top: 0; z-index: 50; will-change: transform; transition: opacity .3s var(--ease); --level: 0; }
-.presence-svg { position: absolute; left: -24px; top: -14px; overflow: visible; }
-.ff-core, .ff-wing, .ff-halo, .presence-ring, .ff-orbit { transform-box: fill-box; transform-origin: center; }
-.ff-core { fill: url(#ff-tail); filter: drop-shadow(0 0 0.8px rgba(40,24,0,.85)) drop-shadow(0 0 3px #ffd27a) drop-shadow(0 0 9px rgba(255,190,80,.8)); transition: fill .3s, opacity .3s; }
-.ff-halo { transition: opacity .3s var(--ease); }
-.ff-wing { fill: rgba(255,252,242,.5); stroke: rgba(60,45,20,.45); stroke-width: .45; transition: opacity .3s; }
-.ff-body { fill: #2b2416; stroke: rgba(255,236,190,.45); stroke-width: .45; }
-.ff-feeler { fill: none; stroke: #2b2416; stroke-width: .6; stroke-linecap: round; filter: drop-shadow(0 0 .6px rgba(255,236,190,.6)); }
-.ff-orbit { opacity: 0; transition: opacity .3s; }
-.ff-orbit .mote { fill: var(--fly-hi); filter: drop-shadow(0 0 3px var(--fly)); }
-.presence-ring { fill: none; stroke: var(--fly); stroke-width: .8; opacity: 0; transition: opacity .3s var(--ease); }
-.ff-trail circle { fill: var(--fly); filter: drop-shadow(0 0 3px rgba(255,190,80,.9)) !important; }
-.ff-trail.off { display: none; }
-
-/* The idle glow breathes from Presence's frame loop (30 a second), not a 60 fps CSS animation. */
-.mode-listening .ff-halo { opacity: 1; }
-.mode-listening .ff-core { transform: scale(calc(1 + var(--level) * .45)); }
-.mode-thinking .ff-core { animation: flicker .9s steps(1) infinite; }
-.mode-thinking .ff-orbit { opacity: 1; animation: spin 1.1s linear infinite; }
-.mode-acting .ff-wing, .mode-driving .ff-wing { animation: buzz .09s linear infinite alternate; }
-.mode-acting .presence-ring { opacity: .85; stroke-dasharray: 2 4.2; animation: ring-in .5s var(--spring), spin 9s linear infinite; }
-.mode-paused .ff-core { fill: #b9b4aa; filter: drop-shadow(0 0 0.8px rgba(0,0,0,.8)); opacity: .55; }
-.mode-paused .ff-halo { opacity: 0; }
-.mode-paused .ff-bug { opacity: .6; }
-/* Resting (Presence.tsx): the glow holds steady, so the overlay draws no frames at all. */
-.presence.resting .ff-halo { animation: none; opacity: .8; }
-.presence.resting .ff-core { animation: none; opacity: .92; }
+/* The firefly itself (bug, glow, trail, moods) is styled in shared/firefly.css: it has its own window. */
 @keyframes glow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
-@keyframes glow-core { 0%, 100% { opacity: .78; } 50% { opacity: 1; } }
 @keyframes flicker { 0% { opacity: 1; } 18% { opacity: .55; } 30% { opacity: 1; } 62% { opacity: .7; } 74% { opacity: 1; } }
 @keyframes buzz { to { transform: scaleY(.35); } }
 @keyframes breathe { 50% { opacity: .5; } }

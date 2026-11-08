@@ -74,6 +74,9 @@ const pretty = (accelerator: string | null) => (accelerator ?? "unavailable").re
 
 const overlays = new Map<number, BrowserWindow>();
 let panel: BrowserWindow | null = null;
+/** The firefly: its own small window that follows the cursor (see createFirefly). */
+let firefly: BrowserWindow | null = null;
+const FIREFLY_SIZE = 160;
 let tray: Tray | null = null;
 let brain: ChildProcess | null = null;
 let primaryId = 0;
@@ -132,13 +135,15 @@ const SAFE_PREFERENCES = {
   navigateOnDragDrop: false,
 } as const;
 
-function rendererUrl(page: "overlay" | "panel", query: Record<string, string>): string | null {
+type Page = "overlay" | "panel" | "firefly";
+
+function rendererUrl(page: Page, query: Record<string, string>): string | null {
   const dev = process.env.ELECTRON_RENDERER_URL;
   const qs = new URLSearchParams(query).toString();
   return dev ? `${dev}/${page}.html?${qs}` : null;
 }
 
-function loadPage(win: BrowserWindow, page: "overlay" | "panel", query: Record<string, string>): void {
+function loadPage(win: BrowserWindow, page: Page, query: Record<string, string>): void {
   const url = rendererUrl(page, query);
   if (url) void win.loadURL(url);
   else void win.loadFile(join(__dirname, `../renderer/${page}.html`), { query });
@@ -204,6 +209,70 @@ function createOverlay(d: Display): void {
       if (still && !overlays.has(d.id)) createOverlay(still);
     }, 600);
   });
+}
+
+/**
+ * The firefly lives in its own small window that moves with the cursor. Drawn inside the
+ * full-screen overlay, every frame of it made Windows recompose a transparent window the size of
+ * the screen (a fifth of a core while the mouse moved); moving a small window costs nearly
+ * nothing. It never takes the mouse or the keyboard, and it follows the screen-share setting.
+ */
+function createFirefly(): void {
+  const at = screen.getCursorScreenPoint();
+  const win = new BrowserWindow({
+    x: at.x,
+    y: at.y,
+    width: FIREFLY_SIZE,
+    height: FIREFLY_SIZE,
+    transparent: true,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    show: false,
+    backgroundColor: "#00000000",
+    webPreferences: { ...SAFE_PREFERENCES, backgroundThrottling: false },
+  });
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.setIgnoreMouseEvents(true);
+  win.setContentProtection(!shareVisible);
+  loadPage(win, "firefly", {});
+  // Where to appear before the mouse next moves (the cursor feed only sends changes).
+  win.webContents.on("did-finish-load", () => {
+    if (!win.isDestroyed()) win.webContents.send("cursor", screen.getCursorScreenPoint());
+  });
+  win.once("ready-to-show", () => {
+    if (!win.isDestroyed()) win.showInactive();
+  });
+  firefly = win;
+  win.webContents.on("render-process-gone", () => {
+    if (!win.isDestroyed()) win.reload();
+  });
+  win.on("minimize", () => {
+    setTimeout(() => {
+      if (win.isDestroyed()) return;
+      win.restore();
+      win.showInactive();
+      win.setAlwaysOnTop(true, "screen-saver");
+    }, 150);
+  });
+  win.on("closed", () => {
+    if (firefly === win) firefly = null;
+    if ((app as unknown as { quitting?: boolean }).quitting) return;
+    setTimeout(() => {
+      if (!firefly) createFirefly();
+    }, 600);
+  });
+}
+
+function liveFirefly(): BrowserWindow | null {
+  return firefly && !firefly.isDestroyed() && !firefly.webContents.isDestroyed() ? firefly : null;
 }
 
 /** Overlay windows that are still alive (closed ones are dropped as they're found). */
@@ -374,6 +443,7 @@ function startCursorFeed(): void {
       last = p;
       still = 0;
       for (const win of liveOverlays()) win.webContents.send("cursor", p);
+      liveFirefly()?.webContents.send("cursor", p);
     } else if (++still > 15 && timer) {
       clearInterval(timer);
       timer = null;
@@ -430,6 +500,7 @@ app.whenReady().then(async () => {
   primaryId = screen.getPrimaryDisplay().id;
   await ensureBrain();
   for (const d of screen.getAllDisplays()) createOverlay(d);
+  createFirefly();
   createPanel();
   startCursorFeed();
   // Monitors plugged in or out, a new main screen, or new scaling: every overlay's idea of its
@@ -442,6 +513,7 @@ app.whenReady().then(async () => {
       for (const win of overlays.values()) if (!win.isDestroyed()) win.destroy();
       overlays.clear();
       for (const d of screen.getAllDisplays()) createOverlay(d);
+      liveFirefly()?.moveTop(); // above the new overlays
     }, 500);
   };
   screen.on("display-added", rebuildOverlays);
@@ -646,6 +718,7 @@ ipcMain.handle("share-visible", () => shareVisible);
 ipcMain.on("set-share-visible", (_e, value: boolean) => {
   shareVisible = !!value;
   for (const win of liveOverlays()) win.setContentProtection(!shareVisible);
+  liveFirefly()?.setContentProtection(!shareVisible);
   try {
     mkdirSync(join(HOME, ".pyxi"), { recursive: true });
     writeFileSync(UI_PREFS, JSON.stringify({ shareVisible }));
@@ -653,6 +726,19 @@ ipcMain.on("set-share-visible", (_e, value: boolean) => {
     console.warn("[pyxi] couldn't save the screen-share setting:", err);
   }
   broadcast("share-visible", shareVisible);
+});
+// The firefly moves its own window (it runs the spring); only the firefly page may.
+ipcMain.on("firefly-move", (e, x: unknown, y: unknown) => {
+  const win = liveFirefly();
+  if (!win || e.sender !== win.webContents || typeof x !== "number" || typeof y !== "number") return;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  // setBounds, not setPosition: crossing to a screen with other scaling must not resize it.
+  win.setBounds({ x: Math.round(x), y: Math.round(y), width: FIREFLY_SIZE, height: FIREFLY_SIZE });
+});
+// Pyxi's mood and voice level for the firefly, from the main screen's overlay.
+ipcMain.on("firefly-state", (e, s: unknown) => {
+  if (!liveOverlays().some((w) => w.webContents === e.sender) || typeof s !== "object" || s === null) return;
+  liveFirefly()?.webContents.send("firefly-state", s);
 });
 ipcMain.handle("hotkeys", () => ({ ...activeHotkeys, hold: holdToTalk ? "Control+Alt" : null }));
 // The notch's text box needs keyboard focus, which a non-focusable overlay can't take on its own.

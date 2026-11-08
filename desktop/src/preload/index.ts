@@ -51,4 +51,7 @@ contextBridge.exposeInMainWorld("pyxiBridge", {
   sayStarted: (key: string) => ipcRenderer.send("say-started", key),
   onSayStarted: (fn: Listener<string>) => on("say-started", fn),
   releaseFocus: () => ipcRenderer.send("release-focus"),
+  fireflyMove: (x: number, y: number) => ipcRenderer.send("firefly-move", x, y),
+  fireflyState: (s: unknown) => ipcRenderer.send("firefly-state", s),
+  onFireflyState: (fn: Listener<unknown>) => on("firefly-state", fn),
 });
