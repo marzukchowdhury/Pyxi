@@ -108,6 +108,8 @@ def describe_failure(exc: BaseException) -> str:
         r"budget[ _](exceeded|exhausted|reached)|cost limit|max_cost", low
     ):
         return "I stopped before going over the spending limit for this job."
+    if "switched off in Pyxi's Google Cloud project" in text:
+        return text.strip()[:300]  # says what to turn on, with the link: keep it whole
     first = text.strip().splitlines()[0] if text.strip() else type(exc).__name__
     return first[:160]
 

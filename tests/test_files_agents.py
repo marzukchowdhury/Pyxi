@@ -784,3 +784,30 @@ async def test_sample_data_then_a_pivot_on_an_empty_sheet_in_one_go():
     r = await run_ledger("sample sales and a pivot", files=[], google=g, google_refs=[url], ask=ask)
     assert not r.problems and len(asked) == 1  # one model call, nothing to fix afterwards
     assert any(c[0] == "batch" and "updateCells" in c[1][0] for c in g.calls)  # the pivot
+
+
+def test_a_switched_off_google_api_says_which_and_where_to_turn_it_on():
+    from pyxi.agents.jobs import describe_failure
+    from pyxi.companion.brain import friendly_error
+    from pyxi.connectors.google import google_error
+
+    body = json.dumps(
+        {
+            "error": {
+                "code": 403,
+                "message": "Google Sheets API has not been used in project 83793709681 before or "
+                "it is disabled. Enable it by visiting https://console.developers.google.com/apis/"
+                "api/sheets.googleapis.com/overview?project=83793709681 then retry.",
+                "status": "PERMISSION_DENIED",
+                "details": [{"reason": "SERVICE_DISABLED"}],
+            }
+        }
+    )
+    said = google_error(403, body)
+    assert said.startswith("The Google Sheets API is switched off in Pyxi's Google Cloud project")
+    assert "console.cloud.google.com/apis/library/sheets.googleapis.com?project=83793709681" in said
+    assert "{" not in said
+    assert describe_failure(RuntimeError(said)) == said  # the notification keeps all of it
+    assert friendly_error(RuntimeError(said)) == said
+    other = google_error(404, json.dumps({"error": {"message": "Requested entity was not found."}}))
+    assert other == "Google said 404: Requested entity was not found."

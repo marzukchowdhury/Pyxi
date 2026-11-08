@@ -2992,6 +2992,8 @@ def friendly_error(exc: BaseException) -> str:
     )
     if beta:
         return beta.group(1).strip()
+    if "is switched off in Pyxi's Google Cloud project" in text:
+        return text[:260]  # already says what to do, with the link
     m = re.search(r'"message":\s*"([^"]{3,140})"', text)
     detail = m.group(1) if m else ""
     service = "Google" if "Google" in text else "The service"

@@ -60,6 +60,34 @@ DRIVE = "https://www.googleapis.com/drive/v3/files"
 SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 
 
+def google_error(status: int, body: str) -> str:
+    """Google's refusal in words someone can act on. An API switched off in the Google Cloud
+    project (Sheets was added after the first setup guide) says which one and where to turn it
+    on, instead of 'Google said 403: {'."""
+    try:
+        err = json.loads(body).get("error") or {}
+    except (ValueError, AttributeError):
+        err = {}
+    message = str(err.get("message") or body).strip()
+    reasons = {str(d.get("reason")) for d in err.get("details") or [] if isinstance(d, dict)}
+    if "SERVICE_DISABLED" in reasons or "has not been used in project" in message:
+        api = re.search(r"^(.+? API) has not been used", message)
+        service = re.search(r"\b([a-z]+\.googleapis\.com)\b", message)
+        project = re.search(r"project (\d+)", message)
+        name = api.group(1) if api else "A Google API Pyxi needs"
+        link = (
+            f"https://console.cloud.google.com/apis/library/{service.group(1)}"
+            + (f"?project={project.group(1)}" if project else "")
+            if service
+            else "https://console.cloud.google.com/apis/library"
+        )
+        return (
+            f"The {name} is switched off in Pyxi's Google Cloud project. Turn it on at {link} "
+            "(press Enable), wait a minute, then ask again."
+        )
+    return f"Google said {status}: {message[:200]}"
+
+
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
@@ -474,7 +502,7 @@ class GoogleConnector(Connector):
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.request(method, url, headers=headers, **kw)
         if r.status_code >= 400:
-            raise RuntimeError(f"Google said {r.status_code}: {r.text[:200]}")
+            raise RuntimeError(google_error(r.status_code, r.text))
         return r.json() if r.content else {}
 
     # ------------------------------------------------------------------ gmail
