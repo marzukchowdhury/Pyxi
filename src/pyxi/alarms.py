@@ -185,6 +185,19 @@ _CANCEL = re.compile(
 )
 
 
+_LIST = re.compile(
+    _LEAD + r"(?:what|which|list|show me|tell me)?\s*(?:are\s+)?(?:my\s+)?(?:alarms|timers)(?:\s+(?:do i have|have i got|are set|are on))?"
+    r"|(?:do i have|have i got|are there) (?:any )?(?:alarms|timers)(?: set| on)?" + r"[\s.!?]*$",
+    re.I,
+)
+
+
+def list_request(text: str) -> bool:
+    """'What alarms do I have?', 'list my alarms', 'do I have any timers?'"""
+    t = " ".join(text.split())
+    return bool(_LIST.match(t)) or bool(re.match(r"(?i)^\W*(?:pyxi,?\s+)?what alarms do i have\b", t))
+
+
 def cancel_request(text: str) -> str | None:
     """'Cancel my 6:30 alarm' -> '06:30' (24-hour, or '6:30' with no am/pm: either half of the day)."""
     m = _CANCEL.match(" ".join(text.split()))

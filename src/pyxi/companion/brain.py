@@ -320,6 +320,27 @@ class Brain:
         await self.hub.emit("routines", routines=self.routines.public())
         self._speak(f"{alarm.line(now)} Keep the PC awake and I'll ring.")
 
+    def _list_alarms(self) -> None:
+        """'What alarms do I have?': read straight from the routines and running timers."""
+        now = datetime.now()
+        rows = []
+        for r in sorted((r for r in self.routines.items if r.kind == "alarm" and r.enabled), key=lambda r: r.next_run):
+            at = datetime.fromtimestamp(r.next_run)
+            day = "today" if at.date() == now.date() else "tomorrow" if at.date() == (now + timedelta(days=1)).date() else f"{at:%A}"
+            repeat = "" if r.on else f", {r.describe().split(' at ')[0]}"
+            rows.append(f"{alarms.spoken_time(at)} {day}" + (f" ({r.message})" if r.message else "") + repeat)
+        timers = [j.task for j in self.jobs.jobs.values() if j.role == "reminder" and j.status == "running"]
+        self._calls.append({"round": 1, "tool": "list_alarms", "arguments": {}, "instant": True})
+        if not rows and not timers:
+            self._speak("No alarms or timers set.")
+            return
+        parts = []
+        if rows:
+            parts.append(("Your alarm: " if len(rows) == 1 else f"{len(rows)} alarms: ") + "; ".join(rows) + ".")
+        if timers:
+            parts.append(("One timer running: " if len(timers) == 1 else f"{len(timers)} timers running: ") + "; ".join(timers) + ".")
+        self._speak(" ".join(parts))
+
     async def _cancel_alarm(self, which: str) -> None:
         """'Cancel my 6:30 alarm': that alarm goes at once (with no am/pm, either 6:30)."""
         if ":" in which and len(which.split(":")[0]) == 2:
@@ -1774,6 +1795,8 @@ class Brain:
                         await self._set_timer(remind)
                     else:
                         await self._set_alarm(remind)
+                elif not synthetic and alarms.list_request(user_text):
+                    self._list_alarms()
                 elif not synthetic and (which := alarms.cancel_request(user_text)) is not None:
                     await self._cancel_alarm(which)
                 elif not synthetic and (alarm := alarms.alarm_request(user_text)) is not None:

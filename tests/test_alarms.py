@@ -190,3 +190,18 @@ async def test_cancel_an_alarm_by_its_time_is_instant(settings) -> None:
     assert said[-1] == "Done, your 6:30 AM alarm is cancelled." and not b.routines.items
     await b.turn("Cancel my 9:15 alarm.")
     assert said[-1].startswith("There's no 9:15 AM alarm.")
+
+
+async def test_what_alarms_do_i_have_is_instant(settings) -> None:
+    from pyxi.alarms import list_request
+
+    assert list_request("What alarms do I have?") and list_request("list my alarms")
+    assert not list_request("set an alarm for 7")
+    b = Brain(settings, Hub(), llm=DemoLLM(), screen=FakeScreen())
+    said: list[str] = []
+    b._speak = lambda text, **kw: said.append(text)  # type: ignore[method-assign]
+    await b.turn("What alarms do I have?")
+    assert said[-1] == "No alarms or timers set."
+    await b.turn("set an alarm for 6:30 am tomorrow")
+    await b.turn("What alarms do I have?")
+    assert said[-1].startswith("Your alarm: 6:30 AM")
