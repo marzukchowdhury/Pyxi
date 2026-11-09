@@ -166,3 +166,27 @@ def test_number_words_in_timers() -> None:
     assert timer_request("Pyxi, set a timer for two minutes.").seconds == 120
     assert timer_request("set a five minute timer").seconds == 300
     assert timer_request("timer for twenty-five minutes").seconds == 1500
+
+
+def test_tomorrow_after_midnight_is_the_coming_morning() -> None:
+    late = datetime(2026, 11, 9, 0, 30)
+    a = alarm_request("Wake me up at 6:30 tomorrow.", late)
+    assert (a.at.day, a.at.hour, a.at.minute) == (9, 6, 30)
+    assert a.line(late) == "Alarm set for 6:30 AM this morning, in about 6 hours."
+    assert alarm_request("set an alarm for 6 pm tomorrow", late).at.day == 10
+
+
+async def test_cancel_an_alarm_by_its_time_is_instant(settings) -> None:
+    from pyxi.alarms import cancel_request
+
+    assert cancel_request("Cancel my 6:30 alarm.") == "6:30"
+    assert cancel_request("turn off my 5:15 pm alarm") == "17:15"
+    assert cancel_request("cancel my meeting") is None
+    b = Brain(settings, Hub(), llm=DemoLLM(), screen=FakeScreen())
+    said: list[str] = []
+    b._speak = lambda text, **kw: said.append(text)  # type: ignore[method-assign]
+    await b.turn("set an alarm for 6:30 am tomorrow")
+    await b.turn("Cancel my 6:30 alarm.")
+    assert said[-1] == "Done, your 6:30 AM alarm is cancelled." and not b.routines.items
+    await b.turn("Cancel my 9:15 alarm.")
+    assert said[-1].startswith("There's no 9:15 AM alarm.")

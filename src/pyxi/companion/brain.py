@@ -320,6 +320,26 @@ class Brain:
         await self.hub.emit("routines", routines=self.routines.public())
         self._speak(f"{alarm.line(now)} Keep the PC awake and I'll ring.")
 
+    async def _cancel_alarm(self, which: str) -> None:
+        """'Cancel my 6:30 alarm': that alarm goes at once (with no am/pm, either 6:30)."""
+        if ":" in which and len(which.split(":")[0]) == 2:
+            times = {which}
+        else:
+            h, m = (int(x) for x in which.split(":"))
+            times = {f"{h % 24:02d}:{m:02d}", f"{(h + 12) % 24:02d}:{m:02d}"}
+        gone = [r for r in self.routines.items if r.kind == "alarm" and r.time in times]
+        for r in gone:
+            self.routines.remove(r.id)
+        self._calls.append({"round": 1, "tool": "cancel_alarm", "arguments": {"time": which}, "instant": True})
+        await self.hub.emit("routines", routines=self.routines.public())
+        when = alarms.spoken_time(datetime.strptime(sorted(times)[0], "%H:%M"))
+        if not gone:
+            left = [r for r in self.routines.items if r.kind == "alarm"]
+            others = ", ".join(sorted({alarms.spoken_time(datetime.strptime(r.time or "00:00", "%H:%M")) for r in left}))
+            self._speak(f"There's no {when} alarm." + (f" You've got {others}." if others else " You've no alarms set."))
+            return
+        self._speak(f"Done, your {when} alarm is cancelled." if len(gone) == 1 else f"Done, I cancelled {len(gone)} alarms at {when}.")
+
     async def _set_timer(self, timer: alarms.Timer) -> None:
         """'Set a timer for 10 minutes': shows in the task tray, rings when it's up, and Stop
         everything cancels it."""
@@ -1754,6 +1774,8 @@ class Brain:
                         await self._set_timer(remind)
                     else:
                         await self._set_alarm(remind)
+                elif not synthetic and (which := alarms.cancel_request(user_text)) is not None:
+                    await self._cancel_alarm(which)
                 elif not synthetic and (alarm := alarms.alarm_request(user_text)) is not None:
                     await self._set_alarm(alarm)  # about a second: no model, no Clock app
                 elif not synthetic and (timer := alarms.timer_request(user_text)) is not None:

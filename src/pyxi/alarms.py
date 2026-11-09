@@ -57,10 +57,14 @@ class Alarm:
     at: datetime
     label: str = ""
     passed_today: bool = False  # they said today, but that time had gone: it's tomorrow
+    small_hours: bool = False  # "tomorrow" said after midnight: the morning that's coming
 
     def line(self, now: datetime) -> str:
         if self.passed_today:
             return f"{spoken_time(self.at)} has already gone today, so it's set for tomorrow."
+        if self.small_hours:
+            hours = round((self.at - now).total_seconds() / 3600)
+            return f"Alarm set for {spoken_time(self.at)} this morning, in about {hours} hour{'s' if hours != 1 else ''}."
         day = "today" if self.at.date() == now.date() else "tomorrow" if self.at.date() == (now + timedelta(days=1)).date() else self.at.strftime("%A")
         return f"Alarm set for {spoken_time(self.at)} {day}."
 
@@ -117,6 +121,10 @@ def alarm_request(text: str, now: datetime | None = None) -> Alarm | None:
     elif ampm == "am" and h == 12:
         h = 0
     choices = [h] if ampm or h > 12 or h == 0 else [h, h + 12 if h < 12 else h - 12]
+    # Past midnight, "tomorrow at 6:30" means the morning that's coming, not the day after.
+    small_hours = day == "tomorrow" and now.hour < 5 and (ampm == "am" or (not ampm and h < 12))
+    if small_hours:
+        day = "today"
     base = now.date() + timedelta(days=1) if day == "tomorrow" else now.date()
     candidates = []
     for hour in choices:
@@ -126,8 +134,10 @@ def alarm_request(text: str, now: datetime | None = None) -> Alarm | None:
         candidates.append(at)
     # "Alarm for 7" with no am/pm: the next 7 o'clock, morning first when it's tomorrow.
     at = min(candidates) if day != "tomorrow" else candidates[0]
-    passed = day == "today" and at.date() != now.date()
-    return Alarm(at=at, label=(m.group("label") or "").strip(), passed_today=passed)
+    passed = day == "today" and at.date() != now.date() and not small_hours
+    if small_hours and at.date() != now.date():
+        small_hours = False  # that time has already gone this morning too: it really is tomorrow
+    return Alarm(at=at, label=(m.group("label") or "").strip(), passed_today=passed, small_hours=small_hours)
 
 
 _SPAN = r"(?P<n>\d+(?:\.\d+)?|an?|half an?|" + _NUMS + r")\s*(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?)"
@@ -166,6 +176,29 @@ def reminder_request(text: str, now: datetime | None = None) -> Timer | Alarm | 
         if a is not None:
             return Alarm(at=a.at, label=m.group("label").strip(), passed_today=a.passed_today)
     return None
+
+
+_CANCEL = re.compile(
+    _LEAD + r"(?:cancel|delete|remove|turn off|stop|get rid of)\s+(?:my\s+|the\s+)?" + _TIME
+    + r"\s+alarm(?:\s+(?:for\s+)?(?:tomorrow|today|this morning))?[\s.!?]*$",
+    re.I,
+)
+
+
+def cancel_request(text: str) -> str | None:
+    """'Cancel my 6:30 alarm' -> '06:30' (24-hour, or '6:30' with no am/pm: either half of the day)."""
+    m = _CANCEL.match(" ".join(text.split()))
+    if not m:
+        return None
+    h, mins = int(m.group("h")), int(m.group("m") or 0)
+    ampm = (m.group("ampm") or "").replace(".", "").replace(" ", "").lower()
+    if ampm == "pm" and h < 12:
+        h += 12
+    elif ampm == "am" and h == 12:
+        h = 0
+    if not (0 <= h <= 23 and 0 <= mins <= 59):
+        return None
+    return f"{h:02d}:{mins:02d}" if ampm or h > 12 else f"{h}:{mins:02d}"
 
 
 def timer_request(text: str) -> Timer | None:
