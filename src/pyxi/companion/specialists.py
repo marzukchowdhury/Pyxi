@@ -132,8 +132,9 @@ FLASHCARDS = ToolSpec(
 
 QUIZ = ToolSpec(
     "quiz",
-    "Quiz them out loud from their flashcards, one question per turn. action 'start' (from the "
-    "latest deck, or `deck`: a topic or file name), 'again' (only the ones they missed), "
+    "Quiz them out loud, one question per turn. action 'start' (from the latest deck, or "
+    "`deck`: a topic or file name; a topic with no flashcards gets a short deck from general "
+    "knowledge, so 'quiz me on the heart' just works), 'again' (only the ones they missed), "
     "'answer' (after they reply: `right` true if it means the same as the card's answer, "
     "generous with wording, strict on facts; `said` is what they said), 'stop'. The result "
     "tells you what to say next. Never say the answer before they've tried.",
@@ -478,6 +479,38 @@ async def after_meeting(brain: Brain, job: Job) -> bool:
 
 
 # ---------------------------------------------------------------------------------- Sage
+async def _topic_deck(brain: Brain, topic: str, n: int) -> Any:
+    """A few cards on a well-known topic from the model's own knowledge (one quick call)."""
+    from otto.llm.base import Message
+
+    from pyxi.agents import sage
+
+    n = max(3, min(n, 10))
+    try:
+        resp = await brain.llm.complete(
+            system=sage.SYSTEM,
+            messages=[
+                Message.user(
+                    f"No notes: use well-established facts only. About {n} cards (and no quiz "
+                    f"questions) on: {topic}. Short, exam-style questions; answers of one sentence."
+                )
+            ],
+            max_tokens=1500,
+        )
+    except Exception:
+        log.exception("couldn't make a deck on %s", topic)
+        return None
+    title, cards, _ = sage.parse(resp.text)
+    if not cards:
+        return None
+    deck = sage.Deck(title=title or topic, source=f"{topic}.topic", cards=cards[:n])
+    try:
+        sage.save_deck(brain.settings.data_dir, deck)  # "quiz me again" finds it later
+    except Exception:
+        log.warning("couldn't save the %s deck", topic, exc_info=True)
+    return deck
+
+
 async def _study(brain: Brain, args: dict[str, Any]) -> str:
     from pyxi.agents import sage
 
@@ -511,11 +544,16 @@ async def _study(brain: Brain, args: dict[str, Any]) -> str:
         if action == "again" and quiz and quiz.missed:
             quiz = sage.Quiz.start(quiz.deck, len(quiz.missed), only=list(quiz.missed))
         else:
-            deck = sage.find_deck(brain.settings.data_dir, str(args.get("deck") or ""))
+            topic = str(args.get("deck") or "").strip()
+            deck = sage.find_deck(brain.settings.data_dir, topic)
+            if (deck is None or not deck.cards) and topic:
+                # "Quiz me on the heart" with no notes: a short deck from what's well known,
+                # made now, so they're quizzed instead of told to find their slides first.
+                deck = await _topic_deck(brain, topic, int(args.get("questions") or 5))
             if deck is None or not deck.cards:
                 return (
-                    "quiz: there are no flashcards yet. Offer to make some from their slides or "
-                    "notes (action 'make' with the file)."
+                    "quiz: there are no flashcards yet and no topic was named. Ask what to be "
+                    "quizzed on, or offer to make cards from their slides or notes."
                 )
             quiz = sage.Quiz.start(deck, int(args.get("questions") or 10))
         brain.study_quiz = quiz

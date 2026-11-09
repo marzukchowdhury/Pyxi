@@ -239,3 +239,26 @@ def test_the_found_file_is_named_not_spelled_out_as_a_path(tmp_path):
     rep = trace.report(trace.best_first([screen, file]), "lease", ["screen history", "files"])
     assert str(p) not in rep["body"] and rep["body"].startswith('On screen in Adobe Acrobat: "Lease renewal.pdf",')
     assert str(p) in rep["summary"]  # the model still has the path
+
+
+async def test_quiz_on_a_topic_without_notes_makes_a_deck(settings):
+    """Night run: 'Quiz me on the heart' answered 'no flashcards yet, point me at your slides'."""
+    from conftest import FakeScreen
+
+    from pyxi.companion import specialists
+    from pyxi.companion.brain import Brain
+    from pyxi.demo import DemoLLM
+    from pyxi.hub import Hub
+
+    class Cards(DemoLLM):
+        async def complete(self, *a, **k):
+            from types import SimpleNamespace
+
+            from otto.llm.base import Usage
+
+            text = '{"title": "The heart", "cards": [{"q": "How many chambers?", "a": "Four."}, {"q": "Which side pumps to the lungs?", "a": "The right."}, {"q": "What stops backflow?", "a": "Valves."}]}'
+            return SimpleNamespace(text=text, usage=Usage(), tool_calls=[])
+
+    b = Brain(settings, Hub(), llm=Cards(), screen=FakeScreen())
+    out = await specialists.handle(b, "quiz", {"action": "start", "deck": "the heart", "questions": 3})
+    assert out.startswith("quiz: on The heart, 3 questions") and "How many chambers?" in out
