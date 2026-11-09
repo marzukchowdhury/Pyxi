@@ -15,6 +15,7 @@
 import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { bridge, keysOf } from "../shared/bridge";
 import { installPanelStyles } from "./panelStyles";
+import { Routines } from "../panel/Connections";
 import { Chat, Gallery, Palace, Settings, type Tab, TABS, Team } from "../panel/Panel";
 import { Activity } from "../panel/Activity";
 import { VoiceStudio } from "../panel/VoiceStudio";
@@ -171,6 +172,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     bridge.focusOverlay(); // so its text boxes take typing
   };
   useEffect(() => bridge.onNotchToggle(() => (full ? setFull(false) : openFull())), [full]);
+  useEffect(() => bridge.onNotchOpen((t) => openFull(t as Tab)), []);
   useEffect(() => {
     if (!full) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
@@ -396,6 +398,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
               <main className="body notch-body">
                 {tab === "chat" && <Chat />}
                 {tab === "team" && <Team />}
+                {tab === "routines" && <Routines />}
                 {tab === "palace" && <Palace />}
                 {tab === "activity" && <Activity />}
                 {tab === "gallery" && <Gallery />}

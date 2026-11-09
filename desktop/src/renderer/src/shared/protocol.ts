@@ -486,6 +486,9 @@ export type ClientMessage =
   | { type: "connectors" }
   | { type: "routines" }
   | { type: "routine_delete"; id: string }
+  | { type: "routine_add"; task: string; days: string[]; time: string; every_minutes: number | null }
+  | { type: "routine_toggle"; id: string; enabled: boolean }
+  | { type: "routine_run"; id: string }
   | { type: "connect"; id: string }
   | { type: "disconnect"; id: string }
   | { type: "guide_cancel" }

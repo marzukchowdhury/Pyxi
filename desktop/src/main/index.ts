@@ -13,7 +13,8 @@ import { existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync 
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
-import { startUpdates } from "./updates";
+import { trayTemplate } from "./trayMenu";
+import { checkNow, startUpdates } from "./updates";
 import {
   app,
   BrowserWindow,
@@ -327,6 +328,48 @@ function toggleNotch(): void {
   if (win && !win.isDestroyed()) win.webContents.send("notch-toggle");
 }
 
+/** The notch, unfolded on one of its tabs (the tray's "Open Settings"). */
+function openNotchOn(tab: string): void {
+  const win = overlays.get(primaryId);
+  if (win && !win.isDestroyed()) win.webContents.send("notch-open", tab);
+}
+
+let paused = false;
+/** Pause Pyxi: it stops looking at the screen until resumed (the privacy hotkey does the same). */
+function togglePause(): void {
+  paused = !paused;
+  broadcast("privacy-toggle");
+  buildTrayMenu();
+}
+
+function buildTrayMenu(): void {
+  if (!tray) return;
+  tray.setContextMenu(
+    Menu.buildFromTemplate(
+      trayTemplate({
+        version: app.getVersion(),
+        hotkey: (name) => pretty(activeHotkeys[name]),
+        paused,
+        muted,
+        openPyxi: toggleNotch,
+        openSettings: () => openNotchOn("settings"),
+        togglePause,
+        setMuted: (value) => {
+          muted = value;
+          broadcast("mute", muted);
+        },
+        stopEverything: () => void stopEverything(),
+        openUrl: (url) => void shell.openExternal(url),
+        checkForUpdates: async () => {
+          const said = await checkNow();
+          new Notification({ title: "Pyxi updates", body: said }).show();
+        },
+        quit: () => app.quit(),
+      }),
+    ),
+  );
+}
+
 /** The old separate panel window, still available from the tray for people who like it. */
 function togglePanel(): void {
   if (!panel) return;
@@ -546,33 +589,14 @@ app.whenReady().then(async () => {
     talk: () => broadcast("ptt"),
     panel: toggleNotch,
     dismiss: () => broadcast("dismiss"),
-    privacy: () => broadcast("privacy-toggle"),
+    privacy: togglePause,
     stop: () => void stopEverything(),
   });
 
   tray = new Tray(trayIcon());
   tray.setToolTip("Pyxi");
   tray.on("click", toggleNotch);
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: `Open Pyxi  (${pretty(activeHotkeys.panel)})`, click: toggleNotch },
-      { label: "Open as a separate window", click: togglePanel },
-      { label: `Talk  (${pretty(activeHotkeys.talk)})`, click: () => broadcast("ptt") },
-      { label: `Dismiss drawings  (${pretty(activeHotkeys.dismiss)})`, click: () => broadcast("dismiss") },
-      { label: `Stop everything  (${pretty(activeHotkeys.stop)})`, click: () => void stopEverything() },
-      {
-        label: "Mute Pyxi's voice",
-        type: "checkbox",
-        checked: muted,
-        click: (item) => {
-          muted = item.checked;
-          broadcast("mute", muted);
-        },
-      },
-      { type: "separator" },
-      { label: "Quit Pyxi", click: () => app.quit() },
-    ]),
-  );
+  buildTrayMenu();
   // No window pops up at launch: the notch on the top edge is the whole interface.
 });
 

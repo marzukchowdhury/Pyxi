@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld("pyxiBridge", {
   onPrivacyToggle: (fn: Listener<void>) => on("privacy-toggle", fn),
   onMuteToggle: (fn: Listener<boolean>) => on("mute", fn),
   onNotchToggle: (fn: Listener<void>) => on("notch-toggle", fn),
+  onNotchOpen: (fn: Listener<string>) => on("notch-open", fn),
   shareVisible: () => ipcRenderer.invoke("share-visible"),
   setShareVisible: (value: boolean) => ipcRenderer.send("set-share-visible", value),
   onShareVisible: (fn: Listener<boolean>) => on("share-visible", fn),

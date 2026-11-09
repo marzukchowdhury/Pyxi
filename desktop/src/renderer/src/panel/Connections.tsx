@@ -55,26 +55,92 @@ export function Connections() {
 }
 
 /** Routines Pyxi runs on a schedule while it's open. Ask for one in plain words. */
+const DAY_CHOICES: [string, string][] = [["every day", "Every day"], ["weekdays", "Weekdays"], ["weekends", "Weekends"]];
+const ONE_DAY: [string, string][] = [["mon", "M"], ["tue", "T"], ["wed", "W"], ["thu", "T"], ["fri", "F"], ["sat", "S"], ["sun", "S"]];
+const IDEAS = [
+  "Check my email for anything from my professor and tell me",
+  "Tell me what's on my calendar today",
+  "Remind me to drink some water",
+];
+
+/** The Routines tab: what Pyxi does on a schedule. Set one up here or just ask Pyxi out loud. */
 export function Routines() {
   const list = usePanel((s) => s.routines);
+  const [task, setTask] = useState("");
+  const [days, setDays] = useState<string[]>(["every day"]);
+  const [time, setTime] = useState("09:00");
+  const [hourly, setHourly] = useState(false);
   useEffect(() => brain.send({ type: "routines" }), []);
-  if (!list) return null;
-  if (!list.length)
-    return <p className="muted">None yet. Try: "Every weekday at 9, check my email for anything from my professor and tell me."</p>;
+  const pick = (d: string) =>
+    setDays((now) => {
+      if (DAY_CHOICES.some(([id]) => id === d)) return [d];
+      const single = now.filter((x) => !DAY_CHOICES.some(([id]) => id === x));
+      const next = single.includes(d) ? single.filter((x) => x !== d) : [...single, d];
+      return next.length ? next : ["every day"];
+    });
+  const add = () => {
+    if (!task.trim()) return;
+    brain.send({ type: "routine_add", task: task.trim(), days, time, every_minutes: hourly ? 60 : null });
+    setTask("");
+  };
   return (
-    <div className="connections">
-      {list.map((r) => (
-        <div key={r.id} className="conn">
-          <div className="conn-row">
-            <span className="conn-glyph g-routine"><Clock /></span>
-            <div className="conn-text">
-              <b>{r.task}</b>
-              <span>{r.when}, next {new Date(r.next_run * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}</span>
-            </div>
-            <button className="ghost" onClick={() => brain.send({ type: "routine_delete", id: r.id })}>Delete</button>
-          </div>
+    <div className="routines">
+      <div className="routine-form">
+        <input
+          value={task}
+          placeholder="What should Pyxi do?"
+          onChange={(e) => setTask(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+        />
+        <div className="chips-row">
+          {DAY_CHOICES.map(([id, label]) => (
+            <button key={id} className={days.includes(id) ? "on" : ""} onClick={() => pick(id)}>{label}</button>
+          ))}
         </div>
-      ))}
+        <div className="chips-row days">
+          {ONE_DAY.map(([id, label]) => (
+            <button key={id} title={id} className={days.includes(id) ? "on" : ""} onClick={() => pick(id)}>{label}</button>
+          ))}
+        </div>
+        <div className="routine-when">
+          <label><input type="checkbox" checked={hourly} onChange={(e) => setHourly(e.target.checked)} /> Every hour</label>
+          {!hourly && <input type="time" value={time} onChange={(e) => setTime(e.target.value)} />}
+          <button className="primary" disabled={!task.trim()} onClick={add}>Add routine</button>
+        </div>
+        {!task && (
+          <div className="routine-ideas">
+            {IDEAS.map((idea) => (
+              <button key={idea} className="ghost" onClick={() => setTask(idea)}>{idea}</button>
+            ))}
+          </div>
+        )}
+      </div>
+      {list && !list.length && <p className="muted">None yet. Add one above, or just ask Pyxi: "Every weekday at 9, check my email for anything from my professor."</p>}
+      {list && list.length > 0 && (
+        <div className="connections">
+          {list.map((r) => (
+            <div key={r.id} className={`conn ${r.enabled ? "on" : "off"}`}>
+              <div className="conn-row">
+                <span className="conn-glyph g-routine"><Clock /></span>
+                <div className="conn-text">
+                  <b>{r.task}</b>
+                  <span>
+                    {r.when}
+                    {r.enabled
+                      ? `, next ${new Date(r.next_run * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}`
+                      : ", paused"}
+                  </span>
+                </div>
+                <label className="routine-switch" title={r.enabled ? "On" : "Off"}>
+                  <input type="checkbox" checked={r.enabled} onChange={(e) => brain.send({ type: "routine_toggle", id: r.id, enabled: e.target.checked })} />
+                </label>
+                <button className="ghost" title="Do it now" onClick={() => brain.send({ type: "routine_run", id: r.id })}>Run now</button>
+                <button className="ghost" onClick={() => brain.send({ type: "routine_delete", id: r.id })}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

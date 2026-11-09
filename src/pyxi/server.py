@@ -10,8 +10,9 @@ import os
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
@@ -22,11 +23,13 @@ from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
 from pyxi.hub import Hub
 from pyxi.palace.tracker import PalaceTracker
+from pyxi.routines import Days
 from pyxi.scenes import TITLES, get_scene
 from pyxi.scenes import library as model_library
 from pyxi.scenes.object_gallery import OBJECT_GALLERY, OBJECT_TITLES
 
 log = logging.getLogger(__name__)
+ROUTINE_DAYS = set(get_args(Days))
 _SAFE_NAME = re.compile(r"^[a-f0-9]{12}\.png$")
 _LIBRARY_NAME = re.compile(r"^[a-z0-9_]{1,60}\.glb$")
 
@@ -234,7 +237,11 @@ def create_app(
             **brain.public_state(),
             # The beta: joined (models go through the beta server), or could join. Anyone can join,
             # including people with a key of their own (own_key), whose key then sits unused.
-            "beta": {"joined": cloud.in_beta(), "can_join": not cloud.in_beta(), "own_key": cloud.had_own_key()},
+            "beta": {
+                "joined": cloud.in_beta(),
+                "can_join": not cloud.in_beta(),
+                "own_key": cloud.had_own_key(),
+            },
             "version": __version__,
             "demo": demo,
             "gallery": {**TITLES, **OBJECT_TITLES},
@@ -393,9 +400,12 @@ def create_app(
         elif kind in ("memories_get", "memory_forget", "memories_wipe"):
             if kind == "memory_forget":
                 brain.forget_memory(
-                    str(msg.get("store") or "pyxi"), str(msg.get("scope") or ""), str(msg.get("key") or "")
+                    str(msg.get("store") or "pyxi"),
+                    str(msg.get("scope") or ""),
+                    str(msg.get("key") or ""),
                 )
             elif kind == "memories_wipe":
+
                 async def _wipe() -> None:
                     await hub.emit("notice", message=await brain.wipe_everything())
                     await hub.emit("memories", memories=brain.memories_public())
@@ -485,6 +495,33 @@ def create_app(
         elif kind == "routine_delete" and msg.get("id"):
             brain.routines.remove(str(msg["id"]))
             await hub.emit("routines", routines=brain.routines.public())
+        elif kind == "routine_add" and str(msg.get("task") or "").strip():
+            # The Routines tab's own form: what, which days, what time (or every N minutes).
+            days = [d for d in msg.get("days") or [] if d in ROUTINE_DAYS] or ["every day"]
+            every = msg.get("every_minutes")
+            brain.routines.add(
+                str(msg["task"]),
+                days=days,
+                time=None if every else str(msg.get("time") or "09:00"),
+                every_minutes=int(every) if every else None,
+            )
+            await hub.emit("routines", routines=brain.routines.public())
+        elif kind == "routine_toggle" and msg.get("id"):
+            for r in brain.routines.items:
+                if r.id == msg["id"]:
+                    r.enabled = bool(msg.get("enabled"))
+                    if r.enabled:
+                        r.next_run = r.compute_next(datetime.now())
+                    brain.routines.save()
+            await hub.emit("routines", routines=brain.routines.public())
+        elif kind == "routine_run" and msg.get("id"):
+            r = next((r for r in brain.routines.items if r.id == msg["id"]), None)
+            if r is not None and r.kind == "turn":
+                brain._spawn(
+                    brain.turn(
+                        f"(Routine: {r.task})", shown=f"Routine: {r.task[:80]}", synthetic=True
+                    )
+                )
         elif kind == "connectors":
             await hub.emit("connectors", connectors=brain.connectors.statuses())
         elif kind == "connect" and msg.get("id") in ("google", "linkedin"):

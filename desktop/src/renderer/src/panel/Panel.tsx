@@ -14,8 +14,8 @@ import { FileAccess } from "./FileAccess";
 import { PriceChecks } from "./PriceChecks";
 import { VoiceStudio } from "./VoiceStudio";
 
-export type Tab = "chat" | "team" | "palace" | "activity" | "gallery" | "voice" | "settings";
-export const TABS: [Tab, string][] = [["chat", "Chat"], ["team", "Team"], ["palace", "Memory"], ["activity", "Activity"], ["gallery", "3D"], ["voice", "Voice"], ["settings", "Settings"]];
+export type Tab = "chat" | "team" | "routines" | "palace" | "activity" | "gallery" | "voice" | "settings";
+export const TABS: [Tab, string][] = [["chat", "Chat"], ["team", "Team"], ["routines", "Routines"], ["palace", "Memory"], ["activity", "Activity"], ["gallery", "3D"], ["voice", "Voice"], ["settings", "Settings"]];
 const STATE_LABEL: Record<string, string> = {
   idle: "Ready when you are", listening: "Listening…", transcribing: "Catching that…", looking: "Taking a look…",
   thinking: "Thinking…", speaking: "Talking",
@@ -66,6 +66,7 @@ export function Panel() {
       <main className="body">
         {tab === "chat" && <Chat />}
         {tab === "team" && <Team />}
+        {tab === "routines" && <Routines />}
         {tab === "palace" && <Palace />}
         {tab === "activity" && <Activity />}
         {tab === "gallery" && <Gallery />}
@@ -515,8 +516,6 @@ export function Settings() {
       <PriceChecks />
       <h4>Connected accounts</h4>
       <Connections />
-      <h4>Routines</h4>
-      <Routines />
       <h4>Hotkeys</h4>
       {keys.hold && <div className="kv"><span>Talk (hold, release to send)</span><kbd>{k("hold")}</kbd></div>}
       <div className="kv"><span>Type to Pyxi</span><kbd>Ctrl, Ctrl</kbd></div>

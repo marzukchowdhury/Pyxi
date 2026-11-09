@@ -60,6 +60,8 @@ export interface Bridge {
   onMuteToggle(fn: (muted: boolean) => void): () => void;
   /** Ctrl+Alt+W or the tray icon: unfold or fold the full notch. */
   onNotchToggle(fn: () => void): () => void;
+  /** The tray's "Open Settings": unfold the notch on that tab. */
+  onNotchOpen(fn: (tab: string) => void): () => void;
   /** Whether screen sharing (Discord, OBS, Meet) shows Pyxi's overlay. */
   shareVisible(): Promise<boolean>;
   setShareVisible(value: boolean): void;
@@ -192,6 +194,7 @@ function mockBridge(): Bridge {
     },
     setShareVisible() {},
     onShareVisible: noop,
+    onNotchOpen: noop,
     onNotchToggle(fn) {
       const h = (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.code === "KeyW" && fn();
       window.addEventListener("keydown", h);

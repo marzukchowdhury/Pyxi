@@ -61,3 +61,17 @@ export function startUpdates(
   setInterval(check, EVERY);
   ipcMain.on("install-update", () => install("Update app"));
 }
+
+/** "Check for Updates…" from the tray: check now and say what came of it, in plain words. */
+export async function checkNow(): Promise<string> {
+  if (!app.isPackaged) return "Updates come with the installed app (this is the developer version).";
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const latest = result?.updateInfo?.version;
+    if (!latest || latest === app.getVersion()) return `You're up to date (Pyxi ${app.getVersion()}).`;
+    return `Pyxi ${latest} is downloading. It installs by itself when you're away for a few minutes, or press Update app in the notch.`;
+  } catch (err) {
+    note(`check from the tray failed: ${(err as Error)?.message ?? err}`);
+    return "Couldn't check for updates right now. Is the internet connection up?";
+  }
+}
