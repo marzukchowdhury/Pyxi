@@ -899,7 +899,8 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append(f"check-in with the wrong details: {ins[0][9:120]}")
         if expect == "checkin_mail" and "gmail_search" not in tools:
             problems.append("didn't look in the mail for the booking")
-    if expect in ("fill_form", "checkin", "checkin_mail") and len(re.findall(r"[.!?](\s|$)", said)) > 2:
+    looked = "gmail_search" in tools  # one line while it looks, then the result: fine
+    if expect in ("fill_form", "checkin", "checkin_mail") and len(re.findall(r"[.!?](\s|$)", said)) > (3 if looked else 2):
         problems.append(f"talks too much ({len(said)} chars)")
     problems += specialist_problems(expect, tools, said, background, brain._calls)
     from pyxi.companion.brain import drop_false_promises
