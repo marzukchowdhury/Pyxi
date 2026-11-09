@@ -1871,6 +1871,22 @@ class Brain:
                             "stop": None,
                         }
                     )
+            except asyncio.CancelledError:
+                # "Stop everything" cancels the turn itself. It still goes in the history, with
+                # what it did and cost: a stopped turn used to vanish, its spend with it.
+                self.history = [*self.history[-11:], (user_text, " ".join(self._said))]
+                self._record_turn(turn_id, user_text, started, "stopped")
+                self._spawn(
+                    self.hub.emit(
+                        "turn_done",
+                        turn_id=turn_id,
+                        cost_usd=round(self._usage.cost_usd, 5),
+                        tokens=self._usage.total_tokens,
+                        spent_today=round(self.turns.spent_today(), 4),
+                        daily_budget=self.settings.budget.daily_cost_usd,
+                    )
+                )
+                raise
             except Exception as exc:
                 log.exception("turn failed")
                 error = f"{type(exc).__name__}: {exc}"
@@ -1886,29 +1902,7 @@ class Brain:
                 # dropped on purpose, so a silent or half-answered turn isn't a bug then.
                 error = "interrupted"
             self.history = [*self.history[-11:], (user_text, said)]
-            ctx = self._ctx
-            image_path = None
-            if ctx and self._images:
-                image_path = self.turns.save_image(turn_id, self._images[0])
-            self.turns.record(
-                {
-                    "id": turn_id,
-                    "ts": time.time(),
-                    "user_text": user_text,
-                    "app": ctx.window.app if ctx else None,
-                    "window": ctx.window.title if ctx else None,
-                    "screen_text": ctx.render(60) if ctx else None,
-                    "image_path": image_path,
-                    "tool_calls": self._calls,
-                    "said": said,
-                    "rounds": len({c["round"] for c in self._calls}),
-                    "input_tokens": self._usage.input_tokens + self._usage.cache_read_tokens,
-                    "output_tokens": self._usage.output_tokens,
-                    "cost_usd": self._usage.cost_usd,
-                    "latency_ms": int((time.monotonic() - started) * 1000),
-                    "error": error,
-                }
-            )
+            self._record_turn(turn_id, user_text, started, error)
             if self._speech:
                 await asyncio.gather(self._speech, return_exceptions=True)
             await self.hub.emit(
@@ -1920,6 +1914,34 @@ class Brain:
                 daily_budget=self.settings.budget.daily_cost_usd,
             )
             await self.set_state("idle")
+
+    def _record_turn(
+        self, turn_id: str, user_text: str, started: float, error: str | None
+    ) -> None:
+        """The turn, into the history: what was asked, seen, done, said and spent."""
+        ctx = self._ctx
+        image_path = None
+        if ctx and self._images:
+            image_path = self.turns.save_image(turn_id, self._images[0])
+        self.turns.record(
+            {
+                "id": turn_id,
+                "ts": time.time(),
+                "user_text": user_text,
+                "app": ctx.window.app if ctx else None,
+                "window": ctx.window.title if ctx else None,
+                "screen_text": ctx.render(60) if ctx else None,
+                "image_path": image_path,
+                "tool_calls": self._calls,
+                "said": " ".join(self._said),
+                "rounds": len({c["round"] for c in self._calls}),
+                "input_tokens": self._usage.input_tokens + self._usage.cache_read_tokens,
+                "output_tokens": self._usage.output_tokens,
+                "cost_usd": self._usage.cost_usd,
+                "latency_ms": int((time.monotonic() - started) * 1000),
+                "error": error,
+            }
+        )
 
     # ================================================================== graph
     def _build_graph(self) -> Any:

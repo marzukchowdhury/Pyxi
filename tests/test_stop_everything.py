@@ -83,3 +83,28 @@ def test_only_a_plain_stop_counts() -> None:
 
     assert is_stop("Stop.") and is_stop("cancel that") and is_stop("Hey Pyxi, stop!")
     assert not is_stop("stop the music") and not is_stop("stop sharing my screen")
+
+
+async def test_a_turn_stopped_midway_is_still_in_the_history(settings):
+    # The Stop button cancels the running turn: it used to vanish from the history, its spend too.
+    brain = _brain(settings)
+    reached = asyncio.Event()
+
+    class Stuck:
+        async def ainvoke(self, state):
+            brain._usage.cost_usd = 0.002
+            brain._said.append("On it.")
+            reached.set()
+            await asyncio.sleep(60)
+
+    brain._graph = Stuck()
+    brain._spawn(brain.turn("Open a new tab and go to my sheet"))
+    await asyncio.wait_for(reached.wait(), 5)
+    await brain.stop_everything()
+    await asyncio.sleep(0.05)
+    last = brain.turns.recent(1)[0]
+    assert last["user_text"] == "Open a new tab and go to my sheet"
+    assert last["error"] == "stopped" and last["said"] == "On it."
+    assert brain.turns.spent_today() == 0.002
+    assert brain.history[-1] == ("Open a new tab and go to my sheet", "On it.")
+    assert not brain._lock.locked()  # the next request isn't left waiting
