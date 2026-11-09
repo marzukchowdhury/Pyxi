@@ -128,6 +128,8 @@ def install(brain: Any, background: list[str], name: str = "") -> None:
     """Replace each specialist's work with a recorder."""
     from pyxi.companion import specialists
 
+    name = re.sub(r" \d+$", "", name)  # "watch done 0": the repeat number isn't part of the name
+
     async def fake_travel(brain_: Any, args: dict[str, Any]) -> str:
         background.append("travel: " + json.dumps(args)[:200])
         return "Started job_x: Atlas is reading their travel mail. Say one short line ('On it.')."

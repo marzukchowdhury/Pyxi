@@ -224,7 +224,7 @@ def _match(text: str) -> Instant | None:
         site = (m.group("site") or m.group("site2") or "google").lower()
         q = (m.group("q") or m.group("q2") or m.group("q3") or "").strip()
         if q:
-            return Instant("open_url", _SEARCHES[site].format(q=quote_plus(q)), f"Searching {site.title().replace('Youtube', 'YouTube')} for {q}.")
+            return Instant("open_url", _SEARCHES[site].format(q=quote_plus(q)), f"Here are the {site.title().replace('Youtube', 'YouTube')} results for {q}.")
     if _CLEAR.match(t) and re.search(r"(?i)\b(close|hide|dismiss|clear|remove|rid|away)\b", t):
         return Instant("clear", "all", "Cleared away.")
     if m := _MEDIA_RE.match(t):

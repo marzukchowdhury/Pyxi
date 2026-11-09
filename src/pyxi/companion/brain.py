@@ -320,6 +320,9 @@ class Brain:
         await self.hub.emit("routines", routines=self.routines.public())
         self._speak(f"{alarm.line(now)} Keep the PC awake and I'll ring.")
 
+    def _ditto_watching(self) -> bool:
+        return any(j.role == "watching" and j.status == "running" for j in self.jobs.jobs.values())
+
     def _list_alarms(self) -> None:
         """'What alarms do I have?': read straight from the routines and running timers."""
         now = datetime.now()
@@ -953,6 +956,33 @@ class Brain:
             return await grab()
         finally:
             await self.hub.emit("capture_show")
+
+    def _screen_named_in(self, text: str) -> int | None:
+        """The top window on the screen a request names ("my right screen", "the second
+        monitor"), or None. Only with more than one screen, and only for looking questions."""
+        if not windows.available() or not re.search(r"(?i)\b(screen|monitor|display)\b", text):
+            return None
+        m = re.search(
+            r"(?i)\b(left|middle|centre|center|right|main|primary|first|second|third|other)\s+(?:screen|monitor|display)\b",
+            text,
+        )
+        if not m or re.search(r"(?i)\b(put|move|split|arrange|open|play|pause)\b", text):
+            return None
+        where = windows.screen_named(m.group(1))
+        if where is None or len(windows.screens()) < 2:
+            return None
+        self._named_screen = where["name"]
+        return next(
+            (
+                h
+                for h, t, _ in windows.open_windows()
+                if not windows._NOT_CONTENT.match(t)
+                and (r := windows.rect_of(h))
+                and r[2] > 80
+                and windows.screen_of(r, [where]) is not None
+            ),
+            None,
+        )
 
     def _named_window(self, text: str, ctx: ScreenContext | None) -> int | None:
         """The window the request names ("...in Notepad"), when it isn't the one Pyxi is already
@@ -1795,6 +1825,18 @@ class Brain:
                         await self._set_timer(remind)
                     else:
                         await self._set_alarm(remind)
+                elif not synthetic and self._ditto_watching() and _DONE_SHOWING.match(user_text):
+                    # Ditto is watching and they say "done": stop and let it work out the rest,
+                    # at once (the model sometimes asked "what were you working on?").
+                    note = await specialists.handle(self, "watch_me", {"action": "stop"})
+                    self._calls.append(
+                        {"round": 1, "tool": "watch_me", "arguments": {"action": "stop"}, "instant": True}
+                    )
+                    self._speak(
+                        "Got it. Ditto's working out the rest, and the plan comes on a card before anything changes."
+                        if note and note.startswith("Started")
+                        else "Okay, I've stopped watching."
+                    )
                 elif not synthetic and alarms.list_request(user_text):
                     self._list_alarms()
                 elif not synthetic and (which := alarms.cancel_request(user_text)) is not None:
@@ -1895,6 +1937,11 @@ class Brain:
                     windows.snap(named, "restore")
                     await asyncio.sleep(0.45)
                 ctx = await self._capture(hwnd=named)
+            elif (top := self._screen_named_in(state.get("user_text", ""))) is not None:
+                # "What's on my right screen?": look at that screen from the start (one model
+                # round instead of two, about 5 s sooner).
+                ctx = await self._capture(hwnd=top)
+                self._shown_screen, self._screens_text = self._named_screen, None
             self._ctx = ctx
             await self.hub.emit(
                 "capture",
@@ -3328,6 +3375,13 @@ _JUST_OPEN = re.compile(
     re.I,
 )
 # Tools that start work which finishes later (the notification says how it went).
+# "Done", "that's the first one", "now you": what people say when they've shown Ditto one.
+_DONE_SHOWING = re.compile(
+    r"(?i)^\W*(?:(?:ok|okay|right|so|alright|yes|yeah)[,.]?\s+)*(?:i'?m\s+)?(?:done|finished|that'?s (?:the first one|one|it|done)|"
+    r"now you(?: do (?:it|the rest))?|your turn|there you go|that one'?s done)\b[^?]{0,60}$"
+)
+
+
 _MULTI_SCREEN_NOTE = (
     "The screenshot is of the screen marked above; the list is every screen. Never say you "
     "can only see one screen, and never mention 'the list' or 'the shot': just say what's there. "

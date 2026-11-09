@@ -82,3 +82,43 @@ Examples from tonight's runs:
   - the tray menu by right-click (covered by unit tests only);
   - music playback (it would have played sound in the night; verified this morning).
 - **Left on screen:** Notepad has three unsaved test tabs from the hands tests ("Pyxi night test, line one", "second line", "third line"). Close them without saving.
+
+---
+
+# Live session and the overnight A–Z run (8–9 November)
+
+After the first report, the founder tested Pyxi live, then left the PC on overnight on all three screens. The overnight run used a driver (`.pyxi/night/driver.py`) that talks to the real Pyxi Dev app the way the notch's text box does: real screens, windows, mouse, teammates and the connected Google account. **138 cases, A to Z,** ran in three rounds: each failure was fixed, then everything was run again.
+
+**Safety during the run:**
+- The PC was muted; its sound was put back in the morning.
+- The driver only approved the "use your mouse and keyboard" card, for harmless tasks; every other card was declined.
+- Cases that would act on real accounts (sending email, creating a meeting, buying, deleting, tidying a folder) were left out. They stay covered by the fake-mailbox and practice-site checks.
+
+## Bugs found live and overnight (all fixed, each with a test)
+
+| # | Bug | Fix |
+|---|---|---|
+| 25 | A 7am alarm took 2 minutes of the mouse in the Clock app, was right only by luck, then looped | Alarms and timers are Pyxi's own: understood without the model, set in about 1 s, rung with a chime, a card and a line |
+| 26 | "Make it one-time" deleted the alarm and set nothing; model alarms repeated every day | Changing an alarm sets the new one; an alarm or reminder without days rings once |
+| 27 | "Remind me in 2 minutes to drink water" became a reminder every day at 12:02 | "Remind me in N minutes to X" and "remind me at 5pm to X" ring once, instantly |
+| 28 | "Wake me up at 6:30 tomorrow" said at 12:30 AM was set a day late | After midnight, "tomorrow" means the coming morning, and Pyxi says so |
+| 29 | Saying "Pyxi" was heard as "Your pixxit", "Epic City", "Pixie", "Pixig"; a request was read as a complaint | Misheard wake words become "Pyxi," before anything reads them; "alarm" and "timer" are speech hotwords |
+| 30 | "Can you see my three screens?" got "I can only see one screen" | Every turn knows each screen and what's on it; it can look at one, and put or lay out windows on one |
+| 31 | A split screen put both windows behind the full-screen window | The panes end up in front |
+| 32 | Ledger edited the morning's "Untitled spreadsheet" instead of the blank one on the middle screen | The open file is found on any screen, and an Untitled file is never looked up by name |
+| 33 | The hands kept going after the task was done (alt+tab after Play, taskbar clicks after the alarm) | A finishing step tells them to stop; switching windows after it ends the task; repeated actions count as circles |
+| 34 | "Play the song on my middle screen" played a Fortnite track called "Meet Me in the Middle" | Screen and window requests aren't song searches; play or pause on a screen is one key press |
+| 35 | Typing "in Notepad" went into the Calculator | The named app is brought to the front before typing |
+| 36 | **Penny froze the whole brain** on one email full of spaces | Two mail patterns rewritten to run in time proportional to the email; email text tidied first |
+| 37 | **Penny counted job-alert emails as spending** (salaries read as charges) | Job alerts, recruiters and unpaid big numbers are never spending or subscriptions |
+| 38 | Every Google call reloaded certificates (25 Gmail reads: 6.6 s) | One kept-open client: 0.37 s. Web search, page reads and weather share one too |
+| 39 | Weather for "this weekend", "on Saturday" or "is it going to rain?" was slow, or asked which city | Answered from the forecast in about 1 s, with the city from this PC's time zone when Google's isn't allowed |
+| 40 | "Open my Downloads folder" used the mouse (20 s) | Folders and more apps open instantly; "search YouTube for X", "google X" and "…, open Gmail" too |
+| 41 | "Who won the last F1 race?" took four model rounds (21.6 s) | One search, at most one page: 7.7 s |
+| 42 | "Close the 3D model" hid parts one by one (12 s) | Instant |
+| 43 | "Quiz me on the heart" asked for slides | A short deck from general knowledge |
+| 44 | Spotify "opened" though it isn't installed | The web player opens instead |
+| 45 | The Stop everything hotkey was never registered (Electron threw on "Pause") | The next shortcut is tried |
+| 46 | "Pause the music" crashed (a local import named like a module) | Fixed |
+| 47 | Ledger's report said "bold" when it made the text bold and blue | Says every change |
+| 48 | Scout's second job in a row failed; bot checks kept it waiting 2 minutes | Fixed in Otto (two commits) |
