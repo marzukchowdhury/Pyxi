@@ -197,7 +197,7 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             )
         return (
             f"Started {job.id}: {job.agent_name} is on it in the background. Say one short line "
-            "('On it.'); they get a notification with the new file."
+            "that names the job; they're told when the new file is ready."
         )
     if name == "edit_document":
         task = str(args.get("task") or "").strip()
@@ -274,7 +274,7 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             )
         return (
             f"Started {job.id}: {job.agent_name} is on it in the background. Say one short line "
-            "('On it.'); they get a notification when it's done."
+            "that names the job; they're told when it's done."
         )
     if name in ("search_files", "read_file"):
         access = await consent(brain)

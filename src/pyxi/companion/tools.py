@@ -536,7 +536,7 @@ COMPANION_TOOLS += [
         "errand",
         "Do something in the background with the user's connected accounts: set up a meeting or "
         "invite, write or reply to an email, create a doc, post to Discord or LinkedIn. You say one short "
-        "line first ('On it, I'll let you know.') and the user gets a notification in the notch when it's "
+        "line first that names the job ('Writing to Sam about Friday.') and they're told when it's "
         "done. Write the task completely and exactly: every name, email address, date and time as the "
         "user said them. If something essential is missing (like when the meeting is), ask the user "
         "first instead.",
