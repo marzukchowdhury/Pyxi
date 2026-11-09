@@ -181,7 +181,11 @@ def is_own(hwnd: int) -> bool:
 
 def window_at(x: int, y: int) -> int:
     """The top-level window under a screen point (click-through layers don't count)."""
-    u = ctypes.windll.user32  # type: ignore[attr-defined]
+    # A user32 of our own: ctypes.windll.user32 is one object shared by the whole process, and
+    # argument types set on it here made uiautomation's own GetAncestor call throw ("argument 2:
+    # TypeError: 'c_long' object..."), so after the first click Pyxi could no longer read the
+    # screen's text.
+    u = ctypes.WinDLL("user32")  # type: ignore[attr-defined]
     u.WindowFromPoint.restype = wt.HWND
     u.WindowFromPoint.argtypes = [wt.POINT]
     u.GetAncestor.restype = wt.HWND
