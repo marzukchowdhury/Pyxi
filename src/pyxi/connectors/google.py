@@ -845,8 +845,16 @@ class GoogleConnector(Connector):
                 )
                 self._tz = str(data.get("value") or "")
             except Exception as exc:
-                log.warning("couldn't read the calendar's time zone: %s", exc)
-                return None  # try again next time rather than remembering the failure
+                from pyxi.localzone import local_zone
+
+                if re.search(r"403|insufficient", str(exc)):
+                    # The calendar settings scope isn't granted: that won't change this session,
+                    # so use this PC's own zone from now on (and stop asking every turn).
+                    self._tz = local_zone()
+                    log.info("calendar time zone not allowed (%s); using this PC's: %s", exc, self._tz)
+                else:
+                    log.warning("couldn't read the calendar's time zone: %s", exc)
+                    return local_zone() or None  # try Google again next time
         return self._tz or None
 
     async def calendar_add(self, args: dict[str, Any]) -> Result:

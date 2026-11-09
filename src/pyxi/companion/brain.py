@@ -2753,12 +2753,16 @@ class Brain:
         self._speech = asyncio.create_task(run())
 
     async def _home_city(self) -> str:
+        """Where they are, for "is it going to rain?": the calendar's time zone, else this PC's."""
+        from pyxi.localzone import local_zone
+
         if self.connectors.google.connected():
             try:
-                return weather.city_of(await self.connectors.google.time_zone())
+                if city := weather.city_of(await self.connectors.google.time_zone()):
+                    return city
             except Exception:
-                return ""
-        return ""
+                pass
+        return weather.city_of(local_zone())
 
     async def _weather_now(self, place: str, when: str) -> bool:
         """'What's the weather tomorrow?' answered straight from the forecast, no model and no
