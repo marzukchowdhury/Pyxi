@@ -467,6 +467,24 @@ _NAMED = {
 }
 
 
+def _look(op: dict[str, Any]) -> str:
+    """'bold and blue', 'italic, 14 pt and highlighted yellow': every change, said plainly."""
+    parts = [k for k in ("bold", "italic", "underlined", "struck through") if op.get(k.split()[0].replace("underlined", "underline").replace("struck", "strikethrough"))]
+    if op.get("color"):
+        parts.append(str(op["color"]) if not str(op["color"]).startswith("#") else "coloured")
+    if op.get("size"):
+        parts.append(f"{op['size']} pt")
+    if op.get("highlight"):
+        parts.append(f"highlighted {op['highlight']}" if not str(op["highlight"]).startswith("#") else "highlighted")
+    if op.get("font"):
+        parts.append(f"in {op['font']}")
+    if op.get("link"):
+        parts.append("a link")
+    if not parts:
+        return "the new look"
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
 def _rgb(color: Any) -> tuple[float, float, float] | None:
     """'#1A73E8', 'red', 'blue' -> 0-1 floats."""
     names = {
@@ -1645,11 +1663,9 @@ class GoogleDoc:
                 ],
             )
             await self.load()
-            look = (
-                ", ".join(k for k in ("bold", "italic", "underline") if op.get(k)) or "the new look"
-            )
+            look = _look(op)
             shown = f"'{str(op.get('find'))[:40]}'" if op.get("find") else "the line"
-            return f"Gave {shown} {look}" + (f" ({len(ranges)} places)" if len(ranges) > 1 else "")
+            return f"Made {shown} {look}" + (f" ({len(ranges)} places)" if len(ranges) > 1 else "")
         if name == "page_break":
             where = (
                 {"location": {"index": self._at(op)}}
