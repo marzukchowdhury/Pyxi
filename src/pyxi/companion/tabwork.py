@@ -11,10 +11,11 @@ Two tools, offered to the model only while the extension is connected (pyxi/brow
 
 Safety, in order of importance:
 
-* Acting on a site needs the user's Allow the first time (per site, kept 30 days,
-  ``BrowserLink.allow_site``). Right after Pyxi read mail, a page or a document in the same
-  turn, the kept permission doesn't apply and it asks on a fresh card, because the task may
-  have come from that content.
+* Acting on a site needs the user's Allow, per site. "Allow" covers that one task; "Always
+  allow on this site" keeps the site for 30 days (``BrowserLink.allow_site``), like the mouse
+  and keyboard's card. Right after Pyxi read mail, a page or a document in the same turn, a
+  kept site doesn't apply and the card has no Always button, because the task may have come
+  from that content.
 * A task stays on the site it started on. Going on to another site (a link that leads there,
   another tab, an address the model wrote) asks first, every time, before that site is read
   and with the address on the card: what was read in one signed-in tab must not be carried
@@ -87,8 +88,8 @@ USE_TAB = ToolSpec(
     "name), where they're already signed in. Their mouse stays free and no new window opens. "
     "Use it instead of use_computer for anything inside a website, and instead of a teammate "
     "when the task is in the tab they have open or needs their sign-in ('fill this in', 'add "
-    "this to my cart', 'go to my orders and find the tracking number'). The first time on a "
-    "site they see an Allow card; anything that sends, submits, buys, deletes or posts asks "
+    "this to my cart', 'go to my orders and find the tracking number'). They see an Allow "
+    "card for the site first; anything that sends, submits, buys, deletes or posts asks "
     "again; it never types passwords or card numbers. It reads the page itself, so don't "
     "read_tab first. Give `task` exactly: what to do, on which page, what done looks like, and "
     "every value they gave. Say one short line first that names the job, never the task itself.",
@@ -603,8 +604,8 @@ class TabOperator:
 
     # ------------------------------------------------------------------ one action
     async def _site(self, host: str, address: str = "") -> bool:
-        """May Pyxi act on this site? Asked once per site and task; a yes is kept by the
-        caller (tabwork.handle) unless the turn read outside content first."""
+        """May Pyxi act on this site? Asked once per site and task; whether a yes outlives
+        the task is the caller's business (their "Always allow on this site")."""
         if host in self._allowed:
             return True
         moved_from = self.home if self.home and host != self.home else ""
@@ -1035,10 +1036,11 @@ async def _work(
         )
 
     async def consent(host: str, address: str, moved_from: str) -> bool:
-        # A kept permission covers a task on that site. It doesn't cover a task that moves
-        # there from another site, nor one that follows mail, a page or a document Pyxi read
-        # in this turn: either may be a page's idea rather than theirs. Those ask every time,
-        # and their yes isn't kept.
+        # "Allow" is for this task. "Always allow on this site" keeps the site for 30 days,
+        # for tasks that start on it. A kept site doesn't cover a task that moves there from
+        # another site, nor one that follows mail, a page or a document Pyxi read in this turn:
+        # either may be a page's idea rather than theirs. Those ask every time, with no
+        # Always button.
         keep = not after_reading and not moved_from
         if keep and link.site_allowed(host):
             return True
@@ -1067,10 +1069,11 @@ async def _work(
             "Pyxi works inside that tab, signed in as you, without your mouse. Press Esc in "
             "the tab to stop it. Anything that sends, submits, buys, deletes or posts asks "
             "you again."
-            + (" Pyxi won't ask again for this site for 30 days." if keep else ""),
+            + (' "Always allow on this site" lasts 30 days.' if keep else ""),
+            **({"always": "Always allow on this site"} if keep else {}),
         )
-        if ok and keep:
-            link.allow_site(host)
+        if ok == "always" and keep:
+            link.allow_site(host)  # Settings lists it, with Remove
             await brain.hub.emit("browser", **link.public())
         return bool(ok)
 

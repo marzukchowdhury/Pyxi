@@ -43,13 +43,13 @@ export function BrowserConnect() {
         <ul className="folders">
           {state.sites.map((s) => (
             <li key={s.host}>
-              <span title="Pyxi may click and type on this site without asking first">{s.host}, until {day(s.expires)}</span>
+              <span title="You chose Always allow on this site: Pyxi may click and type here without asking first">{s.host}, until {day(s.expires)}</span>
               <button className="ghost" aria-label={`Stop Pyxi acting on ${s.host}`} onClick={() => brain.send({ type: "browser_site_revoke", host: s.host })}>Remove</button>
             </li>
           ))}
         </ul>
       )}
-      <p className="muted">With the Pyxi extension in Chrome, Edge or Firefox, Pyxi can read and work in your own tabs, signed in as you, without taking your mouse. It asks the first time it acts on a site and before anything is sent, submitted, bought, deleted or posted. It never types passwords or card numbers, and Esc in the tab stops it.</p>
+      <p className="muted">With the Pyxi extension in Chrome, Edge or Firefox, Pyxi can read and work in your own tabs, signed in as you, without taking your mouse. It asks before it acts on a site (Always allow on this site keeps one for 30 days) and before anything is sent, submitted, bought, deleted or posted. It never types passwords or card numbers, and Esc in the tab stops it.</p>
     </div>
   );
 }

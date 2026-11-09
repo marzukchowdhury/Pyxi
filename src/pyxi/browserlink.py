@@ -23,8 +23,8 @@ The launch key (``pyxi.brainkey``) is not used on this route: it changes at ever
 an extension has no way to learn it. The pairing token stands in for it, and it opens this
 route only, never the app's own ``/ws`` or ``/api``.
 
-Also kept here: the sites where the user has let Pyxi act (``sites`` in the same file), each
-for the same 30 days as other standing permissions (``pyxi.grants``).
+Also kept here: the sites where the user chose "Always allow on this site" (``sites`` in the
+same file), each for the same 30 days as other standing permissions (``pyxi.grants``).
 """
 
 from __future__ import annotations

@@ -94,9 +94,9 @@ Two tools appear in Pyxi while a browser is connected, and nothing changes when 
 ## Safety
 
 - **You allow each site, twice over.** The browser must let the extension into the site (the
-  section above), and Pyxi asks on its own card the first time it acts on a site ("Let Pyxi
-  click and type on shop.example.com in your browser?"). Pyxi remembers that yes for 30 days;
-  Settings lists the sites with a Remove button.
+  section above), and Pyxi asks on its own card before it acts on a site ("Let Pyxi click and
+  type on shop.example.com in your browser?"). **Allow** covers that one task. **Always allow
+  on this site** keeps the site for 30 days; Settings lists those sites with a Remove button.
 - **A task stays on the site it started on.** Going on to another site (a link that leads
   there, another tab, an address) asks first, every time, with the address on the card and
   before that site is read. So does anything right after Pyxi read an email, a page or a

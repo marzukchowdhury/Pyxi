@@ -501,16 +501,25 @@ async def test_the_first_action_on_a_site_asks_and_dont_means_nothing_happens(se
     assert not brain.browser.site_allowed(SITE) and brain.audit.recent() == []
 
 
-async def test_allow_is_remembered_for_that_site_only(settings, quick):
+async def test_allow_is_for_this_task_and_always_keeps_that_site_only(settings, quick):
     brain = _brain(settings)
     browser = PretendBrowser(brain.browser)
     cards = Cards(brain.hub)
     typing = act({"do": "type", "ref": "e1", "text": "bob@example.com"})
-    job = await work(brain, "Put bob@example.com in To", typing, ("done", {"ok": True, "summary": "It's in."}))
-    assert cards.asked == [CONSENT] and browser.acted() == [("type", {"ref": "e1", "text": "bob@example.com", "enter": False})]
-    assert job.status == "done" and brain.said == ["It's in."] and brain.browser.site_allowed(SITE)
+    job = await work(brain, "Put bob@example.com in To", typing, typing, ("done", {"ok": True, "summary": "It's in."}))
+    assert cards.asked == [CONSENT]  # once for the task, not once per action
+    assert cards.card()["always"] == "Always allow on this site" and "lasts 30 days" in cards.card()["reason"]
+    assert browser.acted()[0] == ("type", {"ref": "e1", "text": "bob@example.com", "enter": False})
+    assert job.status == "done" and brain.said == ["It's in."]
+    assert not brain.browser.site_allowed(SITE)  # a plain Allow keeps nothing
+
+    cards.answer = "always"
+    await work(brain, "And again", typing)
+    assert cards.asked == [CONSENT, CONSENT] and brain.browser.site_allowed(SITE)
+    assert [s["host"] for s in brain.browser.sites()] == [SITE]  # what Settings lists, with Remove
+    cards.answer = False  # nothing to answer from here on
     await work(brain, "Again", typing)
-    assert cards.asked == [CONSENT]  # not asked twice
+    assert cards.asked == [CONSENT, CONSENT]  # not asked again
     log = brain.audit.recent()[0]
     assert log["what"] == f'Typed "bob@example.com" into "To" on {SITE}' and log["agent"] == "Pyxi (in your browser)"
     assert log["kind"] == "clicked" and log["detail"] == "Again"
@@ -529,12 +538,14 @@ async def test_after_reading_something_in_the_same_turn_it_asks_again_and_keeps_
     await work(brain, "Click Next page", act({"do": "click", "ref": "e12"}))
     assert cards.asked == [CONSENT]  # the kept permission didn't apply
     assert "This asks again because Pyxi just read the email you read." in cards.card()["reason"]
-    assert "30 days" not in cards.card()["reason"] and browser.acted() == [("click", {"ref": "e12"})]
+    assert "30 days" not in cards.card()["reason"] and "always" not in cards.card()  # no Always button
+    assert browser.acted() == [("click", {"ref": "e12"})]
 
     brain.browser.revoke_site(SITE)
     cards.events.clear()
+    cards.answer = "always"  # even an answer that says so (a stale card, another window)
     await work(brain, "Click Next page", act({"do": "click", "ref": "e12"}))
-    assert cards.asked == [CONSENT] and not brain.browser.site_allowed(SITE)  # and a yes isn't kept
+    assert cards.asked == [CONSENT] and not brain.browser.site_allowed(SITE)  # keeps nothing
 
 
 # ====================================================================== sending, submitting, deleting
@@ -680,7 +691,7 @@ async def test_a_task_stays_on_its_site_unless_they_say_it_may_go_on(settings, q
     cards = Cards(brain.hub, answer=False)
     job = await work(brain, "Summarise this page", act({"do": "switch_tab", "text": "my notes"}), act({"do": "click", "ref": "e12"}))
     assert cards.asked == ["Let Pyxi go on to notes.example.org in your browser?"]
-    assert "30 days" not in cards.card()["reason"]
+    assert "30 days" not in cards.card()["reason"] and "always" not in cards.card()
     assert not [a for n, a in browser.did if n == "read" and a.get("tab") == 11]  # never read
     assert job.summary == "Okay, I stopped before notes.example.org." and browser.acted()[-1][0] == "switch"
 
