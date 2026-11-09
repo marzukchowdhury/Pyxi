@@ -51,6 +51,15 @@ class TurnStore:
                 Path(image).unlink(missing_ok=True)
         return len(old)
 
+    def forget(self, turn_id: str) -> None:
+        """Drop one turn, with its screenshot: its words were carried into the turn after it,
+        which is the one that answers them. What it spent stays counted."""
+        with self._conn() as c:
+            row = c.execute("SELECT image_path FROM turns WHERE id = ?", (turn_id,)).fetchone()
+            c.execute("DELETE FROM turns WHERE id = ?", (turn_id,))
+        if row and row[0]:
+            Path(row[0]).unlink(missing_ok=True)
+
     def save_image(self, turn_id: str, jpeg: bytes) -> str:
         path = self.turns_dir / f"{turn_id}.jpg"
         path.write_bytes(jpeg)

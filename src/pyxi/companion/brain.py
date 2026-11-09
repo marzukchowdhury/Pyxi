@@ -216,6 +216,11 @@ class Brain:
         self._synthetic = False
         self._pending_say = ""
         self._cut_short = False
+        # What a turn they talked over left behind (its words, and what it had done), for the
+        # turn their new words start: nothing they said is dropped.
+        self._dropped: dict[str, Any] | None = None
+        self._words_gen = -1  # the speech gen at which they last pressed talk
+        self._stopped_turn = ""  # the turn the stop button ended: its words are not carried on
         self._placed = Placed()  # what's on screen now (cards, stages), so new things keep clear
         self.overlay_in_capture = (
             False  # the desktop app says whether screen shares see the overlay
@@ -235,6 +240,7 @@ class Brain:
     def begin_listening(self) -> None:
         """Push-to-talk pressed: capture the screen *now*, while the user starts speaking."""
         self.interrupt()
+        self._words_gen = self._speech_gen  # more words are coming: a running turn is talked over
         self._prefetch = asyncio.create_task(self._capture())
         self._spawn(self.set_state("listening"))
         self.warm_voice(listening=True)
@@ -1778,6 +1784,8 @@ class Brain:
                 queued += 1
         self._prefetch = None
         self.interrupt()
+        # Stopped, not talked over: the request that was running is not picked up again.
+        self._stopped_turn, self._dropped = (self._turn_id if self._lock.locked() else ""), None
         await self.set_state("idle")
         parts = [f"{jobs} teammate job{'s' if jobs != 1 else ''}"] if jobs else []
         if hands_on:
@@ -1797,12 +1805,52 @@ class Brain:
             self._operator.cancelled = True  # talking to Pyxi stops her hands too
         self._spawn(self.hub.emit("stop_audio"))
 
+    def _done_so_far(self) -> list[str]:
+        """What this turn's tool calls started or did, a few words each (not speech, not lookups)."""
+        lookups = INFO_TOOLS | {t.spec.name for t in self.connectors.tools() if t.info}
+        done = []
+        for c in self._calls:
+            if c["tool"] == "say" or c["tool"] in lookups:
+                continue
+            args = ", ".join(f"{k}: {str(v)[:80]}" for k, v in (c.get("arguments") or {}).items())
+            done.append(f"{c['tool']} ({args})" if args else str(c["tool"]))
+        return done[:6]
+
+    def _pick_up(self, user_text: str, waited: bool) -> tuple[str, list[str]]:
+        """They kept talking, or paused mid-sentence and the request arrived in two parts: the
+        turn that had started on the first part was cut off. If it had done nothing yet, its
+        words go in front of the new ones, so both are answered as one request (and its own row
+        leaves the turn log: this turn is the one that answers it). If it had already acted,
+        the words stay where they are and this turn is told what was done. Returns the words
+        to answer and any notes for the model."""
+        left, self._dropped = self._dropped, None
+        if left is None or instant.is_stop(user_text):  # "stop" is never "do that, and stop"
+            return user_text, []
+        if (
+            not (left["by_words"] or waited)  # cut off by Escape, not by more words
+            or time.monotonic() - left["at"] > _CARRY_S
+        ):
+            if not left["done"]:  # asked and never answered: the conversation still says so
+                self.history = [*self.history[-11:], (left["text"], "")]
+            return user_text, []
+        if left["done"]:
+            return user_text, [
+                f'Your last turn was cut off because they spoke again. They had asked: "{left["text"]}". '
+                f"Already started or done before the cut: {'; '.join(left['done'])}. Their new "
+                "words may carry on from that request: finish what is left of it too, and never "
+                "redo what is already done."
+            ]
+        log.info("turn %s was talked over: its words go with the next turn", left["turn_id"])
+        self.turns.forget(left["turn_id"])
+        return f"{left['text']} {user_text}", []
+
     async def turn(
         self, user_text: str, *, shown: str | None = None, synthetic: bool = False
     ) -> None:
         """``synthetic``: a routine or a guide step, not words the user actually said (so an
         address in it never counts as the user naming that person)."""
         self.warm_voice()  # the voice loads while the model thinks, if it was let go
+        waited = self._lock.locked()  # typed or said while another turn was still running
         async with self._lock:
             self._ctx, self._images, self._usage, self._said, self._calls = (
                 None,
@@ -1842,10 +1890,13 @@ class Brain:
             started = time.monotonic()
             await self.hub.emit("user", text=shown or user_text, turn_id=turn_id)
             error = None
+            cut_off: list[str] = []  # what a turn they talked over had already done, if it had
             if not synthetic:
                 from pyxi import wakename
 
                 user_text = wakename.normalize(user_text)  # typed or heard: "Your pixxit..." -> "Pyxi, ..."
+                user_text, cut_off = self._pick_up(user_text, waited)
+                self._user_text = user_text
             try:
                 hit = None if synthetic else instant.match(user_text)
                 asked = None if synthetic or hit else weather.simple_question(user_text)
@@ -1903,7 +1954,7 @@ class Brain:
                             "user_text": user_text,
                             "turn_id": turn_id,
                             "round": 0,
-                            "notes": [],
+                            "notes": cut_off,
                             "needs_more": False,
                             "stop": None,
                         }
@@ -1938,7 +1989,27 @@ class Brain:
                 # They spoke again (or pressed talk) before the answer came: the answer was
                 # dropped on purpose, so a silent or half-answered turn isn't a bug then.
                 error = "interrupted"
-            self.history = [*self.history[-11:], (user_text, said)]
+            heard: str | None = said  # what the conversation keeps as Pyxi's answer
+            if error == "interrupted" and not synthetic and self._stopped_turn != turn_id:
+                # Talked over, not stopped: the turn their new words start gets these words too
+                # (or, if this one had already acted, is told what it did). See _pick_up.
+                done = self._done_so_far()
+                self._dropped = {
+                    "turn_id": turn_id,
+                    "text": user_text,
+                    "done": done,
+                    "by_words": self._words_gen == self._speech_gen,
+                    "at": time.monotonic(),
+                }
+                # A half nobody answered is not left in the conversation: it is carried forward.
+                heard = (
+                    f"{said} (Cut off here: they spoke again before you finished. Already "
+                    f"started or done: {'; '.join(done)}.)".strip()
+                    if done
+                    else None
+                )
+            if heard is not None:
+                self.history = [*self.history[-11:], (user_text, heard)]
             self._record_turn(turn_id, user_text, started, error)
             if self._speech:
                 await asyncio.gather(self._speech, return_exceptions=True)
@@ -2036,6 +2107,11 @@ class Brain:
                     "I've used up today's budget, so I'm taking a breather. You can raise it in settings."
                 )
                 return {"stop": "daily budget", "needs_more": False}
+            if self._speech_gen != self._turn_gen:
+                # They spoke again before this round began: no model call for an answer that
+                # would be dropped. The turn their new words start takes it from here.
+                self._cut_short = True
+                return {"stop": "interrupted", "needs_more": False}
             await self.set_state("thinking")
             self._say_in_board = False  # a board only takes over the reply of its own round
             pyxi = self.registry.get("pyxi")
@@ -2209,6 +2285,11 @@ class Brain:
                 for c in calls
             )
             for call in calls:
+                if self._speech_gen != self._turn_gen:
+                    # They spoke again mid-round: the rest of it is not done behind their back.
+                    # What was done so far is passed to the turn their new words start.
+                    self._cut_short = True
+                    return {"round": round_no, "stop": "interrupted", "needs_more": False}
                 if call.id in early:
                     continue  # already said, while the rest was still streaming in
                 if call.name == "say" and looks_up and self._said:
@@ -3456,6 +3537,8 @@ _MULTI_SCREEN_NOTE = (
 )
 
 
+# Words from a turn they talked over are carried into their next turn only this soon after.
+_CARRY_S = 90.0
 _BACKGROUND_TOOLS = {
     "edit_document",
     "convert_files",
