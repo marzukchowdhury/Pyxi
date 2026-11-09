@@ -148,3 +148,11 @@ def test_site_searches_open_at_once():
     assert instant.match("google cheap flights to Toronto").value.startswith("https://www.google.com/search?q=cheap+flights")
     assert instant.match("find wireless earbuds on Amazon").value.startswith("https://www.amazon.ca/s?k=")
     assert instant.match("Find a coffee place near me that is open now") is None  # Maps with picks: the model
+
+
+def test_a_plain_command_after_a_reason():
+    from pyxi.companion import instant
+
+    assert instant.match("I need to check my email, open Gmail.").value == "https://mail.google.com"
+    assert instant.match("I want to watch something. Go to YouTube.").value == "https://www.youtube.com"
+    assert instant.match("Open Gmail and summarize my latest email") is None  # more to it: the model

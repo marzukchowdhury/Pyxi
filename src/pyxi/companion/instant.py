@@ -187,6 +187,18 @@ _CLEAR = re.compile(
 
 def match(text: str) -> Instant | None:
     """The instant route for this request, or None when it needs the model."""
+    hit = _match(text)
+    if hit is None:
+        # "I need to check my email, open Gmail": a plain command after a reason. Only the last
+        # clause, and only an open or search command (never "..., and then do X").
+        parts = re.split(r"[,.;:]\s+|\s+so\s+", " ".join(text.split()))
+        last = parts[-1] if len(parts) > 1 else ""
+        if last and re.match(r"(?i)^\W*(?:please\s+|just\s+|can you\s+)?(?:open|go to|pull up|bring up|launch|start|search|google)\b", last):
+            hit = _match(last)
+    return hit
+
+
+def _match(text: str) -> Instant | None:
     t = _GMAIL_MISHEARD.sub(r"\1open gmail", " ".join(text.split()))
     t = re.sub(r"(?i)^\W*(?:no,?\s+)?i said\s+", "", t)  # "No, I said open Gmail"
     if not t or len(t) > 80:
