@@ -35,11 +35,17 @@ _ALARM = re.compile(
     + r"(?:\s+(?:please|for me))?[\s.!?]*$",
     re.I,
 )
+_NUM_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "twelve": 12, "fifteen": 15, "twenty": 20, "twenty-five": 25, "thirty": 30,
+    "forty": 40, "forty-five": 45, "fifty": 50, "sixty": 60, "ninety": 90,
+}
+_NUMS = "|".join(sorted(_NUM_WORDS, key=len, reverse=True))
 _TIMER = re.compile(
     _LEAD
     + r"(?:(?:set|start|make|put)\s+(?:a|an|the)?\s*)?"
-    + r"(?:timer\s+(?:for\s+)?(?P<n>\d+(?:\.\d+)?|an?|half an?)\s*(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?)"
-    + r"|(?P<n2>\d+)[\s-]*(?P<unit2>second|minute|min|hour)s?[\s-]+timer)"
+    + r"(?:timer\s+(?:for\s+)?(?P<n>\d+(?:\.\d+)?|an?|half an?|" + _NUMS + r")\s*(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?)"
+    + r"|(?P<n2>\d+|" + _NUMS + r")[\s-]*(?P<unit2>second|minute|min|hour)s?[\s-]+timer)"
     + r"(?:\s+(?:for|to)\s+(?P<label>[^.?!]{2,60}))?"
     + r"(?:\s+(?:please|for me))?[\s.!?]*$",
     re.I,
@@ -124,8 +130,8 @@ def alarm_request(text: str, now: datetime | None = None) -> Alarm | None:
     return Alarm(at=at, label=(m.group("label") or "").strip(), passed_today=passed)
 
 
-_SPAN = r"(?P<n>\d+(?:\.\d+)?|an?|half an?|one|two|three|five|ten|fifteen|twenty|thirty)\s*(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?)"
-_WORDS = {"one": 1, "two": 2, "three": 3, "five": 5, "ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30}
+_SPAN = r"(?P<n>\d+(?:\.\d+)?|an?|half an?|" + _NUMS + r")\s*(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?)"
+_WORDS = _NUM_WORDS
 _REMIND_IN = re.compile(
     _LEAD
     + r"remind me\s+(?:(?:in|after)\s+" + _SPAN + r"\s+(?:to|that|about)\s+(?P<label>[^?!]{2,80}?)"
@@ -168,7 +174,7 @@ def timer_request(text: str) -> Timer | None:
         return None
     raw = (m.group("n") or m.group("n2") or "").lower()
     unit = (m.group("unit") or m.group("unit2") or "").lower()
-    n = 0.5 if raw.startswith("half") else 1.0 if raw in ("a", "an") else float(raw)
+    n = 0.5 if raw.startswith("half") else 1.0 if raw in ("a", "an") else float(_NUM_WORDS.get(raw, raw))
     scale = 1 if unit.startswith("s") else 3600 if unit.startswith("h") else 60
     seconds = int(n * scale)
     if not 1 <= seconds <= 24 * 3600:

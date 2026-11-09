@@ -159,3 +159,10 @@ def test_close_the_model_is_instant() -> None:
     for t in ("Close the 3D model.", "close that", "Hide it", "remove the drawings"):
         assert instant.match(t).action == "clear", t
     assert instant.match("close notepad") is None
+
+
+def test_number_words_in_timers() -> None:
+    """Heard by Whisper as words: 'set a timer for two minutes' went to the model."""
+    assert timer_request("Pyxi, set a timer for two minutes.").seconds == 120
+    assert timer_request("set a five minute timer").seconds == 300
+    assert timer_request("timer for twenty-five minutes").seconds == 1500
