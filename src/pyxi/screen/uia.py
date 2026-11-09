@@ -386,3 +386,7 @@ def browser_url(hwnd: int, budget_s: float = 0.5) -> str | None:
     except Exception as exc:
         log.debug("address bar read failed: %s", exc)
         return None
+
+
+if sys.platform == "darwin":  # Accessibility instead of UI Automation (pyxi/macos/uia.py)
+    from pyxi.macos.uia import *  # noqa: F403

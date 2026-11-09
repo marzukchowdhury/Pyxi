@@ -36,7 +36,12 @@ clock = datetime.now  # tests move time
 
 
 def open_path(path: Path) -> None:
-    """Open a file in its usual app (Edge for a PDF). Replaced in tests."""
+    """Open a file in its usual app (Edge for a PDF, Preview on a Mac). Replaced in tests."""
+    if __import__("sys").platform == "darwin":
+        import subprocess
+
+        subprocess.Popen(["open", str(path)])
+        return
     os.startfile(str(path))  # type: ignore[attr-defined]
 
 

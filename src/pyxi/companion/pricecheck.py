@@ -94,6 +94,12 @@ def save(data_dir: Path, prefs: dict[str, Any]) -> dict[str, Any]:
 
 def browser_url(hwnd: int | None = None) -> str:
     """The address in the browser's address bar (Chrome, Edge, Brave, Firefox), or ''."""
+    if __import__("sys").platform == "darwin":  # Accessibility, else AppleScript (macos/uia.py)
+        from pyxi import windows
+        from pyxi.screen import uia
+
+        hwnd = hwnd or windows.foreground()
+        return (uia.browser_url(hwnd) or "") if hwnd else ""
     try:
         import uiautomation as auto
     except ImportError:

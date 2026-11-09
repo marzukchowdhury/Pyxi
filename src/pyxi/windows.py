@@ -443,3 +443,7 @@ def window_like(name: str, open_now: list[tuple[int, str, str]], skip: set[int])
 
 def foreground() -> int:
     return int(_user32().GetForegroundWindow() or 0) if available() else 0
+
+
+if sys.platform == "darwin":  # the Mac versions, same names and arguments (pyxi/macos/windows.py)
+    from pyxi.macos.windows import *  # noqa: F403

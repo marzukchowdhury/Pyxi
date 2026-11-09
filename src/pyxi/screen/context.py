@@ -223,7 +223,13 @@ _PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#
 
 
 def _font(size: int) -> ImageFont.ImageFont:
-    for name in ("segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf"):
+    for name in (
+        "segoeuib.ttf",
+        "arialbd.ttf",
+        "DejaVuSans-Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",  # macOS
+        "/System/Library/Fonts/Helvetica.ttc",
+    ):
         try:
             return ImageFont.truetype(name, size)
         except OSError:
@@ -237,6 +243,10 @@ class ScreenReader:
     @staticmethod
     def foreground_title() -> str | None:
         """Title of the window in front right now (cheap; no capture)."""
+        if sys.platform == "darwin":
+            from pyxi import windows
+
+            return uia.window_title(windows.foreground())
         try:
             import ctypes
 
@@ -459,10 +469,17 @@ class ScreenReader:
         with (getattr(mss, "MSS", None) or mss.mss)() as sct:
             mon = pick_monitor(sct.monitors[1:], (*pos, 1, 1) if pos else window_rect)
             raw = sct.grab(mon)
-            return Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX"), (
-                mon["left"],
-                mon["top"],
-            )
+            img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+            return to_points(img, mon), (mon["left"], mon["top"])
+
+
+def to_points(img: Image.Image, mon: dict[str, int]) -> Image.Image:
+    """On a Mac, mss gives a Retina screen at twice its size in points; everything else Pyxi
+    knows (Accessibility, the mouse, the overlay) is in points, so the picture is scaled to
+    match. On Windows the process is DPI aware and the sizes already agree."""
+    if sys.platform != "darwin" or (img.width, img.height) == (mon["width"], mon["height"]):
+        return img
+    return img.resize((mon["width"], mon["height"]), Image.LANCZOS)
 
 
 def _contains(outer: tuple[int, int, int, int], r: tuple[int, int, int, int]) -> bool:

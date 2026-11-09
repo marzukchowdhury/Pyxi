@@ -157,3 +157,7 @@ def find_text(lines: list[TextLine], quote: str, within: Rect | None = None) -> 
 def _inside(r: Rect, outer: Rect) -> bool:
     cx, cy = r[0] + r[2] / 2, r[1] + r[3] / 2
     return outer[0] <= cx <= outer[0] + outer[2] and outer[1] <= cy <= outer[1] + outer[3]
+
+
+if sys.platform == "darwin":  # Apple's Vision instead of Windows' OCR (pyxi/macos/ocr.py)
+    from pyxi.macos.ocr import available, read_lines  # noqa: F401

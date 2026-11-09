@@ -448,3 +448,7 @@ class Hands:
 def _utf16(ch: str) -> list[int]:
     b = ch.encode("utf-16-le")
     return [int.from_bytes(b[i : i + 2], "little") for i in range(0, len(b), 2)]
+
+
+if sys.platform == "darwin":  # Quartz events instead of SendInput (pyxi/macos/hands.py)
+    from pyxi.macos.hands import *  # noqa: F403

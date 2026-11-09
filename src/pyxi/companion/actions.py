@@ -129,3 +129,7 @@ def in_account(url: str, email: str | None) -> str:
     sep = "&" if parsed.query else "?"
     base, _, frag = url.partition("#")
     return f"{base}{sep}authuser={quote(email)}" + (f"#{frag}" if frag else "")
+
+
+if __import__("sys").platform == "darwin":  # Mac apps and folders (pyxi/macos/apps.py)
+    from pyxi.macos.apps import APPS, app_target, open_app  # noqa: F401

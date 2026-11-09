@@ -148,3 +148,7 @@ def read_json(path: Path) -> dict[str, Any] | None:
         except (OSError, SecretError) as exc:
             log.warning("couldn't encrypt %s: %s", path.name, exc)
     return data
+
+
+if sys.platform == "darwin":  # a Keychain-held key instead of DPAPI (pyxi/macos/secretstore.py)
+    from pyxi.macos.secretstore import MAGIC, available, protect, unprotect

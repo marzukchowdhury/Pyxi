@@ -90,9 +90,24 @@ def windows_zone() -> str:
     return info.TimeZoneKeyName or info.StandardName
 
 
+def mac_zone(link: str = "/etc/localtime") -> str:
+    """'America/Vancouver' from macOS's own setting: /etc/localtime is a link into the zoneinfo
+    folder (/var/db/timezone/zoneinfo/America/Vancouver). '' off a Mac."""
+    if sys.platform != "darwin":
+        return ""
+    import os
+
+    try:
+        target = os.readlink(link)
+    except OSError:
+        return ""
+    _, sep, name = target.partition("zoneinfo/")
+    return name if sep and "/" in name else ""
+
+
 def local_zone() -> str:
     """'America/Vancouver' for this PC, or '' if it can't be told."""
-    name = WINDOWS_TO_IANA.get(windows_zone(), "")
+    name = WINDOWS_TO_IANA.get(windows_zone(), "") or mac_zone()
     if name:
         return name
     tz = datetime.now().astimezone().tzinfo

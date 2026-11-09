@@ -255,3 +255,7 @@ def read_text(path: Path, max_chars: int = 8000) -> str:
     if len(text) > max_chars:
         text = text[:max_chars] + f"\n... (cut; {len(text):,} characters in all)"
     return text
+
+
+if __import__("sys").platform == "darwin":  # Spotlight instead of Windows Search (pyxi/macos/files.py)
+    from pyxi.macos.files import search_index

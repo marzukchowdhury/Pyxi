@@ -441,3 +441,7 @@ def play_url(query: str, music: bool = False) -> str:
         else "https://www.youtube.com/results?search_query="
     )
     return base + quote_plus(query)
+
+
+if sys.platform == "darwin":  # AppleScript volume, Spotify and the browser (pyxi/macos/media.py)
+    from pyxi.macos.media import *  # noqa: F403

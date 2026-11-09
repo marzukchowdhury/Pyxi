@@ -25,7 +25,12 @@ for _stream in (sys.stdout, sys.stderr):
 def _quit_with_app(pid: str | None) -> None:
     """Started by the desktop app: exit the moment that app's process ends (closed, crashed or
     replaced by an installer), so an old brain is never left running on its own."""
-    if not pid or not pid.isdigit() or os.name != "nt":
+    if not pid or not pid.isdigit():
+        return
+    if sys.platform == "darwin":
+        _quit_with_app_mac(int(pid))
+        return
+    if os.name != "nt":
         return
     import ctypes
     import threading
@@ -40,6 +45,32 @@ def _quit_with_app(pid: str | None) -> None:
         os._exit(0)
 
     threading.Thread(target=wait, name="quit-with-app", daemon=True).start()
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)  # signal 0: nothing is sent, it only asks whether the process exists
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _quit_with_app_mac(pid: int, every_s: float = 1.0) -> None:
+    """The Mac has no handle to wait on: check once a second that the app is still there."""
+    import threading
+    import time
+
+    if not _alive(pid):
+        os._exit(0)
+
+    def watch() -> None:
+        while _alive(pid):
+            time.sleep(every_s)
+        os._exit(0)
+
+    threading.Thread(target=watch, name="quit-with-app", daemon=True).start()
 
 
 def _load_dotenv() -> None:

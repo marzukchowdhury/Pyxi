@@ -86,6 +86,14 @@ def read_focus() -> Focus | None:
 
     if not uia.available():
         return None
+    if __import__("sys").platform == "darwin":  # Accessibility's focused element
+        f = uia.focused_field()  # type: ignore[attr-defined]
+        if f is None:
+            return None
+        password = bool(f["password"])
+        value = f["value"] if f["role"] in FILLED and not password else ""
+        name = "(password field)" if password else f["name"]
+        return Focus(f["process"], f["title"], name, f["role"], value, password)
     try:
         import uiautomation as auto
 
@@ -205,7 +213,7 @@ class Recorder:
         self._last: Focus | None = None
         self._window: tuple[str, str] | None = None
         self._task: asyncio.Task[None] | None = None
-        self.own_apps = {"pyxi.exe", "electron.exe"}  # Pyxi's own overlay isn't part of the task
+        self.own_apps = {"pyxi.exe", "electron.exe", "pyxi", "electron"}  # Pyxi's own (Windows, Mac)
 
     def start(self) -> None:
         self._task = asyncio.ensure_future(self._run())

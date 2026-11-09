@@ -43,8 +43,17 @@ Progress = Callable[["Status"], Awaitable[None]]
 
 
 def home() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Pyxi" / "LibreOffice"
     base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
     return Path(base) / "Pyxi" / "LibreOffice"
+
+
+# On a Mac, Pyxi uses a LibreOffice the user installed themselves (it doesn't set one up).
+MAC_APPS = (
+    Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"),
+    Path.home() / "Applications" / "LibreOffice.app" / "Contents" / "MacOS" / "soffice",
+)
 
 
 def profile_dir() -> Path:
@@ -91,7 +100,9 @@ def warm_up(soffice: str | Path) -> bool:
 
 
 def installed(root: Path | None = None) -> Path | None:
-    """soffice.exe from Pyxi's own copy, if it's been set up."""
+    """soffice.exe from Pyxi's own copy, if it's been set up (on a Mac: the user's LibreOffice)."""
+    if sys.platform == "darwin":
+        return next((p for p in MAC_APPS if p.is_file()), None)
     root = root or home()
     try:
         info = json.loads((root / MARKER).read_text(encoding="utf-8"))
@@ -281,6 +292,11 @@ class Installer:
             return None
 
     async def _install(self) -> Path:
+        if sys.platform == "darwin":  # the download is a Windows installer
+            raise RuntimeError(
+                "On a Mac, Pyxi can't set LibreOffice up by itself yet. Install it from "
+                "libreoffice.org and Pixel will use it."
+            )
         self.root.mkdir(parents=True, exist_ok=True)
         async with self.client_factory() as client:
             listing = await client.get(STABLE)

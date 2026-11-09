@@ -3650,6 +3650,8 @@ def _same_view(a: Image.Image, b: Image.Image) -> bool:
 
 
 def ctypes_foreground() -> int:
+    if sys.platform == "darwin":
+        return windows.foreground()
     try:
         import ctypes
 
