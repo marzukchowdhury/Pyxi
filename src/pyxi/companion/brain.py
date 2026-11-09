@@ -88,7 +88,7 @@ from pyxi.scenes.object_gallery import OBJECT_GALLERY
 from pyxi.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summary
 from pyxi.scenes.sketch import Sketchboard, steps_from_speech
 from pyxi.scenes.spec import SceneAnchor
-from pyxi.screen import ScreenContext, ScreenReader
+from pyxi.screen import ScreenContext, ScreenReader, uia
 from pyxi.stream_llm import StreamingChat
 from pyxi.timecontext import now_block
 from pyxi.voice import Transcriber, make_tts, split_sentences
@@ -596,6 +596,20 @@ class Brain:
         # One short line out loud; the whole story is in the tray and the notification.
         await self.say_line(split_sentences(out.summary)[0][:140] if out.summary else "Done.")
 
+    def _screens_note(self) -> str:
+        """With two or three monitors, what's on each, so 'my left screen' means something and
+        Pyxi never says it can only see one screen. Worked out once a turn (it's cheap)."""
+        if getattr(self, "_screens_text", None) is None:
+            try:
+                self._screens_text = (
+                    windows.screens_summary(uia.cursor_pos()) if windows.available() else ""
+                )
+            except Exception:
+                log.warning("couldn't list the screens", exc_info=True)
+                self._screens_text = ""
+        note = self._screens_text or ""
+        return f"\n\n# All their screens\n{note}\n{_MULTI_SCREEN_NOTE}" if note else ""
+
     async def _arrange_windows(self, args: dict[str, Any]) -> str | None:
         """Lay windows out (two, three or four panes), or snap, maximize, minimize or restore the
         window they're in."""
@@ -607,6 +621,22 @@ class Brain:
             return "arrange_windows: I couldn't tell which window you mean."
         layout = str(args.get("layout") or "split")
         panes = [str(p).strip() for p in args.get("panes") or [] if str(p).strip()]
+        on = windows.screen_named(str(args.get("screen") or "")) if args.get("screen") else None
+        if args.get("screen") and on is None:
+            names = ", ".join(s["name"] for s in windows.screens()) or "one"
+            return f"arrange_windows: there's no {args['screen']!r} screen (they have: {names})."
+        if on is not None and (layout != "panes" or len(panes) <= 1):
+            # "Put YouTube on my right screen": that window (or the one they're in), moved there
+            # and made full-screen (or snapped, if they said left or right half).
+            win = hwnd
+            if panes and panes[0].lower() not in ("current", "this", "this window", "here"):
+                win = windows.window_like(panes[0], windows.open_windows(minimized=True), set()) or 0
+                if not win:
+                    return f"arrange_windows: {panes[0]!r} isn't open. Open it first, or say so."
+            windows.place(win, *on["work"])
+            windows.snap(win, layout if layout in ("left", "right", "top", "bottom") else "maximize")
+            windows.focus(win)
+            return None
         if layout == "split":
             target = str(args.get("open") or "").strip()
             if not target:
@@ -621,7 +651,7 @@ class Brain:
             return "arrange_windows: give at least two panes."
         panes = panes[:6]
         rects = windows.pane_rects(
-            windows.work_area(hwnd), len(panes), str(args.get("arrangement") or "auto")
+            on["work"] if on else windows.work_area(hwnd), len(panes), str(args.get("arrangement") or "auto")
         )
         open_now = windows.open_windows()
         used: set[int] = {hwnd}
@@ -1639,6 +1669,7 @@ class Brain:
                 self._guide_fresh = True  # a new request: a guide in it counts from step 1
             self._pending_say = ""  # an answer held back during a lookup round
             self._cut_short = False  # a round was dropped because they spoke again
+            self._screens_text: str | None = None  # every screen and what's on it, once a turn
             self._opened_urls: set[str] = set()  # pages opened by this request: each once
             # Mail, pages and documents this turn read: after any, every outward action asks on
             # a fresh card, and its card says what came from them (pyxi/safety.py).
@@ -1814,9 +1845,12 @@ class Brain:
             text = prompts.turn_prompt(
                 user_text=cfg["user_text"],
                 history=self.history,
-                screen=self._ctx.render(self.settings.screen.max_elements)
-                if self._ctx
-                else "(no screen)",
+                screen=(
+                    self._ctx.render(self.settings.screen.max_elements)
+                    if self._ctx
+                    else "(no screen)"
+                )
+                + self._screens_note(),
                 jobs=jobs,
                 memories=memories,
                 notes=state.get("notes", []),
@@ -2568,7 +2602,27 @@ class Brain:
             except (TypeError, ValueError):
                 secs = 2.5
             await asyncio.sleep(secs)
-            ctx = await self._capture(follow_mouse=False)  # what just opened is in front
+            if args.get("screen") and windows.available():
+                # "What's on my left screen?": its top window, read like the one under the mouse.
+                where = windows.screen_named(str(args["screen"]))
+                if where is None:
+                    return f"look_again: there's no {args['screen']!r} screen."
+                top = next(
+                    (
+                        h
+                        for h, t, _ in windows.open_windows()
+                        if not windows._NOT_CONTENT.match(t)
+                        and (r := windows.rect_of(h))
+                        and r[2] > 80
+                        and windows.screen_of(r, [where]) is not None
+                    ),
+                    None,
+                )
+                if top is None:
+                    return f"look_again: nothing is open on the {where['name']} screen (just the desktop)."
+                ctx = await self._capture(hwnd=top)
+            else:
+                ctx = await self._capture(follow_mouse=False)  # what just opened is in front
             if ctx.excluded:
                 return f"look_again: that's a private app ({ctx.excluded}), so I can't look."
             self._ctx = ctx
@@ -3162,6 +3216,14 @@ _JUST_OPEN = re.compile(
     re.I,
 )
 # Tools that start work which finishes later (the notification says how it went).
+_MULTI_SCREEN_NOTE = (
+    "The screenshot shows one screen (where the mouse is); the list above is every screen. "
+    "Never say you can only see one screen: say what's on each from the list, and to look at "
+    "another one use look_again with screen set to it. To move or lay out windows on a "
+    "particular screen, arrange_windows takes screen ('left', 'middle', 'right')."
+)
+
+
 _BACKGROUND_TOOLS = {
     "edit_document",
     "convert_files",

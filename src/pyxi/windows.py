@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import re
 import ctypes.wintypes as wt
 import logging
 import os
@@ -255,6 +256,89 @@ def open_windows(minimized: bool = False) -> list[tuple[int, str, str]]:
 
     u.EnumWindows(visit, 0)
     return [(h, t, exe_of(h)) for h, t, _ in found]
+
+
+def screens() -> list[dict]:
+    """Every monitor, left to right: {"n", "name", "rect", "work"} with rects as x, y, w, h."""
+    if not available():
+        return []
+    u = _user32()
+    found: list[dict] = []
+
+    @ctypes.WINFUNCTYPE(wt.BOOL, wt.HMONITOR, wt.HDC, ctypes.POINTER(wt.RECT), wt.LPARAM)
+    def visit(mon, _hdc, _rect, _):
+        info = _MonitorInfo()
+        info.cbSize = ctypes.sizeof(_MonitorInfo)
+        if u.GetMonitorInfoW(mon, ctypes.byref(info)):
+            m, w = info.rcMonitor, info.rcWork
+            found.append(
+                {
+                    "rect": (m.left, m.top, m.right - m.left, m.bottom - m.top),
+                    "work": (w.left, w.top, w.right - w.left, w.bottom - w.top),
+                    "primary": bool(info.dwFlags & 1),
+                }
+            )
+        return True
+
+    u.EnumDisplayMonitors(0, 0, visit, 0)
+    found.sort(key=lambda s: (s["rect"][0], s["rect"][1]))
+    names = {1: ["only"], 2: ["left", "right"], 3: ["left", "middle", "right"]}.get(len(found))
+    for i, s in enumerate(found):
+        s["n"] = i + 1
+        s["name"] = names[i] if names else f"screen {i + 1}"
+    return found
+
+
+# Pyxi's own windows and overlays that sit on every screen: never "what's on the screen".
+_NOT_CONTENT = re.compile(r"^(Pyxi\b|NVIDIA GeForce Overlay|Program Manager|Windows Input Experience)", re.I)
+
+
+def screen_of(rect: tuple[int, int, int, int], all_screens: list[dict]) -> dict | None:
+    x, y, w, h = rect
+    cx, cy = x + w // 2, y + h // 2
+    for s in all_screens:
+        sx, sy, sw, sh = s["rect"]
+        if sx <= cx < sx + sw and sy <= cy < sy + sh:
+            return s
+    return None
+
+
+def screens_summary(mouse: tuple[int, int] | None = None) -> str:
+    """'3 screens, left to right. Left: Firefox "New Tab". Middle: Facebook, YouTube...' Text
+    for the model, so it knows every screen and what's on each (one picture shows only one)."""
+    all_screens = screens()
+    if len(all_screens) < 2:
+        return ""
+    on: dict[int, list[str]] = {s["n"]: [] for s in all_screens}
+    for hwnd, title, _exe in open_windows():
+        if _NOT_CONTENT.match(title):
+            continue
+        r = rect_of(hwnd)
+        s = screen_of(r, all_screens) if r and r[2] > 80 and r[3] > 80 else None
+        if s is not None and len(on[s["n"]]) < 5:
+            on[s["n"]].append(title[:70])
+    here = screen_of((*mouse, 1, 1), all_screens) if mouse else None
+    lines = [f"The user has {len(all_screens)} screens, left to right (top window first on each):"]
+    for s in all_screens:
+        what = "; ".join(on[s["n"]]) or "nothing open (the desktop)"
+        mark = " (the screenshot is of this one: the mouse is here)" if here is s else ""
+        lines.append(f"- {s['name'].capitalize()} screen{mark}: {what}")
+    return "\n".join(lines)
+
+
+def screen_named(name: str) -> dict | None:
+    """'left', 'middle', 'right', 'second', '2', 'primary', 'main' -> that screen."""
+    all_screens = screens()
+    word = name.strip().lower().removesuffix(" screen").removesuffix(" monitor")
+    ordinals = {"first": 1, "second": 2, "third": 3, "fourth": 4, "1": 1, "2": 2, "3": 3, "4": 4}
+    for s in all_screens:
+        if word == s["name"] or ordinals.get(word) == s["n"]:
+            return s
+        if word in ("main", "primary") and s["primary"]:
+            return s
+    if word in ("center", "centre") and len(all_screens) == 3:
+        return all_screens[1]
+    return None
 
 
 def rect_of(hwnd: int) -> tuple[int, int, int, int] | None:

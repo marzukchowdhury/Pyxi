@@ -716,7 +716,12 @@ COMPANION_TOOLS += [
             "seconds": {
                 "type": "number",
                 "description": "How long to let it load first (default 2.5).",
-            }
+            },
+            "screen": {
+                "type": "string",
+                "description": "With more than one monitor: look at that screen instead ('left', "
+                "'middle', 'right'), e.g. 'what's on my left screen?'. Use seconds 0 then.",
+            },
         },
     ),
     _tool(
@@ -814,6 +819,12 @@ COMPANION_TOOLS += [
                 "enum": ["columns", "rows", "grid", "main"],
                 "description": "For panes: columns side by side (default for 2 or 3), rows stacked, grid "
                 "2x2 (default for 4), or main: a big left half with the rest stacked on the right.",
+            },
+            "screen": {
+                "type": "string",
+                "description": "With more than one monitor: which screen ('left', 'middle', 'right', "
+                "'main'). With one pane (or none: the window they're in) it moves that window there "
+                "full-screen ('put YouTube on my right screen'); with several it lays them out there.",
             },
             "open": {
                 "type": "string",

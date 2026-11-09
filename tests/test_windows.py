@@ -143,3 +143,61 @@ async def test_panes_end_up_in_front_of_the_window_they_were_in(settings, monkey
 
 async def _no_sleep(_s):
     return None
+
+
+THREE = [
+    {"n": 1, "name": "left", "rect": (0, 0, 1920, 1080), "work": (0, 0, 1920, 1032), "primary": True},
+    {"n": 2, "name": "middle", "rect": (1920, 0, 1080, 1920), "work": (1920, 0, 1080, 1872), "primary": False},
+    {"n": 3, "name": "right", "rect": (3000, 0, 1080, 1920), "work": (3000, 0, 1080, 1872), "primary": False},
+]
+
+
+def test_every_screen_and_whats_on_it(monkeypatch):
+    """'Can you see I'm using three screens?' got 'I can only see one screen'."""
+    monkeypatch.setattr(windows, "screens", lambda: THREE)
+    monkeypatch.setattr(
+        windows,
+        "open_windows",
+        lambda minimized=False: [
+            (1, "Pyxi overlay", ""),
+            (2, "(1) Facebook - Mozilla Firefox", ""),
+            (3, "Music - YouTube - Mozilla Firefox", ""),
+            (4, "Claude", ""),
+        ],
+    )
+    rects = {1: (0, 0, 1920, 1032), 2: (0, 0, 960, 1032), 3: (1912, -8, 1096, 1888), 4: (2992, -8, 1096, 1888)}
+    monkeypatch.setattr(windows, "rect_of", lambda h: rects[h])
+    text = windows.screens_summary(mouse=(3500, 900))
+    assert "3 screens" in text and "Pyxi overlay" not in text
+    assert "- Left screen: (1) Facebook" in text
+    assert "- Middle screen: Music - YouTube" in text
+    assert "- Right screen (the screenshot is of this one" in text
+    monkeypatch.setattr(windows, "screens", lambda: THREE[:1])
+    assert windows.screens_summary() == ""  # one screen: nothing to add
+
+
+def test_screens_by_name(monkeypatch):
+    monkeypatch.setattr(windows, "screens", lambda: THREE)
+    assert windows.screen_named("left screen")["n"] == 1
+    assert windows.screen_named("second")["n"] == 2
+    assert windows.screen_named("main monitor")["n"] == 1
+    assert windows.screen_named("center")["n"] == 2
+    assert windows.screen_named("fourth") is None
+
+
+async def test_put_a_window_on_another_screen(settings, monkeypatch):
+    from test_brain_and_server import make_brain
+
+    moved: dict = {}
+    monkeypatch.setattr(windows, "available", lambda: True)
+    monkeypatch.setattr(windows, "screens", lambda: THREE)
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(9, "Music - YouTube - Mozilla Firefox", "firefox.exe")])
+    monkeypatch.setattr(windows, "place", lambda hwnd, *rect: moved.__setitem__("rect", (hwnd, rect)))
+    monkeypatch.setattr(windows, "snap", lambda hwnd, where: moved.__setitem__("snap", (hwnd, where)))
+    monkeypatch.setattr(windows, "focus", lambda hwnd: True)
+    brain, _ = make_brain(settings)
+    brain._ctx = type("C", (), {"window": type("W", (), {"hwnd": 7})()})()
+    note = await brain._arrange_windows({"layout": "maximize", "panes": ["YouTube"], "screen": "right"})
+    assert note is None and moved == {"rect": (9, (3000, 0, 1080, 1872)), "snap": (9, "maximize")}
+    note = await brain._arrange_windows({"layout": "maximize", "screen": "fourth"})
+    assert note and "they have: left, middle, right" in note
