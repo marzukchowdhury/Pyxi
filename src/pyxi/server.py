@@ -370,6 +370,19 @@ def create_app(
         finally:
             hub.disconnect(cid)
 
+    # Pyxi in your browser (pyxi/browserlink.py): the extension's own socket. The launch key
+    # isn't asked for here, since an extension can't know it. Instead the connection must come
+    # from this PC, from a browser extension, and from one that was paired with a code.
+    @app.websocket("/ws/browser")
+    async def ws_browser(socket: WebSocket) -> None:
+        await brain.browser.serve(socket)
+
+    @app.post("/api/browser/pair")
+    async def browser_pair() -> dict[str, Any]:
+        """A pairing code for the extension, for local tools (needs the launch key). The
+        desktop app asks over its socket instead ("browser_pair")."""
+        return brain.browser.new_code()
+
     async def _e2e_card() -> None:
         """End-to-end tests only (demo mode with PYXI_E2E=1): a harmless Allow card, so a test can
         answer it in the real overlay. The answer is broadcast back."""
@@ -434,6 +447,16 @@ def create_app(
             if hasattr(brain.screen, "set_private_apps"):
                 brain.screen.set_private_apps(apps)
             await hub.emit("private_apps", apps=apps, built_in=private_apps.BUILT_IN)
+        elif kind in ("browser_get", "browser_pair", "browser_forget", "browser_site_revoke"):
+            # Settings, "Connect your browser": a pairing code, unpair, the sites Pyxi may act on.
+            link, extra = brain.browser, {}
+            if kind == "browser_pair":
+                extra = link.new_code()
+            elif kind == "browser_forget":
+                link.forget(str(msg.get("id") or ""))
+            elif kind == "browser_site_revoke":
+                link.revoke_site(str(msg.get("host") or ""))
+            await hub.emit("browser", **link.public(), **extra)
         elif kind == "file_access_get":
             await hub.emit("file_access", **files_access.load(settings.data_dir).public())
         elif kind == "file_access_save":

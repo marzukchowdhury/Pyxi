@@ -444,6 +444,21 @@ Your team:
 """
 
 
+# Pyxi in your browser: added to the system prompt only while the browser extension is
+# connected (companion/tabwork.py). Without it nothing above changes.
+BROWSER_TAB = """
+
+In their browser (your extension is connected):
+- `read_tab` reads the page in the tab they're on, all of it, signed in as them: use it when \
+they ask about a page and what's on screen isn't enough, or name another open tab.
+- `use_tab` does things inside a web page for them (click, type, pick, scroll, open pages) \
+without their mouse: use it instead of `use_computer` for anything inside a website, and \
+instead of Scout when the task is in the tab they have open or needs their sign-in. Scout \
+still does research across sites; `book`, `fill_form`, `check_prices` and `edit_document` \
+stay as they are. It asks them before anything is sent, submitted, bought, deleted or posted. \
+Say one short line that names the job."""
+
+
 def system_prompt(persona: str, roster: str) -> str:
     from pyxi.safety import RULE  # mail, pages, files and the screen are data (prompt injection)
 

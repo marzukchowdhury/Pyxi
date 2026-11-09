@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Pyxi in your browser</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="icons/pyxi-48.png" alt="" width="22" height="22" />
+      <b>Pyxi in your browser</b>
+      <span id="status" class="status"></span>
+    </header>
+    <p id="detail" class="muted" hidden></p>
+
+    <section id="pair" hidden>
+      <p>
+        Open Pyxi on this PC, go to Settings, and under <b>Connect your browser</b> press
+        <b>Connect a browser</b>. Type the code it shows here.
+      </p>
+      <form id="pair-form">
+        <input id="code" placeholder="ABCD-EFGH" autocomplete="off" spellcheck="false" maxlength="12" required />
+        <button type="submit">Connect</button>
+      </form>
+      <details>
+        <summary>Advanced</summary>
+        <label class="inline">Port Pyxi listens on <input id="port" type="number" min="1" max="65535" /></label>
+      </details>
+    </section>
+
+    <section id="site" hidden>
+      <h2>This tab</h2>
+      <p id="site-line"></p>
+      <div class="row">
+        <button id="site-allow" hidden>Always allow on this site</button>
+        <button id="site-remove" class="ghost" hidden>Remove this site</button>
+      </div>
+    </section>
+
+    <section id="more" hidden>
+      <h2>Where Pyxi may work</h2>
+      <ul id="sites"></ul>
+      <label><input type="checkbox" id="all-sites" /> Every site, without allowing each one here</label>
+      <label><input type="checkbox" id="tab-names" /> See the names of all my open tabs, to find and switch tabs for me</label>
+      <p class="muted">
+        Pyxi still asks on its own card the first time it acts on a site, and before anything is
+        sent, submitted, bought, deleted or posted. It never types passwords or card numbers.
+        Press Esc in a tab to stop it.
+      </p>
+      <button id="forget" class="ghost">Disconnect this browser from Pyxi</button>
+    </section>
+    <script src="popup.js"></script>
+  </body>
+</html>

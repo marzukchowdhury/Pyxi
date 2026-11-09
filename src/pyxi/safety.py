@@ -45,6 +45,7 @@ UNTRUSTED_TOOLS = frozenset(
         "gmail_people",
         "docs_read",
         "sheets_read",
+        "read_tab",  # a tab in their own browser (companion/tabwork.py)
     }
 )
 
@@ -84,6 +85,7 @@ SOURCE_LABEL = {
     "read_file": "the document you read",
     "docs_read": "the document you read",
     "sheets_read": "the spreadsheet you read",
+    "read_tab": "the browser tab you read",
 }
 
 Reads = list[tuple[str, str]]  # (label from SOURCE_LABEL, the text that was read)

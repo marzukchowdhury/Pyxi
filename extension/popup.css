@@ -1,0 +1,57 @@
+/* Pyxi's popup: the same near-black glass and ice accent as the desktop app's panel. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0c10;
+  --hair: rgba(255, 255, 255, 0.1);
+  --ink: #f4f7fb;
+  --ink-2: rgba(232, 238, 248, 0.62);
+  --ice: #9ecbff;
+  --glow: #ffbe50;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  width: 320px; padding: 14px 16px 16px; background: var(--bg); color: var(--ink);
+  font: 13px/1.45 system-ui, "Segoe UI", sans-serif;
+}
+header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+header b { font-size: 14px; flex: 1; }
+.status { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.status::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px;
+  border-radius: 50%; background: rgba(232, 238, 248, 0.3); vertical-align: 1px;
+}
+.status.on { color: var(--ink); }
+.status.on::before { background: var(--glow); box-shadow: 0 0 6px var(--glow); }
+h2 {
+  margin: 14px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-2);
+}
+p { margin: 6px 0; }
+.muted { color: var(--ink-2); font-size: 12px; }
+form { display: flex; gap: 8px; margin: 10px 0 6px; }
+input[type="number"], #code {
+  flex: 1; min-width: 0; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--hair);
+  background: rgba(255, 255, 255, 0.05); color: var(--ink); font: inherit;
+}
+#code { text-transform: uppercase; letter-spacing: 0.12em; font-variant-numeric: tabular-nums; }
+#port { width: 90px; flex: none; }
+button {
+  padding: 7px 12px; border-radius: 8px; border: 0; background: var(--ice); color: #0b0c10;
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--ink-2); border: 1px solid var(--hair); font-weight: 500; }
+button:hover { filter: brightness(1.1); }
+[hidden] { display: none !important; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+label { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; }
+label.inline { align-items: center; }
+details { margin-top: 4px; color: var(--ink-2); font-size: 12px; }
+summary { cursor: pointer; }
+ul { list-style: none; margin: 0 0 6px; padding: 0; }
+li {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0;
+  border-bottom: 1px solid var(--hair);
+}
+li button { padding: 2px 8px; font-size: 12px; }
+#forget { margin-top: 8px; }

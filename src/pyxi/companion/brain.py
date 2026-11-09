@@ -44,6 +44,7 @@ from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
 from pyxi import alarms
 from pyxi.companion import answers, filework, instant, paperwork, pricecheck, prompts, specialists
+from pyxi.companion import tabwork  # Pyxi in your browser (the extension)
 from pyxi.companion.actions import app_target, in_account, open_app, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
@@ -236,6 +237,7 @@ class Brain:
         self.connectors = Connectors(settings.data_dir, Path.home() / "Documents" / "Pyxi")
         self.routines = RoutineStore(settings.data_dir / "routines.json")
         self.mailwatch = MailWatchStore(settings.data_dir / "mailwatch.json")
+        tabwork.setup(self)  # Pyxi in your browser: self.browser, the extension's bridge
 
     # ================================================================== entry points
     async def set_state(self, state: State) -> None:
@@ -1250,6 +1252,7 @@ class Brain:
             tools = [t for t in tools if t.name not in THREE_D_TOOLS]
         if self._builder_on():
             tools = [BUILD_BRIEF if t.name == "build_3d_model" else t for t in tools]
+        tools += tabwork.tools(self)  # read_tab and use_tab, only while a browser is connected
         return tools
 
     def _builder_llm(self) -> LLMProvider:
@@ -1811,6 +1814,7 @@ class Brain:
     async def stop_everything(self) -> str:
         """The "Stop everything" hotkey and tray item: every teammate job, the hands, Scout's
         browser, open cards (answered "no") and anything queued to go out, all at once."""
+        in_tab = await tabwork.stop(self)  # before its job is cancelled: the tab is told too
         jobs = await self.jobs.stop_all()
         hands_on = self._operator is not None
         if hands_on:
@@ -1829,6 +1833,8 @@ class Brain:
         parts = [f"{jobs} teammate job{'s' if jobs != 1 else ''}"] if jobs else []
         if hands_on:
             parts.append("the mouse and keyboard")
+        if in_tab:
+            parts.append("the work in your browser tab")
         if queued:
             parts.append(f"{queued} waiting action{'s' if queued != 1 else ''}")
         message = "Stopped everything" + (
@@ -2209,6 +2215,7 @@ class Brain:
             system = prompts.system_prompt(
                 pyxi.persona if pyxi else "", self.registry.roster_text()
             )
+            system += tabwork.prompt(self)  # only while a browser is connected
             now_t = time.time()
             jobs = "\n".join(
                 j.brief()
@@ -3155,6 +3162,8 @@ class Brain:
             return await filework.handle(self, name, args)
         if name in PAPER_TOOLS:  # forms, flight check-in, showing a bill: companion/paperwork.py
             return await paperwork.handle(self, name, args)
+        if name in tabwork.TOOLS:  # their own browser tabs: companion/tabwork.py
+            return await tabwork.handle(self, name, args)
         if name in pricecheck.TOOLS:  # cheaper elsewhere: companion/pricecheck.py
             return await pricecheck.handle(self, name, args)
         if name in answers.TOOLS:  # the answer, on a card: companion/answers.py
@@ -3821,6 +3830,7 @@ _BACKGROUND_TOOLS = {
     "errand",
     "book",
     "use_computer",
+    "use_tab",
     "tidy_folder",
     "build_3d_model",
     "explain_in_3d",
