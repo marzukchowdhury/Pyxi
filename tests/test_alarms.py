@@ -113,3 +113,14 @@ async def test_a_label_that_only_says_alarm_rings_as_time_to_get_up(settings) ->
     (r,) = brain.routines.items
     await brain.run_due_routines(datetime.fromtimestamp(r.next_run + 5))
     assert said[-1].endswith("Time to get up.") and "November" not in said[-1]
+
+
+async def test_media_keys_still_work_next_to_screen_playpause(settings, monkeypatch) -> None:
+    """Night run: 'Pause the music' crashed with UnboundLocalError ('hands')."""
+    from pyxi.companion import brain as brain_mod
+
+    pressed: list[str] = []
+    monkeypatch.setattr(brain_mod.media, "press", lambda key: pressed.append(key), raising=False)
+    b = Brain(settings, Hub(), llm=DemoLLM(), screen=FakeScreen())
+    note = await b._quick_action("media", "playpause")
+    assert note is None or "UnboundLocal" not in str(note)

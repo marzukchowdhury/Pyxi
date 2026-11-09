@@ -813,14 +813,14 @@ class Brain:
             )
             if top is None:
                 return f"screen_playpause: nothing is open on the {where['name']} screen."
-            from pyxi import hands
+            from pyxi import hands as keys  # (not "hands": that name is used elsewhere here)
 
             windows.focus(top[0])
             await asyncio.sleep(0.25)
             key = "k" if "youtube" in top[1].lower() else "space"
             try:
-                await asyncio.to_thread(lambda: hands.Hands().press(key))
-            except hands.Interrupted:
+                await asyncio.to_thread(lambda: keys.Hands().press(key))
+            except keys.Interrupted:
                 return "screen_playpause: they moved the mouse just then, so I didn't press play."
             return None
         if action == "volume":
