@@ -185,35 +185,65 @@ const DRAW = {
     arrow(x, 318, 290, 3.6);
     x.fill();
   },
-  // Pyxi itself: wings, body, and the glowing tail
+  // Pyxi itself, seen from above: head and antennae, two open wings, and the lantern of a tail
   firefly(x) {
-    x.translate(320, 236);
-    x.scale(15, 15);
-    x.rotate((-30 * Math.PI) / 180);
+    x.translate(318, 196);
+    x.rotate((-26 * Math.PI) / 180);
+    x.lineCap = x.lineJoin = "round";
     x.strokeStyle = x.fillStyle = ICE;
-    x.lineWidth = 0.3;
+    // wings: long teardrops, open, each with a vein
+    for (const s of [-1, 1]) {
+      x.lineWidth = 4.5;
+      x.beginPath();
+      x.moveTo(s * 18, -42);
+      x.bezierCurveTo(s * 86, -112, s * 196, -52, s * 170, 26);
+      x.bezierCurveTo(s * 150, 74, s * 62, 26, s * 26, -8);
+      x.closePath();
+      x.stroke();
+      x.lineWidth = 2.5;
+      x.beginPath();
+      x.moveTo(s * 26, -30);
+      x.quadraticCurveTo(s * 96, -52, s * 150, 14);
+      x.stroke();
+      // antennae
+      x.lineWidth = 4;
+      x.beginPath();
+      x.moveTo(s * 9, -92);
+      x.quadraticCurveTo(s * 20, -132, s * 52, -146);
+      x.stroke();
+    }
+    // head, and the thorax as an outline so it doesn't burn out to a white blob
     x.beginPath();
-    x.ellipse(-3.4, -5.6, 5.4, 2.3, (-38 * Math.PI) / 180, 0, 7);
-    x.stroke();
-    x.beginPath();
-    x.ellipse(3.4, -5.6, 5.4, 2.3, (38 * Math.PI) / 180, 0, 7);
-    x.stroke();
-    x.beginPath();
-    x.ellipse(0, -5, 2.3, 2.6, 0, 0, 7);
+    x.arc(0, -76, 19, 0, 7);
     x.fill();
+    x.lineWidth = 6;
     x.beginPath();
-    x.arc(0, -8.3, 1.6, 0, 7);
-    x.fill();
+    x.ellipse(0, -28, 34, 30, 0, 0, 7);
+    x.stroke();
+    x.lineWidth = 3;
+    line(x, 0, -52, 0, -4);
+    // the lantern: a gold tail in three segments
     x.strokeStyle = x.fillStyle = GOLD;
     x.beginPath();
-    x.ellipse(0, 0, 3, 3.7, 0, 0, 7);
+    x.ellipse(0, 74, 44, 76, 0, 0, 7);
     x.fill();
-    x.lineWidth = 0.14;
-    [5.6, 7.6, 9.8].forEach((r) => {
+    x.globalCompositeOperation = "destination-out";
+    x.lineWidth = 13;
+    for (const y of [40, 80, 116]) {
       x.beginPath();
-      x.arc(0, 0, r, 0, 7);
+      x.moveTo(-50, y);
+      x.quadraticCurveTo(0, y + 14, 50, y);
       x.stroke();
-    });
+    }
+    x.globalCompositeOperation = "source-over";
+    // its light: loose sparks around the tail, thinning with distance (not rings)
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+    for (let i = 0; i < 300; i++) {
+      const a = rnd() * Math.PI * 2;
+      const r = 66 + Math.pow(rnd(), 1.8) * 92;
+      x.fillRect(Math.cos(a) * r * 0.86, 78 + Math.sin(a) * r, 2, 2);
+    }
   },
 };
 /** Draw a shape on a 640 x 400 canvas and return its pixels as points: [x, y, z, gold, spin]. */
@@ -397,12 +427,23 @@ function scene(name, aspect, box) {
         spin: 0.45,
       };
     case "firefly":
-      return { ...at, pts: sampled("firefly", flat(fitH * 1.12)), depth: 0.05 };
+      return {
+        ...at,
+        pts: sampled("firefly", flat(fitH * 1.3)),
+        depth: 0.02,
+        bright: 0.95,
+        grain: 0.56,
+      };
     case "bubble":
     case "screen":
     case "scan":
     case "allow":
-      return { ...at, pts: sampled(name, flat(fitH * 0.94)), depth: 0.035 };
+      return {
+        ...at,
+        pts: sampled(name, flat(fitH * 0.94)),
+        depth: 0.03,
+        grain: 0.8,
+      };
     default:
       return { ...at, pts: null, cx: 0, cy: 0, bright: 0.4 };
   }
@@ -411,8 +452,8 @@ function scene(name, aspect, box) {
 const VERT = `
 attribute vec3 aPos;
 attribute vec2 aMeta;   // gold (0..1), brightness
-attribute vec2 aStatic; // size (fraction of the viewport height), phase
-uniform float uAspect, uTime, uPx;
+attribute vec3 aStatic; // size (fraction of the viewport height), phase, 1 if it forms shapes
+uniform float uAspect, uTime, uPx, uGrain;
 uniform vec2 uRot;
 varying float vGold;
 varying float vA;
@@ -426,7 +467,7 @@ void main() {
   float f = ${CAM.toFixed(1)} / max(zc, 0.2);
   gl_Position = zc < 0.25 ? vec4(2.0, 2.0, 2.0, 1.0) : vec4(p.x * f / uAspect, p.y * f, 0.0, 1.0);
   float tw = 0.72 + 0.28 * sin(uTime * 1.9 + aStatic.y * 6.2832);
-  gl_PointSize = max(1.5, aStatic.x * f * uPx);
+  gl_PointSize = max(1.5, aStatic.x * mix(1.0, uGrain, aStatic.z) * f * uPx);
   vGold = aMeta.x;
   vA = aMeta.y * tw * clamp(f, 0.35, 1.5);
 }`;
@@ -476,7 +517,7 @@ export function initSwarm({ reduced = false } = {}) {
   }
   gl.useProgram(prog);
   const U = Object.fromEntries(
-    ["uAspect", "uTime", "uPx", "uRot", "uOpacity"].map((n) => [
+    ["uAspect", "uTime", "uPx", "uRot", "uOpacity", "uGrain"].map((n) => [
       n,
       gl.getUniformLocation(prog, n),
     ]),
@@ -489,7 +530,7 @@ export function initSwarm({ reduced = false } = {}) {
   const goldT = new Float32Array(N);
   const briT = new Float32Array(N);
   const spinW = new Float32Array(N);
-  const stat = new Float32Array(N * 2);
+  const stat = new Float32Array(N * 3);
   const phase = new Float32Array(N);
   const stiff = new Float32Array(N);
   const wander = new Float32Array(N);
@@ -497,10 +538,11 @@ export function initSwarm({ reduced = false } = {}) {
     phase[i] = rand();
     stiff[i] = 0.018 + rand() * 0.05;
     const bokeh = i >= NS && rand() < 0.05; // a few big soft ones, far out of focus
-    stat[i * 2] = bokeh
+    stat[i * 3] = bokeh
       ? 0.022 + rand() * 0.02
       : 0.0042 + Math.pow(rand(), 2.2) * 0.0085;
-    stat[i * 2 + 1] = phase[i];
+    stat[i * 3 + 1] = phase[i];
+    stat[i * 3 + 2] = i < NS ? 1 : 0;
     wander[i] = i < NS ? 0.006 : 0.03;
     if (i >= NS) {
       goldT[i] = rand() < 0.7 ? 1 : 0;
@@ -518,7 +560,7 @@ export function initSwarm({ reduced = false } = {}) {
   };
   const posBuf = buffer(pos, gl.DYNAMIC_DRAW, "aPos", 3);
   const metaBuf = buffer(meta, gl.DYNAMIC_DRAW, "aMeta", 2);
-  buffer(stat, gl.STATIC_DRAW, "aStatic", 2);
+  buffer(stat, gl.STATIC_DRAW, "aStatic", 3);
   gl.disable(gl.DEPTH_TEST);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE);
@@ -547,6 +589,7 @@ export function initSwarm({ reduced = false } = {}) {
   let spin = 0;
   let opacity = 0;
   let opacityT = 1;
+  let grain = 1;
   const dustTo = (i) => {
     loc[i * 3] = (rand() * 2 - 1) * aspect * 1.45;
     loc[i * 3 + 1] = (rand() * 2 - 1) * 1.35;
@@ -740,6 +783,7 @@ export function initSwarm({ reduced = false } = {}) {
     gl.uniform1f(U.uTime, t);
     gl.uniform2f(U.uRot, ry, rx);
     gl.uniform1f(U.uOpacity, opacity);
+    gl.uniform1f(U.uGrain, grain);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.POINTS, 0, N);
   };
@@ -754,6 +798,7 @@ export function initSwarm({ reduced = false } = {}) {
       meta[i * 2 + 1] = briT[i];
     }
     opacity = opacityT;
+    grain = shape.grain || 1;
     draw(0);
   }
   let last = 0;
@@ -766,6 +811,7 @@ export function initSwarm({ reduced = false } = {}) {
     last = ms;
     spin += shape.spin * (k / 60);
     opacity += (opacityT - opacity) * 0.05 * k;
+    grain += ((shape.grain || 1) - grain) * 0.05 * k;
     const tx = pointer ? pointer.x : 0;
     const ty = pointer ? pointer.y : 0;
     ry += (Math.sin(t * 0.21) * 0.1 + tx * 0.12 - ry) * 0.04 * k;

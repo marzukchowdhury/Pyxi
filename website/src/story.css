@@ -310,7 +310,7 @@
 }
 .spell-stage {
   width: 100%;
-  height: clamp(220px, 34vh, 330px);
+  height: clamp(240px, calc(100vh - 560px), 340px);
 }
 .spell {
   display: grid;
