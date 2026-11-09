@@ -2492,7 +2492,13 @@ class Brain:
                 return "web_search: that's enough searching. Answer now from what you've found, and say how sure you are."
             return await web.search_text(str(args.get("query", ""))[:200])
         if name == "read_page":
-            return await web.read_text(str(args.get("url", ""))[:500])
+            page = await web.read_text(str(args.get("url", ""))[:500])
+            # Every extra page is another model round (4-5 s): one page answers one fact.
+            return (page or "") + (
+                "\n(If this answers their question, answer now. Don't read another page for the same fact.)"
+                if page and not page.startswith("read_page:")
+                else ""
+            )
         if name == "recall_screen":
             hits = self.spatial.recall(str(args["query"]), 5)
             if not hits:
