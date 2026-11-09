@@ -57,29 +57,62 @@
             </p>
           </div>
 
-          <figure class="stage reveal" aria-label="Pyxi at work: real screenshots">
-            <div class="stage-screen" id="stage">
-              <div class="slide is-on" data-ask="where's the export button?" data-say="Right here: the ring is where to click.">
-                <img src="/img/targeting.webp" srcset="/img/targeting-800.webp 800w, /img/targeting.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="Pyxi pointing at the Export button in a settings window, with a ring on the button and a thread of light from the firefly" fetchpriority="high" />
-                <video class="clip" data-clip="point" data-start="2" muted loop playsinline preload="none" aria-hidden="true"></video>
-                <span class="pt" style="--x: 39.4%; --y: 47.2%" data-label="Export"></span>
+          <figure class="stage reveal" aria-label="Pyxi at work: real screenshots" data-on="0">
+            <canvas class="hero-dust" aria-hidden="true"></canvas>
+            <div class="stage-idle">
+              <div class="stage-3d">
+                <i class="stage-edge e1" aria-hidden="true"></i>
+                <i class="stage-edge e2" aria-hidden="true"></i>
+                <div class="stage-screen" id="stage">
+                  <div class="slide is-on" data-ask="where's the export button?" data-say="Right here: the ring is where to click.">
+                    <img src="/img/targeting.webp" srcset="/img/targeting-800.webp 800w, /img/targeting.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="Pyxi pointing at the Export button in a settings window, with a ring on the button and a thread of light from the firefly" fetchpriority="high" />
+                    <video class="clip" data-clip="point" data-start="2" muted loop playsinline preload="none" aria-hidden="true"></video>
+                    <span class="pt" style="--x: 39.4%; --y: 47.2%" data-label="Export"></span>
+                  </div>
+                  <div class="slide" data-ask="how does HTTPS work? Show me." data-say="Five steps, narrated, rising out of the page.">
+                    <img src="/img/explanation-800.webp" srcset="/img/explanation-800.webp 800w, /img/explanation.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="A 3D explanation of HTTPS rising out of a glass panel over a settings window" loading="lazy" />
+                    <span class="pt" style="--x: 75%; --y: 62%" data-label="Session key"></span>
+                  </div>
+                  <div class="slide" data-ask="explode this panel." data-say="The real window, peeled apart by layer.">
+                    <img src="/img/exploded-800.webp" srcset="/img/exploded-800.webp 800w, /img/exploded.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="An exploded view: the settings window peeled apart into layered glass panes with labels" loading="lazy" />
+                    <span class="pt" style="--x: 55.9%; --y: 28.7%" data-label="Appearance page"></span>
+                  </div>
+                  <div class="slide" data-ask="how does a neural network learn?" data-say="Forward pass first. Then the nudge backwards.">
+                    <img src="/img/neural-net-800.webp" srcset="/img/neural-net-800.webp 800w, /img/neural-net.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="A 3D neural network with labelled layers and a narrated step panel" loading="lazy" />
+                    <span class="pt" style="--x: 81.9%; --y: 48%" data-label="Output"></span>
+                  </div>
+                  <div class="slide" data-ask="show me how you did it." data-say="Every click Scout made, replayed as a lesson.">
+                    <img src="/img/walkthrough-800.webp" srcset="/img/walkthrough-800.webp 800w, /img/walkthrough.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="A Ghost Walkthrough replaying a browser task with a spotlight on the work email field" loading="lazy" />
+                    <span class="pt" style="--x: 50%; --y: 46%" data-label="Work email"></span>
+                  </div>
+                </div>
+                <div class="stage-floats" aria-hidden="true">
+                  <!-- the screenshot sliced into layers: each pop is a window onto the same image, lifted off the screen -->
+                  <i class="pop pill" data-for="0" style="--xn: 31.25; --yn: 0; --wn: 37.5; --hn: 5.4; --z: 50px"><b></b></i>
+                  <i class="pop win" data-for="0" style="--xn: 21.6; --yn: 26.6; --wn: 56.8; --hn: 46.4; --z: 28px"><b></b></i>
+                  <i class="pop card" data-for="0" style="--xn: 1.5; --yn: 90.2; --wn: 19.9; --hn: 7.6; --z: 76px"><b></b></i>
+                  <i class="pop win" data-for="1" style="--xn: 21.6; --yn: 26.6; --wn: 56.8; --hn: 46.4; --z: 24px"><b></b></i>
+                  <i class="pop card" data-for="1" style="--xn: 44.6; --yn: 62.4; --wn: 52.8; --hn: 31.4; --z: 84px"><b></b></i>
+                  <i class="pop card" data-for="2" style="--xn: 2.2; --yn: 2.8; --wn: 38.6; --hn: 11; --z: 84px"><b></b></i>
+                  <i class="pop card" data-for="2" style="--xn: 20.3; --yn: 79.4; --wn: 59.4; --hn: 9.8; --z: 72px"><b></b></i>
+                  <i class="pop win" data-for="3" style="--xn: 21.6; --yn: 26.6; --wn: 56.8; --hn: 46.4; --z: 24px"><b></b></i>
+                  <i class="pop card" data-for="3" style="--xn: 44.6; --yn: 62.4; --wn: 52.8; --hn: 31.4; --z: 84px"><b></b></i>
+                  <i class="pop pill" data-for="4" style="--xn: 39.6; --yn: 0; --wn: 21.4; --hn: 4.8; --z: 50px"><b></b></i>
+                  <i class="pop field" data-for="4" style="--xn: 27; --yn: 42.8; --wn: 46; --hn: 6.6; --z: 46px"><b></b></i>
+                  <i class="pop card" data-for="4" style="--xn: 11.4; --yn: 87.2; --wn: 77.2; --hn: 10.4; --z: 64px"><b></b></i>
+                  <span class="float ice" data-for="0" style="--x: 64%; --y: 24%; --z: 110px">Export &middot; button</span>
+                  <span class="float gold" data-for="0" style="--x: 8%; --y: 76%; --z: 70px"><b>Pyxi</b>Right here. One click.</span>
+                  <span class="float ice" data-for="1" style="--x: 60%; --y: 20%; --z: 120px">Explaining &middot; 5 steps</span>
+                  <span class="float gold" data-for="1" style="--x: 6%; --y: 70%; --z: 80px"><b>Pyxi</b>Rising out of the page, narrated.</span>
+                  <span class="float ice" data-for="2" style="--x: 14%; --y: 24%; --z: 130px">Sidebar</span>
+                  <span class="float ice" data-for="2" style="--x: 62%; --y: 30%; --z: 90px">Appearance page</span>
+                  <span class="float ice" data-for="3" style="--x: 56%; --y: 18%; --z: 120px">Forward pass</span>
+                  <span class="float gold" data-for="3" style="--x: 6%; --y: 72%; --z: 80px"><b>Pyxi</b>Then the nudge backwards.</span>
+                  <span class="float ice" data-for="4" style="--x: 58%; --y: 26%; --z: 120px">Step 4 &middot; Work email</span>
+                  <span class="float gold" data-for="4" style="--x: 6%; --y: 74%; --z: 80px"><b>Scout</b>Every click, replayed as a lesson.</span>
+                </div>
               </div>
-              <div class="slide" data-ask="how does HTTPS work? Show me." data-say="Five steps, narrated, rising out of the page.">
-                <img src="/img/explanation-800.webp" srcset="/img/explanation-800.webp 800w, /img/explanation.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="A 3D explanation of HTTPS rising out of a glass panel over a settings window" loading="lazy" />
-                <span class="pt" style="--x: 75%; --y: 62%" data-label="Session key"></span>
-              </div>
-              <div class="slide" data-ask="explode this panel." data-say="The real window, peeled apart by layer.">
-                <img src="/img/exploded-800.webp" srcset="/img/exploded-800.webp 800w, /img/exploded.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="An exploded view: the settings window peeled apart into layered glass panes with labels" loading="lazy" />
-                <span class="pt" style="--x: 55.9%; --y: 28.7%" data-label="Appearance page"></span>
-              </div>
-              <div class="slide" data-ask="how does a neural network learn?" data-say="Forward pass first. Then the nudge backwards.">
-                <img src="/img/neural-net-800.webp" srcset="/img/neural-net-800.webp 800w, /img/neural-net.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="A 3D neural network with labelled layers and a narrated step panel" loading="lazy" />
-                <span class="pt" style="--x: 81.9%; --y: 48%" data-label="Output"></span>
-              </div>
-              <div class="slide" data-ask="show me how you did it." data-say="Every click Scout made, replayed as a lesson.">
-                <img src="/img/walkthrough-800.webp" srcset="/img/walkthrough-800.webp 800w, /img/walkthrough.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="A Ghost Walkthrough replaying a browser task with a spotlight on the work email field" loading="lazy" />
-                <span class="pt" style="--x: 50%; --y: 46%" data-label="Work email"></span>
-              </div>
+              <div class="stage-reflect" aria-hidden="true"></div>
             </div>
             <figcaption class="stage-cap">
               <span class="stage-dots" role="group" aria-label="Choose an example">
@@ -373,297 +406,12 @@
       </section>
 
       <!-- ============================================================ features -->
-      <section class="features" aria-label="Features">
-        <div class="wrap">
-          <article class="feature" id="explain" data-say="I write notes beside the thing you're reading.">
-            <div class="feature-copy">
-              <p class="kicker reveal">Explains</p>
-              <h3 class="h3 reveal">Notes beside the thing you're reading.</h3>
-              <p class="reveal">Ask "explain this page" or "what's the story in this chart?" and Pyxi writes a notebook card right next to it. Each point writes itself in ink as Pyxi says it, and a numbered outline frames the exact thing it means. Ask about a diagram or a photo and it pins short tags onto the actual parts of the picture.</p>
-              <ul class="asks reveal" aria-label="Things to try">
-                <li>Explain this meme</li>
-                <li>What's the story in this chart? Draw it.</li>
-                <li>Explain this diagram</li>
-              </ul>
-            </div>
-            <div class="feature-media reveal">
-              <div class="shot shot-clip">
-                <img src="/clips/notes.webp" width="1280" height="800" alt="Field notes: a handwritten card beside a settings window, each point framing the control it explains" loading="lazy" />
-                <video class="clip" data-clip="notes" data-start="2" muted loop playsinline preload="none" aria-hidden="true"></video>
-                <span class="pt" style="--x: 39.4%; --y: 47.3%" data-label="Export"></span>
-                <i class="live">Recorded from Pyxi</i>
-              </div>
-            </div>
-          </article>
-
-          <article class="feature flip" id="guide" data-say="Ask how to do something. I'll point, then wait for your click.">
-            <div class="feature-copy">
-              <p class="kicker reveal">Guides</p>
-              <h3 class="h3 reveal">Points at the button. Then waits for you.</h3>
-              <p class="reveal">Ask how to do something in any app and Pyxi marks the one control to click, with an arrow from your cursor. It waits for your real click, looks again, and gives you the next step until you're done. Name the app and it looks at that window, even on your other monitor.</p>
-              <ul class="asks reveal" aria-label="Things to try">
-                <li>How do I add an environment variable in Vercel?</li>
-                <li>Walk me through turning on notifications</li>
-                <li>What does this setting do?</li>
-              </ul>
-            </div>
-            <div class="feature-media reveal">
-              <div class="shot">
-                <img src="/img/targeting-800.webp" srcset="/img/targeting-800.webp 800w, /img/targeting.webp 1440w" sizes="(min-width: 1000px) 600px, 92vw" width="1440" height="900" alt="Pyxi pointing at a button: an expanding ring, a thread of light from the firefly, a framed checkbox and a circled tab" loading="lazy" />
-                <span class="pt" style="--x: 37.6%; --y: 38.7%" data-label="Dark mode"></span>
-              </div>
-            </div>
-          </article>
-
-          <article class="feature" id="build" data-say="How is a chip built? Let me take one apart for you.">
-            <div class="feature-copy">
-              <p class="kicker reveal">Builds in 3D</p>
-              <h3 class="h3 reveal">Ask how something works. Watch it get built.</h3>
-              <p class="reveal">"Hey Pyxi, how is an AI chip built? Show me in 3D." Pyxi assembles a real-looking model from parts: the substrate, the silicon interposer, the compute die and the stacked memory chips beside it. Then it takes it apart layer by layer while it explains, like a short video. Say "show the inside" or "make it spin" and it edits the same model. Ideas get the same treatment: HTTPS, OAuth or a neural network become a 3D scene with a guided tour.</p>
-              <ul class="asks reveal" aria-label="Things to try">
-                <li>How is an AI chip built? Show me in 3D.</li>
-                <li>How are RAM chips stacked?</li>
-                <li>How does OAuth work?</li>
-              </ul>
-            </div>
-            <div class="feature-media reveal">
-              <div class="shot shot-stack">
-                <img class="back" src="/clips/explain.webp" width="1280" height="800" alt="" loading="lazy" />
-                <div class="front shot-clip">
-                  <img src="/clips/chip.webp" width="1280" height="800" alt="Pyxi building a 3D model of an AI chip over a settings window: package substrate and solder balls, a silicon interposer, the compute die and stacks of DRAM memory dies, taken apart layer by layer" loading="lazy" />
-                  <video class="clip" data-clip="chip" data-start="2" muted loop playsinline preload="none" aria-hidden="true"></video>
-                  <span class="pt" style="--x: 41%; --y: 38%" data-label="AI chip"></span>
-                  <i class="live">Recorded from Pyxi</i>
-                </div>
-              </div>
-            </div>
-          </article>
-
-          <article class="feature flip" id="hands" data-say="I'll ask first. Then I can do the clicking.">
-            <div class="feature-copy">
-              <p class="kicker reveal">Takes the wheel</p>
-              <h3 class="h3 reveal">Your mouse and keyboard, only when you say so.</h3>
-              <p class="reveal">"Play Blinding Lights on YouTube Music." "Make a pivot table of this in Sheets." Pyxi asks first, with Allow or Always allow. Then it moves your real mouse and keyboard and labels what it's doing beside the cursor. Move the mouse or press <kbd>Esc</kbd> and it stops. Sending, buying, deleting and closing things always ask again.</p>
-              <ul class="asks reveal" aria-label="Things to try">
-                <li>Play Blinding Lights on YouTube Music</li>
-                <li>Make a pivot table of this in Sheets</li>
-              </ul>
-            </div>
-            <div class="feature-media reveal">
-              <div class="mock mock-hands" role="img" aria-label="Illustration: Pyxi's approval card asking to use the mouse and keyboard, with Allow, Always allow and Don't buttons">
-                <div class="mock-window">
-                  <div class="mw-bar"><i></i><i></i><i></i><span>YouTube Music</span></div>
-                  <div class="mw-body">
-                    <div class="mw-search"><span class="typed">Blinding Lights</span></div>
-                    <div class="mw-rows"><b></b><b></b><b></b></div>
-                  </div>
-                </div>
-                <div class="request">
-                  <div class="req-title">Pyxi needs your OK</div>
-                  <div class="req-action">Use your mouse and keyboard to play Blinding Lights in YouTube Music</div>
-                  <div class="req-buttons">
-                    <span class="req-btn yes">Allow<span class="pt" style="--x: 50%; --y: 50%" data-label="Allow"></span></span>
-                    <span class="req-btn">Always allow</span>
-                    <span class="req-btn">Don't</span>
-                  </div>
-                </div>
-                <div class="driving-tag"><b>Searching for the song</b><span>Esc or move the mouse to stop</span></div>
-              </div>
-            </div>
-          </article>
-
-          <article class="feature" id="team" data-say="Bigger job? I'll bring in the team.">
-            <div class="feature-copy">
-              <p class="kicker reveal">Delegates</p>
-              <h3 class="h3 reveal">A small team that works while you watch.</h3>
-              <p class="reveal">For bigger jobs Pyxi hands off to teammates with their own names, voices and memory. Scout researches in a real browser, Quill writes, Sketch makes 3D. They pass work along: Scout finds the pricing, then Quill writes the summary. Afterwards, any browser job replays as a Ghost Walkthrough that shows you how to do it yourself.</p>
-              <ul class="asks reveal" aria-label="Things to try">
-                <li>Scout, find the pricing for linear.app, then Quill, write me a two-line summary</li>
-                <li>Make me a teammate called Pixel who compares prices across three shops</li>
-              </ul>
-            </div>
-            <div class="feature-media reveal">
-              <div class="shot shot-duo">
-                <img class="wide" src="/img/walkthrough-800.webp" width="1440" height="900" alt="A Ghost Walkthrough replaying a browser task step by step" loading="lazy" />
-                <div class="tall">
-                  <img src="/img/panel-team-440.webp" srcset="/img/panel-team-440.webp 440w, /img/panel-team.webp 880w" sizes="(min-width: 1000px) 230px, 40vw" width="880" height="1300" alt="The team panel: Pyxi as lead, with Scout the researcher at work and Quill and Sketch free" loading="lazy" />
-                  <span class="pt" style="--x: 10.9%; --y: 51.4%" data-label="Scout"></span>
-                </div>
-              </div>
-            </div>
-          </article>
-
-          <article class="feature flip" id="memory" data-say="Want to go back to this morning? Turn on the Memory Palace.">
-            <div class="feature-copy">
-              <p class="kicker reveal">Remembers, if you want</p>
-              <h3 class="h3 reveal">A Memory Palace for your screen.</h3>
-              <p class="reveal">Turn it on and Pyxi keeps a quiet history of what was where. "Take me back to the pricing page this morning" rebuilds it as an explorable hologram with a time scrubber, and "how did I get here?" lays out the chain of events in 3D. It's off until you turn it on, records no keystrokes, stays on your computer and clears itself after 72 hours.</p>
-              <ul class="asks reveal" aria-label="Things to try">
-                <li>Take me back to what I was doing 20 minutes ago</li>
-                <li>How did I get here?</li>
-              </ul>
-            </div>
-            <div class="feature-media reveal">
-              <div class="shot">
-                <img src="/img/memory-palace-800.webp" srcset="/img/memory-palace-800.webp 800w, /img/memory-palace.webp 1440w" sizes="(min-width: 1000px) 600px, 92vw" width="1440" height="900" alt="Memory Palace: a past settings window rebuilt in 3D layers, with a time scrubber along the bottom" loading="lazy" />
-                <span class="pt" style="--x: 40.6%; --y: 94%" data-label="Time scrubber"></span>
-              </div>
-            </div>
-          </article>
-
-          <article class="feature" id="voice" data-say="I hear you and talk back, right here on your PC.">
-            <div class="feature-copy">
-              <p class="kicker reveal">Talks</p>
-              <h3 class="h3 reveal">Hears you and talks back, on your PC.</h3>
-              <p class="reveal">Speech recognition and Pyxi's voice run on your own computer, so your voice recordings aren't sent anywhere. Choose who Pyxi sounds like in the voice studio. Speed, language and captions are one tap away.</p>
-              <ul class="asks reveal" aria-label="Hotkeys">
-                <li>Hold <kbd>Ctrl</kbd> <kbd>Alt</kbd> to talk</li>
-                <li>Tap <kbd>Ctrl</kbd> twice to type</li>
-              </ul>
-            </div>
-            <div class="feature-media reveal">
-              <div class="shot shot-panel">
-                <img src="/img/voice-studio-440.webp" srcset="/img/voice-studio-440.webp 440w, /img/voice-studio.webp 880w" sizes="(min-width: 1000px) 340px, 70vw" width="880" height="1300" alt="The voice studio: voice cards with drawn signatures, voices that run on this PC, and premium options" loading="lazy" />
-                <span class="pt" style="--x: 19.7%; --y: 36.4%" data-label="On this PC"></span>
-              </div>
-            </div>
-          </article>
-        </div>
-      </section>
-
       <!-- ============================================================ chores -->
-      <section class="chores" id="chores" data-say="And the little things, done in seconds.">
-        <div class="wrap">
-          <p class="kicker reveal">Everyday chores</p>
-          <h2 class="h2 reveal">And the little things, <span class="dim">in seconds.</span></h2>
-          <p class="lead narrow reveal">No clicking around. Pyxi does these directly, and anything that reaches other people waits for your OK.</p>
-          <div class="bento">
-            <article class="tile reveal" data-tile="windows">
-              <div class="tile-art art-windows" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-              <h3>Two to four windows, one step</h3>
-              <p>Lay out the apps you need side by side, in one go.</p>
-              <q>Gmail and Sheets side by side</q>
-            </article>
-            <article class="tile reveal" data-tile="music">
-              <div class="tile-art art-music" aria-hidden="true">
-                <div class="np"><span class="np-art"></span><span class="np-lines"><b></b><b></b></span><span class="eq"><i></i><i></i><i></i><i></i></span></div>
-                <div class="vol"><span class="vol-ico"></span><span class="vol-bar"><span class="vol-fill"></span></span></div>
-              </div>
-              <h3>Songs and volume</h3>
-              <p>Starts the song in a window behind yours and sets the volume. Pause and skip too.</p>
-              <q>Play Billie Jean, a bit quieter</q>
-            </article>
-            <article class="tile reveal" data-tile="tidy">
-              <div class="tile-art art-tidy" aria-hidden="true">
-                <span class="file f1"></span><span class="file f2"></span><span class="file f3"></span><span class="file f4"></span><span class="file f5"></span><span class="file f6"></span>
-                <span class="folder d1"></span><span class="folder d2"></span><span class="folder d3"></span>
-                <span class="undo">Undo</span>
-              </div>
-              <h3>A tidy Desktop, with undo</h3>
-              <p>Sorts the mess into folders. You approve the plan, nothing is deleted, and "undo that" puts it all back.</p>
-              <q>My desktop is a mess, organise it</q>
-            </article>
-            <article class="tile reveal" data-tile="mail">
-              <div class="tile-art art-mail" aria-hidden="true">
-                <div class="request mini">
-                  <div class="req-title">Pyxi needs your OK</div>
-                  <div class="req-action">Reply to Sam with the fixed letter attached</div>
-                  <div class="req-buttons"><span class="req-btn yes">Allow</span><span class="req-btn">Don't</span></div>
-                </div>
-              </div>
-              <h3>Emails and invites, with approval</h3>
-              <p>Works in Gmail, Google Calendar and Google Docs. Every email, invite or post shows you an approval card first.</p>
-              <q>Sam emailed my recommendation letter, fix it</q>
-            </article>
-          </div>
-          <p class="footnote reveal">Illustrations of Pyxi's own cards and layouts.</p>
-        </div>
-      </section>
-
-      <!--include:sections-->
+      <!--include:explore-->
 
       <!-- ============================================================ different -->
-      <section class="different" id="different" data-say="Not a chat window. More like a friend at your shoulder.">
-        <div class="wrap">
-          <p class="kicker reveal">Why Pyxi</p>
-          <h2 class="h2 reveal">Not a chat window.<br /><span class="dim">Someone at your shoulder.</span></h2>
-          <div class="versus reveal" role="table" aria-label="A chat assistant compared with Pyxi">
-            <div class="vs-row vs-head" role="row"><span role="columnheader">A chat assistant</span><span role="columnheader">Pyxi</span></div>
-            <div class="vs-row" role="row"><span role="cell">You paste in a screenshot</span><span role="cell">Already sees your screen when you ask</span></div>
-            <div class="vs-row" role="row"><span role="cell">Describes where the button is</span><span role="cell">Points at the button</span></div>
-            <div class="vs-row" role="row"><span role="cell">Lists every step at once</span><span role="cell">Gives one step, waits for your click, then the next</span></div>
-            <div class="vs-row" role="row"><span role="cell">Answers in paragraphs</span><span role="cell">Writes on the page, or builds it in 3D</span></div>
-            <div class="vs-row" role="row"><span role="cell">Tells you what to click</span><span role="cell">Does the clicking, after you press Allow</span></div>
-            <div class="vs-row" role="row"><span role="cell">One assistant</span><span role="cell">A lead with a team: Scout, Quill and Sketch</span></div>
-          </div>
-        </div>
-      </section>
-
       <!-- ============================================================ privacy -->
-      <section class="privacy" id="privacy" data-say="I can see your screen, so I'm careful with it.">
-        <div class="wrap privacy-grid">
-          <div>
-            <p class="kicker reveal">Privacy</p>
-            <h2 class="h2 reveal">It can see your screen. <span class="dim">So it's careful.</span></h2>
-            <p class="lead reveal">Privacy is the core of a product like this, not a footnote. Here's the short version. The full policy says plainly what Pyxi looks at, what leaves your computer and how to delete it.</p>
-            <a class="btn btn-ghost reveal" href="/privacy">Read the privacy policy</a>
-          </div>
-          <ul class="trust">
-            <li class="reveal"><b>Looks only when you ask.</b> Pyxi captures your screen when you talk or type to it. The Memory Palace and file search are off until you turn them on.</li>
-            <li class="reveal"><b>Secrets are blacked out, and never remembered.</b> Password fields, banking apps and anything that looks like a key or token are removed before anything is sent, and Pyxi refuses to save a password, card or ID number as a memory.</li>
-            <li class="reveal"><b>Not sold, not used for training.</b> What you ask goes to an AI model to work out the reply. We don't sell it, and we don't use it to train models.</li>
-            <li class="reveal"><b>What Pyxi reads is data, not orders.</b> An email or web page that says "ignore your rules" can't make Pyxi do anything: every send, booking and file change still needs your Allow, and the card says when a recipient came from something Pyxi read.</li>
-            <li class="reveal"><b>An activity log, with undo.</b> Everything Pyxi did on your behalf, with the time and the teammate: emails sent, buttons pressed, files moved, scripts changed.</li>
-            <li class="reveal"><b>"Always allow" expires.</b> After 30 days it asks again. Settings lists every grant, and you can revoke any of them.</li>
-            <li class="reveal"><b>One key stops everything.</b> <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>Pause</kbd> halts every teammate, the mouse and keyboard, and anything waiting to go out. <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>P</kbd> pauses screen access. "Wipe everything" forgets it all.</li>
-          </ul>
-        </div>
-      </section>
-
       <!-- ============================================================ faq -->
-      <section class="faq" id="faq" data-say="Questions? Here are the ones people ask first.">
-        <div class="wrap faq-grid">
-          <div>
-            <p class="kicker reveal">FAQ</p>
-            <h2 class="h2 reveal">Good questions.</h2>
-          </div>
-          <div class="faq-list">
-            <details class="reveal">
-              <summary>How do I join the beta?</summary>
-              <p>Download and install Pyxi, open Settings, choose <b>Join the Pyxi beta</b> and type the invite code you were given. That's it. The <a href="/download">install guide</a> walks through every step.</p>
-            </details>
-            <details class="reveal">
-              <summary>Do I need an API key or a paid AI account?</summary>
-              <p>No. In the beta, Pyxi's AI runs through the Pyxi beta server, so an invite code is all you need. Each beta account has a free daily allowance that resets at midnight UTC.</p>
-            </details>
-            <details class="reveal">
-              <summary>Why does Windows warn me when I install it?</summary>
-              <p>The beta installer isn't code-signed yet, so Windows SmartScreen doesn't recognise the publisher and shows "Windows protected your PC". Choose <b>More info</b>, then <b>Run anyway</b>. The <a href="/download#smartscreen">install guide</a> shows exactly where to click.</p>
-            </details>
-            <details class="reveal">
-              <summary>Does Pyxi watch my screen all the time?</summary>
-              <p>No. It looks only when you talk or type to it. If you turn on the Memory Palace, it keeps window titles, focus changes and where controls were, on your computer, for 72 hours. It never records keystrokes, and <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>P</kbd> pauses everything.</p>
-            </details>
-            <details class="reveal">
-              <summary>Can it really use my mouse and keyboard?</summary>
-              <p>Yes, after you press Allow (once, or Always allow). It labels what it's doing beside the cursor and stops the moment you move the mouse or press <kbd>Esc</kbd>. Sending, paying, deleting, posting, signing in or out and closing apps always ask again, and it never types into password fields.</p>
-            </details>
-            <details class="reveal">
-              <summary>Which computers does it run on?</summary>
-              <p>Windows 10 and Windows 11. Pyxi reads the screen with Windows UI Automation, so Windows comes first. A Mac version is next on the roadmap<!--if:macWaitlistUrl-->, and you can <a href="{{macWaitlistUrl}}">join the Mac waitlist</a><!--end-->.</p>
-            </details>
-            <details class="reveal">
-              <summary>Does anything run offline?</summary>
-              <p>Speech recognition (Whisper) and the default voice (Kokoro) run on your computer. Understanding your screen uses an AI model online. People who build Pyxi from source can also run it fully locally with Ollama.</p>
-            </details>
-            <details class="reveal">
-              <summary>How do I uninstall it?</summary>
-              <p>Open Windows Settings, then Apps, then Installed apps, find Pyxi and choose Uninstall. To remove your history too, delete the <code>%APPDATA%\Pyxi</code> folder.</p>
-            </details>
-          </div>
-        </div>
-      </section>
-
       <!-- ============================================================ final cta -->
       <section class="finale" data-say="Say hey. I'll be right beside your cursor.">
         <div class="wrap finale-inner">

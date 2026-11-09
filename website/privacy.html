@@ -2,30 +2,470 @@
 <html lang="en">
   <head>
     <!--include:head-->
-    <title>Privacy policy | Pyxi</title>
-    <meta name="description" content="What Pyxi looks at, what leaves your computer, what is kept, and how to delete it, including files, email, Bengali speech and the beta server." />
+    <title>Privacy: what Pyxi looks at, what leaves your computer | Pyxi</title>
+    <meta
+      name="description"
+      content="Pyxi can see your screen, so it is careful with it. What it looks at, what leaves your computer, what is masked before it goes, what is kept and for how long, and how to delete it."
+    />
     <link rel="canonical" href="{{siteUrl}}/privacy" />
     <meta property="og:url" content="{{siteUrl}}/privacy" />
-    <meta property="og:title" content="Pyxi privacy policy" />
-    <meta property="og:description" content="What Pyxi looks at, what leaves your computer, what is kept, and how to delete it." />
-    <meta name="twitter:title" content="Pyxi privacy policy" />
-    <meta name="twitter:description" content="What Pyxi looks at, what leaves your computer, what is kept, and how to delete it." />
+    <meta
+      property="og:title"
+      content="Pyxi privacy: what leaves your computer"
+    />
+    <meta
+      property="og:description"
+      content="What Pyxi looks at, what is masked before anything leaves, what is kept and how to delete it."
+    />
+    <meta
+      name="twitter:title"
+      content="Pyxi privacy: what leaves your computer"
+    />
+    <meta
+      name="twitter:description"
+      content="What Pyxi looks at, what is masked before anything leaves, what is kept and how to delete it."
+    />
     <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/pages/privacy.js"></script>
   </head>
   <body class="page-privacy">
     <!--include:nav-->
     <!--include:firefly-->
 
     <main id="main">
-      <section class="page-hero slim" data-say="Here's exactly what I look at, and what I keep.">
-        <div class="wrap prose-wrap">
-          <p class="kicker">Privacy</p>
-          <h1 class="display-sm">Privacy policy</h1>
+      <!-- ============================================================ hero: what leaves your computer -->
+      <section
+        class="page-hero"
+        data-say="I can see your screen, so I'm careful with it."
+      >
+        <div class="wrap">
+          <p class="kicker reveal">Privacy</p>
+          <h1 class="display-sm reveal">
+            I can see your screen,
+            <span class="dim">so I'm careful with it.</span>
+          </h1>
+          <p class="lead reveal">
+            Pyxi looks at your screen only when you talk or type to it. What you
+            ask, with a masked screenshot and the on-screen text, goes to an AI
+            model to work out the reply, and nothing else. Password fields,
+            keys, banking apps and card numbers are blacked out before anything
+            leaves. Your history stays on your PC. Here is the whole journey,
+            then the whole policy.
+          </p>
+        </div>
+        <div class="wrap leave-wrap reveal">
+          <div class="leave-scroll">
+            <div class="leave-scene">
+              <div class="leave-tilt">
+                <canvas
+                  class="leave"
+                  role="img"
+                  aria-label="Your PC on the left with three plates of glass: your screen, your files, your accounts. A thread of light carries your question, a masked screenshot, the on-screen text and the part of a file the job needs to the AI model on the right. A gate stands between them: password fields, API keys, banking apps and card numbers hit it, turn into black bars and fall back. A dashed path takes conversations, Memory Palace history and encrypted sign-in tokens into a box marked stays on this PC."
+                ></canvas>
+              </div>
+            </div>
+          </div>
+          <ul class="leave-key" aria-hidden="true">
+            <li><i class="k-ok"></i> goes to the AI model, to answer you</li>
+            <li><i class="k-bar"></i> blacked out at the gate, never leaves</li>
+            <li><i class="k-local"></i> stays on this PC</li>
+          </ul>
+          <p class="leave-hint">
+            Scroll the picture sideways to see the whole journey.
+          </p>
         </div>
       </section>
-      <article class="wrap prose-wrap prose">
-        <!--doc:PRIVACY-->
-      </article>
+
+      <!-- ============================================================ the seven promises -->
+      <section
+        class="promises"
+        id="promises"
+        data-say="The short version, in seven promises."
+      >
+        <div class="wrap">
+          <p class="kicker reveal">The short version</p>
+          <h2 class="h2 reveal">
+            Seven things that are <span class="dim">always true.</span>
+          </h2>
+          <p class="lead reveal">
+            Each one links to the part of the policy that spells it out.
+          </p>
+          <ul class="promise-grid">
+            <li class="reveal">
+              <a class="promise" href="#what-pyxi-looks-at">
+                <span class="ic"
+                  ><svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z"
+                    />
+                    <circle cx="12" cy="12" r="3" /></svg
+                ></span>
+                <span class="more">In the policy</span>
+                <b>Looks only when you ask.</b>
+                Pyxi captures your screen when you talk or type to it. The
+                Memory Palace and file search are off until you turn them on.
+              </a>
+            </li>
+            <li class="reveal">
+              <a class="promise gold" href="#what-pyxi-looks-at">
+                <span class="ic"
+                  ><svg viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="4" y="10.5" width="16" height="10" rx="2.5" />
+                    <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+                    <path d="M12 14.5v2.5" /></svg
+                ></span>
+                <span class="more">In the policy</span>
+                <b>Secrets are blacked out, and never remembered.</b>
+                Password fields, banking apps and anything that looks like a key
+                or token are removed before anything is sent, and Pyxi refuses
+                to save a password, card or ID number as a memory.
+              </a>
+            </li>
+            <li class="reveal">
+              <a class="promise" href="#what-leaves-your-computer">
+                <span class="ic"
+                  ><svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M12 3 4.5 6v6c0 4.5 3.2 7.8 7.5 9 4.3-1.2 7.5-4.5 7.5-9V6L12 3Z"
+                    />
+                    <path d="m9 12 2 2 4-4.5" /></svg
+                ></span>
+                <span class="more">In the policy</span>
+                <b>Not sold, not used for training.</b>
+                What you ask goes to an AI model to work out the reply. We don't
+                sell it, and we don't use it to train models.
+              </a>
+            </li>
+            <li class="reveal">
+              <a class="promise" href="#the-short-version">
+                <span class="ic"
+                  ><svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 3.5h9l4 4v13H6z" />
+                    <path d="M15 3.5v4h4" />
+                    <path d="M9 12h6M9 15.5h6" />
+                    <path d="M4 9.5 2.5 11 4 12.5" /></svg
+                ></span>
+                <span class="more">In the policy</span>
+                <b>What Pyxi reads is data, not orders.</b>
+                An email or web page that says "ignore your rules" can't make
+                Pyxi do anything: every send, booking and file change still
+                needs your Allow, and the card says when a recipient came from
+                something Pyxi read.
+              </a>
+            </li>
+            <li class="reveal">
+              <a class="promise" href="#your-choices">
+                <span class="ic"
+                  ><svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 6.5h11M4 12h16M4 17.5h9" />
+                    <path d="M20 6.5h-2.5" />
+                    <path d="m17.5 15.5-2 2 2 2" />
+                    <path d="M15.5 17.5H20" /></svg
+                ></span>
+                <span class="more">In the policy</span>
+                <b>An activity log, with undo.</b>
+                Everything Pyxi did on your behalf, with the time and the
+                teammate: emails sent, buttons pressed, files moved, scripts
+                changed. It can undo what can be undone.
+              </a>
+            </li>
+            <li class="reveal">
+              <a class="promise" href="#using-your-mouse-and-keyboard">
+                <span class="ic"
+                  ><svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="12" r="8.5" />
+                    <path d="M12 7.5V12l3 2" /></svg
+                ></span>
+                <span class="more">In the policy</span>
+                <b>"Always allow" expires.</b>
+                After 30 days it asks again. Settings lists every grant, and you
+                can revoke any of them.
+              </a>
+            </li>
+            <li class="reveal">
+              <a class="promise gold" href="#using-your-mouse-and-keyboard">
+                <span class="ic"
+                  ><svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 3.5v8" />
+                    <path d="M7 6.2a8 8 0 1 0 10 0" /></svg
+                ></span>
+                <span class="more">In the policy</span>
+                <b>One key stops everything.</b>
+                <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>Pause</kbd> halts every
+                teammate, the mouse and keyboard, and anything waiting to go
+                out. <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>P</kbd> pauses screen
+                access. "Wipe everything" forgets it all.
+              </a>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ============================================================ where things go -->
+      <section class="where" id="where" data-say="Where things go, and why.">
+        <div class="wrap">
+          <p class="kicker reveal">What leaves your computer</p>
+          <h2 class="h2 reveal">
+            Every destination, <span class="dim">and the reason for it.</span>
+          </h2>
+          <p class="lead reveal">
+            Nothing on this list goes anywhere until you ask Pyxi to do the
+            thing that needs it. In local mode (Ollama), nothing goes to any AI
+            provider at all.
+          </p>
+          <ul class="where-list">
+            <li class="where-row head" aria-hidden="true">
+              <span></span><span>What</span><span>Where it goes</span
+              ><span>Why</span>
+            </li>
+            <li class="where-row reveal">
+              <span class="dest ai"
+                ><svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z" />
+                  <path d="M12 8v8M8.5 10l7 4M15.5 10l-7 4" /></svg
+              ></span>
+              <span class="what"
+                >Your request, the masked screenshot and on-screen text, recent
+                conversation, and the parts of files or emails a job needs</span
+              >
+              <span class="to"
+                ><b>The AI model</b
+                ><span
+                  >through OpenRouter (during the beta, through the Pyxi beta
+                  server), or the provider of your own key if you added
+                  one</span
+                ></span
+              >
+              <span class="why">To understand your screen and answer</span>
+            </li>
+            <li class="where-row reveal">
+              <span class="dest ai"
+                ><svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="8" y="3.5" width="8" height="12" rx="4" />
+                  <path d="M5 11.5a7 7 0 0 0 14 0" />
+                  <path d="M12 18.5v2" /></svg
+              ></span>
+              <span class="what">Bengali speech</span>
+              <span class="to"
+                ><b>Google's Gemini model</b
+                ><span
+                  >through OpenRouter (during the beta, through the Pyxi beta
+                  server)</span
+                ></span
+              >
+              <span class="why"
+                >To turn Bengali speech into text. Other languages stay on your
+                computer</span
+              >
+            </li>
+            <li class="where-row reveal">
+              <span class="dest web"
+                ><svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="11" cy="11" r="6.5" />
+                  <path d="m20 20-4.3-4.3" /></svg
+              ></span>
+              <span class="what"
+                >Web searches you ask for, and price checks</span
+              >
+              <span class="to"
+                ><b>DuckDuckGo or Bing</b
+                ><span>then the store websites that come up</span></span
+              >
+              <span class="why">To look things up and compare prices</span>
+            </li>
+            <li class="where-row reveal">
+              <span class="dest web"
+                ><svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+                  <path d="M3 9h18" />
+                  <circle cx="6.5" cy="6.8" r="0.6" />
+                  <circle cx="9" cy="6.8" r="0.6" /></svg
+              ></span>
+              <span class="what">Pages a teammate opens</span>
+              <span class="to"
+                ><b>Those websites</b
+                ><span>in a browser on your computer</span></span
+              >
+              <span class="why"
+                >To do the research, booking or form you asked for</span
+              >
+            </li>
+            <li class="where-row reveal">
+              <span class="dest web"
+                ><svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3.5 6.5h17v11h-17z" />
+                  <path d="m3.5 7 8.5 6 8.5-6" /></svg
+              ></span>
+              <span class="what"
+                >Emails, calendar events, documents and posts you ask Pyxi to
+                send or change</span
+              >
+              <span class="to"
+                ><b>Google, Discord or LinkedIn</b
+                ><span>only for accounts you connected</span></span
+              >
+              <span class="why">To do the errand, after an approval card</span>
+            </li>
+            <li class="where-row reveal">
+              <span class="dest web"
+                ><svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3.5" y="5" width="17" height="15" rx="2.5" />
+                  <path d="M3.5 10h17M8 3v4M16 3v4" /></svg
+              ></span>
+              <span class="what">Bookings and forms</span>
+              <span class="to"
+                ><b>The website you're booking with or filling in</b
+                ><span>with the details you saved</span></span
+              >
+              <span class="why"
+                >To make the booking. You approve the final step; you pay
+                yourself</span
+              >
+            </li>
+            <li class="where-row reveal">
+              <span class="dest"
+                ><svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" /></svg
+              ></span>
+              <span class="what">Optional premium voices</span>
+              <span class="to"
+                ><b>ElevenLabs or Google</b
+                ><span>only if you add your own key</span></span
+              >
+              <span class="why">To speak with that voice</span>
+            </li>
+            <li class="where-row reveal">
+              <span class="dest"
+                ><svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3v11" />
+                  <path d="m8 10 4 4 4-4" />
+                  <path
+                    d="M4 16v3a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-3"
+                  /></svg
+              ></span>
+              <span class="what">Update checks</span>
+              <span class="to"
+                ><b>GitHub</b
+                ><span>when Pyxi starts and every four hours</span></span
+              >
+              <span class="why">To find and download a new version</span>
+            </li>
+            <li class="where-row reveal">
+              <span class="dest"
+                ><svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M5 17.5a4 4 0 0 1 .8-7.9A6 6 0 0 1 17.4 9a4.3 4.3 0 0 1 1.6 8.5H5Z"
+                  /></svg
+              ></span>
+              <span class="what">Voice and speech models</span>
+              <span class="to"
+                ><b>GitHub and Hugging Face</b
+                ><span
+                  >downloaded once, the first time they're needed</span
+                ></span
+              >
+              <span class="why"
+                >So speech can be understood and spoken on your computer</span
+              >
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ============================================================ what's stored here -->
+      <section
+        class="kept"
+        id="kept"
+        data-say="And this is what stays, and for how long."
+      >
+        <div class="wrap kept-grid">
+          <div>
+            <p class="kicker reveal">What's stored on your computer</p>
+            <h2 class="h2 reveal">
+              Your history <span class="dim">stays home.</span>
+            </h2>
+            <p class="lead reveal">
+              Everything Pyxi keeps lives in one folder on your PC, and much of
+              it deletes itself on a schedule. "Wipe everything" in the Memory
+              tab forgets the rest. Uninstalling Pyxi and deleting the folder
+              removes it all.
+            </p>
+            <code class="kept-path reveal">%APPDATA%\Pyxi\.pyxi</code>
+          </div>
+          <ul class="kept-list">
+            <li class="reveal">
+              <span
+                >Conversations, with the masked screenshot each answer
+                used</span
+              ><span class="tag ice">deleted after 30 days</span>
+            </li>
+            <li class="reveal">
+              <span>Memory Palace history, if you turned it on</span
+              ><span class="tag ice">deleted after 72 hours</span>
+            </li>
+            <li class="reveal">
+              <span>Things you asked Pyxi to remember</span
+              ><span class="tag">until you say "Forget"</span>
+            </li>
+            <li class="reveal">
+              <span>Ditto's recordings of a task you showed it</span
+              ><span class="tag">until you delete them</span>
+            </li>
+            <li class="reveal">
+              <span>Teammates' task records, flashcard decks and budgets</span
+              ><span class="tag">on your PC</span>
+            </li>
+            <li class="reveal">
+              <span
+                >Booking details you saved: name, email, phone, date of birth,
+                city, preferences</span
+              ><span class="tag never">no ID numbers, ever</span>
+            </li>
+            <li class="reveal">
+              <span
+                >Sign-in tokens for connected accounts, and your beta
+                token</span
+              ><span class="tag gold">encrypted with Windows DPAPI</span>
+            </li>
+            <li class="reveal">
+              <span>Files Pyxi makes for you</span
+              ><span class="tag">Documents\Pyxi, or beside the original</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ============================================================ the full policy -->
+      <section
+        class="policy"
+        id="policy"
+        data-say="Here's the full policy, word for word."
+      >
+        <div class="wrap prose-wrap policy-head">
+          <p class="kicker reveal">The full policy</p>
+          <h2 class="h2 reveal">Privacy policy</h2>
+          <p class="lead reveal">
+            The complete text, straight from the document the app ships with. If
+            this page and the app ever differ, this document wins.
+          </p>
+        </div>
+        <article class="wrap prose-wrap prose">
+          <!--doc:PRIVACY-->
+        </article>
+      </section>
+
+      <section class="policy-cta">
+        <div class="wrap prose-wrap">
+          <p class="muted">
+            Questions about the beta server or your data: see "Your choices"
+            above. The terms of use cover the rest.
+          </p>
+          <div class="cta-row">
+            <a class="btn btn-ghost" href="/terms">Read the terms of use</a>
+            <a class="btn btn-fly" href="/download">Download Pyxi</a>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!--include:footer-->

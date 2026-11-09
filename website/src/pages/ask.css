@@ -1,0 +1,389 @@
+/* Ask anything: the galaxy hero and the "how to ask" row. The palette and the day timeline
+   reuse sections.css. */
+.ask-hero {
+  padding-bottom: clamp(30px, 5vw, 60px);
+  overflow: hidden;
+}
+.ask-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr);
+  gap: clamp(24px, 4vw, 56px);
+  align-items: center;
+}
+.ask-copy .lead {
+  margin-bottom: 22px;
+}
+
+.gal-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px 6px 16px;
+  border-radius: 16px;
+  background: var(--glass);
+  border: 1px solid var(--hair-hi);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 24px 70px rgba(0, 0, 0, 0.45);
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s;
+}
+.gal-box:focus-within {
+  border-color: rgba(255, 200, 97, 0.55);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 24px 70px rgba(0, 0, 0, 0.45),
+    0 0 0 4px rgba(255, 200, 97, 0.12);
+}
+.gal-box input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: 500 clamp(17px, 1.6vw, 21px)/1.2 var(--font);
+  letter-spacing: -0.02em;
+  outline: none;
+}
+.gal-box input::placeholder {
+  color: var(--ink-3);
+}
+.gal-box input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+.gal-count {
+  flex: none;
+  min-width: 36px;
+  padding: 5px 10px;
+  border-radius: 99px;
+  text-align: center;
+  font: 650 12.5px/1.2 var(--font);
+  color: var(--ice-hi);
+  background: rgba(158, 203, 255, 0.12);
+  border: 1px solid rgba(158, 203, 255, 0.3);
+}
+.gal-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+.gal-chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px 6px 9px;
+  border-radius: 99px;
+  border: 1px solid var(--hair);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink-2);
+  font: 600 12.5px/1.2 var(--font);
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.gal-chips button::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 8px var(--c);
+}
+.gal-chips button:hover {
+  color: var(--ink);
+  border-color: var(--hair-hi);
+}
+.gal-chips button.on {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--c) 16%, transparent);
+  border-color: color-mix(in srgb, var(--c) 55%, transparent);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--c) 18%, transparent);
+}
+.gal-hint {
+  margin: 16px 0 0;
+  font-size: 13.5px;
+  color: var(--ink-3);
+}
+.gal-hint .touch {
+  display: none;
+}
+@media (hover: none) {
+  .gal-hint .mouse {
+    display: none;
+  }
+  .gal-hint .touch {
+    display: inline;
+  }
+}
+
+.galaxy-wrap {
+  position: relative;
+  aspect-ratio: 1.08;
+  max-height: 640px;
+  border-radius: 28px;
+  background:
+    radial-gradient(
+      60% 55% at 50% 48%,
+      rgba(158, 203, 255, 0.07),
+      transparent 70%
+    ),
+    radial-gradient(
+      40% 40% at 30% 70%,
+      rgba(255, 200, 97, 0.05),
+      transparent 70%
+    );
+  -webkit-mask-image: radial-gradient(closest-side, #000 60%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 60%, transparent 100%);
+}
+.galaxy {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: pan-y;
+}
+.gal-pt {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+/* the list below: a clicked star lights its card */
+.asks-grid li.lit {
+  background: color-mix(in srgb, var(--c) 10%, rgba(255, 255, 255, 0.04));
+  border-color: color-mix(in srgb, var(--c) 60%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--c) 40%, transparent),
+    0 0 40px color-mix(in srgb, var(--c) 22%, transparent);
+}
+
+/* ---------------------------------------------------------------- how to ask */
+.howask {
+  padding: clamp(50px, 7vw, 90px) 0 clamp(30px, 5vw, 60px);
+}
+.howask-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 32px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.howask-grid li {
+  padding: 18px 18px 20px;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--hair);
+}
+.howask-grid h3 {
+  margin: 16px 0 6px;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.howask-grid p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+.howask-grid kbd {
+  font-size: 0.8em;
+}
+.how-art {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 96px;
+  padding: 0 14px;
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.015)
+  );
+  border: 1px solid var(--hair);
+  overflow: hidden;
+}
+.how-art kbd {
+  font-size: 13px;
+}
+.how-wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  height: 28px;
+}
+.how-wave b {
+  width: 3px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--fly);
+  box-shadow: 0 0 8px rgba(255, 200, 97, 0.7);
+  animation: how-wave 1.1s ease-in-out infinite;
+}
+.how-wave b:nth-child(2) {
+  animation-delay: 0.12s;
+}
+.how-wave b:nth-child(3) {
+  animation-delay: 0.24s;
+}
+.how-wave b:nth-child(4) {
+  animation-delay: 0.36s;
+}
+.how-wave b:nth-child(5) {
+  animation-delay: 0.48s;
+}
+@keyframes how-wave {
+  0%,
+  100% {
+    height: 8px;
+  }
+  50% {
+    height: 26px;
+  }
+}
+.how-tap {
+  font: 600 11px/1 var(--font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.how-caret {
+  margin-left: auto;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: rgba(12, 14, 20, 0.9);
+  border: 1px solid var(--hair-hi);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.how-caret i {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--fly);
+  animation: how-blink 1s steps(2) infinite;
+}
+@keyframes how-blink {
+  to {
+    opacity: 0;
+  }
+}
+.how-lang {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+}
+.how-lang span {
+  padding: 5px 10px;
+  border-radius: 9px;
+  background: rgba(12, 14, 20, 0.9);
+  border: 1px solid var(--hair-hi);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.how-lang span[lang="bn"] {
+  align-self: flex-end;
+  color: var(--ice-hi);
+  border-color: rgba(158, 203, 255, 0.35);
+  font-size: 14px;
+}
+.how-look {
+  justify-content: center;
+}
+.how-win {
+  position: absolute;
+  width: 58%;
+  height: 62%;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #1a1f2a, #11141b);
+  border: 1px solid var(--hair-hi);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+}
+.how-win::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 9px;
+  border-radius: 8px 8px 0 0;
+  background: rgba(255, 255, 255, 0.07);
+}
+.how-win.back {
+  width: 44%;
+  height: 50%;
+  transform: translate(42%, -22%);
+  opacity: 0.45;
+  z-index: -1;
+}
+.how-ring {
+  position: absolute;
+  left: 36%;
+  top: 48%;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--ice);
+  box-shadow: 0 0 14px rgba(158, 203, 255, 0.7);
+  animation: how-ring 2.2s ease-out infinite;
+}
+@keyframes how-ring {
+  0% {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  70%,
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 999px) {
+  .ask-hero-grid {
+    grid-template-columns: 1fr;
+  }
+  .galaxy-wrap {
+    order: -1;
+    aspect-ratio: 1.15;
+    width: min(100%, 560px);
+    margin-inline: auto;
+  }
+  .howask-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .galaxy-wrap {
+    aspect-ratio: 1;
+  }
+  .howask-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not(.force-motion) .how-wave b,
+  html:not(.force-motion) .how-caret i,
+  html:not(.force-motion) .how-ring {
+    animation: none;
+  }
+}

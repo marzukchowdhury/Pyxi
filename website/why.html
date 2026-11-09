@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!--include:head-->
+    <title>Why Pyxi: not a chat window, a friend at your shoulder</title>
+    <meta name="description" content="The same task done two ways: copy and paste into a chat box, or ask Pyxi and watch it point, write on the page and fix it after one Allow. How Pyxi differs from a chat box and a browser agent." />
+    <link rel="canonical" href="{{siteUrl}}/why" />
+    <meta property="og:url" content="{{siteUrl}}/why" />
+    <meta property="og:title" content="Why Pyxi" />
+    <meta property="og:description" content="Not a chat window. More like a friend at your shoulder. Drag the line and see the same task done two ways." />
+    <meta name="twitter:title" content="Why Pyxi" />
+    <meta name="twitter:description" content="Not a chat window. More like a friend at your shoulder. Drag the line and see the same task done two ways." />
+    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/pages/why.js"></script>
+  </head>
+  <body class="page-why">
+    <!--include:nav-->
+    <!--include:firefly-->
+
+    <main id="main">
+      <!-- ============================================================ hero: the same task, two ways -->
+      <section class="page-hero slim why-hero" data-say="Not a chat window. More like a friend at your shoulder.">
+        <div class="wrap why-head">
+          <p class="kicker reveal">Why Pyxi</p>
+          <h1 class="display-sm reveal">Not a chat window.<br /><span class="dim">More like a friend at your shoulder.</span></h1>
+          <p class="lead reveal">One task, "fix the typo in this paragraph", done two ways. Drag the line across and compare.</p>
+        </div>
+        <div class="wrap">
+          <div class="tw-scroll">
+            <div class="twoways reveal" id="twoways" style="--split: 50" aria-label="The same task two ways: on the left, copying the paragraph into a chat box and pasting the answer back; on the right, asking Pyxi, which rings the typo, shows the fix and replaces it after one Allow.">
+              <!-- left pane: the chat-box way -->
+              <div class="tw-pane tw-left" aria-hidden="true">
+                <div class="tw-world">
+                  <div class="tw-scene">
+                    <div class="tw-doc">
+                      <header><i></i><i></i><i></i><b>Cover letter.docx</b></header>
+                      <div class="tw-bars"><span style="--w: 38%"></span><span style="--w: 92%"></span><span style="--w: 86%"></span><span style="--w: 64%"></span></div>
+                      <p class="tw-para">Thank you for your time. I look forward to hearing from you and hope to <mark class="typo">recieve</mark> your reply soon.</p>
+                      <div class="tw-bars"><span style="--w: 80%"></span><span style="--w: 46%"></span></div>
+                      <div class="tw-select" aria-hidden="true"></div>
+                    </div>
+                    <div class="tw-chatwin">
+                      <header><span class="dot"></span>Chat</header>
+                      <div class="msg me">Can you fix the typo in this? "Thank you for your time. I look forward to hearing from you and hope to recieve your reply soon."</div>
+                      <div class="msg bot">Sure. The word "recieve" should be "receive". Here is the corrected paragraph:<br /><br />"Thank you for your time. I look forward to hearing from you and hope to receive your reply soon."<br /><span class="copy">Copy</span></div>
+                      <div class="compose">Message<span class="caret"></span></div>
+                    </div>
+                    <span class="tw-chip" style="--l: 7; --t: 2; --z: 9"><i>1</i>Select the paragraph and copy it</span>
+                    <span class="tw-chip" style="--l: 44; --t: 5; --z: 11"><i>2</i>Open the chat box</span>
+                    <span class="tw-chip" style="--l: 72; --t: 17; --z: 10"><i>3</i>Paste it and ask</span>
+                    <span class="tw-chip" style="--l: 73; --t: 29; --z: 12"><i>4</i>Read the answer</span>
+                    <span class="tw-chip" style="--l: 66; --t: 43; --z: 9"><i>5</i>Copy the fixed text</span>
+                    <span class="tw-chip" style="--l: 12; --t: 47; --z: 11"><i>6</i>Paste it back over the original</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- right pane: the Pyxi way -->
+              <div class="tw-pane tw-right" aria-hidden="true">
+                <div class="tw-world">
+                  <div class="tw-scene">
+                    <div class="tw-doc">
+                      <header><i></i><i></i><i></i><b>Cover letter.docx</b></header>
+                      <div class="tw-bars"><span style="--w: 38%"></span><span style="--w: 92%"></span><span style="--w: 86%"></span><span style="--w: 64%"></span></div>
+                      <p class="tw-para">Thank you for your time. I look forward to hearing from you and hope to <mark class="typo">recieve</mark> your reply soon.</p>
+                      <div class="tw-bars"><span style="--w: 80%"></span><span style="--w: 46%"></span></div>
+                      <svg class="tw-thread" aria-hidden="true"><path d="" /></svg>
+                      <span class="tw-ring"></span>
+                      <span class="tw-fly"></span>
+                      <svg class="tw-cursor" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 9-6 1.2 3.4 6.6-2.6 1.3-3.4-6.6L5 18.5z" /></svg>
+                    </div>
+                    <div class="tw-cue">
+                      <small>Pyxi</small>
+                      <b>"recieve" is a typo.</b>
+                      <span>It should be "receive". Want me to replace it?</span>
+                    </div>
+                    <div class="tw-allow">
+                      <small>Pyxi wants to type</small>
+                      <b>Replace "recieve" with "receive"</b>
+                      <div class="row"><span class="ok">Allow</span><span class="no">Not now</span></div>
+                    </div>
+                    <span class="tw-chip gold" style="--l: 7; --t: 2; --z: 9"><i>1</i>"Hey Pyxi, fix the typo."</span>
+                    <span class="tw-chip gold" style="--l: 42; --t: 48; --z: 12"><i>2</i>Press Allow</span>
+                    <span class="tw-chip done" style="--l: 78; --t: 6; --z: 11">Done</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tw-divider" aria-hidden="true"></div>
+              <button class="tw-handle" type="button" role="slider" aria-label="Compare the chat-box way with the Pyxi way" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-valuetext="Half and half">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5" /></svg>
+              </button>
+            </div>
+          </div>
+          <div class="tw-legend reveal" aria-hidden="true">
+            <span class="l"><b>A chat box</b> Copy, switch, paste, read, copy, paste back.</span>
+            <span class="r"><b>Pyxi</b> Ask. Allow. Done, right where you were.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ three kinds of help -->
+      <section class="kinds" id="kinds" data-say="Three kinds of help. Only one of them is already looking at your screen.">
+        <div class="wrap">
+          <p class="kicker reveal">Three kinds of help</p>
+          <h2 class="h2 reveal">A chat box. A browser agent.<br /><span class="dim">Or someone who's already looking.</span></h2>
+          <div class="kind-cards">
+            <article class="kind reveal">
+              <div class="ill ill-chat" aria-hidden="true">
+                <span class="b me"></span><span class="b bot"><i></i><i></i><i></i></span><span class="b me short"></span>
+              </div>
+              <h3>A chat box</h3>
+              <p>You describe the problem, or paste a screenshot in, and read paragraphs out. Then you go back to your screen and find the button yourself.</p>
+            </article>
+            <article class="kind reveal">
+              <div class="ill ill-agent" aria-hidden="true">
+                <span class="tabs"><i></i><i></i><i></i></span><span class="page"></span><span class="cur"></span>
+              </div>
+              <h3>A browser agent</h3>
+              <p>Lives inside a browser tab and drives web pages for you. Anything outside the browser, a document, a settings window, a game, is out of reach.</p>
+            </article>
+            <article class="kind pyxi reveal">
+              <div class="ill ill-pyxi" aria-hidden="true">
+                <span class="win"></span><span class="ring"></span><span class="fly"></span><svg viewBox="0 0 24 24"><path d="M5 3l14 9-6 1.2 3.4 6.6-2.6 1.3-3.4-6.6L5 18.5z" /></svg>
+              </div>
+              <h3>Pyxi</h3>
+              <p>A firefly beside your cursor that already sees the window you're on. It points, writes on the page, builds it in 3D, or does the clicking after you press Allow, in any app.</p>
+            </article>
+          </div>
+
+          <div class="compare reveal" role="table" aria-label="A chat box, a browser agent and Pyxi compared">
+            <div class="cmp-row cmp-head" role="row"><span role="columnheader"></span><span role="columnheader">A chat box</span><span role="columnheader">A browser agent</span><span role="columnheader" class="hi">Pyxi</span></div>
+            <div class="cmp-row" role="row"><span role="rowheader">Sees your screen when you ask</span><span role="cell">You paste a screenshot in</span><span role="cell">The web page it's on</span><span role="cell" class="hi">The window you're on</span></div>
+            <div class="cmp-row" role="row"><span role="rowheader">Where it works</span><span role="cell">In its own window</span><span role="cell">Inside the browser</span><span role="cell" class="hi">Any app on your Windows desktop</span></div>
+            <div class="cmp-row" role="row"><span role="rowheader">How it answers</span><span role="cell">Paragraphs</span><span role="cell">Actions on the page</span><span role="cell" class="hi">Out loud, with rings, notes and 3D drawn on your screen</span></div>
+            <div class="cmp-row" role="row"><span role="rowheader">Finding the button</span><span role="cell">Describes where it is</span><span role="cell">Clicks it for you</span><span role="cell" class="hi">Points at it, then clicks only after you press Allow</span></div>
+            <div class="cmp-row" role="row"><span role="rowheader">Before anything is sent, booked, bought or deleted</span><span role="cell">Not its job</span><span role="cell">Varies</span><span role="cell" class="hi">Always asks, every time</span></div>
+            <div class="cmp-row" role="row"><span role="rowheader">Your own clicks</span><span role="cell">Unaffected</span><span role="cell">Shared with the agent</span><span role="cell" class="hi">Pass straight through Pyxi's layer</span></div>
+            <div class="cmp-row" role="row"><span role="rowheader">Longer jobs</span><span role="cell">You wait in the window</span><span role="cell">You wait on the tab</span><span role="cell" class="hi">Teammates work in the background while you carry on</span></div>
+          </div>
+
+          <div class="versus reveal" role="table" aria-label="A chat assistant compared with Pyxi, in everyday moments">
+            <div class="vs-row vs-head" role="row"><span role="columnheader">A chat assistant</span><span role="columnheader">Pyxi</span></div>
+            <div class="vs-row" role="row"><span role="cell">You paste in a screenshot</span><span role="cell">Already sees your screen when you ask</span></div>
+            <div class="vs-row" role="row"><span role="cell">Describes where the button is</span><span role="cell">Points at the button</span></div>
+            <div class="vs-row" role="row"><span role="cell">Lists every step at once</span><span role="cell">Gives one step, waits for your click, then the next</span></div>
+            <div class="vs-row" role="row"><span role="cell">Answers in paragraphs</span><span role="cell">Writes on the page, or builds it in 3D</span></div>
+            <div class="vs-row" role="row"><span role="cell">Tells you what to click</span><span role="cell">Does the clicking, after you press Allow</span></div>
+            <div class="vs-row" role="row"><span role="cell">One assistant</span><span role="cell">A lead with a team: Scout, Quill and Sketch</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ who it's for -->
+      <section class="whofor" id="for" data-say="Who's it for? Anyone who'd rather be shown than told.">
+        <div class="wrap">
+          <p class="kicker reveal">Who it's for</p>
+          <h2 class="h2 reveal">Anyone who'd rather be shown <span class="dim">than told.</span></h2>
+          <div class="who-grid">
+            <article class="who reveal" style="--c: #9ecbff">
+              <span class="who-mark"><svg viewBox="0 0 24 24"><path d="M3 8l9-4 9 4-9 4-9-4Z" /><path d="M7 10v5c0 1.5 2.5 3 5 3s5-1.5 5-3v-5" /></svg></span>
+              <h3>Students</h3>
+              <p>Ask about the slide you're on and get the explanation on it, with a 3D model if that helps. Sage turns your slides and notes into flashcards and quizzes.</p>
+            </article>
+            <article class="who reveal" style="--c: #ffc861">
+              <span class="who-mark"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3z" /><path d="M3 7l9 6 9-6" /></svg></span>
+              <h3>People who email and book a lot</h3>
+              <p>Quill drafts the reply beside the message. Atlas pulls your trips together. Bookings fill in and stop at the final step, which is yours. Everything that sends waits for Allow.</p>
+            </article>
+            <article class="who reveal" style="--c: #eaf3ff">
+              <span class="who-mark"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /></svg></span>
+              <h3>People who want it explained where they are</h3>
+              <p>A post, a chart, a bill, an error message. Pyxi explains it on the spot with a cue card and a thread of light to the part it means.</p>
+            </article>
+            <article class="who reveal" style="--c: #5fe3b0">
+              <span class="who-mark"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 16 0" /><path d="M4 12v4a2 2 0 0 0 2 2h2v-6H4Zm16 0v4a2 2 0 0 1-2 2h-2v-6h4Z" /></svg></span>
+              <h3>Bengali speakers</h3>
+              <p>Pyxi speaks English and Bengali. Hold <kbd>Ctrl</kbd> <kbd>Alt</kbd> and ask in whichever comes first.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ finale -->
+      <section class="finale" data-say="Say hey. I'll be right beside your cursor.">
+        <div class="wrap finale-inner">
+          <div class="finale-glow" aria-hidden="true"></div>
+          <h2 class="display-sm reveal">See it on your own screen.</h2>
+          <p class="lead reveal">Download the beta, join with your invite code, and hold <kbd>Ctrl</kbd> <kbd>Alt</kbd>.</p>
+          <div class="cta-row center reveal">
+            <a class="btn btn-fly btn-lg" href="/download" data-track="why-download">Download for Windows</a>
+            <a class="btn btn-ghost btn-lg" href="/features">Everything it does</a>
+          </div>
+          <p class="fine reveal">Version <span data-version>{{version}}</span>, <span data-size>{{downloadSize}}</span>. Windows 10 and 11.<br />By installing you agree to the <a href="/terms">terms of use</a> and <a href="/privacy">privacy policy</a>.</p>
+        </div>
+      </section>
+    </main>
+
+    <!--include:footer-->
+  </body>
+</html>

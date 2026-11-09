@@ -1,0 +1,187 @@
+/* What it does: the wall of screens. */
+.wall-hero {
+  padding-top: clamp(100px, 13vh, 140px);
+  padding-bottom: 0;
+  overflow: hidden;
+}
+.wall-hero .display-sm {
+  font-size: clamp(38px, 4.6vw, 64px);
+}
+.wall-hero .lead {
+  max-width: 40em;
+}
+.wall {
+  position: relative;
+  height: clamp(280px, 30vw, 430px);
+  margin-top: clamp(14px, 2vw, 28px);
+  perspective: 1500px;
+  perspective-origin: 50% 40%;
+  cursor: grab;
+  user-select: none;
+  touch-action: pan-y;
+  outline: none;
+  --tx: 0deg;
+}
+.wall:active {
+  cursor: grabbing;
+}
+.wall:focus-visible .wall-ring {
+  outline: 2px solid var(--ice);
+  outline-offset: 12px;
+}
+.wall-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 38%;
+  aspect-ratio: 16 / 10;
+  transform-style: preserve-3d;
+  transform: translate(-50%, -50%) rotateX(var(--tx))
+    translateZ(calc(var(--r, 700px) * -1)) rotateY(var(--rot, 0deg));
+  transition: none;
+}
+.screen {
+  position: absolute;
+  inset: 0;
+  display: block;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #e9ecf1;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  /* --d is how far from the front, 0..1: side screens darken and recede */
+  box-shadow: 0 30px 80px rgba(0, 0, 0, calc(0.6 - var(--d, 0.5) * 0.3));
+  transform: rotateY(var(--a)) translateZ(var(--r, 700px));
+  filter: brightness(calc(1.05 - var(--d, 0.5) * 0.75))
+    saturate(calc(1 - var(--d, 0.5) * 0.5));
+  backface-visibility: hidden;
+  -webkit-user-drag: none;
+}
+.screen img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+.screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  background: linear-gradient(
+    115deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.08) 50%,
+    transparent 62%
+  );
+  opacity: calc(1 - var(--d, 0.5));
+}
+.screen.front {
+  box-shadow:
+    0 40px 110px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(158, 203, 255, 0.35),
+    0 0 60px rgba(158, 203, 255, 0.14);
+}
+.wall-floor {
+  position: absolute;
+  left: 50%;
+  bottom: -6%;
+  width: 70%;
+  height: 30%;
+  transform: translateX(-50%);
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    rgba(158, 203, 255, 0.14),
+    rgba(255, 200, 97, 0.05) 45%,
+    transparent 70%
+  );
+  filter: blur(18px);
+  pointer-events: none;
+}
+.wall-cap {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  margin-top: clamp(16px, 2vw, 26px);
+  padding-bottom: clamp(50px, 7vw, 90px);
+}
+.wall-title {
+  margin: 0;
+  text-align: center;
+}
+.wall-title b {
+  display: block;
+  font-size: clamp(18px, 1.6vw, 22px);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.wall-title span {
+  display: block;
+  margin-top: 4px;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+.wall-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--hair-hi);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    border-color 0.2s,
+    transform 0.3s var(--spring);
+}
+.wall-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(158, 203, 255, 0.5);
+  transform: scale(1.06);
+}
+.wall-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (max-width: 999px) {
+  .wall {
+    height: clamp(220px, 46vw, 340px);
+    perspective: 1100px;
+  }
+  .wall-ring {
+    width: 56%;
+  }
+}
+@media (max-width: 640px) {
+  .wall {
+    height: 230px;
+  }
+  .wall-ring {
+    width: 72%;
+  }
+  .wall-cap {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+  .wall-title span {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not(.force-motion) .screen {
+    transition: none;
+  }
+}

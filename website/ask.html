@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!--include:head-->
+    <title>Ask Pyxi anything: sixty real things it does, in your words</title>
+    <meta name="description" content="Hold Ctrl and Alt and say it the way you'd say it to a friend. Sixty real things Pyxi does on your Windows PC today: explain, guide, do, files, documents, money, travel, meetings, study, code, errands and memory." />
+    <link rel="canonical" href="{{siteUrl}}/ask" />
+    <meta property="og:url" content="{{siteUrl}}/ask" />
+    <meta property="og:title" content="Ask Pyxi anything" />
+    <meta property="og:description" content="Sixty real things Pyxi does today, in your words. Type a word and watch them come forward." />
+    <meta name="twitter:title" content="Ask Pyxi anything" />
+    <meta name="twitter:description" content="Sixty real things Pyxi does today, in your words. Type a word and watch them come forward." />
+    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/pages/ask.js"></script>
+  </head>
+  <body class="page-ask">
+    <!--include:nav-->
+    <!--include:firefly-->
+
+    <main id="main">
+      <!-- ============================================================ the galaxy -->
+      <section class="page-hero ask-hero" data-say="Everything out there is something I do today. Type a word.">
+        <div class="wrap ask-hero-grid">
+          <div class="ask-copy">
+            <p class="kicker reveal">Ask anything</p>
+            <h1 class="display-sm reveal">Anything on your screen.<br /><span class="dim">In your words.</span></h1>
+            <p class="lead reveal">Sixty real things Pyxi does today, floating out there by kind. Type a word and the ones that match come forward. Hover one and Pyxi points at who does it.</p>
+            <label class="gal-box reveal">
+              <span class="pal-fly" aria-hidden="true"></span>
+              <input id="gal-input" type="search" placeholder="Hey Pyxi, " autocomplete="off" spellcheck="false" aria-label="Search what Pyxi can do" />
+              <span class="gal-count" id="gal-count" aria-live="polite">60</span>
+            </label>
+            <div class="gal-chips reveal" id="gal-chips" role="group" aria-label="Pull a kind of ask closer">
+              <button type="button" class="on" data-cat="" style="--c: #ffc861">All</button>
+              <button type="button" data-cat="explain" style="--c: #ffc861">Explain</button>
+              <button type="button" data-cat="guide" style="--c: #ffc861">Guide</button>
+              <button type="button" data-cat="do" style="--c: #ffc861">Do</button>
+              <button type="button" data-cat="files" style="--c: #b9a3ff">Files</button>
+              <button type="button" data-cat="docs" style="--c: #8fd694">Documents</button>
+              <button type="button" data-cat="money" style="--c: #e8d36a">Money</button>
+              <button type="button" data-cat="travel" style="--c: #ffb27a">Travel</button>
+              <button type="button" data-cat="meetings" style="--c: #a0d8ef">Meetings</button>
+              <button type="button" data-cat="study" style="--c: #c3e88d">Study</button>
+              <button type="button" data-cat="code" style="--c: #f78c6c">Code</button>
+              <button type="button" data-cat="errands" style="--c: #7cc7ff">Errands</button>
+              <button type="button" data-cat="memory" style="--c: #89ddff">Memory</button>
+            </div>
+            <p class="gal-hint reveal"><span class="mouse">Drag or move your mouse to turn it. Click an ask to read what happens.</span><span class="touch">Drag to turn it. Tap an ask to read what happens.</span></p>
+          </div>
+          <div class="galaxy-wrap reveal" aria-hidden="true">
+            <canvas class="galaxy" id="galaxy"></canvas>
+            <span class="gal-pt"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ how to ask -->
+      <section class="howask" data-say="Hold Ctrl and Alt, and just talk. Let go to send.">
+        <div class="wrap">
+          <p class="kicker reveal">How to ask</p>
+          <h2 class="h2 reveal">No window to open. <span class="dim">No prompt to write.</span></h2>
+          <ul class="howask-grid">
+            <li class="reveal">
+              <div class="how-art how-keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><i class="how-wave"><b></b><b></b><b></b><b></b><b></b></i></div>
+              <h3>Hold and talk</h3>
+              <p>Hold <kbd>Ctrl</kbd> <kbd>Alt</kbd> and say it. Let go and it's sent. The notch shows Listening, then what Pyxi is looking at, then its words.</p>
+            </li>
+            <li class="reveal">
+              <div class="how-art how-type"><kbd>Ctrl</kbd><span class="how-tap">tap tap</span><span class="how-caret">Hey Pyxi,<i></i></span></div>
+              <h3>Or type</h3>
+              <p>Double-tap <kbd>Ctrl</kbd> to type instead, or hover the notch for a small chat. Same Pyxi, same screen.</p>
+            </li>
+            <li class="reveal">
+              <div class="how-art how-lang"><span>Hey Pyxi</span><span lang="bn">পিক্সি, এটা কী?</span></div>
+              <h3>English or Bengali</h3>
+              <p>Ask in Bengali and Pyxi answers in Bengali, out loud, with no setup. Other languages are on the way.</p>
+            </li>
+            <li class="reveal">
+              <div class="how-art how-look"><i class="how-win"></i><i class="how-win back"></i><b class="how-ring"></b></div>
+              <h3>It looks when you ask</h3>
+              <p>One look at the window you're on: a screenshot plus the names and places of its controls. Nothing in the background.</p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ============================================================ the palette -->
+      <section class="palette" id="ask" data-say="All sixty, with what actually happens on your screen.">
+        <div class="wrap">
+          <p class="kicker reveal">The full list</p>
+          <h2 class="h2 reveal">Say it the way you'd say it <span class="dim">to a friend.</span></h2>
+          <p class="lead narrow reveal">Sixty real things Pyxi does today, in your words. Type a word to find one, or hold <kbd>Ctrl</kbd> <kbd>Alt</kbd> on your PC and just say it.</p>
+          <div class="pal reveal">
+            <label class="pal-box">
+              <span class="pal-fly" aria-hidden="true"></span>
+              <input id="pal-input" type="search" placeholder="Hey Pyxi, " autocomplete="off" spellcheck="false" aria-label="Search what Pyxi can do" />
+              <span class="pal-count" id="pal-count" aria-live="polite">60</span>
+            </label>
+            <div class="pal-chips" role="group" aria-label="Filter by kind">
+              <button type="button" class="on" data-cat="">All</button>
+              <button type="button" data-cat="explain">Explain</button>
+              <button type="button" data-cat="guide">Guide</button>
+              <button type="button" data-cat="do">Do</button>
+              <button type="button" data-cat="files">Files</button>
+              <button type="button" data-cat="docs">Documents</button>
+              <button type="button" data-cat="money">Money</button>
+              <button type="button" data-cat="travel">Travel</button>
+              <button type="button" data-cat="meetings">Meetings</button>
+              <button type="button" data-cat="study">Study</button>
+              <button type="button" data-cat="code">Code</button>
+              <button type="button" data-cat="errands">Errands</button>
+              <button type="button" data-cat="memory">Memory</button>
+            </div>
+          </div>
+          <ul class="asks-grid" id="asks-grid">
+            <li class="reveal" data-cat="explain" data-who="Pyxi" style="--c: #ffc861"><q>Explain this chart</q><span>A cue card beside it, each point framing the part it means, trends sketched on the chart.</span></li>
+            <li class="reveal" data-cat="explain" data-who="Pyxi" style="--c: #ffc861"><q>Explain this meme</q><span>The joke, the reference and why it lands, written in ink next to the picture.</span></li>
+            <li class="reveal" data-cat="explain" data-who="Pyxi" style="--c: #ffc861"><q>Explain this diagram</q><span>Short tags pinned onto the actual parts of the picture, flows traced across it.</span></li>
+            <li class="reveal" data-cat="explain" data-who="Pyxi" style="--c: #ffc861"><q>What is this bill actually charging me?</q><span>Tags on the bill's real lines: what you owe, by when, why, and anything that looks wrong.</span></li>
+            <li class="reveal" data-cat="explain" data-who="Pyxi" style="--c: #ffc861"><q>What does this setting do?</q><span>One plain answer, with the setting ringed on screen.</span></li>
+            <li class="reveal" data-cat="explain" data-who="Sketch" style="--c: #86e0c3"><q>How does HTTPS work? Show me.</q><span>A 3D scene with a narrated five-step tour, rising out of the page you're on.</span></li>
+            <li class="reveal" data-cat="explain" data-who="Sketch" style="--c: #86e0c3"><q>How is an AI chip built? Show me in 3D.</q><span>A real-looking model, taken apart layer by layer while Pyxi explains. "Show the inside" edits it.</span></li>
+            <li class="reveal" data-cat="explain" data-who="Sketch" style="--c: #86e0c3"><q>Explode this panel</q><span>The real window peels apart into glass layers, each piece exactly over its own pixels.</span></li>
+            <li class="reveal" data-cat="explain" data-who="Pyxi" style="--c: #ffc861"><q>What's the weather tomorrow?</q><span>The high, the low and the chance of rain, in about a second, with real numbers.</span></li>
+            <li class="reveal" data-cat="explain" data-who="Pyxi" lang="bn" style="--c: #ffc861"><q>আমার স্ক্রিনে কী আছে?</q><span lang="en">Ask in Bengali and Pyxi answers in Bengali, out loud, with no setup.</span></li>
+
+            <li class="reveal" data-cat="guide" data-who="Pyxi" style="--c: #ffc861"><q>Where's the export button?</q><span>A ring on the button and a thread of light back to the firefly, the moment Pyxi says "here".</span></li>
+            <li class="reveal" data-cat="guide" data-who="Pyxi" style="--c: #ffc861"><q>Walk me through turning on dark mode</q><span>One step at a time: an arrow from your cursor, then it waits for your real click.</span></li>
+            <li class="reveal" data-cat="guide" data-who="Pyxi" style="--c: #ffc861"><q>How do I add an environment variable in Vercel?</q><span>It looks at that app, even on your other monitor, and marks the one control to click.</span></li>
+            <li class="reveal" data-cat="guide" data-who="Scout" style="--c: #7cc7ff"><q>Show me how you did it</q><span>A Ghost Walkthrough: Scout's run replayed with a spotlight on each thing it clicked.</span></li>
+
+            <li class="reveal" data-cat="do" data-who="Pyxi" style="--c: #ffc861"><q>Play Billie Jean, a bit quieter</q><span>The song starts in a window behind yours, in Spotify when you have it, and the volume comes down.</span></li>
+            <li class="reveal" data-cat="do" data-who="Pyxi" style="--c: #ffc861"><q>Put Gmail and Sheets side by side</q><span>Two, three or four windows laid out in one go.</span></li>
+            <li class="reveal" data-cat="do" data-who="Pyxi" style="--c: #ffc861"><q>My desktop is a mess, organise it</q><span>You approve the plan, nothing is deleted, and "undo that" puts it all back.</span></li>
+            <li class="reveal" data-cat="do" data-who="Pyxi" style="--c: #ffc861"><q>Find coffee near me that's open now</q><span>Maps, searched for you, with the best picks ringed on the map.</span></li>
+            <li class="reveal" data-cat="do" data-who="Pyxi" style="--c: #ffc861"><q>Write a funny reply in this box</q><span>Drafted and dropped straight into the box you're typing in.</span></li>
+            <li class="reveal" data-cat="do" data-who="Pyxi" style="--c: #ffc861"><q>Every weekday at 9, check my email for anything from my professor</q><span>A routine. It runs while Pyxi is open, and you can see, pause or delete it in the notch.</span></li>
+            <li class="reveal" data-cat="do" data-who="Pyxi" style="--c: #ffc861"><q>Remind me at 5 to call Mum</q><span>A plain reminder, no model needed.</span></li>
+            <li class="reveal" data-cat="do" data-who="Pyxi" style="--c: #ffc861"><q>Make a pivot table of this in Sheets</q><span>Pyxi asks first, then drives your real mouse and keyboard, labelling what it's doing.</span></li>
+
+            <li class="reveal" data-cat="files" data-who="Pixel" style="--c: #b9a3ff"><q>Turn these photos into one PDF</q><span>Done on your PC in seconds. A new file beside the originals, never over them.</span></li>
+            <li class="reveal" data-cat="files" data-who="Pixel" style="--c: #b9a3ff"><q>Merge these three PDFs</q><span>Merge, split, reorder, rotate, delete pages, add page numbers or a watermark.</span></li>
+            <li class="reveal" data-cat="files" data-who="Pixel" style="--c: #b9a3ff"><q>Compress this PDF so I can email it</q><span>Smaller, same pages.</span></li>
+            <li class="reveal" data-cat="files" data-who="Pixel" style="--c: #b9a3ff"><q>Unlock this PDF</q><span>You type the password on a card; the model never sees it.</span></li>
+            <li class="reveal" data-cat="files" data-who="Pixel" style="--c: #b9a3ff"><q>Make this scan searchable</q><span>Text read off the pages with Windows' own offline recognition.</span></li>
+            <li class="reveal" data-cat="files" data-who="Pixel" style="--c: #b9a3ff"><q>What changed between these two contracts?</q><span>A list of changes and a marked-up Word report.</span></li>
+            <li class="reveal" data-cat="files" data-who="Pixel" style="--c: #b9a3ff"><q>Convert this HEIC to JPG</q><span>Images, Office files, Markdown and HTML to PDF, PDF to Word, CSV to Excel and back.</span></li>
+
+            <li class="reveal" data-cat="docs" data-who="Ledger" style="--c: #8fd694"><q>Add a totals row to this spreadsheet</q><span>Real formulas, not pasted numbers, saved as a copy beside your original.</span></li>
+            <li class="reveal" data-cat="docs" data-who="Ledger" style="--c: #8fd694"><q>Make a pivot by category and put a chart on it</q><span>In Excel or in a Google Sheet, through Google's own API.</span></li>
+            <li class="reveal" data-cat="docs" data-who="Ledger" style="--c: #8fd694"><q>Add a heading and bullets to my Doc</q><span>Word, PowerPoint and Google Docs edited in place, with Google keeping every version.</span></li>
+            <li class="reveal" data-cat="docs" data-who="Ledger" style="--c: #8fd694"><q>Put my receipts into my budget sheet</q><span>Penny finds them, Ledger adds the rows.</span></li>
+
+            <li class="reveal" data-cat="money" data-who="Penny" style="--c: #e8d36a"><q>What did I spend this month?</q><span>Totalled from your receipts in Gmail, by category, against your budget. No AI model involved.</span></li>
+            <li class="reveal" data-cat="money" data-who="Penny" style="--c: #e8d36a"><q>Which subscriptions am I still paying for?</q><span>Every recurring charge, with where to cancel it. Pyxi opens the page; you press the button.</span></li>
+            <li class="reveal" data-cat="money" data-who="Penny" style="--c: #e8d36a"><q>Any returns closing soon?</q><span>Orders with their return deadlines, and a reminder a few days before.</span></li>
+            <li class="reveal" data-cat="money" data-who="Penny" style="--c: #e8d36a"><q>Set a $300 food budget</q><span>Kept on your PC. Penny tells you where you stand.</span></li>
+            <li class="reveal" data-cat="money" data-who="Scout" style="--c: #7cc7ff"><q>Is this cheaper anywhere?</q><span>The exact product, checked at other stores. A tag lands by the price: "$24 less at Best Buy".</span></li>
+
+            <li class="reveal" data-cat="travel" data-who="Atlas" style="--c: #ffb27a"><q>Lay out my trip from my confirmations</q><span>Flights, hotels and rentals from your mail, day by day, with addresses and booking codes.</span></li>
+            <li class="reveal" data-cat="travel" data-who="Atlas" style="--c: #ffb27a"><q>Remind me before my flight</q><span>The evening before, and three hours before take-off.</span></li>
+            <li class="reveal" data-cat="travel" data-who="Atlas" style="--c: #ffb27a"><q>Check me in when it opens</q><span>Exactly 24 hours before departure. No paid seats or upgrades, and the boarding pass link in a notification.</span></li>
+
+            <li class="reveal" data-cat="meetings" data-who="Scribe" style="--c: #a0d8ef"><q>Turn this recording into notes</q><span>Transcribed on your PC. Then a summary, the decisions and who does what by when.</span></li>
+            <li class="reveal" data-cat="meetings" data-who="Scribe" style="--c: #a0d8ef"><q>Draft the follow-up email</q><span>Written from the notes, shown on a card, sent only when you say so.</span></li>
+
+            <li class="reveal" data-cat="study" data-who="Sage" style="--c: #c3e88d"><q>Make flashcards from these slides</q><span>Each card points back to its slide. Saved as CSV for Anki or Quizlet.</span></li>
+            <li class="reveal" data-cat="study" data-who="Sage" style="--c: #c3e88d"><q>Quiz me out loud</q><span>Sage asks in Pyxi's voice, you answer by voice. Generous on wording, strict on facts.</span></li>
+            <li class="reveal" data-cat="study" data-who="Sage" style="--c: #c3e88d"><q>Explain the diagram on slide 12</q><span>Tags on the diagram itself.</span></li>
+
+            <li class="reveal" data-cat="code" data-who="Patch" style="--c: #f78c6c"><q>Why is this failing?</q><span>Patch reads the error, finds the exact file and line, and explains it in plain words.</span></li>
+            <li class="reveal" data-cat="code" data-who="Patch" style="--c: #f78c6c"><q>Apply the smallest fix</q><span>Shown as a diff on a card. On Allow the file changes and a backup is kept.</span></li>
+
+            <li class="reveal" data-cat="errands" data-who="Scout" style="--c: #7cc7ff"><q>Scout, find linear.app's pricing, then Quill, write me a two-line summary</q><span>A handoff: Scout researches in a real browser, Quill writes from the result.</span></li>
+            <li class="reveal" data-cat="errands" data-who="Quill" style="--c: #f0a9c9"><q>Sam emailed my recommendation letter, fix it</q><span>Pyxi finds the email, Quill fixes a copy, and offers to reply with it attached.</span></li>
+            <li class="reveal" data-cat="errands" data-who="Pyxi" style="--c: #ffc861"><q>Reply to Sam: the dates are right, signed copy Friday</q><span>Written in your words, sent after you press Allow.</span></li>
+            <li class="reveal" data-cat="errands" data-who="Pyxi" style="--c: #ffc861"><q>Add lunch with Nabiha on Friday at 1</q><span>On your Google Calendar. Inviting her asks first.</span></li>
+            <li class="reveal" data-cat="errands" data-who="Scout" style="--c: #7cc7ff"><q>Fill this application from my CV</q><span>Scout fills the form from your CV. Passwords, card numbers and ID numbers are yours to type.</span></li>
+            <li class="reveal" data-cat="errands" data-who="Scout" style="--c: #7cc7ff"><q>Book a dentist cleaning Saturday morning</q><span>Scout finds the slot and fills the form; you approve the final Book.</span></li>
+            <li class="reveal" data-cat="errands" data-who="Scout" style="--c: #7cc7ff"><q>Two tickets for the 7:40</q><span>Seats picked, then the window is handed to you at checkout. Pyxi never pays.</span></li>
+
+            <li class="reveal" data-cat="memory" data-who="Trace" style="--c: #89ddff"><q>Where did I see that pricing page last week?</q><span>Screen history, files and mail searched at once, pointing at the exact window, file or email.</span></li>
+            <li class="reveal" data-cat="memory" data-who="Pyxi" style="--c: #ffc861"><q>Take me back to what I was doing 20 minutes ago</q><span>The Memory Palace rebuilds that screen as a hologram with a time scrubber. Opt-in.</span></li>
+            <li class="reveal" data-cat="memory" data-who="Pyxi" style="--c: #ffc861"><q>How did I get here?</q><span>Your recent steps as a 3D chain of events, with "what if" branches.</span></li>
+            <li class="reveal" data-cat="memory" data-who="Ditto" style="--c: #c792ea"><q>Watch me do this once, then do the rest</q><span>Ditto learns the routine from one demonstration and finishes the other items.</span></li>
+            <li class="reveal" data-cat="memory" data-who="Pyxi" style="--c: #ffc861"><q>Remember that Nabiha's birthday is in March</q><span>Kept on your PC. Never a password, card or ID number, even if you say one.</span></li>
+          </ul>
+          <p class="pal-empty" id="pal-empty" hidden>Nothing with that word yet. Try "PDF", "email", "flight" or "spend".</p>
+        </div>
+      </section>
+
+      <!-- ============================================================ a day with Pyxi -->
+      <section class="day" id="day" data-say="A whole day, with me beside your cursor.">
+        <div class="wrap">
+          <p class="kicker reveal">A day with Pyxi</p>
+          <h2 class="h2 reveal">From the first coffee <span class="dim">to the last show.</span></h2>
+          <p class="lead narrow reveal">Everything here is a real request Pyxi handles today. The only thing made up is the day.</p>
+        </div>
+        <div class="day-track" tabindex="0" aria-label="A day with Pyxi, scroll sideways">
+          <ol class="moments">
+            <li class="moment reveal" style="--c: #ffb27a">
+              <time>7:40</time><b class="who">Atlas</b>
+              <h3>"Check me in when it opens."</h3>
+              <p>Check-in opened at 7:40. Atlas did it, skipped the paid seats and upgrades, and sent you the boarding pass link.</p>
+              <div class="art art-pass"><span>Boarding pass</span><b>YVR &rarr; YYZ</b><small>Seat 14C &middot; Gate opens 9:10</small></div>
+            </li>
+            <li class="moment reveal" style="--c: #ffc861">
+              <time>9:15</time><b class="who">Pyxi</b>
+              <h3>"What is this bill actually charging me?"</h3>
+              <p>Tags land on the bill's own lines: the amount, the date it's due, and a fee that wasn't there last month.</p>
+              <div class="art art-tags"><i style="--x: 62%; --y: 28%">Due 21 Nov</i><i style="--x: 70%; --y: 58%">$84.20</i><i class="warn" style="--x: 40%; --y: 78%">New fee</i></div>
+            </li>
+            <li class="moment reveal" style="--c: #a0d8ef">
+              <time>11:00</time><b class="who">Scribe</b>
+              <h3>"Turn this recording into notes."</h3>
+              <p>Transcribed on your PC. Three decisions, four action items with owners, and a follow-up drafted for you to check.</p>
+              <div class="art art-notes"><b>Decisions</b><span>Ship the beta Friday</span><span>Nabiha owns the launch email</span><b>Action items</b><span>Sam: pricing page by Wed</span></div>
+            </li>
+            <li class="moment reveal" style="--c: #7cc7ff">
+              <time>13:20</time><b class="who">Scout</b>
+              <h3>"Is this cheaper anywhere?"</h3>
+              <p>Scout works out the exact product and checks the other stores in the background. A tag lands by the price.</p>
+              <div class="art art-price"><s>$149.99</s><b>$24 less at Best Buy</b><small>Same model, free shipping &middot; checked just now</small></div>
+            </li>
+            <li class="moment reveal" style="--c: #f78c6c">
+              <time>15:30</time><b class="who">Patch</b>
+              <h3>"Why is this failing?"</h3>
+              <p>Patch finds the line, explains it, and proposes a three-line fix on a card. You press Allow; a backup is kept.</p>
+              <div class="art art-diff"><span class="del">- total = price * qty</span><span class="add">+ total = price * int(qty)</span><em>app.py, line 42</em></div>
+            </li>
+            <li class="moment reveal" style="--c: #c3e88d">
+              <time>18:00</time><b class="who">Sage</b>
+              <h3>"Quiz me on these slides."</h3>
+              <p>Flashcards from the lecture, then a quiz out loud. Sage is generous with wording and strict on facts.</p>
+              <div class="art art-card"><small>Card 7 of 24</small><b>What does the interposer do?</b><span>Links the compute die to the memory stacks</span></div>
+            </li>
+            <li class="moment reveal" style="--c: #7cc7ff">
+              <time>20:10</time><b class="who">Scout</b>
+              <h3>"Two tickets for the 7:40 tomorrow."</h3>
+              <p>Seats F7 and F8 picked. At checkout the window is handed to you. Pyxi never types a card number.</p>
+              <div class="art art-req"><b>Scout needs your OK</b><span>Book 2 seats for The Long Light, then stop at checkout</span><i>Allow</i></div>
+            </li>
+            <li class="moment reveal" style="--c: #e8d36a">
+              <time>22:30</time><b class="who">Penny</b>
+              <h3>"What did I spend this month?"</h3>
+              <p>Totalled from your receipts in Gmail, with no AI model involved. Food is under budget. Subscriptions are not.</p>
+              <div class="art art-bars"><i style="--v: 0.62"><em>Food</em></i><i style="--v: 0.38"><em>Transit</em></i><i class="over" style="--v: 1"><em>Subs</em></i><i style="--v: 0.2"><em>Fun</em></i></div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ============================================================ finale -->
+      <section class="finale" data-say="Say hey. I'll be right beside your cursor.">
+        <div class="wrap finale-inner">
+          <div class="finale-glow" aria-hidden="true"></div>
+          <h2 class="display-sm reveal">Try one for real.</h2>
+          <p class="lead reveal">Download the beta, join with your invite code, hold <kbd>Ctrl</kbd> <kbd>Alt</kbd> and say any of the sixty.</p>
+          <div class="cta-row center reveal">
+            <a class="btn btn-fly btn-lg" href="{{downloadUrl}}" data-download data-track="ask-download">
+              <svg class="win" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2.3 6.6 1.5v5.4H1zM7.4 1.4 15 .3v6.6H7.4zM1 7.7h5.6v5.4L1 12.3zM7.4 7.7H15v6.6l-7.6-1.1z" /></svg>
+              Download for Windows
+            </a>
+            <a class="btn btn-ghost btn-lg" href="/download">Install guide</a>
+          </div>
+          <p class="fine reveal">Version <span data-version>{{version}}</span>, <span data-size>{{downloadSize}}</span>. Windows 10 and 11.<br />By installing you agree to the <a href="/terms">terms of use</a> and <a href="/privacy">privacy policy</a>.</p>
+        </div>
+      </section>
+    </main>
+
+    <!--include:footer-->
+  </body>
+</html>

@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!--include:head-->
+    <title>The Pyxi team: one firefly, twelve teammates</title>
+    <meta
+      name="description"
+      content="Pyxi leads a team of twelve teammates: Scout researches, Quill writes, Pixel handles files, Ledger edits spreadsheets, Penny tracks money, Atlas plans travel, and more. See who does what, and what each one reads."
+    />
+    <link rel="canonical" href="{{siteUrl}}/team" />
+    <meta property="og:url" content="{{siteUrl}}/team" />
+    <meta
+      property="og:title"
+      content="The Pyxi team: one firefly, twelve teammates"
+    />
+    <meta
+      property="og:description"
+      content="Pyxi talks to you and coordinates. For real work it hands off to teammates with their own names, voices and memory."
+    />
+    <meta
+      name="twitter:title"
+      content="The Pyxi team: one firefly, twelve teammates"
+    />
+    <meta
+      name="twitter:description"
+      content="Pyxi talks to you and coordinates. For real work it hands off to teammates with their own names, voices and memory."
+    />
+    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/pages/team.js"></script>
+  </head>
+  <body class="page-team">
+    <!--include:nav-->
+    <!--include:firefly-->
+
+    <main id="main">
+      <!-- ============================================================ the orbit -->
+      <section
+        class="page-hero orbit-hero"
+        data-say="Meet the team. I lead, they do the legwork."
+      >
+        <div class="wrap orbit-grid">
+          <div class="orbit-copy">
+            <p class="kicker reveal">The team</p>
+            <h1 class="display-sm reveal">
+              One firefly,<br /><span class="dim">twelve teammates.</span>
+            </h1>
+            <p class="lead reveal">
+              Pyxi talks to you and coordinates. For real work it hands off to
+              teammates with their own names, voices and memory, and they pass
+              work to each other: Scout finds, Quill writes; Penny spots the
+              receipts, Ledger puts them in your sheet.
+            </p>
+            <p class="orbit-hint reveal">
+              <span class="mouse"
+                >Hover a teammate to meet them. Click to read more.</span
+              ><span class="touch">Tap a teammate to meet them.</span>
+            </p>
+            <div class="cta-row reveal">
+              <a class="btn btn-fly" href="#roster">Meet everyone</a>
+              <a class="btn btn-ghost" href="#how">How they work</a>
+            </div>
+          </div>
+          <div
+            class="orbit"
+            aria-label="Pyxi at the centre, with twelve teammates orbiting on three rings"
+          >
+            <div class="orbit-sys" aria-hidden="true">
+              <i class="orbit-path" data-ring="0"></i>
+              <i class="orbit-path" data-ring="1"></i>
+              <i class="orbit-path" data-ring="2"></i>
+            </div>
+            <div class="orbit-sats"></div>
+            <button
+              class="orbit-core"
+              type="button"
+              data-mate="Pyxi"
+              aria-label="Pyxi, the companion"
+            >
+              <span class="core-glow"></span>
+              <span class="core-ring"></span>
+              <svg class="core-mark" viewBox="-12 -14 24 26" aria-hidden="true">
+                <g transform="rotate(-30)">
+                  <ellipse
+                    class="bm-wing"
+                    cx="-2.4"
+                    cy="-5"
+                    rx="3.8"
+                    ry="1.7"
+                    transform="rotate(-38 -2.4 -5)"
+                  />
+                  <ellipse
+                    class="bm-wing"
+                    cx="2.4"
+                    cy="-5"
+                    rx="3.8"
+                    ry="1.7"
+                    transform="rotate(38 2.4 -5)"
+                  />
+                  <ellipse class="bm-body" cx="0" cy="-5" rx="2.3" ry="2.6" />
+                  <circle class="bm-body" cx="0" cy="-8.3" r="1.6" />
+                  <ellipse class="bm-core" cx="0" cy="0" rx="3" ry="3.7" />
+                </g>
+              </svg>
+            </button>
+            <aside class="orbit-card" aria-live="polite"></aside>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ the roster -->
+      <section
+        class="team"
+        id="roster"
+        data-say="Twelve teammates. Each one has a name, a voice and a memory."
+      >
+        <div class="wrap">
+          <p class="kicker reveal">The roster</p>
+          <h2 class="h2 reveal">
+            Who does what, <span class="dim">and what each one reads.</span>
+          </h2>
+          <p class="lead narrow reveal">
+            Every teammate works on your computer first and sends the AI model
+            only what its job needs. The "Reads" line on each card says exactly
+            what that is.
+          </p>
+          <ul class="roster">
+            <li
+              class="mate lead reveal"
+              style="--c: #ffc861"
+              data-mate="Pyxi"
+              id="mate-pyxi"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <g transform="rotate(-30 12 12)">
+                  <ellipse cx="12" cy="9" rx="2.3" ry="2.6" />
+                  <circle cx="12" cy="5.6" r="1.6" />
+                  <ellipse cx="12" cy="14.6" rx="3" ry="3.7" class="fill" />
+                  <path d="M9.6 8l-3.8-2.4M14.4 8l3.8-2.4" />
+                </g>
+              </svg>
+              <h3>Pyxi</h3>
+              <p class="role">The companion</p>
+              <p>
+                Sees your screen, points and draws, explains in 3D, and decides
+                who on the team should take a job. Warm, curious and quietly
+                funny.
+              </p>
+              <ul class="skills">
+                <li>sees your screen</li>
+                <li>points &amp; draws</li>
+                <li>3D explanations</li>
+                <li>coordinates the team</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> The window you're on, only while you talk or type
+                to it: a screenshot, its controls and the text on screen.
+                Password fields and anything that looks like a key are blacked
+                out first.
+              </p>
+              <p class="sample">"Where's the export button?"</p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #7cc7ff"
+              data-mate="Scout"
+              id="mate-scout"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M15.5 8.5l-2 5-5 2 2-5z" class="fill" />
+              </svg>
+              <h3>Scout</h3>
+              <p class="role">Research and browsing</p>
+              <p>
+                Drives a real browser you can watch. Prefers official sources,
+                saves facts with links, never guesses.
+              </p>
+              <ul class="skills">
+                <li>web research</li>
+                <li>forms</li>
+                <li>price checks</li>
+                <li>bookings</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> The pages it opens, in a browser on your computer.
+                Searches go to DuckDuckGo or Bing.
+              </p>
+              <p class="sample">"Is this cheaper anywhere?"</p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #f0a9c9"
+              data-mate="Quill"
+              id="mate-quill"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M19 4c-6 1-10 5-12 11l-2 5 5-2c6-2 10-6 11-12z" />
+                <path d="M7 17l6-6" />
+              </svg>
+              <h3>Quill</h3>
+              <p class="role">Writing</p>
+              <p>
+                Clear, friendly writer. Short sentences, specific details, no
+                fluff.
+              </p>
+              <ul class="skills">
+                <li>emails</li>
+                <li>summaries</li>
+                <li>outreach messages</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> The emails and notes the errand involves. Anything
+                it writes is shown on a card and sent only when you say so.
+              </p>
+              <p class="sample">
+                "Sam emailed my recommendation letter, fix it"
+              </p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #86e0c3"
+              data-mate="Sketch"
+              id="mate-sketch"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" />
+                <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" />
+              </svg>
+              <h3>Sketch</h3>
+              <p class="role">3D</p>
+              <p>
+                Visual thinker. Turns any idea into a tidy 3D scene with a
+                five-step tour, and real things into models you can take apart.
+              </p>
+              <ul class="skills">
+                <li>3D diagrams</li>
+                <li>exploded views</li>
+                <li>flow animations</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> Your question and the screen you're on, so the
+                scene can rise out of the page you're looking at.
+              </p>
+              <p class="sample">"How is an AI chip built? Show me in 3D."</p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #b9a3ff"
+              data-mate="Pixel"
+              id="mate-pixel"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="4" y="4" width="7" height="7" rx="1.5" />
+                <rect x="13" y="4" width="7" height="7" rx="1.5" class="fill" />
+                <rect x="4" y="13" width="7" height="7" rx="1.5" class="fill" />
+                <rect x="13" y="13" width="7" height="7" rx="1.5" />
+              </svg>
+              <h3>Pixel</h3>
+              <p class="role">Files</p>
+              <p>
+                Tidy, fast file wrangler. Converts, merges, splits and shrinks
+                files in seconds, never touches the original, and says exactly
+                where the new one is.
+              </p>
+              <ul class="skills">
+                <li>anything to PDF</li>
+                <li>PDF pages, numbers, passwords</li>
+                <li>scans to text</li>
+                <li>compare documents</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> The files you hand it, on your computer. Nothing
+                goes to the AI model.
+              </p>
+              <p class="sample">"Merge these three PDFs"</p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #8fd694"
+              data-mate="Ledger"
+              id="mate-ledger"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3.5" y="4" width="17" height="16" rx="2" />
+                <path d="M3.5 9.5h17M3.5 15h17M9 4v16M15 4v16" />
+              </svg>
+              <h3>Ledger</h3>
+              <p class="role">Spreadsheets and documents</p>
+              <p>
+                Careful numbers person. Edits spreadsheets, documents and decks
+                directly, writes real formulas instead of pasted numbers, and
+                keeps your original safe.
+              </p>
+              <ul class="skills">
+                <li>Excel formulas &amp; totals</li>
+                <li>pivot summaries</li>
+                <li>Word &amp; PowerPoint</li>
+                <li>Google Sheets &amp; Docs</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> An outline of the file, to decide the edits.
+                Results are saved as a copy beside the original; Google Docs and
+                Sheets are edited in place, where Google keeps every version.
+              </p>
+              <p class="sample">"Add a totals row to this spreadsheet"</p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #ffb27a"
+              data-mate="Atlas"
+              id="mate-atlas"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" />
+              </svg>
+              <h3>Atlas</h3>
+              <p class="role">Travel</p>
+              <p>
+                Calm, organised travel planner. Reads your flight and hotel
+                confirmations, lays the trip out day by day, and reminds you
+                before you need to leave.
+              </p>
+              <ul class="skills">
+                <li>itineraries from your mail</li>
+                <li>flight reminders</li>
+                <li>hotel addresses</li>
+                <li>check-in</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> Airline and hotel confirmations in your mail, on
+                your computer. Only a confirmation it can't make sense of is
+                sent to the AI model.
+              </p>
+              <p class="sample">"Lay out my trip from my confirmations"</p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #e8d36a"
+              data-mate="Penny"
+              id="mate-penny"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.5" />
+                <path
+                  d="M12 7v10M9.5 9.5c0-1 1-1.5 2.5-1.5s2.5.6 2.5 1.6c0 2.4-5 1.6-5 4.1 0 1 1 1.7 2.5 1.7s2.5-.6 2.5-1.6"
+                />
+              </svg>
+              <h3>Penny</h3>
+              <p class="role">Money</p>
+              <p>
+                Level-headed money keeper. Adds up what you really spent from
+                your receipts, watches your budget and your subscriptions, and
+                never judges a coffee.
+              </p>
+              <ul class="skills">
+                <li>monthly spending</li>
+                <li>budgets</li>
+                <li>receipts to a spreadsheet</li>
+                <li>subscriptions &amp; bills</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> Receipts, billing and order emails. Everything is
+                totalled on your computer, with no AI model involved.
+              </p>
+              <p class="sample">"What did I spend this month?"</p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #a0d8ef"
+              data-mate="Scribe"
+              id="mate-scribe"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 12h2M8 8v8M12 5v14M16 8v8M20 12h-2" />
+              </svg>
+              <h3>Scribe</h3>
+              <p class="role">Meetings</p>
+              <p>
+                Attentive note-taker. Listens to the whole recording, writes
+                down what was decided and who does what by when, and drafts the
+                follow-up for you to check.
+              </p>
+              <ul class="skills">
+                <li>transcripts</li>
+                <li>decisions &amp; action items</li>
+                <li>follow-up emails</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> The recording, transcribed on your computer. Only
+                the transcript is sent to the AI model.
+              </p>
+              <p class="sample">"Turn this recording into notes"</p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #c3e88d"
+              data-mate="Sage"
+              id="mate-sage"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="5" y="7" width="13" height="13" rx="2" class="fill" />
+                <rect x="7.5" y="4" width="13" height="13" rx="2" />
+              </svg>
+              <h3>Sage</h3>
+              <p class="role">Study</p>
+              <p>
+                Patient study buddy. Turns your slides and notes into flashcards
+                and quizzes, asks you out loud, and is generous with wording but
+                strict on facts.
+              </p>
+              <ul class="skills">
+                <li>flashcards</li>
+                <li>quizzes</li>
+                <li>quiz me out loud</li>
+                <li>diagrams explained</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> The text of the slides and notes you give it.
+              </p>
+              <p class="sample">"Make flashcards from these slides"</p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #f78c6c"
+              data-mate="Patch"
+              id="mate-patch"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 6l-5 6 5 6M16 6l5 6-5 6M13.5 4l-3 16" />
+              </svg>
+              <h3>Patch</h3>
+              <p class="role">Code</p>
+              <p>
+                Calm debugger. Reads the error, finds the exact line, explains
+                it in plain words and proposes the smallest fix, which you
+                approve before anything changes.
+              </p>
+              <ul class="skills">
+                <li>errors explained</li>
+                <li>finds the line</li>
+                <li>small fixes with a backup</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> The error and the lines around it. A script changes
+                only after you press Allow on a card that shows the change, and
+                a backup is kept.
+              </p>
+              <p class="sample">"Why is this failing?"</p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #c792ea"
+              data-mate="Ditto"
+              id="mate-ditto"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="4" y="4" width="11" height="11" rx="2.5" />
+                <rect
+                  x="9"
+                  y="9"
+                  width="11"
+                  height="11"
+                  rx="2.5"
+                  class="fill"
+                />
+              </svg>
+              <h3>Ditto</h3>
+              <p class="role">Repetitive tasks</p>
+              <p>
+                Quick study. Watches you do a boring task once, then does the
+                rest the quiet way, in files or a background browser, and only
+                borrows your mouse when it has to.
+              </p>
+              <ul class="skills">
+                <li>watch me once</li>
+                <li>batch renames &amp; filing</li>
+                <li>forms per row</li>
+                <li>hands as a last resort</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> Only while you show it a task: the windows you
+                switch to, the fields you fill (never a password field) and a
+                small screenshot at each window change. The recording stays on
+                your computer.
+              </p>
+              <p class="sample">"Watch me do this once, then do the rest"</p>
+            </li>
+            <li
+              class="mate reveal"
+              style="--c: #89ddff"
+              data-mate="Trace"
+              id="mate-trace"
+            >
+              <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="6.5" />
+                <path d="M16 16l5 5M11 7.5V11l2.5 1.5" />
+              </svg>
+              <h3>Trace</h3>
+              <p class="role">Memory</p>
+              <p>
+                Remembers where everything was. Searches your screen history,
+                files and mail at once and points at the exact window, file or
+                email.
+              </p>
+              <ul class="skills">
+                <li>where did I see that?</li>
+                <li>screen history</li>
+                <li>files &amp; mail</li>
+              </ul>
+              <p class="reads">
+                <b>Reads</b> Your screen history (only if the Memory Palace is
+                on), your files and your mail, when you ask where you saw
+                something.
+              </p>
+              <p class="sample">
+                "Where did I see that pricing page last week?"
+              </p>
+            </li>
+          </ul>
+          <p class="footnote reveal">
+            Each teammate has a spending cap per job, shown in the panel. Make
+            your own too: "Make me a teammate called Pixel who compares prices
+            across three shops."
+          </p>
+        </div>
+      </section>
+
+      <!-- ============================================================ how they work -->
+      <section
+        class="howteam"
+        id="how"
+        data-say="They work in the background. Anything that reaches people waits for your OK."
+      >
+        <div class="wrap">
+          <p class="kicker reveal">How teammates work</p>
+          <h2 class="h2 reveal">
+            You talk to Pyxi. <span class="dim">Pyxi runs the team.</span>
+          </h2>
+          <ol class="howteam-steps">
+            <li class="reveal">
+              <span class="hs-n">1</span>
+              <h3>Pyxi takes the job</h3>
+              <p>
+                Say it the way you'd say it to a friend. Pyxi works out who
+                should take it: Scout for research, Pixel for files, Ledger for
+                the sheet, or several of them in a row.
+              </p>
+            </li>
+            <li class="reveal">
+              <span class="hs-n">2</span>
+              <h3>They work in the background</h3>
+              <p>
+                Teammates do their legwork in files, in a background browser or
+                in your connected accounts while you keep working. The panel
+                shows what each one is doing, with its spending cap for the job.
+              </p>
+            </li>
+            <li class="reveal">
+              <span class="hs-n">3</span>
+              <h3>Anything that reaches the world waits</h3>
+              <p>
+                Sending, booking, buying, deleting, posting or changing a file
+                stops at an Allow card first. The card says what will happen
+                and, when a recipient came from something Pyxi read, says so.
+              </p>
+            </li>
+            <li class="reveal">
+              <span class="hs-n">4</span>
+              <h3>Everything is on the record</h3>
+              <p>
+                The activity log lists what each teammate did on your behalf,
+                with the time: emails sent, buttons pressed, files moved,
+                scripts changed. What can be undone, it undoes.
+              </p>
+            </li>
+            <li class="reveal">
+              <span class="hs-n">5</span>
+              <h3>One key stops it all</h3>
+              <p>
+                <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>Pause</kbd> stops every
+                teammate, the mouse and keyboard, and anything waiting to go
+                out. Moving the mouse or pressing <kbd>Esc</kbd> stops a
+                hands-on action instantly.
+              </p>
+            </li>
+          </ol>
+          <p class="footnote reveal">
+            Teammates never type passwords, card numbers or government ID
+            numbers, and never complete a payment. When a booking reaches
+            checkout, the window is handed to you.
+          </p>
+        </div>
+      </section>
+
+      <!-- ============================================================ finale -->
+      <section
+        class="finale"
+        data-say="Say hey. I'll introduce you to everyone."
+      >
+        <div class="wrap finale-inner">
+          <div class="finale-glow" aria-hidden="true"></div>
+          <h2 class="display-sm reveal">Meet the team on your own desktop.</h2>
+          <p class="lead reveal">
+            Download the beta, join with your invite code, and hold
+            <kbd>Ctrl</kbd> <kbd>Alt</kbd>.
+          </p>
+          <div class="cta-row center reveal">
+            <a
+              class="btn btn-fly btn-lg"
+              href="{{downloadUrl}}"
+              data-download
+              data-track="team-download"
+            >
+              <svg class="win" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M1 2.3 6.6 1.5v5.4H1zM7.4 1.4 15 .3v6.6H7.4zM1 7.7h5.6v5.4L1 12.3zM7.4 7.7H15v6.6l-7.6-1.1z"
+                />
+              </svg>
+              Download for Windows
+            </a>
+            <a class="btn btn-ghost btn-lg" href="/download">Install guide</a>
+          </div>
+          <p class="fine reveal">
+            Version <span data-version>{{version}}</span>,
+            <span data-size>{{downloadSize}}</span>. Windows 10 and 11.<br />By
+            installing you agree to the <a href="/terms">terms of use</a> and
+            <a href="/privacy">privacy policy</a>.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <!--include:footer-->
+  </body>
+</html>

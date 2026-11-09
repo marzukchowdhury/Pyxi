@@ -234,7 +234,10 @@ code { font: 500 0.9em ui-monospace, "Cascadia Code", Consolas, monospace; paddi
 @keyframes blink { 50% { opacity: 0; } }
 .hero .lead { margin-top: 26px; }
 
-.stage { position: relative; margin: 0; perspective: 1800px; }
+/* The stage: a pane of glass in space. It tilts with your mouse, idles with a slow float, has real
+   thickness (two edge planes behind it), chips float out of the screen at different depths, a
+   reflection lies under it and gold dust drifts behind. */
+.stage { position: relative; margin: 0; perspective: 1300px; --rx: 0deg; --ry: 0deg; }
 .stage::before {
   content: "";
   position: absolute;
@@ -244,6 +247,29 @@ code { font: 500 0.9em ui-monospace, "Cascadia Code", Consolas, monospace; paddi
   background: radial-gradient(closest-side, rgba(255, 200, 97, 0.16), rgba(158, 203, 255, 0.08) 55%, transparent);
   filter: blur(30px);
 }
+.hero-dust { position: absolute; inset: -30% -18% -40%; width: 136%; height: 170%; z-index: -1; pointer-events: none; }
+.stage-idle { transform-style: preserve-3d; animation: stage-idle 9s ease-in-out infinite; }
+@keyframes stage-idle {
+  0%, 100% { transform: translateY(0) rotateX(1.5deg) rotateY(-5deg); }
+  50% { transform: translateY(-8px) rotateX(-1deg) rotateY(-2deg); }
+}
+.stage-3d {
+  position: relative;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--rx)) rotateY(var(--ry));
+  transition: transform 0.5s var(--ease);
+  will-change: transform;
+}
+.stage-edge {
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.01) 40%, rgba(158, 203, 255, 0.05));
+  pointer-events: none;
+}
+.stage-edge.e1 { transform: translateZ(-16px); }
+.stage-edge.e2 { transform: translateZ(-34px); opacity: 0.6; box-shadow: 0 60px 120px rgba(0, 0, 0, 0.6); }
 .stage-screen {
   position: relative;
   aspect-ratio: 16 / 10;
@@ -252,15 +278,101 @@ code { font: 500 0.9em ui-monospace, "Cascadia Code", Consolas, monospace; paddi
   background: #e9ecf1;
   border: 1px solid var(--hair-hi);
   box-shadow: 0 0 0 7px rgba(255, 255, 255, 0.03), 0 0 0 8px var(--hair), 0 40px 120px rgba(0, 0, 0, 0.6), 0 12px 30px rgba(0, 0, 0, 0.35);
-  transform: rotateY(-7deg) rotateX(3deg);
-  transform-origin: 30% 50%;
-  transition: transform 0.9s var(--spring);
+  transform: translateZ(0);
 }
-.stage:hover .stage-screen { transform: none; }
-.slide { position: absolute; inset: 0; opacity: 0; transform: scale(1.015); transition: opacity 0.6s var(--ease), transform 1.2s var(--ease); }
+.stage-screen::after {
+  /* a sheen on the glass that slides as the pane tilts */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(calc(115deg + var(--ry) * 2), transparent 35%, rgba(255, 255, 255, 0.09) 48%, transparent 60%);
+  pointer-events: none;
+}
+.slide { position: absolute; inset: 0; opacity: 0; transform: scale(1.03) translateY(1%); transition: opacity 0.6s var(--ease), transform 1.2s var(--ease); }
 .slide.is-on { opacity: 1; transform: none; }
 .slide img { width: 100%; height: 100%; object-fit: cover; }
-.stage-cap { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 22px; font-size: 13px; color: var(--ink-3); }
+/* the screenshot sliced into layers: each pop shows one region of the current image, lifted off
+   the screen at its own depth, so the notch, the window and the cue card part as the glass tilts */
+.pop {
+  position: absolute;
+  left: calc(var(--xn) * 1%);
+  top: calc(var(--yn) * 1%);
+  width: calc(var(--wn) * 1%);
+  height: calc(var(--hn) * 1%);
+  overflow: hidden;
+  border-radius: 10px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 4px 14px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  transform: translateZ(0);
+  transition: opacity 0.4s var(--ease), transform 1s var(--spring);
+}
+.pop.pill { border-radius: 0 0 14px 14px; }
+.pop.win { border-radius: 8px; box-shadow: 0 30px 70px rgba(0, 0, 0, 0.35); }
+.pop.card { border-radius: 12px; }
+.pop.field { border-radius: 6px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 24px rgba(255, 200, 97, 0.35); }
+.pop b {
+  position: absolute;
+  left: calc(-100% * var(--xn) / var(--wn));
+  top: calc(-100% * var(--yn) / var(--hn));
+  width: calc(100% * 100 / var(--wn));
+  height: calc(100% * 100 / var(--hn));
+  background: var(--img) 0 0 / 100% 100% no-repeat;
+}
+.stage[data-on="0"] .pop[data-for="0"],
+.stage[data-on="1"] .pop[data-for="1"],
+.stage[data-on="2"] .pop[data-for="2"],
+.stage[data-on="3"] .pop[data-for="3"],
+.stage[data-on="4"] .pop[data-for="4"] { opacity: 1; transform: translateZ(var(--z)); transition-delay: 0.2s; }
+/* chips that float out of the screen, one set per example */
+.stage-floats { position: absolute; inset: 0; transform-style: preserve-3d; pointer-events: none; }
+.float {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 12px 8px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #fff;
+  background: rgba(10, 12, 18, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+  opacity: 0;
+  transform: translate3d(0, 10px, calc(var(--z) * 0.4)) scale(0.96);
+  transition: opacity 0.5s var(--ease), transform 0.9s var(--spring);
+}
+.float.ice { color: var(--ice-hi); border-color: rgba(158, 203, 255, 0.45); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), 0 0 24px rgba(158, 203, 255, 0.18); }
+.float.gold { color: #fff; border-color: rgba(255, 200, 97, 0.4); font-weight: 500; font-size: 13.5px; max-width: 230px; }
+.float.gold b { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fly); }
+.stage[data-on="0"] .float[data-for="0"],
+.stage[data-on="1"] .float[data-for="1"],
+.stage[data-on="2"] .float[data-for="2"],
+.stage[data-on="3"] .float[data-for="3"],
+.stage[data-on="4"] .float[data-for="4"] { opacity: 1; transform: translate3d(0, 0, var(--z)); transition-delay: 0.35s; }
+/* the reflection under the glass */
+.stage-reflect {
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  top: calc(100% + 14px);
+  height: 42%;
+  border-radius: 20px;
+  background: var(--img) center top / cover no-repeat;
+  transform: translateZ(-20px) scaleY(-1);
+  transform-origin: top;
+  opacity: 0.35;
+  filter: blur(2px) saturate(0.8);
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent 85%);
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent 85%);
+  pointer-events: none;
+  transition: background-image 0.6s;
+}
+.stage-cap { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 22px; font-size: 13px; color: var(--ink-3); }
 .stage-dots { display: flex; gap: 6px; }
 .stage-dots button { width: 26px; height: 6px; padding: 0; border: 0; border-radius: 99px; background: rgba(255, 255, 255, 0.14); cursor: pointer; transition: background 0.3s, width 0.4s var(--spring); }
 .stage-dots button[aria-pressed="true"] { width: 44px; background: var(--ice); box-shadow: 0 0 12px rgba(158, 203, 255, 0.6); }
@@ -566,7 +678,11 @@ details p { margin: 0; padding: 0 22px 20px; color: var(--ink-2); font-size: 15.
 /* ============================================================ responsive */
 @media (max-width: 999px) {
   .hero-grid { grid-template-columns: 1fr; }
-  .stage-screen { transform: none; }
+  .stage-idle { animation: none; }
+  .stage-3d { transform: none; }
+  .stage-reflect, .hero-dust, .pop { display: none; }
+  .float { font-size: 11.5px; padding: 5px 9px 6px; }
+  .float.gold { display: none; }
   .feature, .feature.flip { grid-template-columns: 1fr; gap: 36px; }
   .feature.flip .feature-copy { order: 0; }
   .pillars { grid-template-columns: 1fr; }
@@ -615,7 +731,9 @@ details p { margin: 0; padding: 0 22px 20px; color: var(--ink-2); font-size: 15.
   html:not(.force-motion) *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
   html:not(.force-motion) .slide { transform: none; transition: opacity 0.6s ease !important; }
   html:not(.force-motion) .reveal { transform: none !important; transition: opacity 0.5s ease !important; }
-  html:not(.force-motion) .stage-screen { transform: none; }
+  html:not(.force-motion) .stage-idle { animation: none; }
+  html:not(.force-motion) .stage-3d { transform: none; }
+  html:not(.force-motion) .float { transition: opacity 0.4s; }
   html:not(.force-motion) .thread-line, html:not(.force-motion) .target-tag { transition: opacity 0.3s ease !important; }
   html:not(.force-motion) .mw-search .typed { width: auto; border-right: 0; }
 }

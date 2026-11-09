@@ -1,0 +1,397 @@
+/* Privacy page: the "what leaves your computer" scene, the trust grid, where things go, what's kept. */
+.page-privacy .page-hero {
+  padding-bottom: 0;
+}
+.page-privacy .page-hero .lead {
+  max-width: 44em;
+}
+
+.leave-wrap {
+  margin-top: clamp(28px, 4vw, 48px);
+}
+.leave-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding-bottom: 6px;
+}
+.leave-scene {
+  position: relative;
+  min-width: 860px;
+  perspective: 1800px;
+}
+.leave-tilt {
+  position: relative;
+  border-radius: 22px;
+  background:
+    radial-gradient(
+      120% 90% at 50% 0%,
+      rgba(158, 203, 255, 0.07),
+      transparent 60%
+    ),
+    linear-gradient(180deg, #0c0f16, #07080b);
+  border: 1px solid var(--hair);
+  box-shadow:
+    0 50px 140px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  transition: transform 0.5s var(--ease);
+  transform-style: preserve-3d;
+  overflow: hidden;
+}
+.leave-tilt::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0.05),
+    transparent 35%,
+    transparent 70%,
+    rgba(158, 203, 255, 0.04)
+  );
+  pointer-events: none;
+}
+canvas.leave {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1600 / 720;
+}
+.leave-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13.5px;
+  color: var(--ink-3);
+}
+.leave-key li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.leave-key i {
+  display: inline-block;
+  width: 26px;
+  height: 12px;
+  border-radius: 4px;
+}
+.leave-key .k-ok {
+  background: rgba(46, 36, 14, 0.95);
+  border: 1px solid rgba(255, 200, 97, 0.7);
+  box-shadow: 0 0 10px rgba(255, 200, 97, 0.35);
+}
+.leave-key .k-bar {
+  background: #020306;
+  border: 1px solid rgba(255, 200, 97, 0.8);
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(255, 200, 97, 0.16) 0 4px,
+    transparent 4px 9px
+  );
+}
+.leave-key .k-local {
+  background: rgba(14, 22, 34, 0.95);
+  border: 1px dashed rgba(158, 203, 255, 0.7);
+}
+.leave-hint {
+  display: none;
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+/* ---------------------------------------------------------------- the seven promises */
+.promises {
+  padding: clamp(70px, 10vw, 130px) 0 clamp(40px, 6vw, 70px);
+}
+.promise-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 34px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.promise {
+  position: relative;
+  display: block;
+  padding: 22px 22px 24px;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 15px;
+  line-height: 1.55;
+  transition:
+    transform 0.35s var(--spring),
+    border-color 0.25s,
+    background 0.25s;
+}
+.promise:hover {
+  transform: translateY(-3px);
+  border-color: rgba(158, 203, 255, 0.4);
+  background: rgba(158, 203, 255, 0.05);
+}
+.promise .ic {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  background: rgba(158, 203, 255, 0.1);
+  border: 1px solid rgba(158, 203, 255, 0.3);
+  color: var(--ice);
+}
+.promise .ic svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.promise.gold .ic {
+  background: rgba(255, 200, 97, 0.1);
+  border-color: rgba(255, 200, 97, 0.3);
+  color: var(--fly);
+}
+.promise b {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 17px;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+.promise .more {
+  position: absolute;
+  right: 18px;
+  top: 20px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.promise:hover .more {
+  opacity: 1;
+}
+.promise kbd {
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- where things go */
+.where {
+  padding: clamp(40px, 6vw, 70px) 0;
+}
+.where-list {
+  display: grid;
+  gap: 10px;
+  margin: 30px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.where-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 18px;
+  align-items: center;
+  padding: 16px 20px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.where-row.head {
+  padding: 6px 20px;
+  background: none;
+  border-color: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.where-row .dest {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hair-hi);
+  color: var(--ink-2);
+}
+.where-row .dest svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.where-row .dest.ai {
+  color: var(--fly);
+  background: rgba(255, 200, 97, 0.08);
+  border-color: rgba(255, 200, 97, 0.3);
+}
+.where-row .dest.web {
+  color: var(--ice);
+  background: rgba(158, 203, 255, 0.08);
+  border-color: rgba(158, 203, 255, 0.3);
+}
+.where-row .what {
+  color: var(--ink);
+  font-weight: 560;
+}
+.where-row .to b {
+  display: block;
+  font-weight: 600;
+  color: var(--ink);
+}
+.where-row .to span {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+/* ---------------------------------------------------------------- what's stored here */
+.kept {
+  padding: clamp(40px, 6vw, 70px) 0 clamp(60px, 8vw, 100px);
+}
+.kept-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: clamp(28px, 5vw, 70px);
+  align-items: start;
+}
+.kept-path {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--hair);
+  font:
+    500 13.5px ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  color: var(--ink-2);
+}
+.kept-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kept-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  font-size: 15px;
+  color: var(--ink-2);
+}
+.kept-list li span:first-child {
+  color: var(--ink);
+}
+.kept-list .tag {
+  flex: none;
+  padding: 4px 10px 5px;
+  border-radius: 99px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border: 1px solid var(--hair-hi);
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.03);
+  white-space: nowrap;
+}
+.kept-list .tag.ice {
+  color: var(--ice-hi);
+  border-color: rgba(158, 203, 255, 0.4);
+  background: rgba(158, 203, 255, 0.08);
+}
+.kept-list .tag.gold {
+  color: #ffd98c;
+  border-color: rgba(255, 200, 97, 0.4);
+  background: rgba(255, 200, 97, 0.08);
+}
+.kept-list .tag.never {
+  color: #ffb3c0;
+  border-color: rgba(255, 125, 147, 0.4);
+  background: rgba(255, 125, 147, 0.08);
+}
+
+/* ---------------------------------------------------------------- the policy and the end */
+.policy {
+  padding-top: clamp(40px, 6vw, 70px);
+  border-top: 1px solid var(--hair);
+}
+.policy-head {
+  margin-bottom: 10px;
+}
+.policy-head .h2 {
+  margin-bottom: 10px;
+}
+.policy-head .lead {
+  margin-bottom: 0;
+}
+.policy-cta {
+  padding: 0 0 clamp(80px, 10vw, 130px);
+}
+.policy-cta .cta-row {
+  margin-top: 18px;
+}
+
+@media (max-width: 999px) {
+  .promise-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .where-row {
+    grid-template-columns: 44px minmax(0, 1fr);
+    row-gap: 8px;
+  }
+  .where-row.head {
+    display: none;
+  }
+  .where-row .why {
+    grid-column: 2;
+  }
+  .kept-grid {
+    grid-template-columns: 1fr;
+  }
+  .leave-hint {
+    display: block;
+  }
+}
+@media (max-width: 760px) {
+  .promise-grid {
+    grid-template-columns: 1fr;
+  }
+  .where-row .to {
+    grid-column: 2;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not(.force-motion) .leave-tilt {
+    transition: none;
+  }
+  html:not(.force-motion) .promise {
+    transition: none;
+  }
+}

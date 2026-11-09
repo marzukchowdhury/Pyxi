@@ -4,18 +4,21 @@ import "./pages.css";
 import "./demos.css";
 import "./motion.css";
 import "./sections.css";
+import "./doors.css";
 import "@fontsource-variable/fraunces/wght.css";
 import { initDemos } from "./demos.js";
 import { initMotion } from "./motion.js";
 import { initCatalog } from "./catalog.js";
 import { Firefly } from "./firefly.js";
+import { initHero3D } from "./hero3d.js";
 
 document.documentElement.classList.add("js");
 // Reduced motion keeps Pyxi calm: no typing, trail or sway, but it still answers and points.
 // ?motion=1 shows the full motion anyway (handy for demos on a PC with animations turned off).
 const forceMotion = new URLSearchParams(location.search).has("motion");
 if (forceMotion) document.documentElement.classList.add("force-motion");
-const reduced = !forceMotion && matchMedia("(prefers-reduced-motion: reduce)").matches;
+const reduced =
+  !forceMotion && matchMedia("(prefers-reduced-motion: reduce)").matches;
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -68,7 +71,9 @@ const revealer = new IntersectionObserver(
 );
 // Siblings come in one after another, a beat apart.
 $$(".reveal").forEach((el) => {
-  const sibs = [...el.parentElement.children].filter((c) => c.classList.contains("reveal"));
+  const sibs = [...el.parentElement.children].filter((c) =>
+    c.classList.contains("reveal"),
+  );
   el.style.setProperty("--d", `${Math.min(sibs.indexOf(el), 6) * 70}ms`);
   revealer.observe(el);
 });
@@ -95,11 +100,14 @@ const watcher = new IntersectionObserver(
       if (pts.length && !pointed.has(el)) {
         pointed.add(el);
         pts.forEach((pt, i) =>
-          setTimeout(() => {
-            if (!pointed.has(el)) return;
-            fly.point(pt, pt.dataset.label);
-            pt.closest(".shot")?.classList.add("lit");
-          }, 450 + i * 3000),
+          setTimeout(
+            () => {
+              if (!pointed.has(el)) return;
+              fly.point(pt, pt.dataset.label);
+              pt.closest(".shot")?.classList.add("lit");
+            },
+            450 + i * 3000,
+          ),
         );
       }
     }
@@ -144,13 +152,18 @@ if (stage) {
     for (let i = start; ; i++) {
       const index = i % slides.length;
       const slide = slides[index];
-      dots.forEach((d, k) => d.setAttribute("aria-pressed", String(k === index)));
+      dots.forEach((d, k) =>
+        d.setAttribute("aria-pressed", String(k === index)),
+      );
       if (typed && !reduced) {
         if (!(await type(slide.dataset.ask, my))) return;
         await sleep(260);
       } else askText.textContent = slide.dataset.ask;
       if (my !== run) return;
       slides.forEach((s) => s.classList.toggle("is-on", s === slide));
+      figure.dataset.on = String(index);
+      const img = slide.querySelector("img");
+      figure.style.setProperty("--img", `url("${img.currentSrc || img.src}")`);
       await sleep(450);
       if (my !== run) return;
       if (heroVisible) {
@@ -169,11 +182,22 @@ if (stage) {
     }
   }
   dots.forEach((d, k) => d.addEventListener("click", () => play(k, false)));
-  new IntersectionObserver(([e]) => (heroVisible = e.isIntersecting), { threshold: 0.35 }).observe(hero);
+  new IntersectionObserver(([e]) => (heroVisible = e.isIntersecting), {
+    threshold: 0.35,
+  }).observe(hero);
   // The first slide is already up; say hello, then start pointing.
   say(hero.dataset.say);
+  const first = slides[0]?.querySelector("img");
+  if (first)
+    figure.style.setProperty(
+      "--img",
+      `url("${first.currentSrc || first.src}")`,
+    );
   setTimeout(() => play(0, false), 900);
 }
+
+// ------------------------------------------------------------------ hero: tilt and dust
+initHero3D({ reduced });
 
 // ------------------------------------------------------------------ chores: windows tile
 const windows = $(".art-windows");
@@ -202,8 +226,12 @@ fetch("https://api.github.com/repos/marzukchowdhury/Pyxi/releases/latest")
     if (!rel || !asset) return;
     const version = String(rel.tag_name || "").replace(/^v/, "");
     const size = `${Math.round(asset.size / 2 ** 20)} MB`;
-    document.querySelectorAll("[data-version]").forEach((el) => (el.textContent = version));
-    document.querySelectorAll("[data-size]").forEach((el) => (el.textContent = size));
+    document
+      .querySelectorAll("[data-version]")
+      .forEach((el) => (el.textContent = version));
+    document
+      .querySelectorAll("[data-size]")
+      .forEach((el) => (el.textContent = size));
   })
   .catch(() => {});
 

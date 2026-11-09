@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!--include:head-->
+    <title>Pyxi FAQ: installing, the beta, privacy and how it works</title>
+    <meta name="description" content="Answers about Pyxi for Windows: joining the beta with an invite code, the SmartScreen warning, what Pyxi sees and sends, Allow cards, stopping it, updates and uninstalling." />
+    <link rel="canonical" href="{{siteUrl}}/faq" />
+    <meta property="og:url" content="{{siteUrl}}/faq" />
+    <meta property="og:title" content="Pyxi FAQ" />
+    <meta property="og:description" content="Joining the beta, the Windows warning, what Pyxi sees and sends, Allow cards, stopping it, updates and uninstalling." />
+    <meta name="twitter:title" content="Pyxi FAQ" />
+    <meta name="twitter:description" content="Joining the beta, the Windows warning, what Pyxi sees and sends, Allow cards, stopping it, updates and uninstalling." />
+    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/pages/faq.js"></script>
+  </head>
+  <body class="page-faq">
+    <!--include:nav-->
+    <!--include:firefly-->
+
+    <main id="main">
+      <!-- ============================================================ hero: ask Pyxi -->
+      <section class="page-hero faq-hero" data-say="Questions? Ask me, or pick one of the cards.">
+        <div class="wrap faq-hero-grid">
+          <div class="faq-hero-copy">
+            <p class="kicker reveal">FAQ</p>
+            <h1 class="display-sm reveal">Questions? <span class="dim">Ask me.</span></h1>
+            <p class="lead reveal">Type a word and the cards sort themselves. Pick one and I'll answer it the way I do on your desktop: beside the thing you asked about.</p>
+            <form class="ask-notch reveal" role="search" onsubmit="return false" aria-label="Search the questions">
+              <span class="ask-dot" aria-hidden="true"></span>
+              <input id="faq-ask" type="search" autocomplete="off" spellcheck="false" placeholder="Ask about Pyxi" aria-label="Ask about Pyxi" aria-controls="faq-groups" />
+              <kbd class="ask-kbd" aria-hidden="true">Enter</kbd>
+            </form>
+            <p class="faq-count reveal" aria-live="polite"><b id="faq-n">0</b> <span id="faq-n-label">answers</span></p>
+          </div>
+
+          <div class="qstage reveal" id="qstage" aria-label="Popular questions, as floating cards">
+            <div class="qworld">
+              <ol class="qcards" id="qcards"></ol>
+              <div class="qanswer" id="qanswer" aria-live="polite">
+                <div class="qa-head"><span class="qa-fly" aria-hidden="true"></span><b>Pyxi</b><span class="qa-q" id="qa-q"></span></div>
+                <p class="qa-stream" id="qa-stream"></p>
+                <p class="qa-meant" id="qa-meant"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ all the answers -->
+      <section class="faq-all" id="faq-groups" data-say="Everything people ask, grouped. Tap one to open it.">
+        <div class="wrap">
+          <div class="faq-group" data-group="start">
+            <div class="faq-group-head reveal">
+              <p class="kicker">Getting started</p>
+              <h2 class="h2">Installing <span class="dim">and joining.</span></h2>
+            </div>
+            <div class="faq-list">
+              <details class="qa reveal" id="q-windows" data-popular="8" data-related="q-install q-offline">
+                <summary><h3>Which computers does it run on?</h3></summary>
+                <div class="qa-body"><p>Windows 10 and Windows 11. Pyxi reads the screen with Windows UI Automation, so Windows comes first. A Mac version is next on the roadmap<!--if:macWaitlistUrl-->, and you can <a href="{{macWaitlistUrl}}">join the Mac waitlist</a><!--end-->.</p></div>
+              </details>
+              <details class="qa reveal" id="q-install" data-related="q-smartscreen q-join">
+                <summary><h3>How do I install it?</h3></summary>
+                <div class="qa-body"><p>Click <b>Download for Windows</b> and save <code>{{downloadFile}}</code>. If your browser says the file isn't commonly downloaded, open the download's menu and choose <b>Keep</b>. Run it: Pyxi installs in one click for just your account, with no admin rights needed. A little firefly appears beside your cursor and a slim glass notch sits on the top edge of your screen. The <a href="/download">install guide</a> shows every step.</p></div>
+              </details>
+              <details class="qa reveal" id="q-smartscreen" data-popular="3" data-related="q-install q-source">
+                <summary><h3>Why does Windows warn me when I install it?</h3></summary>
+                <div class="qa-body"><p>The beta installer isn't code-signed yet, so Windows SmartScreen doesn't recognise the publisher and shows "Windows protected your PC". Choose <b>More info</b>, check that the app is <code>{{downloadFile}}</code>, then <b>Run anyway</b>. The <a href="/download#smartscreen">install guide</a> shows exactly where to click.</p></div>
+              </details>
+              <details class="qa reveal" id="q-join" data-popular="1" data-related="q-code q-key">
+                <summary><h3>How do I join the beta?</h3></summary>
+                <div class="qa-body"><p>Install Pyxi, press <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>W</kbd> or click the Pyxi icon in the system tray to open the notch, click the expand button for the full panel and choose <b>Settings</b>. At the top, under <b>Join the Pyxi beta</b>, type the invite code you were given and click <b>Join</b>. That's it. The <a href="/download#join">install guide</a> walks through every step.</p></div>
+              </details>
+              <details class="qa reveal" id="q-code" data-related="q-join q-free">
+                <summary><h3>Where do I get an invite code?</h3></summary>
+                <div class="qa-body"><p>Invite codes come from the Pyxi team during the beta. <!--if:contactEmail-->No code yet? Email <a href="mailto:{{contactEmail}}">{{contactEmail}}</a>.<!--else-->The beta is invite-only for now.<!--end--></p></div>
+              </details>
+              <details class="qa reveal" id="q-free" data-related="q-allowance q-key">
+                <summary><h3>Does the beta cost anything?</h3></summary>
+                <div class="qa-body"><p>No. Pyxi is free during the beta, and you don't need an API key or a payment card. Each beta account has a daily allowance of AI use that resets at midnight UTC, and the whole beta has a monthly limit. The <a href="/terms">terms of use</a> spell this out.</p></div>
+              </details>
+              <details class="qa reveal" id="q-key" data-popular="2" data-related="q-free q-leave">
+                <summary><h3>Do I need an API key or a paid AI account?</h3></summary>
+                <div class="qa-body"><p>No. In the beta, Pyxi's AI runs through the Pyxi beta server, so an invite code is all you need. If you'd rather use your own key, the beta card in Settings has <b>Use my own key instead</b>.</p></div>
+              </details>
+              <details class="qa reveal" id="q-demo" data-related="q-join q-key">
+                <summary><h3>Why does Pyxi say it's in demo mode?</h3></summary>
+                <div class="qa-body"><p>Demo mode is what Pyxi runs when it has no beta token and no key: a rule-based stand-in with no AI model, so you can see the firefly move and try a few built-in tricks. Join the beta from Settings with your invite code and the real brain takes over.</p></div>
+              </details>
+            </div>
+          </div>
+
+          <div class="faq-group" data-group="use">
+            <div class="faq-group-head reveal">
+              <p class="kicker">Using Pyxi</p>
+              <h2 class="h2">Talking to it, <span class="dim">and letting it work.</span></h2>
+            </div>
+            <div class="faq-list">
+              <details class="qa reveal" id="q-talk" data-popular="7" data-related="q-languages q-what">
+                <summary><h3>How do I talk to Pyxi?</h3></summary>
+                <div class="qa-body"><p>Hold <kbd>Ctrl</kbd> <kbd>Alt</kbd>, ask about anything on your screen, and let go to send. Tap <kbd>Ctrl</kbd> twice to type instead. <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>W</kbd> opens the notch, and the expand button opens the full panel with Chat, Team, Memory, 3D, Voice and Settings.</p></div>
+              </details>
+              <details class="qa reveal" id="q-languages" data-related="q-talk q-offline">
+                <summary><h3>Which languages does it speak?</h3></summary>
+                <div class="qa-body"><p>English and Bengali. Your speech is turned into text on your computer. The one exception is Bengali, which is sent to a cloud model to be understood, as the <a href="/privacy">privacy policy</a> explains.</p></div>
+              </details>
+              <details class="qa reveal" id="q-what" data-related="q-teammates q-mouse">
+                <summary><h3>What can it actually do on my screen?</h3></summary>
+                <div class="qa-body"><p>It answers out loud, points at the right thing with a ring and a thread of light, writes notes on the page, builds explanations in 3D, and does the clicking for you when you let it. Anything that reaches another person or costs money waits for your OK. The <a href="/features">What it does</a> page shows each one.</p></div>
+              </details>
+              <details class="qa reveal" id="q-teammates" data-related="q-allow q-accounts">
+                <summary><h3>What are the teammates?</h3></summary>
+                <div class="qa-body"><p>Pyxi leads and hands jobs to teammates that work in the background while you keep going: Scout researches, Ledger edits spreadsheets and documents, Pixel converts and merges files, Atlas builds trips from your confirmations, Penny totals your spending, Sage makes flashcards, Scribe turns a meeting recording into notes, Patch fixes a script, Forms fills a form from a document, Trace finds where you saw something, and Ditto learns a task by watching you once. Meet them on <a href="/team">The team</a>.</p></div>
+              </details>
+              <details class="qa reveal" id="q-mouse" data-popular="6" data-related="q-allow q-stop">
+                <summary><h3>Can it really use my mouse and keyboard?</h3></summary>
+                <div class="qa-body"><p>Yes, after you press Allow (once, or Always allow). It labels what it's doing beside the cursor and stops the moment you move the mouse or press <kbd>Esc</kbd>. Sending, paying, deleting, posting, signing in or out and closing apps always ask again, and it never types into password fields, never types card or government ID numbers, and never completes a payment.</p></div>
+              </details>
+              <details class="qa reveal" id="q-allow" data-related="q-mouse q-stop">
+                <summary><h3>What are Allow cards?</h3></summary>
+                <div class="qa-body"><p>Before Pyxi sends, books, buys, deletes or posts anything, a card shows exactly what will go out, and nothing happens until you press Allow. An "always" grant expires after 30 days, and Settings lists every grant so you can revoke it. The card also says when a recipient came from something Pyxi read rather than from you.</p></div>
+              </details>
+              <details class="qa reveal" id="q-stop" data-related="q-mouse q-allow">
+                <summary><h3>How do I stop it?</h3></summary>
+                <div class="qa-body"><p>Say "Stop", move the mouse, or press <kbd>Esc</kbd>: it stops at once. <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>Pause</kbd> (also in the tray and in Settings) stops everything together: every teammate, the mouse and keyboard, and anything waiting to go out. <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>P</kbd> pauses all screen access.</p></div>
+              </details>
+              <details class="qa reveal" id="q-accounts" data-related="q-google q-allow">
+                <summary><h3>Can it use my email and calendar?</h3></summary>
+                <div class="qa-body"><p>If you connect them. Gmail, Google Calendar, Google Docs, Google Sheets, Discord and LinkedIn are optional, and until you connect one Pyxi can't see it. Google and LinkedIn sign you in on their own websites, so Pyxi never sees your password. Sending an email, posting, messaging or inviting someone always waits for an approval card first.</p></div>
+              </details>
+              <details class="qa reveal" id="q-offline" data-related="q-languages q-leaves">
+                <summary><h3>Does anything run offline?</h3></summary>
+                <div class="qa-body"><p>Speech recognition (Whisper) and the default voice (Kokoro) run on your computer. Understanding your screen uses an AI model online. People who build Pyxi from source can also run it fully locally with Ollama.</p></div>
+              </details>
+            </div>
+          </div>
+
+          <div class="faq-group" data-group="privacy">
+            <div class="faq-group-head reveal">
+              <p class="kicker">Privacy</p>
+              <h2 class="h2">What it sees, <span class="dim">and what it sends.</span></h2>
+            </div>
+            <div class="faq-list">
+              <details class="qa reveal" id="q-watch" data-popular="4" data-related="q-leaves q-history">
+                <summary><h3>Does Pyxi watch my screen all the time?</h3></summary>
+                <div class="qa-body"><p>No. It looks only when you talk or type to it. If you turn on the Memory Palace, it keeps window titles, focus changes and where controls were, on your computer, for 72 hours. It never records keystrokes, and <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>P</kbd> pauses everything.</p></div>
+              </details>
+              <details class="qa reveal" id="q-passwords" data-popular="5" data-related="q-leaves q-mouse">
+                <summary><h3>What about my passwords?</h3></summary>
+                <div class="qa-body"><p>Password fields, password managers, banking apps and credential windows are blacked out before anything is sent, and anything that looks like an API key or token is removed from the text and the screenshot. Pyxi never types into password fields, and it refuses to remember a password, card number, government ID or key even if you say one.</p></div>
+              </details>
+              <details class="qa reveal" id="q-leaves" data-related="q-passwords q-google">
+                <summary><h3>What leaves my computer?</h3></summary>
+                <div class="qa-body"><p>Your request, the masked screenshot and on-screen text, recent conversation, and the parts of files or emails a job needs go to an AI model to work out the reply, through OpenRouter (during the beta, through the Pyxi beta server). We don't sell it and don't use it to train models. The beta server doesn't store what you ask, what's on your screen or your voice. The <a href="/privacy">privacy policy</a> has the full table.</p></div>
+              </details>
+              <details class="qa reveal" id="q-history" data-related="q-wipe q-watch">
+                <summary><h3>How long is my history kept?</h3></summary>
+                <div class="qa-body"><p>Conversations, with the masked screenshot each answer used, stay on your computer and are deleted after 30 days. Memory Palace history, if it's on, is deleted after 72 hours. Everything lives in <code>%APPDATA%\Pyxi\.pyxi</code>.</p></div>
+              </details>
+              <details class="qa reveal" id="q-wipe" data-related="q-history q-uninstall">
+                <summary><h3>How do I delete everything?</h3></summary>
+                <div class="qa-body"><p><b>Wipe everything</b> in the Memory tab forgets every memory, the Memory Palace and the conversations with their screenshots. It asks first. Disconnect an account in Settings to remove its tokens. Uninstalling Pyxi and deleting <code>%APPDATA%\Pyxi</code> removes everything.</p></div>
+              </details>
+              <details class="qa reveal" id="q-google" data-related="q-accounts q-leaves">
+                <summary><h3>What does Pyxi do with my Google data?</h3></summary>
+                <div class="qa-body"><p>Only what you ask it to do. Pyxi's use of information from Google APIs follows the Google API Services User Data Policy, including the Limited Use requirements: it isn't sold, used for advertising or used to train models, and it isn't stored on our servers.</p></div>
+              </details>
+            </div>
+          </div>
+
+          <div class="faq-group" data-group="beta">
+            <div class="faq-group-head reveal">
+              <p class="kicker">Account and beta</p>
+              <h2 class="h2">Allowances, updates <span class="dim">and leaving.</span></h2>
+            </div>
+            <div class="faq-list">
+              <details class="qa reveal" id="q-allowance" data-related="q-free q-leave">
+                <summary><h3>What happens when I use up the allowance?</h3></summary>
+                <div class="qa-body"><p>Pyxi tells you it has used today's beta allowance and stops answering until it resets at midnight UTC. The whole beta has a monthly limit too. Opening apps, music and the other things Pyxi does without the AI model keep working.</p></div>
+              </details>
+              <details class="qa reveal" id="q-leave" data-related="q-key q-wipe">
+                <summary><h3>Can I leave the beta?</h3></summary>
+                <div class="qa-body"><p>Yes. The beta card in Settings has <b>Use my own key instead</b>, which leaves the beta on this PC. Your beta token is stored on your computer, encrypted with Windows' own data protection. <!--if:contactEmail-->To have your beta token and spend totals deleted from the beta server, email <a href="mailto:{{contactEmail}}">{{contactEmail}}</a>.<!--else-->The privacy policy explains how to have your beta token and spend totals deleted.<!--end--></p></div>
+              </details>
+              <details class="qa reveal" id="q-updates" data-related="q-install q-source">
+                <summary><h3>How do updates work?</h3></summary>
+                <div class="qa-body"><p>Pyxi checks for a new version when it starts and every four hours, downloads it from GitHub in the background, and installs it when you restart or quit. The tray menu has <b>Check for Updates</b> if you don't want to wait.</p></div>
+              </details>
+              <details class="qa reveal" id="q-source" data-related="q-updates q-offline">
+                <summary><h3>Is Pyxi open source?</h3></summary>
+                <div class="qa-body"><p>Pyxi's source code is published under the MIT License, and it includes other open-source parts under their own licenses. The terms of use cover the installer, the beta server and the beta itself.</p></div>
+              </details>
+              <details class="qa reveal" id="q-uninstall" data-related="q-wipe q-leave">
+                <summary><h3>How do I uninstall it?</h3></summary>
+                <div class="qa-body"><p>Open Windows Settings, then Apps, then Installed apps, find Pyxi and choose Uninstall. To remove your history too, delete the <code>%APPDATA%\Pyxi</code> folder.</p></div>
+              </details>
+            </div>
+          </div>
+
+          <p class="faq-empty" id="faq-empty" hidden>Nothing matches that yet. Try "invite", "password", "stop" or "Windows".</p>
+        </div>
+      </section>
+
+      <!-- ============================================================ still stuck -->
+      <section class="faq-stuck" data-say="Still stuck? The install guide points at every click.">
+        <div class="wrap stuck-grid">
+          <div class="reveal">
+            <p class="kicker">Still stuck?</p>
+            <h2 class="h2">Two places <span class="dim">that help.</span></h2>
+          </div>
+          <div class="stuck-cards">
+            <a class="stuck-card reveal" href="/download">
+              <b>The install guide</b>
+              <span>Download, the Windows warning, Settings and your invite code, with the firefly pointing at each click.</span>
+            </a>
+            <a class="stuck-card reveal" href="/privacy">
+              <b>The privacy page</b>
+              <span>What Pyxi looks at, what leaves your computer, what's kept and how to delete it, in plain words.</span>
+            </a>
+            <!--if:contactEmail--><a class="stuck-card reveal" href="mailto:{{contactEmail}}">
+              <b>Write to us</b>
+              <span>{{contactEmail}}</span>
+            </a><!--end-->
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!--include:footer-->
+  </body>
+</html>

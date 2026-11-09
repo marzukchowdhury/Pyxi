@@ -1,0 +1,451 @@
+/* FAQ page: the conversation in the hero, the grouped answers, the "still stuck" cards. */
+
+/* ---------------------------------------------------------------- hero */
+.faq-hero {
+  padding-bottom: clamp(30px, 5vw, 60px);
+  overflow: hidden;
+}
+.faq-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: clamp(28px, 5vw, 70px);
+  align-items: center;
+}
+.faq-hero-copy .lead {
+  margin-bottom: 22px;
+}
+
+/* The notch you ask in: glass, a firefly dot, an Enter hint. */
+.ask-notch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 520px;
+  padding: 6px 8px 6px 18px;
+  border-radius: 999px;
+  background: var(--glass);
+  border: 1px solid var(--hair-hi);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 30px 80px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(18px);
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s;
+}
+.ask-notch:focus-within {
+  border-color: rgba(255, 200, 97, 0.5);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 30px 80px rgba(0, 0, 0, 0.5),
+    0 0 0 4px rgba(255, 200, 97, 0.1);
+}
+.ask-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ffe08a;
+  box-shadow: 0 0 12px 2px rgba(255, 200, 97, 0.7);
+}
+.ask-notch:focus-within .ask-dot {
+  animation: ask-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ask-pulse {
+  50% {
+    box-shadow: 0 0 18px 5px rgba(255, 200, 97, 0.75);
+  }
+}
+.ask-notch input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: 500 17px/1.2 var(--font);
+  letter-spacing: -0.01em;
+  outline: none;
+}
+.ask-notch input::placeholder {
+  color: var(--ink-3);
+}
+.ask-notch input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+.ask-kbd {
+  flex: none;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--hair-hi);
+  background: rgba(255, 255, 255, 0.04);
+  font: 600 11.5px/1 var(--font);
+  color: var(--ink-3);
+}
+.faq-count {
+  margin: 14px 0 0 18px;
+  font-size: 13.5px;
+  color: var(--ink-3);
+}
+.faq-count b {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+/* The stack: questions hanging in the air, one brought to the front, Pyxi's answer beside it. */
+.qstage {
+  position: relative;
+  aspect-ratio: 5 / 4;
+  perspective: 1400px;
+}
+.qworld {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform 0.7s var(--ease);
+}
+.qcards {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transform-style: preserve-3d;
+}
+.qcards li {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+.qcard {
+  position: absolute;
+  left: var(--sx);
+  top: var(--sy);
+  max-width: 230px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--hair);
+  background: rgba(14, 17, 24, 0.82);
+  color: var(--ink-2);
+  font: 550 14px/1.35 var(--font);
+  letter-spacing: -0.01em;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translate3d(-10%, 0, var(--sz));
+  opacity: calc(1 + var(--sz) / 1100);
+  filter: blur(calc(var(--sz) * -0.0025px));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  transition:
+    transform 0.9s var(--spring),
+    opacity 0.6s,
+    filter 0.6s,
+    border-color 0.3s,
+    color 0.3s,
+    background 0.3s;
+  animation: qfloat 7s ease-in-out infinite;
+  animation-delay: var(--d);
+}
+@keyframes qfloat {
+  50% {
+    margin-top: -8px;
+  }
+}
+.qcard:hover {
+  color: var(--ink);
+  border-color: var(--hair-hi);
+}
+.qcard:focus-visible {
+  outline: 2px solid var(--fly);
+  outline-offset: 3px;
+}
+.qcard.on {
+  left: 50%;
+  top: 30%;
+  max-width: 320px;
+  padding: 16px 20px;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 600;
+  background: rgba(20, 24, 33, 0.96);
+  border-color: rgba(255, 200, 97, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(255, 200, 97, 0.12),
+    0 40px 100px rgba(0, 0, 0, 0.6),
+    0 0 60px rgba(255, 200, 97, 0.12);
+  transform: translate3d(-50%, -50%, 120px);
+  opacity: 1;
+  filter: none;
+  z-index: 2;
+}
+.qcard.miss {
+  opacity: 0.18;
+  filter: blur(2px);
+  transform: translate3d(-10%, 0, calc(var(--sz) - 220px));
+  pointer-events: none;
+}
+.qstage.filtering .qcard:not(.miss):not(.on) {
+  opacity: 1;
+  filter: none;
+  border-color: rgba(158, 203, 255, 0.4);
+}
+
+/* Pyxi's cue card: the answer, streamed word by word. */
+.qanswer {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  width: min(92%, 440px);
+  padding: 14px 18px 16px;
+  border-radius: 16px;
+  background: rgba(10, 13, 19, 0.94);
+  border: 1px solid rgba(158, 203, 255, 0.28);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
+  transform: translate3d(-50%, 0, 160px);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.qanswer.show {
+  opacity: 1;
+}
+.qa-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.qa-head b {
+  color: #ffd98c;
+  font-weight: 650;
+}
+.qa-fly {
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffe08a;
+  box-shadow: 0 0 10px 2px rgba(255, 200, 97, 0.6);
+}
+.qa-q {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.qa-stream {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.qa-stream .w {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(3px);
+  animation: qword 0.3s var(--ease) forwards;
+}
+@keyframes qword {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.qa-meant {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+.qa-meant a {
+  color: var(--ice);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(158, 203, 255, 0.3);
+}
+.qa-meant a:hover {
+  border-color: var(--ice);
+}
+.qa-meant .qa-full {
+  color: #ffd98c;
+  border-color: rgba(255, 200, 97, 0.35);
+}
+
+/* Reduced motion: nothing drifts, answers simply appear. */
+.faq-hero.still .qcard {
+  animation: none;
+  transition: none;
+}
+.faq-hero.still .qanswer {
+  transition: none;
+}
+.faq-hero.still .qa-stream .w {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+.faq-hero.still .qworld {
+  transition: none;
+}
+
+/* ---------------------------------------------------------------- the grouped answers */
+.faq-all {
+  padding: clamp(40px, 6vw, 80px) 0 clamp(60px, 8vw, 110px);
+}
+.faq-group {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr);
+  gap: clamp(28px, 5vw, 90px);
+  padding: clamp(36px, 5vw, 64px) 0;
+  border-top: 1px solid var(--hair);
+}
+.faq-group:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.faq-group-head {
+  position: sticky;
+  top: 110px;
+  align-self: start;
+}
+.faq-group-head .kicker {
+  margin-bottom: 10px;
+}
+.faq-group-head .h2 {
+  font-size: clamp(26px, 2.6vw, 34px);
+}
+.faq-list {
+  display: grid;
+  gap: 10px;
+}
+.qa summary h3 {
+  display: inline;
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+}
+.qa .qa-body p {
+  margin: 0;
+  padding: 0 22px 20px;
+  color: var(--ink-2);
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+.qa .qa-body p + p {
+  margin-top: -8px;
+}
+.qa.lit {
+  animation: qlit 1.6s var(--ease);
+}
+@keyframes qlit {
+  0% {
+    border-color: rgba(255, 200, 97, 0.7);
+    box-shadow: 0 0 0 4px rgba(255, 200, 97, 0.12);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 200, 97, 0);
+  }
+}
+.faq-empty {
+  margin: 30px 0 0;
+  padding: 22px;
+  border-radius: 16px;
+  border: 1px dashed var(--hair-hi);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------- still stuck */
+.faq-stuck {
+  padding: clamp(60px, 8vw, 110px) 0;
+  border-top: 1px solid var(--hair);
+}
+.stuck-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr);
+  gap: clamp(28px, 5vw, 90px);
+  align-items: start;
+}
+.stuck-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.stuck-card {
+  display: grid;
+  gap: 8px;
+  padding: 20px 22px 22px;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  color: var(--ink-2);
+  text-decoration: none;
+  transition:
+    transform 0.35s var(--spring),
+    border-color 0.25s,
+    background 0.25s;
+}
+.stuck-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--hair-hi);
+  background: var(--surface-2);
+}
+.stuck-card b {
+  font-size: 17px;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+}
+.stuck-card span {
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+/* ---------------------------------------------------------------- smaller screens */
+@media (max-width: 999px) {
+  .faq-hero-grid {
+    grid-template-columns: 1fr;
+  }
+  .qstage {
+    aspect-ratio: 4 / 3;
+    max-width: 640px;
+  }
+  .faq-group,
+  .stuck-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .faq-group-head {
+    position: static;
+  }
+}
+@media (max-width: 760px) {
+  .qstage {
+    aspect-ratio: 3 / 4;
+  }
+  .qcard {
+    max-width: 170px;
+    padding: 10px 12px;
+    font-size: 12.5px;
+  }
+  .qcard.on {
+    max-width: 86%;
+    font-size: 15px;
+    top: 24%;
+  }
+  .qanswer {
+    top: 40%;
+    width: 94%;
+    padding: 12px 14px 14px;
+  }
+  .qa-stream {
+    font-size: 14px;
+  }
+  .ask-notch input {
+    font-size: 16px;
+  }
+  .ask-kbd {
+    display: none;
+  }
+}

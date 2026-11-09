@@ -1,0 +1,541 @@
+/* The team page: the orbit hero, the extended roster, and how teammates work. */
+.orbit-hero {
+  padding-bottom: clamp(30px, 5vw, 60px);
+  overflow: hidden;
+}
+.orbit-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: clamp(28px, 5vw, 70px);
+  align-items: center;
+}
+.orbit-copy .lead {
+  margin-bottom: 18px;
+}
+.orbit-hint {
+  margin: 0 0 24px;
+  font-size: 13.5px;
+  color: var(--ink-3);
+}
+.orbit-hint .touch {
+  display: none;
+}
+@media (hover: none) {
+  .orbit-hint .mouse {
+    display: none;
+  }
+  .orbit-hint .touch {
+    display: inline;
+  }
+}
+
+/* ---------------------------------------------------------------- the orbit */
+.orbit {
+  position: relative;
+  aspect-ratio: 1;
+  width: min(100%, 640px);
+  margin-inline: auto;
+  perspective: 1300px;
+  perspective-origin: 50% 46%;
+}
+.orbit::before {
+  content: "";
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    rgba(255, 200, 97, 0.16),
+    rgba(255, 200, 97, 0.04) 55%,
+    transparent
+  );
+  filter: blur(18px);
+  pointer-events: none;
+}
+.orbit-sys {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  will-change: transform;
+  pointer-events: none;
+}
+.orbit-path {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  border: 1px solid rgba(158, 203, 255, 0.22);
+  box-shadow:
+    0 0 0 1px rgba(158, 203, 255, 0.04) inset,
+    0 0 40px rgba(158, 203, 255, 0.05) inset;
+  background: radial-gradient(
+    closest-side,
+    transparent 92%,
+    rgba(158, 203, 255, 0.06)
+  );
+}
+.orbit-path[data-ring="1"] {
+  border-color: rgba(158, 203, 255, 0.16);
+}
+.orbit-path[data-ring="2"] {
+  border-color: rgba(158, 203, 255, 0.12);
+}
+.orbit-sats {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+/* a teammate: a glass disc with its mark, its name beneath */
+.sat {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  transform-style: preserve-3d;
+  will-change: transform;
+  /* --depth runs 0 (far) to 1 (near): dimmer and softer behind, bright in front */
+  opacity: calc(0.42 + var(--depth, 1) * 0.58);
+  filter: saturate(calc(0.6 + var(--depth, 1) * 0.4));
+}
+.sat:focus-visible {
+  outline: none;
+}
+.sat:focus-visible .sat-disc {
+  box-shadow: 0 0 0 3px var(--c);
+}
+.sat-disc {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-top: -32px;
+  border-radius: 50%;
+  background:
+    radial-gradient(
+      120% 120% at 30% 25%,
+      rgba(255, 255, 255, 0.16),
+      transparent 50%
+    ),
+    radial-gradient(
+      closest-side,
+      color-mix(in srgb, var(--c) 26%, transparent),
+      color-mix(in srgb, var(--c) 8%, rgba(12, 14, 20, 0.9))
+    );
+  border: 1px solid color-mix(in srgb, var(--c) 55%, transparent);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.12) inset,
+    0 -10px 24px color-mix(in srgb, var(--c) 10%, transparent) inset,
+    0 18px 40px rgba(0, 0, 0, 0.55),
+    0 0 30px color-mix(in srgb, var(--c) 18%, transparent);
+  transition:
+    box-shadow 0.3s,
+    border-color 0.3s;
+}
+.sat-disc svg {
+  width: 30px;
+  height: 30px;
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--c) 60%, transparent));
+}
+.sat-disc svg .fill {
+  fill: var(--c);
+  fill-opacity: 0.85;
+}
+.sat-name {
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+}
+.sat.on {
+  opacity: 1;
+  filter: none;
+  z-index: 5000 !important;
+}
+.sat.on .sat-disc {
+  border-color: var(--c);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 24px 60px rgba(0, 0, 0, 0.6),
+    0 0 50px color-mix(in srgb, var(--c) 45%, transparent);
+}
+.sat.on .sat-name {
+  color: var(--ink);
+}
+/* while one is picked the rest step back a little */
+.orbit.picking .sat:not(.on) {
+  opacity: calc((0.42 + var(--depth, 1) * 0.58) * 0.55);
+}
+
+/* Pyxi at the centre */
+.orbit-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  margin: -48px 0 0 -48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  z-index: 1200;
+  transform: translateZ(0);
+}
+.orbit-core:focus-visible {
+  outline: none;
+}
+.orbit-core:focus-visible .core-ring {
+  box-shadow: 0 0 0 3px var(--fly);
+}
+.core-glow {
+  position: absolute;
+  inset: -40%;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    rgba(255, 200, 97, 0.55),
+    rgba(255, 200, 97, 0.12) 45%,
+    transparent 70%
+  );
+  filter: blur(8px);
+  animation: core-breathe 3.6s ease-in-out infinite;
+}
+.core-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 200, 97, 0.5);
+  background: radial-gradient(
+    closest-side,
+    rgba(255, 227, 161, 0.18),
+    rgba(20, 16, 8, 0.85) 70%
+  );
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+    0 20px 50px rgba(0, 0, 0, 0.6),
+    0 0 60px rgba(255, 200, 97, 0.35);
+  transition: box-shadow 0.3s;
+}
+.core-mark {
+  position: relative;
+  width: 48px;
+  height: 52px;
+  filter: drop-shadow(0 0 10px rgba(255, 200, 97, 0.8));
+}
+.core-mark .bm-wing {
+  fill: rgba(255, 243, 207, 0.5);
+}
+.core-mark .bm-body {
+  fill: #2a2113;
+}
+.core-mark .bm-core {
+  fill: #ffe3a1;
+}
+.orbit-core.on .core-ring {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 20px 50px rgba(0, 0, 0, 0.6),
+    0 0 90px rgba(255, 200, 97, 0.6);
+}
+@keyframes core-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+}
+
+/* the card that opens beside a picked teammate */
+.orbit-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 6000;
+  width: 272px;
+  padding: 14px 16px 14px;
+  border-radius: 16px;
+  background: var(--glass-strong);
+  border: 1px solid color-mix(in srgb, var(--c, var(--ice)) 45%, transparent);
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.6),
+    0 0 40px color-mix(in srgb, var(--c, var(--ice)) 12%, transparent);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.25s var(--ease),
+    transform 0.3s var(--ease);
+  will-change: transform;
+}
+.orbit-card.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+.orbit-card header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.orbit-card header div {
+  display: grid;
+}
+.orbit-card header b {
+  font-size: 17px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+}
+.orbit-card header span {
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c);
+}
+.card-mark {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 7px;
+  border-radius: 11px;
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+}
+.card-mark .fill {
+  fill: var(--c);
+  fill-opacity: 0.85;
+}
+.orbit-card p {
+  margin: 10px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.orbit-card .card-reads {
+  padding-top: 10px;
+  border-top: 1px solid var(--hair);
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.orbit-card .card-reads b {
+  color: var(--ice);
+  font-weight: 650;
+}
+.orbit-card .card-ask {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 560;
+}
+.orbit-card a {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--c);
+  text-decoration: none;
+}
+.orbit-card a:hover {
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------- the roster, extended */
+.mate .reads {
+  margin-top: 14px !important;
+  padding-top: 12px;
+  border-top: 1px solid var(--hair);
+  font-size: 13px !important;
+  color: var(--ink-3) !important;
+}
+.mate .reads b {
+  color: var(--ice);
+  font-weight: 650;
+}
+.mate .sample {
+  margin-top: 10px !important;
+  font-size: 13.5px !important;
+  font-weight: 560;
+  color: var(--ink) !important;
+}
+.mate .sample::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin: 0 8px 1px 0;
+  border-radius: 50%;
+  background: var(--fly);
+  box-shadow: 0 0 8px var(--fly);
+}
+
+/* ---------------------------------------------------------------- how teammates work */
+.howteam {
+  padding: clamp(60px, 8vw, 100px) 0 clamp(50px, 7vw, 80px);
+  border-top: 1px solid var(--hair);
+}
+.howteam-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 40px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: hs;
+}
+.howteam-steps li {
+  position: relative;
+  padding: 22px 20px 20px;
+  border-radius: 20px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.015)
+  );
+  border: 1px solid var(--hair);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+}
+.howteam-steps li:nth-child(3) {
+  border-color: rgba(255, 200, 97, 0.3);
+  background:
+    radial-gradient(
+      120% 120% at 0% 0%,
+      rgba(255, 200, 97, 0.1),
+      transparent 55%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.04),
+      rgba(255, 255, 255, 0.015)
+    );
+}
+.hs-n {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #1d1505;
+  background: var(--fly);
+  box-shadow: 0 0 16px rgba(255, 200, 97, 0.45);
+}
+.howteam-steps h3 {
+  margin: 16px 0 6px;
+  font-size: 16.5px;
+  font-weight: 660;
+  letter-spacing: -0.02em;
+}
+.howteam-steps p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.howteam-steps kbd {
+  font-size: 11.5px;
+}
+
+/* ---------------------------------------------------------------- smaller screens */
+@media (max-width: 1100px) {
+  .howteam-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 999px) {
+  .orbit-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .orbit {
+    order: -1;
+    width: min(100%, 520px);
+  }
+  .orbit-copy {
+    text-align: center;
+  }
+  .orbit-copy .lead {
+    margin-inline: auto;
+  }
+  .orbit-copy .cta-row {
+    justify-content: center;
+  }
+  .sat-disc {
+    width: 54px;
+    height: 54px;
+    margin-top: -27px;
+  }
+  .sat-disc svg {
+    width: 26px;
+    height: 26px;
+  }
+  .orbit-core {
+    width: 80px;
+    height: 80px;
+    margin: -40px 0 0 -40px;
+  }
+  .core-mark {
+    width: 40px;
+    height: 44px;
+  }
+}
+@media (max-width: 760px) {
+  .orbit {
+    width: min(100%, 400px);
+  }
+  .sat-disc {
+    width: 46px;
+    height: 46px;
+    margin-top: -23px;
+  }
+  .sat-disc svg {
+    width: 22px;
+    height: 22px;
+  }
+  .sat-name {
+    font-size: 11.5px;
+  }
+  .orbit-card {
+    width: min(250px, 78vw);
+    padding: 12px 14px;
+  }
+  .howteam-steps {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not(.force-motion) .core-glow {
+    animation: none;
+  }
+  html:not(.force-motion) .orbit-card {
+    transition: none;
+  }
+}

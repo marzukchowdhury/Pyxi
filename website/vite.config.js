@@ -62,6 +62,11 @@ export default defineConfig({
       input: {
         index: resolve(root, "index.html"),
         download: resolve(root, "download.html"),
+        features: resolve(root, "features.html"),
+        ask: resolve(root, "ask.html"),
+        team: resolve(root, "team.html"),
+        why: resolve(root, "why.html"),
+        faq: resolve(root, "faq.html"),
         privacy: resolve(root, "privacy.html"),
         terms: resolve(root, "terms.html"),
         404: resolve(root, "404.html"),
