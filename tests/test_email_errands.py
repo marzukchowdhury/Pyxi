@@ -335,7 +335,7 @@ async def test_a_reply_card_says_what_it_replies_to(tmp_path):
     out = await g.gmail_send({"reply_to_id": lunch["id"], "body": "1pm works. See you then!"})
     assert out.action == "Send an email to Sam Rahman (sam.rahman@uni.edu)"
     assert "Subject: Re: Lunch?" in out.preview and "Replying to: Re: Lunch?" in out.preview
-    assert "Gist: 1pm works." in out.preview  # no gist given: the first sentence
+    assert "Gist:" not in out.preview  # no gist given: no line repeating the body's first one
 
 
 async def test_send_refuses_what_it_cant_read_back(tmp_path):

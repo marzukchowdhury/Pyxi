@@ -792,13 +792,17 @@ class GoogleConnector(Connector):
             await self._api("POST", f"{GMAIL}/messages/send", json=raw)
             return f'Sent to {shown}: "{subject}".'
 
-        gist = re.sub(r"\s+", " ", str(args.get("gist") or "")).strip() or _first_line(body)
+        # Pyxi's own one-line summary; none means no Gist line (the body's first line is right
+        # there below it, and said twice it reads like a mistake).
+        gist = re.sub(r"\s+", " ", str(args.get("gist") or "")).strip()
         attached = f"\nAttached: {', '.join(f'{p.name} (from {p.parent})' for p in files)}" if files else ""
         # The card shows the whole email exactly as it's sent: every address, the subject, and
         # the full body (the card scrolls). The Gist line is Pyxi's own summary, not sent.
         return Outgoing(
             action=f"Send an email to {shown}",
-            preview=f"To: {shown}\nSubject: {subject}\nGist: {gist[:160]}{replying}{attached}\n\n{body}",
+            preview=f"To: {shown}\nSubject: {subject}"
+            + (f"\nGist: {gist[:160]}" if gist else "")
+            + f"{replying}{attached}\n\n{body}",
             run=send,
             recipients=[a for _, a in names],
             payload=body,
