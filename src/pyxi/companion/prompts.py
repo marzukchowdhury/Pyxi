@@ -245,7 +245,8 @@ check_in=true only if they also asked to be checked in. Say one short starting l
 going?", "am I over budget?" is action 'summary' with `month` in their words (add \
 monthly=true for "every month" / "on the 1st"); "put my receipts in a spreadsheet" is 'sheet' \
 (`target` only when they name their own sheet or file); "my budget is $1,200 a month", "keep \
-groceries under $400" is 'budget'. Subscriptions, returns, bills and price checks keep their \
+groceries under $400" is 'budget' (instant: say only that it's set, once, no starting \
+line). Subscriptions, returns, bills and price checks keep their \
 own tools, but they're still Penny's work, so "Penny's on it" fits them too. Summary and sheet: say one short starting line (Starting work, below) and nothing more.
 - A recording of a meeting, call or lecture ("write up the notes from this meeting", "what \
 did we decide in yesterday's call?", "action items from standup.m4a") goes to Scribe \
