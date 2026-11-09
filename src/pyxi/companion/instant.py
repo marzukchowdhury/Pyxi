@@ -17,7 +17,7 @@ from pyxi.companion.actions import APPS
 class Instant:
     action: str  # a quick_action: open_url, open_app or media
     value: str
-    line: str  # what Pyxi says, after the acknowledgement
+    line: str  # what Pyxi says ("Notepad, coming up."); empty for media keys
 
 
 _LEAD = (
@@ -130,6 +130,29 @@ _GMAIL_MISHEARD = re.compile(
 )
 
 
+_PRETTY = {
+    "gmail": "Gmail", "my email": "your inbox", "my inbox": "your inbox", "youtube": "YouTube",
+    "youtube music": "YouTube Music", "chatgpt": "ChatGPT", "whatsapp": "WhatsApp",
+    "linkedin": "LinkedIn", "github": "GitHub", "x": "X", "twitter": "X", "my calendar": "your calendar",
+    "notepad": "Notepad", "calculator": "the calculator",
+}
+_OPENING = ["{0}, coming up.", "Opening {0}.", "Here comes {0}.", "{0}, on its way."]
+
+
+def opening_line(what: str, pick=None) -> str:
+    """'Notepad, coming up.' A short line that names what's opening, worded a little differently
+    each time, instead of a stock 'On it'."""
+    import random
+
+    name = _PRETTY.get(what) or (what if what[:1].isupper() else what.title() if len(what) > 3 else what.upper())
+    if name.startswith(("the ", "your ")):
+        templates = [t for t in _OPENING if not t.startswith("{0}")]
+    else:
+        templates = _OPENING
+    line = (pick or random.choice)(templates).format(name)
+    return line[0].upper() + line[1:]
+
+
 def match(text: str) -> Instant | None:
     """The instant route for this request, or None when it needs the model."""
     t = _GMAIL_MISHEARD.sub(r"\1open gmail", " ".join(text.split()))
@@ -144,12 +167,13 @@ def match(text: str) -> Instant | None:
             "https://slides.new": "slide deck",
             "https://forms.new": "form",
         }[_BLANK[what]]
-        return Instant("open_url", _BLANK[what], f"a blank {name}, coming up.")
+        return Instant("open_url", _BLANK[what], f"A blank {name}, coming up.")
     if m := _SITE_RE.match(t):
         what = m.group(1).lower()
-        return Instant("open_url", _SITES[what], "")
+        return Instant("open_url", _SITES[what], opening_line(what))
     if m := _APP_RE.match(t):
-        return Instant("open_app", m.group(1).lower(), "")
+        what = m.group(1).lower()
+        return Instant("open_app", what, opening_line(what))
     if m := _MEDIA_RE.match(t):
         return Instant("media", _MEDIA[m.group(1).lower()], "")
     return None

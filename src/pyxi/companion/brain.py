@@ -1587,7 +1587,7 @@ class Brain:
                             "instant": True,
                         }
                     )
-                    self._speak("On it.")
+                    self._speak(random.choice(["Putting on {0}.", "{0}, coming up.", "Cueing up {0}."]).format(song[0]))
                     await self._play_music({"query": song[0], "app": song[1]})
                 elif hit is None or not await self._instant(hit):
                     await self._graph.ainvoke(
@@ -1933,6 +1933,12 @@ class Brain:
                 if note and note.startswith(f"{call.name}:") and call.name not in QUIET_NOTES:
                     needs_more = True
             self._narrate_card()
+            if needs_more and self._said:
+                notes.append(
+                    "ALREADY_SAID (out loud, this turn): \"" + " ".join(self._said)[-400:] + "\". "
+                    "Don't say any of it again, reworded or not. If you speak next, say only what's new "
+                    "(the answer, the result), in one or two short sentences, or nothing."
+                )
             opened = any(
                 c.name == "quick_action" and c.arguments.get("action") in ("open_url", "open_app")
                 for c in calls
@@ -2578,7 +2584,7 @@ class Brain:
             log.info("instant route didn't work (%s), asking the model", note)
             return False
         if hit.action != "media":  # music stopping or skipping says it all
-            self._speak(f"On it, {hit.line}" if hit.line else "On it.")
+            self._speak(hit.line or "On it.")
         return True
 
     async def say_line(
@@ -3152,21 +3158,14 @@ _NARRATION = re.compile(
 )
 
 
-# Said when Pyxi takes a job on. A different one each time, never one of the last few, so it
-# doesn't say "On it" on every job. None of them claims the job is done.
+# A bare acknowledgement, varied so it isn't "On it" every time. Plain words a person says, not
+# stock phrases ("Roger that", "Aye aye" sounded like a call centre). Pyxi's prompt asks for a
+# line that names the job; these only cover the model's bare "On it.".
 ACKS = [
     "On it",
-    "Roger that",
-    "You got it",
-    "Copy that",
+    "Got it",
+    "Okay",
     "Will do",
-    "Leave it with me",
-    "Say no more",
-    "Right away",
-    "Coming right up",
-    "On the case",
-    "Got you",
-    "Aye aye",
 ]
 # The model's own acknowledgement at the start of a line ("On it.", "On it, I'll let you know.").
 # English only: a reply in another language keeps its own words.
@@ -3180,22 +3179,47 @@ _TOOL_TAG = re.compile(r"\[(?:say|[a-z]+_[a-z_]+)\]\s*")
 _WORD = re.compile(r"[a-z0-9']+")
 
 
+# Words that carry no news: a sentence made only of these plus words already said says nothing new.
+_PLAIN = set(
+    """a an the and or but so then now just also too very really okay ok right yes no not it its it's
+    this that these those there here is are was were be been being am i i'm i'll i've me my you your
+    you're we our us they them their he she him her his to of in on at for with from by as up down
+    out off over into onto about all any some one more most can could will would should do does did
+    done have has had get got go going let let's make made what which who when where how why if
+    already still again sure guess guessing think mean meant way bit little quick fresh
+    new open opening opened up coming now ready here""".split()
+)
+
+
+def _content(sentence: str) -> set[str]:
+    return {w for w in _WORD.findall(split_markers(sentence)[0].lower()) if w not in _PLAIN}
+
+
 def drop_repeats(text: str, earlier: list[str]) -> str:
     """Say each thing once. A model sometimes writes its line in the reply and again in `say`,
-    reworded ("I'll fill the blank sheet..." then "I'll fill the open sheet..."), or leaks a
-    tool's name ("[say] Ledger can't..."). A sentence that mostly repeats one already said this
-    turn, or earlier in the same text, is dropped."""
+    reworded ("I'll fill the blank sheet..." then "I'll fill the open sheet..."), says it again in
+    the next round ("New doc, opening a blank one." then "Got you, opening a new blank doc."), or
+    leaks a tool's name ("[say] Ledger can't..."). A sentence is dropped when it mostly repeats one
+    sentence already said, or when everything it says (its words that carry meaning) was already
+    said this turn."""
     text = _TOOL_TAG.sub("", text)
     seen = [set(_WORD.findall(s.lower())) for e in earlier for s in split_sentences(e)]
+    said_words: set[str] = set().union(*(_content(s) for e in earlier for s in split_sentences(e)))
     kept = []
     for sentence in split_sentences(text):
         words = set(_WORD.findall(split_markers(sentence)[0].lower()))
-        if len(words) >= 4 and any(
+        content = _content(sentence)
+        if MARKER.search(sentence):
+            pass  # a pointer or a note mark is never a repeat: it draws as it's said
+        elif len(words) >= 4 and any(
             len(words & w) / len(words | w) >= 0.6 for w in seen if len(w) >= 4
         ):
             continue
+        elif said_words and len(content) >= 2 and len(content - said_words) <= len(content) // 5:
+            continue
         kept.append(sentence)
         seen.append(words)
+        said_words |= content
     return " ".join(kept)
 
 
@@ -3208,7 +3232,7 @@ def vary_ack(text: str, recent: list[str], pick: Any = random.choice) -> str:
     used = {r.lower() for r in recent}
     ack = pick([a for a in ACKS if a.lower() not in used] or ACKS)
     recent.append(ack)
-    del recent[:-4]
+    del recent[:-3]
     return m.group(1) + ack + text[m.end() :]
 
 

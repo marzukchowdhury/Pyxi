@@ -52,7 +52,7 @@ def test_on_it_becomes_a_different_acknowledgement_each_time() -> None:
     assert all(s.rstrip(".") in ACKS for s in said)
     # never the same as any of the few before it
     for i, s in enumerate(said):
-        assert s not in said[max(0, i - 4) : i], said
+        assert s not in said[max(0, i - 3) : i], said
     # the rest of the line stays
     line = vary_ack("On it, I'll let you know when it's ready.", recent)
     assert line.endswith(", I'll let you know when it's ready.") and line.split(",")[0] in ACKS
@@ -90,3 +90,38 @@ def test_a_key_read_off_the_screen_is_never_repeated():
     assert "AIz" not in hide_secrets(said) and "(a key, hidden)" in hide_secrets(said)
     assert "sk-ant" not in hide_secrets("it says sk-ant-api03-abcdefghijklmnopqrs")
     assert hide_secrets("Ask a skilled person to sketch it") == "Ask a skilled person to sketch it"
+
+
+def test_a_reworded_repeat_in_a_later_round_is_dropped() -> None:
+    from pyxi.companion.brain import drop_repeats
+
+    said = ["New doc, I'm guessing. Opening a blank one now."]
+    assert drop_repeats("Got you, opening a new blank doc.", said) == ""
+    said = ["Pulling up directions to Caffe Reggio now."]
+    out = drop_repeats(
+        "Directions to Caffe Reggio are already up. The fastest route is 7 minutes, via Foster Ave.",
+        said,
+    )
+    assert out == "The fastest route is 7 minutes, via Foster Ave."
+    # an answer that shares a few words with the start line stays
+    said = ["Checking the forecast for Vancouver."]
+    line = "Tomorrow's clear and 9 degrees in Vancouver, rain from Tuesday."
+    assert drop_repeats(line, said) == line
+
+
+def test_instant_routes_name_what_opens() -> None:
+    from pyxi.companion import instant
+
+    hit = instant.match("open notepad")
+    assert hit and "Notepad" in hit.line
+    hit = instant.match("go to youtube")
+    assert hit and "YouTube" in hit.line
+    for _ in range(10):
+        assert instant.opening_line("calculator")[0].isupper()
+
+
+def test_prompt_never_asks_for_a_stock_on_it() -> None:
+    from pyxi.companion import prompts, tools
+
+    assert "On it." not in prompts.SYSTEM
+    assert "'On it.'" not in str(tools.__dict__.get("TOOLS", ""))

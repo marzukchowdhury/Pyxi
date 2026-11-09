@@ -544,7 +544,7 @@ COMPANION_TOOLS += [
         "for?', 'find subscriptions I forgot', 'how much do I spend on subscriptions?'. "
         "action=cancel with the service ('cancel Netflix', 'stop my Adobe plan') opens its cancel "
         "page after an approval card; Pyxi never cancels anything itself, the user presses the "
-        "final button. Say one short line ('On it.'); the result comes as a notification.",
+        "final button. Say one short line that names the job; the result comes as a notification.",
         {
             "action": {"type": "string", "enum": ["find", "cancel"]},
             "service": {
@@ -558,7 +558,7 @@ COMPANION_TOOLS += [
         "Check the user's order and shipping emails for return windows, in the background: 'what "
         "can I still return?', 'when do I have to return the headphones?', 'keep track of my "
         "returns'. Lists each order with its return deadline and sets reminders a few days before "
-        "each one closes, then keeps checking new orders daily. Say one short line ('On it.'); the "
+        "each one closes, then keeps checking new orders daily. Say one short line that names the job; the "
         "list comes as a notification.",
         {},
     ),
@@ -759,7 +759,7 @@ COMPANION_TOOLS += [
         "moving the mouse or pressing Esc; anything that sends, buys, posts or deletes asks again. Use it "
         "whenever they ask you to DO something on screen; use `guide` instead when they want to learn to "
         "do it themselves. Give `task` exactly: what to do, in which app, and what done looks like, plus "
-        "what they told you (the song, the file). Say one short line first ('On it.'), never the task "
+        "what they told you (the song, the file). Say one short line first that names the job, never the task "
         "itself.",
         {
             "task": {
@@ -943,7 +943,7 @@ COMPANION_TOOLS += [
         "for scans); a searchable PDF from a scan; compare two documents; HEIC to JPG; resize or "
         "shrink images; CSV and Excel. Needs real paths: from what's on screen (an Explorer window, "
         "an attachment you downloaded), from search_files, or from them. The original is never "
-        "changed; the new file goes beside it. Say one short line ('On it.'); they get a notification.",
+        "changed; the new file goes beside it. Say one short line that names the job; they get a notification.",
         {
             "operation": {
                 "type": "string",
@@ -976,7 +976,7 @@ COMPANION_TOOLS += [
         "PowerPoint (slides, titles, bullets, notes), and Google Sheets and Docs (totals, a real pivot "
         "table, headings, bullets) through Google. A local file is saved as a copy beside the original; "
         "Google files are edited in place. For fixing the grammar of a document, delegate to Quill "
-        "instead. Say one short line ('On it.'); they get a notification.",
+        "instead. Say one short line that names the job; they get a notification.",
         {
             "task": {
                 "type": "string",
