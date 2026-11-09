@@ -129,3 +129,33 @@ async def test_media_keys_still_work_next_to_screen_playpause(settings, monkeypa
 def test_today_when_that_time_has_gone_says_so() -> None:
     a = alarm_request("set an alarm for 5 pm today", NIGHT)
     assert a.at.day == 9 and a.line(NIGHT) == "5:00 PM has already gone today, so it's set for tomorrow."
+
+
+def test_reminders_ring_once() -> None:
+    """Night run: 'remind me in 2 minutes to drink water' became a reminder every day at 12:02."""
+    from pyxi.alarms import Alarm, Timer, reminder_request
+
+    t = reminder_request("Remind me in 2 minutes to drink some water.", NIGHT)
+    assert isinstance(t, Timer) and t.seconds == 120 and t.label == "drink some water" and t.reminder
+    assert reminder_request("remind me to stretch in 10 minutes", NIGHT).seconds == 600
+    a = reminder_request("Remind me at 5pm to call mum", NIGHT)
+    assert isinstance(a, Alarm) and a.label == "call mum" and a.at.hour == 17
+    assert reminder_request("remind me every day at 9 to take my pills", NIGHT) is None  # repeating: the model
+
+
+async def test_a_reminder_rings_with_its_words(settings) -> None:
+    b = Brain(settings, Hub(), llm=DemoLLM(), screen=FakeScreen())
+    said: list[str] = []
+    b._speak = lambda text, **kw: said.append(text)  # type: ignore[method-assign]
+    await b.turn("remind me in 1 second to stand up")
+    assert said == ["I'll remind you in 1 second."] and not b.routines.items
+    await asyncio.sleep(1.3)
+    assert said[-1] == "Reminder: Stand up."
+
+
+def test_close_the_model_is_instant() -> None:
+    from pyxi.companion import instant
+
+    for t in ("Close the 3D model.", "close that", "Hide it", "remove the drawings"):
+        assert instant.match(t).action == "clear", t
+    assert instant.match("close notepad") is None

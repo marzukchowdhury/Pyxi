@@ -155,6 +155,16 @@ def opening_line(what: str, pick=None) -> str:
     return line[0].upper() + line[1:]
 
 
+_CLEAR = re.compile(
+    _LEAD
+    + r"(?:close|hide|dismiss|clear|remove|get rid of|put away|take away)\s+"
+    + r"(?:(?:the|that|this|those|these|all|everything|it|of it)\s*)*"
+    + r"(?:3d|three[- ]d)?\s*(?:model|models|drawings?|cards?|notes?|thing|stuff|that|it|screen|bicycle|heart|engine)?"
+    + r"(?:\s+(?:on|off) (?:the |my )?screen)?(?:\s+(?:please|now))?[\s.!?]*$",
+    re.I,
+)
+
+
 def match(text: str) -> Instant | None:
     """The instant route for this request, or None when it needs the model."""
     t = _GMAIL_MISHEARD.sub(r"\1open gmail", " ".join(text.split()))
@@ -176,6 +186,8 @@ def match(text: str) -> Instant | None:
     if m := _APP_RE.match(t):
         what = m.group(1).lower()
         return Instant("open_app", what, opening_line(what))
+    if _CLEAR.match(t) and re.search(r"(?i)\b(close|hide|dismiss|clear|remove|rid|away)\b", t):
+        return Instant("clear", "all", "Cleared away.")
     if m := _MEDIA_RE.match(t):
         return Instant("media", _MEDIA[m.group(1).lower()], "")
     return None

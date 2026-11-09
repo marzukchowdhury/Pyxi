@@ -63,8 +63,11 @@ class Alarm:
 class Timer:
     seconds: int
     label: str = ""
+    reminder: bool = False  # "remind me in 10 minutes to stretch"
 
     def line(self) -> str:
+        if self.reminder:
+            return f"I'll remind you in {spoken_span(self.seconds)}."
         return f"Timer set: {spoken_span(self.seconds)}."
 
 
@@ -119,6 +122,44 @@ def alarm_request(text: str, now: datetime | None = None) -> Alarm | None:
     at = min(candidates) if day != "tomorrow" else candidates[0]
     passed = day == "today" and at.date() != now.date()
     return Alarm(at=at, label=(m.group("label") or "").strip(), passed_today=passed)
+
+
+_SPAN = r"(?P<n>\d+(?:\.\d+)?|an?|half an?|one|two|three|five|ten|fifteen|twenty|thirty)\s*(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?)"
+_WORDS = {"one": 1, "two": 2, "three": 3, "five": 5, "ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30}
+_REMIND_IN = re.compile(
+    _LEAD
+    + r"remind me\s+(?:(?:in|after)\s+" + _SPAN + r"\s+(?:to|that|about)\s+(?P<label>[^?!]{2,80}?)"
+    + r"|(?:to|that|about)\s+(?P<label2>[^?!]{2,80}?)\s+(?:in|after)\s+" + _SPAN.replace("?P<n>", "?P<n2>").replace("?P<unit>", "?P<unit2>") + r")"
+    + r"[\s.!?]*$",
+    re.I,
+)
+_REMIND_AT = re.compile(
+    _LEAD + r"remind me\s+(?:at\s+)?(?P<when>.+?)\s+(?:to|that|about)\s+(?P<label>[^?!]{2,80}?)[\s.!?]*$", re.I
+)
+
+
+def _seconds(raw: str, unit: str) -> int:
+    raw, unit = raw.lower(), unit.lower()
+    n = 0.5 if raw.startswith("half") else 1.0 if raw in ("a", "an") else float(_WORDS.get(raw, raw))
+    return int(n * (1 if unit.startswith("s") else 3600 if unit.startswith("h") else 60))
+
+
+def reminder_request(text: str, now: datetime | None = None) -> Timer | Alarm | None:
+    """'Remind me in 10 minutes to stretch' -> a Timer; 'remind me at 5pm to call mum' -> an
+    Alarm with that label. Each rings once."""
+    t = " ".join(text.split())
+    if m := _REMIND_IN.match(t):
+        raw, unit = (m.group("n"), m.group("unit")) if m.group("n") else (m.group("n2"), m.group("unit2"))
+        seconds = _seconds(raw, unit)
+        label = (m.group("label") or m.group("label2") or "").strip()
+        if 1 <= seconds <= 24 * 3600 and label:
+            return Timer(seconds=seconds, label=label, reminder=True)
+        return None
+    if m := _REMIND_AT.match(t):
+        a = alarm_request(f"set an alarm for {m.group('when')}", now)
+        if a is not None:
+            return Alarm(at=a.at, label=m.group("label").strip(), passed_today=a.passed_today)
+    return None
 
 
 def timer_request(text: str) -> Timer | None:

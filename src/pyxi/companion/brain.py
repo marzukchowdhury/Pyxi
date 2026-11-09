@@ -329,7 +329,7 @@ class Brain:
         async def wait_and_ring() -> None:
             await asyncio.sleep(timer.seconds)
             await self.jobs.settle(job, ok=True, summary=f"Timer done: {span}.")
-            await self.ring(timer.label or f"{span} timer", alarm=False)
+            await self.ring(timer.label or f"{span} timer", alarm=False, reminder=timer.reminder)
 
         self.jobs._tasks[job.id] = asyncio.create_task(wait_and_ring())
         self._calls.append(
@@ -337,7 +337,7 @@ class Brain:
         )
         self._speak(timer.line())
 
-    async def ring(self, label: str, *, alarm: bool) -> None:
+    async def ring(self, label: str, *, alarm: bool, reminder: bool = False) -> None:
         """Time's up: a chime that repeats until it's dismissed (a click, talking, or the dismiss
         hotkey), a card, and a spoken line."""
         now = datetime.now()
@@ -345,7 +345,7 @@ class Brain:
         line = (
             f"It's {alarms.spoken_time(now)}." + (f" {label[:1].upper()}{label[1:]}." if label else " Time to get up.")
             if alarm
-            else f"Time's up: {label}."
+            else f"Reminder: {label[:1].upper()}{label[1:]}." if reminder else f"Time's up: {label}."
         )
         await self.hub.emit("alarm", title=what, label=label, at=now.isoformat())
         await self._notify("", ok=True, title=f"{what}, {alarms.spoken_time(now)}", body=line)
@@ -792,6 +792,12 @@ class Brain:
     async def _quick_action(self, action: str, value: str) -> str | None:
         if not value.strip():
             return f"{action}: nothing to do."
+        if action == "clear":
+            # "Close the 3D model", "close that": everything Pyxi has on screen goes, at once.
+            await self.hub.emit("clear")
+            self._object = None
+            self._placed.put("card", None, 0)
+            return None
         if action == "screen_playpause":
             # "Play the song on my middle screen": that screen's top window to the front, then its
             # own play key (K on YouTube, Space elsewhere). A second, not half a minute of mouse.
@@ -1738,6 +1744,12 @@ class Brain:
                         {"round": 1, "tool": "stop_everything", "arguments": {}, "instant": True}
                     )
                     self._speak("Stopped." if "Nothing was running" not in message else "Okay.")
+                elif not synthetic and (remind := alarms.reminder_request(user_text)) is not None:
+                    # "Remind me in 10 minutes to stretch": once, not every day at that time.
+                    if isinstance(remind, alarms.Timer):
+                        await self._set_timer(remind)
+                    else:
+                        await self._set_alarm(remind)
                 elif not synthetic and (alarm := alarms.alarm_request(user_text)) is not None:
                     await self._set_alarm(alarm)  # about a second: no model, no Clock app
                 elif not synthetic and (timer := alarms.timer_request(user_text)) is not None:
