@@ -96,9 +96,30 @@ class Forecast:
                 f"Right now in {self.place.split(',')[0]} it's {self.temp(self.now_temp)} and "
                 f"{self.now_sky}, with a high of {self.temp(d.high)} today."
             )
-        index = {"today": 0, "tomorrow": 1}.get(which, 0)
+        city = self.place.split(",")[0]
+        if which in ("weekend", "week"):
+            days = [d for d in self.days if d.day.weekday() >= 5] if which == "weekend" else self.days
+            if not days:
+                days = self.days[-2:]
+            parts = [
+                f"{d.day:%A} {d.sky}, {self.temp(d.high)}"
+                + (f", {d.rain_chance}% chance of rain" if d.rain_chance >= 30 else "")
+                for d in days[: 2 if which == "weekend" else 7]
+            ]
+            if which == "week":
+                wet = [f"{d.day:%A}" for d in days if d.rain_chance >= 50]
+                hi, lo = max(d.high for d in days), min(d.low for d in days)
+                rain = f" Rain likely on {', '.join(wet)}." if wet else " No real rain in sight."
+                return f"This week in {city}: highs up to {self.temp(hi)}, lows down to {self.temp(lo)}.{rain}"
+            return f"This weekend in {city}: " + "; ".join(parts) + "."
+        names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        if which in names:
+            match = [d for d in self.days if d.day.weekday() == names.index(which)]
+            index = self.days.index(match[0]) if match else 0
+        else:
+            index = {"today": 0, "tomorrow": 1}.get(which, 0)
         d = self.days[min(index, len(self.days) - 1)]
-        when = "Tomorrow" if index == 1 else "Today"
+        when = "Tomorrow" if index == 1 else "Today" if index == 0 else f"{d.day:%A}"
         rain = f", {d.rain_chance}% chance of rain" if d.rain_chance >= 20 else ""
         return (
             f"{when} in {self.place.split(',')[0]}: {d.sky}, high of {self.temp(d.high)}, "
@@ -178,15 +199,32 @@ _ASK = re.compile(
     r"^\W*(?:hey,?\s+)?(?:pyxi,?\s+)?(?:what'?s|what is|how'?s|how is|tell me)?\s*(?:the\s+)?"
     r"(?:weather|forecast)(?:\s+(?:like|going to be|gonna be))?"
     r"(?:\s+(?:in|for|at)\s+(?P<place>[a-z .'-]+?))?"
-    r"(?:\s+(?P<when>today|tomorrow|right now|now|tonight))?"
+    r"(?:\s+(?:for\s+)?(?P<when>today|tomorrow|right now|now|tonight|this weekend|the weekend|weekend|this week|the week|(?:on |this )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)))?"
     r"(?:\s+(?:in|for|at)\s+(?P<place2>[a-z .'-]+?))?[\s?.!]*$",
     re.I,
 )
 
 
+_RAIN = re.compile(
+    r"^\W*(?:hey,?\s+)?(?:pyxi,?\s+)?(?:is it|will it|is it going to|is it gonna|does it look like it'?s? going to)\s+"
+    r"(?:be\s+)?(?P<what>rain|raining|rainy|snow|snowing)"
+    r"(?:\s+(?:in|at)\s+(?P<place>[a-z .'-]+?))?"
+    r"(?:\s+(?P<when>today|tomorrow|right now|now|tonight|this weekend|the weekend|weekend|this week|the week|(?:on |this )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)))?"
+    r"(?:\s+(?:in|at)\s+(?P<place2>[a-z .'-]+?))?[\s?.!]*$",
+    re.I,
+)
+
+
+def _when(word: str) -> str:
+    w = word.lower().removeprefix("on ").removeprefix("this ").removeprefix("the ").strip()
+    return {"right now": "now", "tonight": "today", "": "today", "week": "week"}.get(w, w)
+
+
 def simple_question(text: str) -> tuple[str, str] | None:
-    """(place or "", today|tomorrow|now) for a plain weather question, else None."""
-    m = _ASK.match(" ".join(text.split()))
+    """(place or "", today|tomorrow|now|weekend|week|monday..sunday) for a plain weather
+    question, else None."""
+    text = " ".join(text.split())
+    m = _ASK.match(text) or _RAIN.match(text)
     if not m:
         return None
     when = (m.group("when") or "").lower()
@@ -196,5 +234,4 @@ def simple_question(text: str) -> tuple[str, str] | None:
     place = place or (m.group("place2") or "").strip()
     if place.lower() in ("here", "my area", "my city"):
         place = ""
-    when = {"right now": "now", "tonight": "today", "": "today"}.get(when, when)
-    return place, when
+    return place, _when(when)

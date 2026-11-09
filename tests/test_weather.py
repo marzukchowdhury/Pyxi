@@ -47,3 +47,26 @@ async def test_a_weather_question_skips_the_model(settings, monkeypatch):
     await brain.turn("What's the weather in Vancouver tomorrow?")
     assert not llm.prompts  # no model, no web search
     assert "high of 11°C" in " ".join(s["text"] for s in rec.of("say"))
+
+
+def test_weekends_weekdays_weeks_and_rain_questions_are_quick() -> None:
+    from pyxi.weather import simple_question
+
+    assert simple_question("What's the weather in Dhaka this weekend?") == ("Dhaka", "weekend")
+    assert simple_question("weather in London on Saturday") == ("London", "saturday")
+    assert simple_question("will it snow this week in Toronto") == ("Toronto", "week")
+    assert simple_question("Is it going to rain today?") == ("", "today")
+    assert simple_question("Is it going to rain in Paris tomorrow?") == ("Paris", "tomorrow")
+
+
+def test_weekend_and_week_lines() -> None:
+    from datetime import date, timedelta
+
+    from pyxi.weather import Day, Forecast
+
+    start = date(2026, 11, 9)  # a Monday
+    days = [Day(start + timedelta(days=i), 20 + i, 10, 60 if i == 5 else 0, "clear") for i in range(7)]
+    f = Forecast("Dhaka, Bangladesh", "BD", days, None, "")
+    assert f.say("weekend").startswith("This weekend in Dhaka: Saturday clear, 25°C, 60% chance of rain; Sunday clear, 26°C")
+    assert "Rain likely on Saturday" in f.say("week")
+    assert f.say("saturday").startswith("Saturday in Dhaka: clear, high of 25°C")
