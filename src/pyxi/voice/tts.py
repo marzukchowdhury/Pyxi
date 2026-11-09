@@ -87,6 +87,14 @@ _SPOKEN = [
     (re.compile(r"\s*&\s*"), " and "),
     (re.compile(r"\s*->\s*"), ", then "),
     (re.compile(r"[*_`#]+"), ""),
+    (re.compile(r"(\d)\s*°\s*[CF]\b"), r"\1 degrees"),  # "12°C" (the city says which scale)
+    (re.compile(r"(\d)\s*°"), r"\1 degrees"),
+    (re.compile(r"\b(\d+)\s*[x×]\s*(\d+)\b"), r"\1 by \2"),  # "5x5 table"
+    (re.compile(r"(\d)\s*km\b"), r"\1 kilometres"),
+    (re.compile(r"(\d)\s*kg\b"), r"\1 kilos"),
+    (re.compile(r"(\d)\s*mins?\b"), r"\1 minutes"),
+    (re.compile(r"(\d)\s*hrs?\b"), r"\1 hours"),
+    (re.compile(r"\b([A-Z]{1,2}\d{1,5}):([A-Z]{1,2}\d{1,5})\b"), r"\1 to \2"),  # "A1:C13"
 ]
 
 

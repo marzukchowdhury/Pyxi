@@ -125,3 +125,13 @@ def test_prompt_never_asks_for_a_stock_on_it() -> None:
 
     assert "On it." not in prompts.SYSTEM
     assert "'On it.'" not in str(tools.__dict__.get("TOOLS", ""))
+
+
+def test_symbols_and_units_read_naturally() -> None:
+    from pyxi.voice.tts import speakable
+
+    assert speakable("High of 12°C, low of 7°C.") == "High of 12 degrees, low of 7 degrees."
+    assert speakable("A 5x5 table") == "A 5 by 5 table"
+    assert speakable("3.7 km away, 7 min") == "3.7 kilometres away, 7 minutes"
+    assert speakable("Select A1:C13") == "Select A1 to C13"
+    assert speakable("Version 10:30 AM") == "Version 10:30 AM"

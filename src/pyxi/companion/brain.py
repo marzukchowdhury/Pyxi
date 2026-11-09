@@ -1610,6 +1610,8 @@ class Brain:
                 self._guide, self._guide_trail = None, []
                 await self.hub.emit("guide", active=False, finished=False, at=None)
             said = " ".join(self._said)
+            if not error and not said and self._speech_gen != self._turn_gen:
+                error = "interrupted"  # they spoke again first: a silent turn isn't a bug then
             self.history = [*self.history[-11:], (user_text, said)]
             ctx = self._ctx
             image_path = None

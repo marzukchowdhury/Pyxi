@@ -245,7 +245,7 @@ SCENARIOS = [
     ('3d engine', 'turn_49b75541', 'Build me a 3D model of a car engine and how it works.', '3d'),
     ('draw it', 'turn_d7996a13', 'Draw me a quick diagram of how a search engine works.', 'visual'),
     ('no 3d', 'turn_19671b6e', 'Just tell me quickly: how many chambers does the heart have?', 'nohands'),
-    ('weather', 'turn_49b75541', "What's the weather in Vancouver today?", 'web'),
+    ('weather', 'turn_49b75541', "What's the weather in Vancouver today?", 'weather'),
     ('news today', 'turn_49b75541', "What's the biggest tech news today?", 'web'),
     ('stock', 'turn_49b75541', "What's Apple's stock price right now?", 'web'),
     ('sports', 'turn_49b75541', 'Who won the last Champions League final?', 'web'),
@@ -384,6 +384,46 @@ SIMPLE_SCENARIOS = [
     ("simple how pivot", BLANK_SHEET, "How do I make a pivot table here?", "teach"),
 ]
 SCENARIOS += SIMPLE_SCENARIOS
+
+# The rest of the morning try-out (docs/TRYOUT-BASICS.md), the way a tester says it.
+POST = "turn_49b75541"
+TRYOUT_SCENARIOS = [
+    ("try gmail", FIREFOX, "Open Gmail.", "instant"),
+    ("try calculator", FIREFOX, "Open the calculator.", "instant"),
+    ("try bluetooth", FIREFOX, "Open Bluetooth settings.", "instant"),
+    ("try docs tab", FIREFOX, "Open Google Docs on a new tab.", "instant"),
+    ("try create doc", FIREFOX, "Create a new Google doc.", "instant"),
+    ("try maps tab", FIREFOX, "Open a new tab with Google Maps.", "instant"),
+    ("try header bold", BLANK_SHEET, "Make the header row bold.", "do"),
+    ("try total row", BLANK_SHEET, "Add a total row at the bottom.", "do"),
+    ("try weather", FIREFOX, "What's the weather in Vancouver tomorrow?", "weather"),
+    ("try ounces", FIREFOX, "How many ounces are in a liter?", "chat"),
+    ("try tip", FIREFOX, "What's 18 percent tip on 64 dollars?", "chat"),
+    ("try next song", FIREFOX, "Next song.", "media"),
+    ("try volume", FIREFOX, "Turn the volume down a bit.", "volume"),
+    ("try play", FIREFOX, "Play Blinding Lights by The Weeknd.", "play"),
+    ("try about", POST, "What's this about, in two sentences?", "card"),
+    ("try thanks", FIREFOX, "Thanks, that's all.", "chat"),
+    ("try joke", FIREFOX, "Tell me something funny about spreadsheets.", "chat"),
+]
+SCENARIOS += TRYOUT_SCENARIOS
+
+# What Pyxi must never sound like, in any scenario.
+STOCK = re.compile(r"\b(roger that|copy that|aye aye|leave it with me|on the case|say no more)\b", re.I)
+
+
+def repeated_sentence(said: str) -> str:
+    """A sentence that says again what an earlier one in the same turn said (reworded or not)."""
+    from pyxi.companion.brain import _content
+    from pyxi.voice.tts import split_sentences
+
+    seen: list[set[str]] = []
+    for sentence in split_sentences(said):
+        words = _content(sentence)
+        if len(words) >= 3 and any(len(words & w) / len(words) >= 0.75 for w in seen):
+            return sentence
+        seen.append(words)
+    return ""
 
 
 # What each sample bill must get right: the amount owed, and the thing that looks wrong.
@@ -630,6 +670,12 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("said nothing")  # pausing or skipping the music says it all
     if re.search(r"there you go|i have done this|\{\s*\"", said, re.I):
         problems.append("filler or raw text")
+    if STOCK.search(said):
+        problems.append(f"stock phrase ({STOCK.search(said).group(0)})")
+    if rep := repeated_sentence(said):
+        problems.append(f"said twice: {rep[:60]}")
+    if expect == "weather" and ("weather" not in tools or took > 4):
+        problems.append(f"weather slow or not from the forecast ({took:.1f}s, {tools})")
     if expect == "card":
         if card is None:
             problems.append("no cue card")

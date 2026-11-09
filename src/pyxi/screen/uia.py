@@ -199,10 +199,20 @@ def _walk(
         except Exception:
             top = None
     if top is None:
-        fg = auto.GetForegroundControl()
-        if fg is None:
+        # The foreground window's top-level ancestor, asked of Windows directly: uiautomation's
+        # own GetTopLevelControl passes a c_long where an int belongs and throws ("argument 2:
+        # TypeError"), which left Pyxi blind in the Start menu and in popups.
+        user32 = ctypes.windll.user32
+        fg_hwnd = int(user32.GetForegroundWindow() or 0)
+        root = int(user32.GetAncestor(fg_hwnd, 2) or 0) if fg_hwnd else 0  # GA_ROOT
+        try:
+            top = auto.ControlFromHandle(root or fg_hwnd) if (root or fg_hwnd) else None
+        except Exception:
+            top = None
+        if top is None:
+            top = auto.GetForegroundControl()
+        if top is None:
             return None, []
-        top = fg.GetTopLevelControl() or fg
     r = top.BoundingRectangle
     window = RawWindow(
         title=top.Name or "",
