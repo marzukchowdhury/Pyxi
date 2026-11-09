@@ -405,6 +405,14 @@ TRYOUT_SCENARIOS = [
     ("try about", POST, "What's this about, in two sentences?", "card"),
     ("try thanks", FIREFOX, "Thanks, that's all.", "chat"),
     ("try joke", FIREFOX, "Tell me something funny about spreadsheets.", "chat"),
+    # One question when the kind, size or budget decides the answer; none when it's already there.
+    ("shop vague table", FIREFOX, "Find me an IKEA table.", "ask_first"),
+    (
+        "shop exact desk",
+        FIREFOX,
+        "Find me a white IKEA desk, about 140 centimetres wide, under 150 dollars.",
+        "search_first",
+    ),
 ]
 SCENARIOS += TRYOUT_SCENARIOS
 
@@ -842,6 +850,11 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append("asked for an address instead of looking")
     if expect == "ask" and (acted or "?" not in said):
         problems.append("acted instead of asking what they meant")
+    searched = {"web_search", "read_page", "delegate", "check_prices", "quick_action"} & set(tools)
+    if expect == "ask_first" and (searched or said.count("?") != 1):
+        problems.append("searched before asking what kind, or asked more than one question")
+    if expect == "search_first" and not searched:
+        problems.append("asked about a request that was already specific")
     if expect == "ask_or_media" and not ("?" in said or any(b.startswith(("media", "play")) for b in background)):
         problems.append("neither asked nor played")
     account_tools = {"calendar_list", "gmail_search"} & set(tools)
