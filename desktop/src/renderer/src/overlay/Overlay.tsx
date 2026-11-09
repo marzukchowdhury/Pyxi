@@ -1,3 +1,4 @@
+import { stopChime } from "../shared/chime";
 import { useCallback, useEffect, useRef } from "react";
 import { Recorder } from "../shared/audio";
 import { bridge } from "../shared/bridge";
@@ -61,6 +62,7 @@ export function Overlay() {
     const rec = recorder.current;
     const offDown = bridge.onPttDown(async () => {
       if (rec.active) return;
+      stopChime(); // talking to Pyxi is "I'm up"
       voice.stop();
       brain.send({ type: "interrupt" });
       brain.send({ type: "ptt_start" });
@@ -149,6 +151,7 @@ export function Overlay() {
   }, []);
 
   useEffect(() => bridge.onDismiss(() => {
+    stopChime();
     useOverlay.getState().dismissAll();
     brain.send({ type: "clear" });
   }), []);

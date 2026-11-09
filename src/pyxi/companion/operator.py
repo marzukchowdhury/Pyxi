@@ -196,6 +196,12 @@ opens a list of the columns to pick from.
 - File Explorer: ctrl+l then type a folder path and enter; F2 renames; ctrl+shift+n a new \
 folder; ctrl+x then ctrl+v moves files. Never delete files unless asked (then it's risky).
 - YouTube Music / YouTube: "/" focuses search; type and enter; click the song's title to play.
+- Windows Clock alarms: start it with `press` win, type "Clock", enter, then the Alarm tab and \
+"Add an alarm" (+). ALWAYS set the time yourself, even when the default looks right: click \
+the hour and type it, then the minutes, then pick AM or PM; read the editor back and only Save \
+when it shows exactly the time they asked for. Name it if they said what it's for. Never open, \
+switch or change any other alarm. Once it's saved, you're done: say it only rings while the PC \
+is awake (Windows' own note), and don't go back into the Clock app or other windows to check.
 
 Safety, always:
 - Mark `risky: true` on anything that sends, pays, buys, posts, deletes, submits a form, signs in \
@@ -300,6 +306,22 @@ class Operator:
                         "another spot. Use a completely different way (the keyboard, another "
                         "route to the same result), or call done with ok=false."
                     ).strip()
+            if (
+                len(steps) >= 3
+                and len({s.actions for s in steps[-3:]}) == 1
+                and not steps[-1].actions.startswith("waited")  # waiting on a slow page is fine
+                and look is not None
+                and len(seen) >= 2
+                and _roughly(look, seen[-2])  # and it flips back (a wizard's Next moves on)
+            ):
+                # The same action again and again (clicking a taskbar button that minimises and
+                # restores the window): the screen keeps changing, so the look test misses it.
+                laps += 1
+                steps[-1].note = (
+                    f"{steps[-1].note} You've done exactly the same thing {3 if laps == 1 else 'four or more'} "
+                    "times in a row and it isn't getting anywhere. If the task is already done, call "
+                    "done now. Otherwise use a completely different way, or call done with ok=false."
+                ).strip()
             last_look = look
             if look is not None:
                 seen.append(look)
@@ -592,6 +614,15 @@ def _same(a: Image.Image, b: Image.Image) -> bool:
         return False
     changed = ImageChops.difference(a, b).point(lambda v: 255 if v > 28 else 0)
     return ImageStat.Stat(changed).sum[0] / 255 < 6
+
+
+def _roughly(a: Image.Image, b: Image.Image) -> bool:
+    """Mostly the same picture (under 4% of it changed): a moving feed or a ticking clock
+    doesn't count, a new page or dialog does."""
+    if a.size != b.size:
+        return False
+    changed = ImageChops.difference(a, b).point(lambda v: 255 if v > 28 else 0)
+    return ImageStat.Stat(changed).sum[0] / 255 < 0.04 * a.size[0] * a.size[1]
 
 
 def _alike(a: Image.Image, b: Image.Image) -> bool:

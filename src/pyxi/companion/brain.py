@@ -42,6 +42,7 @@ from pydantic import ValidationError
 from pyxi import booking, hands, media, safety, tidy, weather, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
+from pyxi import alarms
 from pyxi.companion import filework, instant, paperwork, pricecheck, prompts, specialists
 from pyxi.companion.actions import app_target, in_account, open_app, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
@@ -214,6 +215,7 @@ class Brain:
         self._turn_id = ""
         self._synthetic = False
         self._pending_say = ""
+        self._cut_short = False
         self._placed = Placed()  # what's on screen now (cards, stages), so new things keep clear
         self.overlay_in_capture = (
             False  # the desktop app says whether screen shares see the overlay
@@ -297,6 +299,54 @@ class Brain:
             await self.set_state("idle")
             return
         await self.turn(text)
+
+    async def _set_alarm(self, alarm: alarms.Alarm) -> None:
+        """'Set an alarm for 7am': one of Pyxi's routines, set at once, rung by Pyxi itself."""
+        now = datetime.now()
+        r = self.routines.add(
+            alarm.label or f"Alarm {alarms.spoken_time(alarm.at)}",
+            time=alarm.at.strftime("%H:%M"),
+            on=alarm.at.date().isoformat(),
+            kind="alarm",
+            message=alarm.label,
+            now=now,
+        )
+        self._calls.append(
+            {"round": 1, "tool": "alarm", "arguments": {"at": alarm.at.isoformat(), "id": r.id}, "instant": True}
+        )
+        await self.hub.emit("routines", routines=self.routines.public())
+        self._speak(f"{alarm.line(now)} Keep the PC awake and I'll ring.")
+
+    async def _set_timer(self, timer: alarms.Timer) -> None:
+        """'Set a timer for 10 minutes': shows in the task tray, rings when it's up, and Stop
+        everything cancels it."""
+        span = alarms.spoken_span(timer.seconds)
+        job = await self.jobs.track("Pyxi", f"Timer, {span}" + (f": {timer.label}" if timer.label else ""), role="reminder")
+
+        async def wait_and_ring() -> None:
+            await asyncio.sleep(timer.seconds)
+            await self.jobs.settle(job, ok=True, summary=f"Timer done: {span}.")
+            await self.ring(timer.label or f"{span} timer", alarm=False)
+
+        self.jobs._tasks[job.id] = asyncio.create_task(wait_and_ring())
+        self._calls.append(
+            {"round": 1, "tool": "timer", "arguments": {"seconds": timer.seconds}, "instant": True}
+        )
+        self._speak(timer.line())
+
+    async def ring(self, label: str, *, alarm: bool) -> None:
+        """Time's up: a chime that repeats until it's dismissed (a click, talking, or the dismiss
+        hotkey), a card, and a spoken line."""
+        now = datetime.now()
+        what = "Alarm" if alarm else "Timer"
+        line = (
+            f"It's {alarms.spoken_time(now)}." + (f" {label[:1].upper()}{label[1:]}." if label else " Time to get up.")
+            if alarm
+            else f"Time's up: {label}."
+        )
+        await self.hub.emit("alarm", title=what, label=label, at=now.isoformat())
+        await self._notify("", ok=True, title=f"{what}, {alarms.spoken_time(now)}", body=line)
+        self._speak(line, record=False)
 
     async def dictate(self, audio: bytes) -> str:
         """Hold Ctrl + Windows and talk: the words are typed where the cursor is, in whatever app
@@ -1359,7 +1409,9 @@ class Brain:
         for r in self.routines.due(now):
             if r.kind != "turn":  # a reminder or a quiet check: no model, no need to wait
                 self.routines.mark_ran(r, now)
-                if r.kind == "remind":
+                if r.kind == "alarm":
+                    await self.ring(r.message or "", alarm=True)
+                elif r.kind == "remind":
                     job = await self.jobs.track("Pyxi", r.message or r.task, role="reminder")
                     await self.jobs.settle(job, ok=True, summary=r.message or r.task)
                     await self._notify(job.id, ok=True, title="Reminder", body=r.message or r.task)
@@ -1581,6 +1633,7 @@ class Brain:
             if not synthetic:
                 self._guide_fresh = True  # a new request: a guide in it counts from step 1
             self._pending_say = ""  # an answer held back during a lookup round
+            self._cut_short = False  # a round was dropped because they spoke again
             self._opened_urls: set[str] = set()  # pages opened by this request: each once
             # Mail, pages and documents this turn read: after any, every outward action asks on
             # a fresh card, and its card says what came from them (pyxi/safety.py).
@@ -1609,6 +1662,10 @@ class Brain:
                         {"round": 1, "tool": "stop_everything", "arguments": {}, "instant": True}
                     )
                     self._speak("Stopped." if "Nothing was running" not in message else "Okay.")
+                elif not synthetic and (alarm := alarms.alarm_request(user_text)) is not None:
+                    await self._set_alarm(alarm)  # about a second: no model, no Clock app
+                elif not synthetic and (timer := alarms.timer_request(user_text)) is not None:
+                    await self._set_timer(timer)
                 elif asked is not None and await self._weather_now(*asked):
                     pass  # answered from the forecast in about a second
                 elif song is not None:
@@ -1643,8 +1700,10 @@ class Brain:
                 self._guide, self._guide_trail = None, []
                 await self.hub.emit("guide", active=False, finished=False, at=None)
             said = " ".join(self._said)
-            if not error and not said and self._speech_gen != self._turn_gen:
-                error = "interrupted"  # they spoke again first: a silent turn isn't a bug then
+            if not error and self._speech_gen != self._turn_gen and (not said or self._cut_short):
+                # They spoke again (or pressed talk) before the answer came: the answer was
+                # dropped on purpose, so a silent or half-answered turn isn't a bug then.
+                error = "interrupted"
             self.history = [*self.history[-11:], (user_text, said)]
             ctx = self._ctx
             image_path = None
@@ -1861,6 +1920,7 @@ class Brain:
             round_no = state.get("round", 0) + 1
             if self._speech_gen != self._turn_gen:
                 # They pressed talk while this was thinking: drop it, the new question wins.
+                self._cut_short = True
                 return {"round": round_no, "stop": "interrupted", "needs_more": False}
             if not response.tool_calls:
                 text, promised = drop_false_promises(response.text or "")
@@ -2421,11 +2481,14 @@ class Brain:
             return result
         if name == "schedule_routine":
             days = [str(d) for d in args.get("days", []) or []] or None
+            alarm = bool(args.get("alarm"))
             r = self.routines.add(
                 str(args["task"]),
                 days=days,
                 time=args.get("time"),
-                every_minutes=args.get("every_minutes"),
+                every_minutes=None if alarm else args.get("every_minutes"),
+                kind="alarm" if alarm else "turn",
+                message=str(args["task"]) if alarm else None,
             )
             await self.hub.emit("routines", routines=self.routines.public())
             when = datetime.fromtimestamp(r.next_run).strftime("%a %H:%M")

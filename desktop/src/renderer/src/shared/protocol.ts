@@ -370,6 +370,7 @@ export type BrainEvent =
   | { type: "say"; agent: string; index: number; total: number; text: string; audio: string | null; duration_s: number; annotations: Annotation[]; notes?: number[] }
   | { type: "notes"; card: NoteCard }
   | { type: "action"; kind: "open_url" | "copy" | "insert"; value: string }
+  | { type: "alarm"; title: string; label: string; at: string }
   | { type: "job_ready"; job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null }
   | { type: "guide"; active: boolean; step?: number; total?: number | null; goal?: string; label?: string; action?: string; finished?: boolean; at?: [number, number] | null }
   | { type: "stop_audio" }

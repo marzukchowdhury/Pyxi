@@ -111,7 +111,7 @@ def create_app(
 
     async def _routine_clock() -> None:
         while True:
-            await asyncio.sleep(30)
+            await asyncio.sleep(10)  # an alarm rings within ten seconds of its time
             try:
                 await brain.run_due_routines()
             except Exception:

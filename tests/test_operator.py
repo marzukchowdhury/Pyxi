@@ -208,3 +208,28 @@ async def test_real_progress_is_not_mistaken_for_circles():
     op = operator(Scripted(*steps), box, capture=lambda: screen(next(shades)))
     out = await op.run("do something")
     assert out.ok and not any("back to how it was" in s.note for s in out.steps)
+
+
+async def test_the_same_click_over_and_over_is_a_circle_too():
+    # The alarm was saved, then it clicked Firefox's taskbar button again and again: Firefox
+    # minimised and came back, the feed moved, so no two looks matched.
+    box = []
+    # Firefox down, Firefox up, down, up: the look flips back every other step (the look test
+    # proper is blind to it here because the screens alternate with a moving feed in between).
+    from PIL import ImageDraw
+
+    n = iter(range(100))
+
+    def flipping_with_a_moving_feed():
+        i = next(n)
+        ctx = screen("#ffffff" if i % 2 else "#000000")
+        x = 300 + 120 * i  # the feed scrolled a little: a small grey block in a new place
+        ImageDraw.Draw(ctx.screenshot).rectangle((x, 300, x + 110, 410), fill="#888888")
+        return ctx
+
+    same = [("act", {"actions": [{"do": "click", "element_id": 3}]})] * 10
+    op = operator(Scripted(*same), box, capture=flipping_with_a_moving_feed)
+    out = await op.run("set an alarm")
+    assert not out.ok and "circles" in out.summary
+    assert len(out.steps) <= 7  # a few repeats, not a minute of them
+    assert any("same thing" in s.note for s in out.steps)

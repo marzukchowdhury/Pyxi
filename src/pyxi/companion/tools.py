@@ -857,6 +857,11 @@ COMPANION_TOOLS += [
                 "type": "integer",
                 "description": "Instead of a time: repeat every N minutes (15 or more).",
             },
+            "alarm": {
+                "type": "boolean",
+                "description": "An alarm: at that time Pyxi rings (a chime, a card, a spoken line) instead "
+                "of doing a task. `task` is its label ('Gym', 'Alarm'). For 'every weekday at 7 wake me up'.",
+            },
         },
         ["task"],
     ),

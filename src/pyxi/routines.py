@@ -35,7 +35,7 @@ class Routine(BaseModel):
     last_run: float | None = None
     next_run: float = 0.0
     on: str | None = None  # "YYYY-MM-DD": runs once on that day, then goes away
-    kind: Literal["turn", "remind", "returns", "job"] = "turn"
+    kind: Literal["turn", "remind", "returns", "job", "alarm"] = "turn"
     message: str | None = None  # what a "remind" routine shows
     key: str | None = None  # so the same reminder is never set twice
     # kind="job": a teammate's job started straight away when due, with no model turn in

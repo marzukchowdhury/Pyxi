@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { AudioQueue, RemoteVoice, type Voice } from "../shared/audio";
 import { bridge, currentDisplay, onThisDisplay, toLocal } from "../shared/bridge";
 import type { Annotation, BrainEvent, BrainState, Job, NoteCard, ObjectScene, Pin, SceneSpec, Sketchboard, TimelineMoment, Walkthrough } from "../shared/protocol";
+import { startChime } from "../shared/chime";
 import { brain } from "../shared/socket";
 
 export const display = currentDisplay();
@@ -496,6 +497,9 @@ brain.on((e: BrainEvent) => {
         useOverlay.setState({ cheer: { x, y, at: performance.now() } });
         setTimeout(() => useOverlay.setState({ cheer: null }), 2600);
       }
+      break;
+    case "alarm":
+      if (isPrimary) startChime(); // the card and the spoken line come with it
       break;
     case "job_ready":
       if (isPrimary) {
