@@ -31,6 +31,7 @@ from pyxi.mailwatch import (
     RETURNED,
     amount_in,
     merchant,
+    not_spending,
 )
 from pyxi.mailwatch import money as _money
 
@@ -288,6 +289,8 @@ def receipts(
         got = amount_in(body) or amount_in(subject)
         if not got or got[0] <= 0:
             continue
+        if not_spending(str(mail.get("from") or ""), text, got[0]):
+            continue  # a job alert's salary, or a big number nobody paid
         if got[1] == "$" and US_DOLLARS.search(f"{subject}\n{body}"):
             got = (got[0], "USD")  # said so: never mixed into Canadian dollars below
         name = merchant(str(mail.get("from") or ""), subject, body)

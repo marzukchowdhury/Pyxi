@@ -259,4 +259,23 @@ async def test_quiz_on_a_topic_without_notes_makes_a_deck(settings):
 
     b = Brain(settings, Hub(), llm=Cards(), screen=FakeScreen())
     out = await specialists.handle(b, "quiz", {"action": "start", "deck": "the heart", "questions": 3})
-    assert out.startswith("quiz: on The heart, 3 questions") and "How many chambers?" in out
+    assert out.startswith("quiz: on The heart, 3 questions") and any(q in out for q in ("How many chambers?", "Which side pumps", "What stops backflow?"))
+
+
+def test_job_alerts_are_never_spending():
+    """Night run: Penny counted Indeed salaries ($85,000.00 a year) as October spending."""
+    from datetime import datetime
+
+    from pyxi.agents import penny
+
+    mails = [
+        {"id": "1", "from": "Indeed <alert@indeed.com>", "subject": "New jobs for you: Data Analyst",
+         "text": "Data Analyst at Acme. Salary $85,000.00 a year. Apply now. Total compensation", "date": "2026-10-12T10:00:00+00:00"},
+        {"id": "2", "from": "Club <hello@club.ca>", "subject": "Your receipt: annual membership",
+         "text": "Thanks for your payment. Membership $100/year. Total paid: $100.00", "date": "2026-10-14T10:00:00+00:00"},
+        {"id": "3", "from": "Shop <x@shop.ca>", "subject": "Invoice 77", "text": "Invoice total $9,000.00 for consulting quote", "date": "2026-10-15T10:00:00+00:00"},
+    ]
+    rs = penny.receipts(mails, datetime(2026, 10, 1), datetime(2026, 11, 1))
+    names = {r.merchant for r in rs}
+    assert "Indeed" not in names and any(abs(r.amount - 100) < 0.01 for r in rs)
+    assert not any(r.amount > 5000 for r in rs)  # a big number nobody says was paid

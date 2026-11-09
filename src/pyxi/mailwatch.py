@@ -121,6 +121,30 @@ NOT_CANCEL = re.compile(
 )
 
 
+# Mail that mentions money without anyone paying it: job alerts and recruiters (a salary of
+# $85,000.00 a year was counted as a charge), so it's never spending or a subscription.
+JOB_SENDERS = ("indeed", "linkedin", "glassdoor", "ziprecruiter", "workopolis", "monster", "jobbank",
+               "simplyhired", "wellfound", "hired.com", "talent.com", "eluta")
+JOB_TEXT = re.compile(
+    # Only words a job ad uses: "$100/year" for a membership is a real charge.
+    r"\b(salary|job alerts?|jobs? for you|apply now|easy apply|is hiring|new jobs?\b|recruit(?:er|ing)|"
+    r"job posting|jobs? (?:near|matching)|per annum)",
+    re.I,
+)
+PAID_CLEARLY = re.compile(
+    r"(?:total|amount)\s+(?:paid|charged)|you (?:paid|were charged|have been charged)|payment of|charged (?:to|on) your",
+    re.I,
+)
+
+
+def not_spending(sender: str, text: str, amount: float) -> bool:
+    """A job alert or recruiter's mail, or a big number with nothing saying it was paid."""
+    who = sender.lower()
+    if any(j in who for j in JOB_SENDERS) or JOB_TEXT.search(text):
+        return True
+    return amount > 5000 and not PAID_CLEARLY.search(text)
+
+
 def amount_in(text: str) -> tuple[float, str] | None:
     """The amount actually charged: a "Total" line beats a subtotal or tax line, a "charged"
     line beats any other price, and the first price is the last resort."""
@@ -282,6 +306,8 @@ def find_subscriptions(emails: list[dict[str, Any]], now: datetime) -> list[Subs
         ):
             continue
         got = amount_in(e["text"]) or amount_in(e["subject"])
+        if got and not_spending(str(e.get("from") or ""), text, got[0]):
+            continue
         if not got or got[0] <= 0:
             continue
         g["charges"].append((e, got, bool(RECURRING.search(text)), _cadence(text)))
