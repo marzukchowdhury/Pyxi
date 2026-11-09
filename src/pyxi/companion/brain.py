@@ -1844,7 +1844,7 @@ class Brain:
         """They kept talking, or paused mid-sentence and the request arrived in two parts: the
         turn that had started on the first part was cut off. If it had done nothing yet, its
         words go in front of the new ones, so both are answered as one request (and its own row
-        leaves the turn log: this turn is the one that answers it). If it had already acted,
+        in the turn log is marked as carried: this turn is the one that answers it). If it had already acted,
         the words stay where they are and this turn is told what was done. Returns the words
         to answer and any notes for the model."""
         left, self._dropped = self._dropped, None
@@ -1865,7 +1865,7 @@ class Brain:
                 "redo what is already done."
             ]
         log.info("turn %s was talked over: its words go with the next turn", left["turn_id"])
-        self.turns.forget(left["turn_id"])
+        self.turns.carried(left["turn_id"])
         return f"{left['text']} {user_text}", []
 
     async def turn(

@@ -47,10 +47,12 @@ async def test_a_request_said_in_two_parts_is_answered_as_one(settings):
     assert asked(llm) == f"{FIRST} {SECOND}"  # both halves, in order, once
     said = [s["text"] for s in rec.of("say")]
     assert said == ["Both."]
-    # The conversation and the turn log hold one request and its answer, not an orphan half.
+    # The conversation holds one request and its answer, not an orphan half. The turn log
+    # keeps the half that was talked over, marked, so the history still shows it happened.
     assert brain.history == [(f"{FIRST} {SECOND}", "Both.")]
-    [turn] = brain.turns.recent()
+    turn, half = brain.turns.recent()
     assert turn["user_text"] == f"{FIRST} {SECOND}" and turn["error"] is None
+    assert half["user_text"] == FIRST and half["error"] == "carried into the next turn"
     # On screen they see what they said each time, not the first half twice.
     assert [u["text"] for u in rec.of("user")] == [FIRST, SECOND]
 
