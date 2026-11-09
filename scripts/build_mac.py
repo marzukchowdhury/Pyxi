@@ -126,7 +126,10 @@ def install_packages(arch: str) -> None:
         run([*pip, "--require-hashes", "-r", str(LOCK)])
     else:
         print("WARNING: no requirements/mac.txt lock yet; installing from mac.in (versions float)")
-        run([*pip, "-r", str(REQS)])
+        # Ready-made wheels only where they exist: building one from source (cryptography needs
+        # Rust) fails for the Intel build on an Apple silicon runner. An older version with a
+        # wheel beats a newer one without.
+        run([*pip, "--prefer-binary", "-r", str(REQS)])
     run([*pip, "--no-deps", str(OTTO)])
     run([*pip, "--no-deps", str(ROOT)])
 
