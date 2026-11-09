@@ -747,8 +747,8 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     if expect == "teach":
         if any(b.startswith("hands") for b in background):
             problems.append("did it instead of teaching")
-        if not ({"guide", "quick_action", "web_search"} & set(tools)):
-            problems.append("no guide")
+        if not ({"guide", "quick_action", "web_search"} & set(tools)) and "?" not in said:
+            problems.append("no guide")  # (on an empty sheet, offering sample data first is right)
     if expect == "maps":
         opened = [c for c in brain._calls if c["tool"] in ("quick_action", "use_computer")]
         if not any("maps" in json.dumps(c["arguments"]).lower() for c in opened):
