@@ -68,22 +68,44 @@ _GOOGLE_LINK = re.compile(r"/(spreadsheets|document)/d/[\w-]+")
 _THIS = re.compile(r"(?i)^\W*(this|the open|the current|current|open|my open)\b")
 
 
+_UNTITLED = re.compile(r"(?i)^\W*untitled (spreadsheet|document|presentation)\W*$")
+_GOOGLE_TITLE = re.compile(r"(?i) - Google (Sheets|Docs|Slides)\b")
+
+
+def _google_windows(brain: Brain) -> list[tuple[int, str]]:
+    """Browser windows showing a Google Sheet or Doc, on any screen, the window under the mouse
+    first, then front to back."""
+    from pyxi import windows
+
+    found = [(h, t) for h, t, _ in windows.open_windows() if _GOOGLE_TITLE.search(t)]
+    w = brain._ctx.window if brain._ctx else None
+    if w and w.hwnd:
+        found = [(w.hwnd, w.title), *[(h, t) for h, t in found if h != w.hwnd]]
+    return found
+
+
 async def _open_google_file(brain: Brain, ref: str) -> str:
     """'this sheet', 'Untitled spreadsheet': the Sheet or Doc open in their browser, by its real
-    link from the address bar. A name alone fails for a new file (they're all called Untitled)
-    and the screen shows the link cut short."""
+    link from the address bar. A name alone fails for a new file (they're all called Untitled:
+    one evening Ledger edited the morning's 'Untitled spreadsheet' instead of the blank one on
+    screen) and the screen shows the link cut short. Any screen counts, not just the one under
+    the mouse. Returns "" for an Untitled file that isn't open anywhere: never guess by name."""
     if _GOOGLE_LINK.search(ref) or ref.lower().startswith("new "):
-        return ref
-    w = brain._ctx.window if brain._ctx else None
-    if not w or not w.hwnd:
-        return ref
-    title = w.title.lower()
-    if not (_THIS.match(ref) or (ref.strip() and ref.strip().lower() in title)):
         return ref
     from pyxi.screen import uia
 
-    url = await asyncio.to_thread(uia.browser_url, w.hwnd)
-    return url if url and _GOOGLE_LINK.search(url) else ref
+    want = ref.strip().lower()
+    generic = bool(_THIS.match(ref)) or not want
+    kind = "Docs" if re.search(r"(?i)\bdoc", ref) else "Sheets" if re.search(r"(?i)sheet|spreadsheet", ref) else ""
+    for hwnd, title in _google_windows(brain):
+        t = title.lower()
+        if kind and f"google {kind.lower()}" not in t and _GOOGLE_TITLE.search(title):
+            continue  # a Doc when they said sheet (a window whose title doesn't say is still tried)
+        if generic or (want and want in t):
+            url = await asyncio.to_thread(uia.browser_url, hwnd)
+            if url and _GOOGLE_LINK.search(url):
+                return url
+    return "" if _UNTITLED.match(ref) else ref
 
 
 _SAMPLE = re.compile(r"(?i)\b(sample|example|dummy|made[- ]up|fake|test|demo|practice)\b")
@@ -178,6 +200,12 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
                 "edit_document: Google isn't connected. Tell them to connect it in Settings first."
             )
         google = [await _open_google_file(brain, g) for g in google]
+        if "" in google:
+            return (
+                "edit_document: I can't tell which Untitled file they mean: none is open in a "
+                "browser window I can read. Ask them to bring it to the front (or say its name), "
+                "and never guess by the name Untitled."
+            )
         out_of_reach = [g for g in google if not await _reachable(brain, g)]
         made_instead = False
         if out_of_reach:

@@ -573,7 +573,7 @@ COMPANION_TOOLS += [
         {
             "action": {
                 "type": "string",
-                "enum": ["open_url", "open_app", "copy", "insert", "media", "volume"],
+                "enum": ["open_url", "open_app", "copy", "insert", "media", "volume", "screen_playpause"],
             },
             "value": {"type": "string", "description": "The URL, app name, or text."},
         },

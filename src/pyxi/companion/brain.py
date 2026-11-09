@@ -292,6 +292,9 @@ class Brain:
             self._prefetch = None
             await self.set_state("idle")
             return
+        from pyxi import wakename
+
+        text = wakename.normalize(text)  # "Your pixxit split my screen" -> "Pyxi, split my screen"
         await self.hub.emit("transcript", text=text, seconds=round(took, 2))
         if not text.strip():
             self._prefetch = None  # the next question looks at the screen afresh
@@ -602,7 +605,9 @@ class Brain:
         if getattr(self, "_screens_text", None) is None:
             try:
                 self._screens_text = (
-                    windows.screens_summary(uia.cursor_pos()) if windows.available() else ""
+                    windows.screens_summary(uia.cursor_pos(), getattr(self, "_shown_screen", None))
+                    if windows.available()
+                    else ""
                 )
             except Exception:
                 log.warning("couldn't list the screens", exc_info=True)
@@ -787,6 +792,37 @@ class Brain:
     async def _quick_action(self, action: str, value: str) -> str | None:
         if not value.strip():
             return f"{action}: nothing to do."
+        if action == "screen_playpause":
+            # "Play the song on my middle screen": that screen's top window to the front, then its
+            # own play key (K on YouTube, Space elsewhere). A second, not half a minute of mouse.
+            if not windows.available():
+                return "screen_playpause: this only works on Windows."
+            where = windows.screen_named(value)
+            if where is None:
+                return f"screen_playpause: there's no {value!r} screen."
+            top = next(
+                (
+                    (h, t)
+                    for h, t, _ in windows.open_windows()
+                    if not windows._NOT_CONTENT.match(t)
+                    and (r := windows.rect_of(h))
+                    and r[2] > 80
+                    and windows.screen_of(r, [where]) is not None
+                ),
+                None,
+            )
+            if top is None:
+                return f"screen_playpause: nothing is open on the {where['name']} screen."
+            from pyxi import hands
+
+            windows.focus(top[0])
+            await asyncio.sleep(0.25)
+            key = "k" if "youtube" in top[1].lower() else "space"
+            try:
+                await asyncio.to_thread(lambda: hands.Hands().press(key))
+            except hands.Interrupted:
+                return "screen_playpause: they moved the mouse just then, so I didn't press play."
+            return None
         if action == "volume":
             if not windows.available():
                 return "volume: this only works on Windows."
@@ -1670,6 +1706,7 @@ class Brain:
             self._pending_say = ""  # an answer held back during a lookup round
             self._cut_short = False  # a round was dropped because they spoke again
             self._screens_text: str | None = None  # every screen and what's on it, once a turn
+            self._shown_screen: str | None = None  # the screen look_again looked at, if it did
             self._opened_urls: set[str] = set()  # pages opened by this request: each once
             # Mail, pages and documents this turn read: after any, every outward action asks on
             # a fresh card, and its card says what came from them (pyxi/safety.py).
@@ -2621,6 +2658,7 @@ class Brain:
                 if top is None:
                     return f"look_again: nothing is open on the {where['name']} screen (just the desktop)."
                 ctx = await self._capture(hwnd=top)
+                self._shown_screen, self._screens_text = where["name"], None  # the note says so now
             else:
                 ctx = await self._capture(follow_mouse=False)  # what just opened is in front
             if ctx.excluded:
@@ -3217,10 +3255,13 @@ _JUST_OPEN = re.compile(
 )
 # Tools that start work which finishes later (the notification says how it went).
 _MULTI_SCREEN_NOTE = (
-    "The screenshot shows one screen (where the mouse is); the list above is every screen. "
-    "Never say you can only see one screen: say what's on each from the list, and to look at "
-    "another one use look_again with screen set to it. To move or lay out windows on a "
-    "particular screen, arrange_windows takes screen ('left', 'middle', 'right')."
+    "The screenshot is of the screen marked above; the list is every screen. Never say you "
+    "can only see one screen, and never mention 'the list' or 'the shot': just say what's there. "
+    "To see another screen properly, look_again with screen set to it (once: then answer from "
+    "the new screenshot). To move or lay out windows on a particular screen, arrange_windows "
+    "takes screen ('left', 'middle', 'right'). To play or pause what's on a particular screen "
+    "('play the song on my middle screen'), quick_action screen_playpause with value 'middle': "
+    "never the mouse for that."
 )
 
 

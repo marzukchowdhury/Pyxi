@@ -191,7 +191,9 @@ _PLAY = re.compile(
 )
 _NOT_A_SONG = re.compile(
     r"^(?:it|it again|that|this|the music|music|something|again|a game|the video|the next one)$"
-    r"|\b(?:and|then|volume|quieter|louder|lower|higher|game|games|with me|with us|along)\b",
+    r"|\b(?:and|then|volume|quieter|louder|lower|higher|game|games|with me|with us|along)\b"
+    # "play the song on my middle screen", "just click play": something already on screen
+    r"|\b(?:screen|monitor|window|tab|page|click|the song|this song|that song|this video|that video)\b",
     re.I,
 )
 

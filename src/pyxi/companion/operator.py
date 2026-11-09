@@ -163,6 +163,10 @@ if it already has text you're replacing.
 - If something didn't work (the screen didn't change), try a different way; never repeat the \
 same failing action more than twice.
 - Check your work: before `done`, the screen must show the result.
+- Stop the moment it's done. After the step that finishes the task (Save, Play, Send, OK, \
+Create, Add), the next look is your check: if it shows the result (the video playing, the alarm \
+in the list, the file saved), call `done` straight away. Never alt+tab, click taskbar buttons, \
+switch windows or reopen things to double-check, and never do anything the task didn't ask for.
 - If the app can't do it (unlicensed, read-only, signed out, missing a feature), stop at once \
 with `done` ok=false and say what free way would work (Google Sheets or Docs in the browser \
 instead of an unlicensed Office app).
@@ -367,6 +371,15 @@ class Operator:
                     False, str(call.arguments.get("question", "What should I do next?")), steps
                 )
             actions = [a for a in call.arguments.get("actions", []) if isinstance(a, dict)][:4]
+            if (
+                actions
+                and steps
+                and "finishes the task" in steps[-1].note
+                and all(_only_switching(a, ctx) for a in actions)
+            ):
+                # The task's last button was pressed and now it only wants to wander between
+                # windows "to check": that's the job done, so stop here.
+                return Outcome(True, f"Done: {steps[-1].actions[:120]}.", steps)
             if not actions:
                 steps.append(
                     Step(n, "(nothing)", "No actions given: call act with actions, or done.")
@@ -400,6 +413,12 @@ class Operator:
                     notes.append(note)
                 if note and (note.startswith(("skipped", "failed", "declined"))):
                     break  # the rest of the batch assumed this worked
+            if _finishes(task, done_here):
+                # Live: it clicked Play, then spent a minute alt+tabbing to "check". Say so plainly.
+                notes.append(
+                    "That looks like the step that finishes the task. On the next look, if it "
+                    "worked, call done now; don't switch windows or check anything else."
+                )
             steps.append(Step(n, "; ".join(done_here), " ".join(notes)))
             if any(note.startswith("declined") for note in notes):
                 return Outcome(False, "Okay, I left that for you.", steps)
@@ -614,6 +633,36 @@ def _same(a: Image.Image, b: Image.Image) -> bool:
         return False
     changed = ImageChops.difference(a, b).point(lambda v: 255 if v > 28 else 0)
     return ImageStat.Stat(changed).sum[0] / 255 < 6
+
+
+# Buttons and keys that end a task. Counted only when the task itself says the same word.
+_FINISH = ("save", "play", "pause", "send", "submit", "ok", "done", "create", "add", "apply",
+           "confirm", "finish", "post", "book", "start", "set")
+
+
+def _only_switching(action: dict, ctx: Any) -> bool:
+    """alt+tab, win+tab, or a click on a taskbar button or a window's thumbnail: moving between
+    windows, not doing anything in one."""
+    do = str(action.get("do") or "")
+    if do == "press":
+        return str(action.get("keys") or "").lower().replace(" ", "") in ("alt+tab", "win+tab", "alt+shift+tab")
+    if do in ("click", "double_click"):
+        el = next((e for e in getattr(ctx, "elements", []) if e.id == action.get("element_id")), None)
+        name = f"{getattr(el, 'name', '')} {getattr(el, 'role', '')} {action.get('why', '')}".lower()
+        return bool(re.search(r"taskbar|thumbnail|task view|running applications", name))
+    return False
+
+
+def _finishes(task: str, lines: list[str]) -> bool:
+    """Did this step press the button the task was about ("click play" -> "click Play (k)")?"""
+    words = set(re.findall(r"[a-z]+", task.lower()))
+    for line in lines:
+        if not line.startswith(("click", "press", "double-click")):
+            continue
+        said = set(re.findall(r"[a-z]+", line.lower()))
+        if any(w in said and w in words for w in _FINISH):
+            return True
+    return False
 
 
 def _roughly(a: Image.Image, b: Image.Image) -> bool:

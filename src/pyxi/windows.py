@@ -303,7 +303,7 @@ def screen_of(rect: tuple[int, int, int, int], all_screens: list[dict]) -> dict 
     return None
 
 
-def screens_summary(mouse: tuple[int, int] | None = None) -> str:
+def screens_summary(mouse: tuple[int, int] | None = None, shown: str | None = None) -> str:
     """'3 screens, left to right. Left: Firefox "New Tab". Middle: Facebook, YouTube...' Text
     for the model, so it knows every screen and what's on each (one picture shows only one)."""
     all_screens = screens()
@@ -317,11 +317,12 @@ def screens_summary(mouse: tuple[int, int] | None = None) -> str:
         s = screen_of(r, all_screens) if r and r[2] > 80 and r[3] > 80 else None
         if s is not None and len(on[s["n"]]) < 5:
             on[s["n"]].append(title[:70])
-    here = screen_of((*mouse, 1, 1), all_screens) if mouse else None
+    here = next((s for s in all_screens if s["name"] == shown), None) if shown else None
+    here = here or (screen_of((*mouse, 1, 1), all_screens) if mouse else None)
     lines = [f"The user has {len(all_screens)} screens, left to right (top window first on each):"]
     for s in all_screens:
         what = "; ".join(on[s["n"]]) or "nothing open (the desktop)"
-        mark = " (the screenshot is of this one: the mouse is here)" if here is s else ""
+        mark = " (THE SCREENSHOT IS OF THIS ONE)" if here is s else ""
         lines.append(f"- {s['name'].capitalize()} screen{mark}: {what}")
     return "\n".join(lines)
 

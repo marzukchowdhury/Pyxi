@@ -1038,3 +1038,27 @@ async def test_the_outline_shows_the_table_and_text_can_go_at_the_very_top():
     assert outline.index("Hello") < outline.index("a table here") < outline.index("[1] (empty line)")
     await d.apply({"op": "add_heading", "text": "team", "level": 1, "after": "start"})
     assert sent[0][0]["insertText"] == {"location": {"index": 1}, "text": "team\n"}  # above Hello
+
+
+async def test_the_open_sheet_is_found_on_any_screen_and_untitled_is_never_guessed(monkeypatch):
+    """Live: the blank sheet was on the middle screen, the mouse on another; Ledger fell back to
+    the name 'Untitled spreadsheet' and edited the morning's file instead."""
+    from types import SimpleNamespace
+
+    from pyxi import windows
+    from pyxi.companion import filework
+    from pyxi.screen import uia
+
+    brain = SimpleNamespace(_ctx=SimpleNamespace(window=SimpleNamespace(hwnd=1, title="Claude")))
+    monkeypatch.setattr(
+        windows,
+        "open_windows",
+        lambda minimized=False: [(1, "Claude", ""), (5, "Untitled spreadsheet - Google Sheets - Mozilla Firefox", "")],
+    )
+    links = {5: "https://docs.google.com/spreadsheets/d/blankOne/edit"}
+    monkeypatch.setattr(uia, "browser_url", lambda hwnd, budget_s=0.5: links.get(hwnd))
+    assert await filework._open_google_file(brain, "this sheet") == links[5]
+    assert await filework._open_google_file(brain, "Untitled spreadsheet") == links[5]
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(1, "Claude", "")])
+    assert await filework._open_google_file(brain, "Untitled spreadsheet") == ""  # never by name
+    assert await filework._open_google_file(brain, "Budget 2026") == "Budget 2026"  # a real name is fine

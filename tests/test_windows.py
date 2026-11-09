@@ -171,7 +171,7 @@ def test_every_screen_and_whats_on_it(monkeypatch):
     assert "3 screens" in text and "Pyxi overlay" not in text
     assert "- Left screen: (1) Facebook" in text
     assert "- Middle screen: Music - YouTube" in text
-    assert "- Right screen (the screenshot is of this one" in text
+    assert "- Right screen (THE SCREENSHOT IS OF THIS ONE)" in text
     monkeypatch.setattr(windows, "screens", lambda: THREE[:1])
     assert windows.screens_summary() == ""  # one screen: nothing to add
 
@@ -201,3 +201,11 @@ async def test_put_a_window_on_another_screen(settings, monkeypatch):
     assert note is None and moved == {"rect": (9, (3000, 0, 1080, 1872)), "snap": (9, "maximize")}
     note = await brain._arrange_windows({"layout": "maximize", "screen": "fourth"})
     assert note and "they have: left, middle, right" in note
+
+
+def test_a_song_on_a_screen_is_not_a_song_search():
+    from pyxi.companion.instant import play_request
+
+    assert play_request("Can you play the song on my middle screen?") is None
+    assert play_request("Just click play on the middle screen.") is None
+    assert play_request("play Blinding Lights by The Weeknd") == ("Blinding Lights by The Weeknd", "youtube_music")

@@ -977,6 +977,7 @@ class GoogleSheet:
     def __init__(self, google: Any, sheet_id: str) -> None:
         self.google = google
         self.id = sheet_id
+        self.aliases: dict[str, str] = {}  # a tab they asked for that went on the blank sheet
         self.meta: dict[str, Any] = {}
         self.grids: dict[str, list[list[Any]]] = {}
 
@@ -998,6 +999,8 @@ class GoogleSheet:
 
     def _tab(self, name: str | None) -> tuple[str, int, list[list[Any]]]:
         sheets = self.meta.get("sheets", [])
+        if name and str(name).lower() in getattr(self, "aliases", {}):
+            name = self.aliases[str(name).lower()]
         if not sheets:
             raise LedgerError("That spreadsheet has no sheets.")
         for s in sheets:
@@ -1279,6 +1282,16 @@ class GoogleSheet:
             return f"Formatted {op.get('range')} on {title}"
         if name == "add_sheet":
             title = str(op.get("name") or "Sheet")
+            sheets = self.meta.get("sheets", [])
+            only = sheets[0]["properties"]["title"] if len(sheets) == 1 else None
+            if op.get("rows") and only and not any(any(c not in ("", None) for c in r) for r in self.grids.get(only, [])):
+                # A brand-new, blank spreadsheet open in front of them: the data goes on it, from
+                # A1, where they're looking (a new tab next to an empty Sheet1 looked like nothing
+                # had happened).
+                await self.google.sheets_write(self.id, [{"range": f"'{only}'!A1", "values": op["rows"]}])
+                self.grids[only] = [list(r) for r in op["rows"]]
+                self.aliases[title.lower()] = only  # a later edit "on Sample Sales" means here
+                return f"Put the data on {only}, from A1"
             await self.google.sheets_batch(
                 self.id, [{"addSheet": {"properties": {"title": title}}}]
             )
@@ -1684,7 +1697,7 @@ Excel (.xlsx) and Google Sheets:
 - {"op": "set_cells", "sheet"?: name, "cells": {"B5": 120, "C5": "=B5*1.13"}}
 - {"op": "append_row", "sheet"?: name, "values": [..]}
 - {"op": "format", "sheet"?: name, "range": "A1:D1", "bold"?: true, "number_format"?: "$#,##0.00", "fill"?: "#FFF2CC"}
-- {"op": "add_sheet", "name": "Summary", "rows"?: [[..], [..]]}
+- {"op": "add_sheet", "name": "Summary", "rows"?: [[..], [..]]}  (only when they ask for a new tab; sample or new data for an empty sheet is set_cells on it from A1)
 Excel only:
 - {"op": "add_column", "sheet"?: name, "header": "Total", "formula": "=B{r}*C{r}"}  ({r} is each data row)
 - {"op": "make_table", "sheet"?: name}
