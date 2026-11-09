@@ -571,6 +571,10 @@ app.whenReady().then(async () => {
     down: () => broadcast("ptt-down"),
     up: () => broadcast("ptt-up"),
     cancel: () => broadcast("ptt-cancel"),
+    // Hold Ctrl + left Windows: dictation, typed into whatever app has focus.
+    dictateDown: () => broadcast("dictate-down"),
+    dictateUp: () => broadcast("dictate-up"),
+    dictateCancel: () => broadcast("dictate-cancel"),
     doubleTap: () => {
       // The notch lives on the primary overlay; give it the keyboard, then open the text box.
       const win = overlays.get(primaryId);
@@ -764,7 +768,11 @@ ipcMain.on("firefly-state", (e, s: unknown) => {
   if (!liveOverlays().some((w) => w.webContents === e.sender) || typeof s !== "object" || s === null) return;
   liveFirefly()?.webContents.send("firefly-state", s);
 });
-ipcMain.handle("hotkeys", () => ({ ...activeHotkeys, hold: holdToTalk ? "Control+Alt" : null }));
+ipcMain.handle("hotkeys", () => ({
+  ...activeHotkeys,
+  hold: holdToTalk ? "Control+Alt" : null,
+  dictate: holdToTalk ? "Control+Win" : null,
+}));
 // The notch's text box needs keyboard focus, which a non-focusable overlay can't take on its own.
 ipcMain.on("focus-overlay", (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);

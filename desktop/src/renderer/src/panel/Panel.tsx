@@ -518,6 +518,7 @@ export function Settings() {
       <Connections />
       <h4>Hotkeys</h4>
       {keys.hold && <div className="kv"><span>Talk (hold, release to send)</span><kbd>{k("hold")}</kbd></div>}
+      {keys.dictate && <div className="kv"><span>Dictate (hold, types where your cursor is)</span><kbd>{k("dictate")}</kbd></div>}
       <div className="kv"><span>Type to Pyxi</span><kbd>Ctrl, Ctrl</kbd></div>
       <div className="kv"><span>Talk (press to start or stop)</span><kbd>{k("talk")}</kbd></div>
       <div className="kv"><span>Show or hide this panel</span><kbd>{k("panel")}</kbd></div>

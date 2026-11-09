@@ -298,6 +298,31 @@ class Brain:
             return
         await self.turn(text)
 
+    async def dictate(self, audio: bytes) -> str:
+        """Hold Ctrl + Windows and talk: the words are typed where the cursor is, in whatever app
+        has focus. Speech-to-text only (on this PC), no model, no screen: it works while Pyxi is
+        paused too. Returns what was typed ("" for nothing)."""
+        from pyxi import dictation
+
+        await self.set_state("transcribing")
+        try:
+            studio = self.studio
+            heard, took, _ = await self.stt.transcribe(
+                audio, studio.prefs.language if studio else "en"
+            )
+        except Exception:
+            log.exception("dictation transcription failed")
+            await self.hub.emit("error", message="I couldn't make out that dictation. Try again?")
+            await self.set_state("idle")
+            return ""
+        text = dictation.clean(heard)
+        if text:
+            # The desktop pastes it into the focused field and puts the clipboard back.
+            await self.hub.emit("action", kind="insert", value=text)
+        await self.hub.emit("dictated", text=text, seconds=round(took, 2))
+        await self.set_state("idle")
+        return text
+
     async def _within_limits(self, kind: str, next_action: str) -> bool:
         """At an hourly limit (pyxi/limits.py), stop and ask before doing more."""
         from pyxi.limits import Limits

@@ -92,6 +92,41 @@ export function Overlay() {
     };
   }, []);
 
+  // Hold Ctrl + Windows: dictation. Record while held, then the brain types what was said
+  // where the cursor is (it never becomes a question for Pyxi).
+  useEffect(() => {
+    if (!isPrimary) return;
+    const rec = new Recorder();
+    let drop = false;
+    const offDown = bridge.onDictateDown(async () => {
+      if (rec.active || recorder.current.active) return;
+      voice.stop();
+      drop = false;
+      useOverlay.setState({ listening: true, state: "listening" });
+      try {
+        await rec.start((data, mime) => {
+          useOverlay.setState({ listening: false, state: "idle" });
+          if (drop) drop = false;
+          else brain.send({ type: "dictate", data, mime });
+        }, false);
+      } catch (err) {
+        useOverlay.setState({ listening: false, state: "idle" });
+        const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+        brain.send({ type: "notice", message: `The microphone couldn't start. Check Settings > Privacy & security > Microphone. (${reason})` });
+      }
+    });
+    const offUp = bridge.onDictateUp(() => rec.stop());
+    const offCancel = bridge.onDictateCancel(() => {
+      drop = true;
+      rec.stop();
+    });
+    return () => {
+      offDown();
+      offUp();
+      offCancel();
+    };
+  }, []);
+
   // Guides: a click on the mark is the step done (for click steps); a click anywhere else may
   // be them going another way, so the brain checks whether the screen changed.
   useEffect(() => {

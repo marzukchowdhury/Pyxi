@@ -469,6 +469,7 @@ export type ClientMessage =
   | { type: "file_access_save"; enabled: boolean; folders: string[] }
   | { type: "ptt_cancel" }
   | { type: "audio"; data: string; mime: string }
+  | { type: "dictate"; data: string; mime: string }
   | { type: "interrupt" }
   | { type: "answer"; request_id: string; value: unknown }
   | { type: "job_control"; job_id: string; action: string; text?: string }

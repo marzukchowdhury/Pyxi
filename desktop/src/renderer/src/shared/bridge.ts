@@ -37,6 +37,10 @@ export interface Bridge {
   onPttDown(fn: () => void): () => void;
   onPttUp(fn: () => void): () => void;
   onPttCancel(fn: () => void): () => void;
+  /** Hold Ctrl + Windows: dictation (the words are typed where the cursor is). */
+  onDictateDown(fn: () => void): () => void;
+  onDictateUp(fn: () => void): () => void;
+  onDictateCancel(fn: () => void): () => void;
   onQuickType(fn: () => void): () => void;
   /** A new version finished downloading in the background (installed app only). */
   onUpdateReady(fn: (info: { version: string }) => void): () => void;
@@ -89,7 +93,7 @@ export interface Bridge {
   /** The main screen's overlay tells the firefly Pyxi's mood and voice level. */
   fireflyState(s: FireflyState): void;
   onFireflyState(fn: (s: FireflyState) => void): () => void;
-  hotkeys(): Promise<Record<"talk" | "panel" | "dismiss" | "privacy" | "stop" | "hold", string | null>>;
+  hotkeys(): Promise<Record<"talk" | "panel" | "dismiss" | "privacy" | "stop" | "hold" | "dictate", string | null>>;
 }
 
 declare global {
@@ -143,6 +147,9 @@ function mockBridge(): Bridge {
       return () => window.removeEventListener("keyup", h);
     },
     onPttCancel: noop,
+    onDictateDown: noop,
+    onDictateUp: noop,
+    onDictateCancel: noop,
     onGlobalClick(fn) {
       const h = (e: MouseEvent) => fn({ x: e.clientX, y: e.clientY });
       window.addEventListener("mousedown", h);
@@ -212,7 +219,7 @@ function mockBridge(): Bridge {
       return [currentDisplay()];
     },
     async hotkeys() {
-      return { talk: "Control+Alt+Space", panel: "Control+Alt+W", dismiss: "Control+Alt+Backspace", privacy: "Control+Alt+P", stop: "Control+Alt+Pause", hold: "Control+Alt" };
+      return { talk: "Control+Alt+Space", panel: "Control+Alt+W", dismiss: "Control+Alt+Backspace", privacy: "Control+Alt+P", stop: "Control+Alt+Pause", hold: "Control+Alt", dictate: null };
     },
   };
 }

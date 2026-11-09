@@ -461,6 +461,8 @@ def create_app(
             brain._spawn(_beta_leave())
         elif kind == "audio" and msg.get("data"):
             brain._spawn(brain.hear(base64.b64decode(msg["data"])))
+        elif kind == "dictate" and msg.get("data"):
+            brain._spawn(brain.dictate(base64.b64decode(msg["data"])))
         elif kind == "ptt_cancel":
             brain._prefetch = None
             await brain.set_state("idle")
