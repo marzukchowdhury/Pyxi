@@ -155,6 +155,26 @@ def opening_line(what: str, pick=None) -> str:
     return line[0].upper() + line[1:]
 
 
+# "Search YouTube for lo-fi study music", "google cheap flights to Toronto": a search page.
+_SEARCHES = {
+    "youtube": "https://www.youtube.com/results?search_query={q}",
+    "google": "https://www.google.com/search?q={q}",
+    "amazon": "https://www.amazon.ca/s?k={q}",
+    "maps": "https://www.google.com/maps/search/{q}",
+    "google maps": "https://www.google.com/maps/search/{q}",
+    "wikipedia": "https://en.wikipedia.org/w/index.php?search={q}",
+    "reddit": "https://www.reddit.com/search/?q={q}",
+}
+_SEARCH_RE = re.compile(
+    _LEAD
+    + r"(?:(?:search|look up|find)\s+(?:on\s+)?(?P<site>youtube|google maps|google|amazon|maps|wikipedia|reddit)\s+(?:for\s+)?(?P<q>.{2,80}?)"
+    + r"|(?:search|look up|find)\s+(?P<q2>.{2,80}?)\s+on\s+(?P<site2>youtube|google maps|google|amazon|maps|wikipedia|reddit)"
+    + r"|google\s+(?P<q3>.{2,80}?))"
+    + r"(?:\s+(?:for me|please))?[\s.!?]*$",
+    re.I,
+)
+
+
 _CLEAR = re.compile(
     _LEAD
     + r"(?:close|hide|dismiss|clear|remove|get rid of|put away|take away)\s+"
@@ -186,6 +206,13 @@ def match(text: str) -> Instant | None:
     if m := _APP_RE.match(t):
         what = m.group(1).lower()
         return Instant("open_app", what, opening_line(what))
+    if m := _SEARCH_RE.match(t):
+        from urllib.parse import quote_plus
+
+        site = (m.group("site") or m.group("site2") or "google").lower()
+        q = (m.group("q") or m.group("q2") or m.group("q3") or "").strip()
+        if q:
+            return Instant("open_url", _SEARCHES[site].format(q=quote_plus(q)), f"Searching {site.title().replace('Youtube', 'YouTube')} for {q}.")
     if _CLEAR.match(t) and re.search(r"(?i)\b(close|hide|dismiss|clear|remove|rid|away)\b", t):
         return Instant("clear", "all", "Cleared away.")
     if m := _MEDIA_RE.match(t):

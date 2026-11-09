@@ -138,3 +138,13 @@ def test_their_folders_and_more_apps_open_at_once():
     assert app_target("my documents folder") == "shell:Personal"
     assert instant.match("open the clock app").value == "clock"
     assert instant.match("open the recycle bin") is not None
+
+
+def test_site_searches_open_at_once():
+    from pyxi.companion import instant
+
+    hit = instant.match("Search YouTube for lo-fi study music.")
+    assert hit.value == "https://www.youtube.com/results?search_query=lo-fi+study+music"
+    assert instant.match("google cheap flights to Toronto").value.startswith("https://www.google.com/search?q=cheap+flights")
+    assert instant.match("find wireless earbuds on Amazon").value.startswith("https://www.amazon.ca/s?k=")
+    assert instant.match("Find a coffee place near me that is open now") is None  # Maps with picks: the model
