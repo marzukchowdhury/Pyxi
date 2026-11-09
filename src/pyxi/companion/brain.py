@@ -330,7 +330,9 @@ class Brain:
         for r in sorted((r for r in self.routines.items if r.kind == "alarm" and r.enabled), key=lambda r: r.next_run):
             at = datetime.fromtimestamp(r.next_run)
             day = "today" if at.date() == now.date() else "tomorrow" if at.date() == (now + timedelta(days=1)).date() else f"{at:%A}"
-            repeat = "" if r.on else f", {r.describe().split(' at ')[0]}"
+            names = {"mon": "Mondays", "tue": "Tuesdays", "wed": "Wednesdays", "thu": "Thursdays", "fri": "Fridays", "sat": "Saturdays", "sun": "Sundays"}
+            days = ", ".join(names.get(d[:3].lower(), d) for d in r.days)
+            repeat = "" if r.on else f", {days}" if days != "every day" else ", every day"
             rows.append(f"{alarms.spoken_time(at)} {day}" + (f" ({r.message})" if r.message else "") + repeat)
         timers = [j.task for j in self.jobs.jobs.values() if j.role == "reminder" and j.status == "running"]
         self._calls.append({"round": 1, "tool": "list_alarms", "arguments": {}, "instant": True})
