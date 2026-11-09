@@ -131,15 +131,31 @@ async def test_old_words_are_not_carried_into_a_much_later_turn(settings, monkey
 async def test_the_stop_button_ends_it_and_nothing_is_carried_on(settings):
     llm = Slow([("say", {"text": "Dropped."})], [("say", {"text": "Everest."})])
     brain, _ = make_brain(settings, llm=llm)
-    first = asyncio.create_task(brain.turn(FIRST))
+    brain._spawn(brain.turn(FIRST))  # as the server starts it
     await thinking(llm)
     brain.begin_listening()
     await brain.stop_everything()  # the stop button, after they had started to speak
+    await asyncio.sleep(0.05)
+    assert brain._dropped is None
+    await brain.turn("What is the tallest mountain?")
+    assert asked(llm) == "What is the tallest mountain?"
+    # as before: the stopped turn is cancelled and stays in the log as "stopped"
+    stopped = brain.turns.recent()[-1]
+    assert stopped["user_text"] == FIRST and stopped["error"] == "stopped"
+    assert brain.history[0] == (FIRST, "")
+
+
+async def test_a_turn_ended_by_stop_without_being_cancelled_is_not_carried_on_either(settings):
+    llm = Slow([("say", {"text": "Dropped."})], [("say", {"text": "Everest."})])
+    brain, _ = make_brain(settings, llm=llm)
+    first = asyncio.create_task(brain.turn(FIRST))  # not one of the brain's own tasks
+    await thinking(llm)
+    brain.begin_listening()
+    await brain.stop_everything()
     await first
     assert brain._dropped is None
     await brain.turn("What is the tallest mountain?")
     assert asked(llm) == "What is the tallest mountain?"
-    assert brain.turns.recent()[-1]["error"] == "interrupted"  # as before: cancelled, kept in the log
 
 
 async def test_saying_stop_over_a_turn_stops_and_does_not_run_it_again(settings):

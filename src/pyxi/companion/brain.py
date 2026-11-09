@@ -3626,7 +3626,15 @@ _BACKGROUND_TOOLS = {
 }
 # Tools that can say no (a file that isn't there, an account that isn't connected, a card they
 # decline): a line said with one waits for its answer, and is dropped if the answer is no.
-CAN_REFUSE = {"edit_document", "convert_files", "delegate", "book", "errand", "use_computer"}
+CAN_REFUSE = {
+    "edit_document",
+    "convert_files",
+    "delegate",
+    "book",
+    "errand",
+    "use_computer",
+    "paste_table",
+}
 # "Find coffee near me": opening Maps isn't the answer, so Pyxi looks at what opened and
 # answers from it. "I said open Gmail, not GL" asks nothing: one model call, not two.
 _WANTS_ANSWER = re.compile(

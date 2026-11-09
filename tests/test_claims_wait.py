@@ -88,6 +88,18 @@ async def test_a_refusal_the_model_says_nothing_about_is_never_on_it(settings):
     assert said(rec) == ["I couldn't do that just now."]  # not "On it." for a job that never started
 
 
+async def test_a_paste_that_cannot_go_in_is_not_announced_either(settings):
+    llm = Script(
+        [("say", {"text": "Dropping the table in now."}), ("paste_table", {"rows": []})],
+        [("say", {"text": "Tell me what should go in the table."})],
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("paste a table into my doc")
+    await asyncio.sleep(0.05)
+    assert said(rec) == ["Tell me what should go in the table."]
+    assert "paste_table: give rows" in llm.prompts[-1]
+
+
 async def test_a_claim_is_said_once_the_tool_has_agreed(settings):
     llm = Script(
         [
