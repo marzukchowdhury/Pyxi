@@ -29,10 +29,18 @@
   <body class="home">
     <!--include:nav-->
     <!--include:firefly-->
+    <canvas class="swarm" aria-hidden="true"></canvas>
+    <nav class="rail" aria-label="On this page">
+      <a href="#story"><i></i><b>01</b><span>What Pyxi does</span></a>
+      <a href="#how"><i></i><b>02</b><span>How it works</span></a>
+      <a href="#demos"><i></i><b>03</b><span>Watch it work</span></a>
+      <a href="#explore"><i></i><b>04</b><span>Explore</span></a>
+      <a href="#get"><i></i><b>05</b><span>Get Pyxi</span></a>
+    </nav>
 
     <main id="main">
       <!-- ============================================================ hero -->
-      <section class="hero" data-say="Hi, I'm Pyxi. Move your mouse, I'll keep you company.">
+      <section class="hero" data-swarm="vortex" data-swarm-at="#stage" data-say="Hi, I'm Pyxi. Move your mouse, I'll keep you company.">
         <div class="wrap hero-grid">
           <div class="hero-copy">
             <p class="eyebrow reveal"><span class="chip chip-fly">Beta</span> For Windows 10 and 11 &middot; Speaks English and Bengali</p>
@@ -58,7 +66,6 @@
           </div>
 
           <figure class="stage reveal" aria-label="Pyxi at work: real screenshots" data-on="0">
-            <canvas class="hero-dust" aria-hidden="true"></canvas>
             <div class="stage-idle">
               <div class="stage-3d">
                 <i class="stage-edge e1" aria-hidden="true"></i>
@@ -129,29 +136,40 @@
       </section>
 
       <!-- ============================================================ what it does -->
-      <section class="intro" id="features" data-say="Most AI lives in a chat box. I live on your screen.">
-        <div class="wrap">
-          <p class="kicker reveal">What Pyxi does</p>
-          <h2 class="h2 reveal">It shows you.<br /><span class="dim">It doesn't just tell you.</span></h2>
-          <p class="lead narrow reveal">
-            With most AI you paste a screenshot in and read paragraphs out. Pyxi already sees what you see, and it answers on top of it: a ring on the right button, a note beside the paragraph, a model you can watch being built.
-          </p>
-          <div class="pillars">
-            <article class="pillar reveal">
-              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></svg>
-              <h3>It looks when you ask</h3>
-              <p>When you talk or type to Pyxi, it takes one look at your screen: the picture, and the names and positions of the controls on it. Nothing in the background unless you turn that on.</p>
-            </article>
-            <article class="pillar reveal">
-              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="15" cy="9" r="5" /><circle cx="15" cy="9" r="1.4" /><path d="M3 21c2.5-6 6-9.5 9-10.6" /></svg>
-              <h3>It answers on your screen</h3>
-              <p>Rings, arrows, handwritten notes, tags on pictures and 3D scenes, each drawn the moment Pyxi says it. You hear the answer and see it in the same place.</p>
-            </article>
-            <article class="pillar reveal">
-              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5v13l3.6-3.4 2.6 6 2.3-1-2.6-5.9H17L6 3.5Z" /></svg>
-              <h3>It does it when you say so</h3>
-              <p>Pyxi can move your mouse and type after you press Allow. Move the mouse or press <kbd>Esc</kbd> and you're back in control on the spot.</p>
-            </article>
+      <section class="story" id="story" aria-labelledby="story-title">
+        <h2 class="sr-only" id="story-title">What Pyxi does</h2>
+        <div class="story-track" data-swarm="bubble" data-swarm-at="#story-stage">
+          <div class="story-sticky">
+            <div class="story-stage" id="story-stage" aria-hidden="true"></div>
+            <ol class="story-steps">
+              <li class="story-step" data-shape="bubble" data-say="Most AI lives in a chat box.">
+                <p class="story-n">01 <span>/ 05</span></p>
+                <h3 class="story-line">Most AI lives in a chat box.</h3>
+                <p class="story-sub">You paste a screenshot in and read paragraphs out.</p>
+              </li>
+              <li class="story-step" data-shape="screen" data-say="I live on your screen.">
+                <p class="story-n">02 <span>/ 05</span></p>
+                <h3 class="story-line">Pyxi lives on your screen.</h3>
+                <p class="story-sub">It already sees what you see, and it answers on top of it.</p>
+              </li>
+              <li class="story-step" data-shape="scan" data-say="I look when you ask. Never before.">
+                <p class="story-n">03 <span>/ 05</span></p>
+                <h3 class="story-line">It looks when you ask.</h3>
+                <p class="story-sub">One look at the window you're on: the picture, and the names and positions of the controls on it. Nothing in the background unless you turn that on.</p>
+              </li>
+              <li class="story-step" data-shape="build" data-say="How is a chip built? Watch.">
+                <p class="story-n">04 <span>/ 05</span></p>
+                <h3 class="story-line">It answers right where you're looking.</h3>
+                <p class="story-sub">Rings, arrows, handwritten notes and 3D scenes, each drawn the moment Pyxi says it. You hear the answer and see it in the same place.</p>
+              </li>
+              <li class="story-step" data-shape="allow" data-say="I'll ask first. Then I can do the clicking.">
+                <p class="story-n">05 <span>/ 05</span></p>
+                <h3 class="story-line">And it does the clicking when you say so.</h3>
+                <p class="story-sub">Pyxi can move your mouse and type after you press Allow. Move the mouse or press <kbd>Esc</kbd> and you're back in control on the spot.</p>
+              </li>
+            </ol>
+            <div class="story-bar" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+            <p class="story-hint" aria-hidden="true">Scroll</p>
           </div>
         </div>
       </section>
@@ -188,7 +206,7 @@
       <section class="demos" id="demos" data-say="Watch me work. Anything that reaches people waits for your OK.">
         <div class="wrap">
           <p class="kicker reveal">Watch it work</p>
-          <h2 class="h2 reveal">It works the way you would.<br /><span class="dim">Only with your OK.</span></h2>
+          <h2 class="h2 reveal" data-scrub>It works the way you would.<br /><span class="dim">Only with your OK.</span></h2>
           <p class="lead narrow reveal">Ask in your own words. Pyxi explains what's on your screen right where it is, writes the email, books the meeting, and sends Scout off to research in the background while you keep working. Anything that reaches another person, or costs money, waits until you press Allow.</p>
 
           <div class="demo-tabs reveal" role="tablist" aria-label="Demos">
@@ -413,19 +431,28 @@
       <!-- ============================================================ privacy -->
       <!-- ============================================================ faq -->
       <!-- ============================================================ final cta -->
-      <section class="finale" data-say="Say hey. I'll be right beside your cursor.">
-        <div class="wrap finale-inner">
-          <div class="finale-glow" aria-hidden="true"></div>
-          <h2 class="display-sm reveal">Say hey to Pyxi.</h2>
-          <p class="lead reveal">Download the beta, join with your invite code, and hold <kbd>Ctrl</kbd> <kbd>Alt</kbd>.</p>
-          <div class="cta-row center reveal">
-            <a class="btn btn-fly btn-lg" href="{{downloadUrl}}" data-download data-track="finale-download">
-              <svg class="win" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2.3 6.6 1.5v5.4H1zM7.4 1.4 15 .3v6.6H7.4zM1 7.7h5.6v5.4L1 12.3zM7.4 7.7H15v6.6l-7.6-1.1z" /></svg>
-              Download for Windows
-            </a>
-            <a class="btn btn-ghost btn-lg" href="/download">Install guide</a>
+      <section class="finale" id="get" data-swarm="firefly" data-swarm-at="#spell-stage" data-say="Say hey. I'll be right beside your cursor.">
+        <div class="wrap finale-inner finale-split">
+          <div class="finale-copy">
+            <h2 class="display-sm reveal">Say hey to Pyxi.</h2>
+            <p class="lead reveal">Download the beta, join with your invite code, and hold <kbd>Ctrl</kbd> <kbd>Alt</kbd>.</p>
+            <div class="cta-row center reveal">
+              <a class="btn btn-fly btn-lg" href="{{downloadUrl}}" data-download data-track="finale-download">
+                <svg class="win" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2.3 6.6 1.5v5.4H1zM7.4 1.4 15 .3v6.6H7.4zM1 7.7h5.6v5.4L1 12.3zM7.4 7.7H15v6.6l-7.6-1.1z" /></svg>
+                Download for Windows
+              </a>
+              <a class="btn btn-ghost btn-lg" href="/download">Install guide</a>
+            </div>
+            <p class="fine reveal">Version <span data-version>{{version}}</span>, <span data-size>{{downloadSize}}</span>. Windows 10 and 11.<br />By installing you agree to the <a href="/terms">terms of use</a> and <a href="/privacy">privacy policy</a>.</p>
           </div>
-          <p class="fine reveal">Version <span data-version>{{version}}</span>, <span data-size>{{downloadSize}}</span>. Windows 10 and 11.<br />By installing you agree to the <a href="/terms">terms of use</a> and <a href="/privacy">privacy policy</a>.</p>
+          <div class="finale-stage">
+            <div class="finale-glow" aria-hidden="true"></div>
+            <div class="spell-stage" id="spell-stage" aria-hidden="true"></div>
+            <form class="spell reveal" id="spell" autocomplete="off">
+              <label for="spell-input">Type a word. The fireflies will spell it.</label>
+              <input id="spell-input" type="text" maxlength="12" placeholder="hey" spellcheck="false" autocapitalize="off" />
+            </form>
+          </div>
         </div>
       </section>
     </main>

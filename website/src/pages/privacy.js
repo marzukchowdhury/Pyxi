@@ -577,7 +577,9 @@ function anchorHeadings() {
 }
 
 if (document.body.classList.contains("page-privacy")) {
-  const forceMotion = new URLSearchParams(location.search).has("motion");
+  const forceMotion =
+    new URLSearchParams(location.search).has("motion") ||
+    document.documentElement.classList.contains("force-motion");
   const reduced =
     !forceMotion && matchMedia("(prefers-reduced-motion: reduce)").matches;
   anchorHeadings();

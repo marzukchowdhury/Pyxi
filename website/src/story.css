@@ -1,0 +1,458 @@
+/* The swarm behind the home page, the pinned story it acts out, the rail, and the spell box. */
+.swarm {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- the story */
+.story {
+  position: relative;
+}
+.story-track {
+  position: relative;
+  height: 620vh;
+}
+.story-sticky {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  justify-items: center;
+  padding: 0 20px clamp(28px, 6vh, 64px);
+  overflow: hidden;
+}
+/* a soft floor of dark under the words, so they read over the fireflies */
+.story-sticky::before {
+  content: "";
+  position: absolute;
+  inset: 46% 0 0;
+  background: radial-gradient(
+    60% 80% at 50% 70%,
+    rgba(7, 8, 11, 0.9),
+    rgba(7, 8, 11, 0.55) 55%,
+    transparent 80%
+  );
+  pointer-events: none;
+}
+.story-stage {
+  grid-row: 1;
+  align-self: stretch;
+  width: 100%;
+  margin: 104px 0 clamp(14px, 3vh, 30px);
+}
+.story-steps {
+  position: relative;
+  grid-row: 2;
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: min(1000px, 100%);
+  text-align: center;
+}
+.story-step {
+  grid-area: 1 / 1;
+  align-self: end;
+  opacity: 0;
+  transform: translateY(22px) scale(0.985);
+  filter: blur(8px);
+  transition:
+    opacity 0.45s var(--ease),
+    transform 0.7s var(--ease),
+    filter 0.45s;
+  pointer-events: none;
+}
+.story-step.on {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  pointer-events: auto;
+}
+.story-n {
+  margin: 0 0 16px;
+  font:
+    600 12px/1 ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0.2em;
+  color: var(--fly);
+}
+.story-n span {
+  color: var(--ink-3);
+}
+.story-line {
+  margin: 0;
+  font-size: clamp(33px, 5.2vw, 76px);
+  font-weight: 660;
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+.story-sub {
+  margin: 18px auto 0;
+  max-width: 38em;
+  font-size: clamp(16px, 1.35vw, 19.5px);
+  line-height: 1.55;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.sw {
+  opacity: var(--o, 1);
+  transition: opacity 0.28s linear;
+}
+.story-bar {
+  position: relative;
+  grid-row: 3;
+  display: flex;
+  gap: 6px;
+  margin-top: clamp(20px, 4vh, 38px);
+}
+.story-bar i {
+  display: block;
+  width: 38px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.13);
+  overflow: hidden;
+}
+.story-bar i::after {
+  content: "";
+  display: block;
+  height: 100%;
+  background: var(--fly);
+  box-shadow: 0 0 10px var(--fly);
+  transform-origin: left;
+  transform: scaleX(var(--p, 0));
+}
+.story-hint {
+  position: absolute;
+  right: clamp(18px, 4vw, 60px);
+  bottom: clamp(28px, 6vh, 64px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font:
+    600 11px/1 ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  transition: opacity 0.4s;
+}
+.story-hint::after {
+  content: "";
+  width: 1px;
+  height: 34px;
+  background: linear-gradient(var(--fly), transparent);
+  animation: hint 1.8s var(--ease) infinite;
+  transform-origin: top;
+}
+@keyframes hint {
+  0% {
+    transform: scaleY(0);
+    opacity: 1;
+  }
+  60% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleY(1);
+    opacity: 0;
+  }
+}
+.story-track.started .story-hint {
+  opacity: 0;
+}
+
+/* ---------------------------------------------------------------- the rail: a thread down the edge */
+.rail {
+  position: fixed;
+  left: max(20px, calc((100vw - 1200px) / 2 - 96px));
+  top: 50%;
+  z-index: 30;
+  display: none;
+  flex-direction: column;
+  gap: 30px;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s var(--ease);
+  --p: 0;
+}
+.rail.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+.rail::before,
+.rail::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 6px;
+  width: 1px;
+}
+.rail::before {
+  bottom: 6px;
+  background: var(--hair-hi);
+}
+.rail::after {
+  height: calc(var(--p) * (100% - 12px));
+  background: linear-gradient(rgba(255, 200, 97, 0.2), var(--fly));
+  box-shadow: 0 0 8px rgba(255, 200, 97, 0.7);
+}
+.rail a {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 11px;
+  text-decoration: none;
+  font:
+    600 10.5px/1 ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.rail a i {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid var(--hair-hi);
+  background: var(--bg);
+  transition: all 0.35s var(--ease);
+}
+.rail a.done i {
+  border-color: transparent;
+  background: var(--fly);
+  box-shadow: 0 0 12px rgba(255, 200, 97, 0.8);
+}
+.rail a.now i {
+  transform: scale(1.35);
+}
+.rail a b {
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.rail a.now b {
+  opacity: 1;
+  color: var(--fly);
+}
+.rail a span {
+  padding: 6px 10px;
+  margin: -6px 0 -6px -4px;
+  border-radius: 8px;
+  background: rgba(10, 12, 18, 0.9);
+  border: 1px solid var(--hair);
+  color: var(--ink);
+  opacity: 0;
+  transform: translateX(-6px);
+  transition:
+    opacity 0.25s,
+    transform 0.35s var(--ease);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.rail:hover a b {
+  opacity: 1;
+}
+.rail:hover a span {
+  opacity: 1;
+  transform: none;
+}
+@media (min-width: 1440px) {
+  .rail {
+    display: flex;
+  }
+}
+
+/* ---------------------------------------------------------------- the end: type a word */
+.finale-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(30px, 5vw, 80px);
+  align-items: center;
+  text-align: left;
+}
+.finale-split .lead {
+  margin-inline: 0;
+}
+.finale-split .cta-row.center {
+  justify-content: flex-start;
+}
+.finale-stage {
+  position: relative;
+  display: grid;
+  justify-items: center;
+}
+.finale-stage .finale-glow {
+  top: 42%;
+  width: min(520px, 100%);
+  height: 360px;
+}
+.finale:has(.finale-split) {
+  padding: clamp(48px, 7vh, 84px) 0 clamp(34px, 5vh, 60px);
+}
+.spell-stage {
+  width: 100%;
+  height: clamp(220px, 34vh, 330px);
+}
+.spell {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin: 6px 0 0;
+}
+.spell label {
+  font:
+    600 11px/1 ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.spell input {
+  width: min(320px, 80vw);
+  padding: 13px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--hair-hi);
+  background: rgba(10, 12, 18, 0.7);
+  backdrop-filter: blur(10px);
+  color: var(--ink);
+  font: 600 20px/1.2 var(--font);
+  letter-spacing: -0.02em;
+  text-align: center;
+  outline: none;
+  transition:
+    border-color 0.25s,
+    box-shadow 0.3s;
+}
+.spell input::placeholder {
+  color: var(--ink-3);
+  font-weight: 500;
+}
+.spell input:focus {
+  border-color: rgba(255, 200, 97, 0.6);
+  box-shadow:
+    0 0 0 4px rgba(255, 200, 97, 0.1),
+    0 0 40px rgba(255, 200, 97, 0.14);
+}
+
+@media (max-width: 999px) {
+  .finale-split {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+  .finale-split .lead {
+    margin-inline: auto;
+  }
+  .finale-split .cta-row.center {
+    justify-content: center;
+  }
+  .finale-stage {
+    order: -1;
+  }
+  .spell-stage {
+    height: clamp(220px, 34vh, 300px);
+  }
+}
+@media (max-width: 760px) {
+  .story-stage {
+    margin-top: 150px;
+  }
+  .story-track {
+    height: 540vh;
+  }
+  .story-hint {
+    display: none;
+  }
+  .story-bar i {
+    width: 26px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not(.force-motion) .story-track {
+    height: auto;
+  }
+  html:not(.force-motion) .story-sticky {
+    position: static;
+    height: auto;
+    display: block;
+    padding: 90px 20px;
+  }
+  html:not(.force-motion) .story-sticky::before,
+  html:not(.force-motion) .story-stage,
+  html:not(.force-motion) .story-bar,
+  html:not(.force-motion) .story-hint {
+    display: none;
+  }
+  html:not(.force-motion) .story-steps {
+    gap: 80px;
+    margin-inline: auto;
+  }
+  html:not(.force-motion) .story-step {
+    grid-area: auto;
+    opacity: 1;
+    transform: none;
+    filter: none;
+    pointer-events: auto;
+  }
+  html:not(.force-motion) .sw {
+    transition: none;
+  }
+}
+
+/* ---------------------------------------------------------------- animations off on this PC */
+.motion-pill {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 70;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px 10px;
+  border-radius: 99px;
+  border: 1px solid var(--hair-hi);
+  background: rgba(10, 12, 18, 0.88);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  color: var(--ink-2);
+  font: 500 13px/1 var(--font);
+  cursor: pointer;
+  transition:
+    border-color 0.25s,
+    transform 0.3s var(--spring);
+}
+.motion-pill:hover {
+  border-color: rgba(255, 200, 97, 0.6);
+  transform: translateY(-2px);
+}
+.motion-pill i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fly);
+  box-shadow: 0 0 10px var(--fly);
+}
+.motion-pill b {
+  font-weight: 650;
+  color: var(--fly);
+}
