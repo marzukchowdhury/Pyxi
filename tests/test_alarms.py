@@ -124,3 +124,8 @@ async def test_media_keys_still_work_next_to_screen_playpause(settings, monkeypa
     b = Brain(settings, Hub(), llm=DemoLLM(), screen=FakeScreen())
     note = await b._quick_action("media", "playpause")
     assert note is None or "UnboundLocal" not in str(note)
+
+
+def test_today_when_that_time_has_gone_says_so() -> None:
+    a = alarm_request("set an alarm for 5 pm today", NIGHT)
+    assert a.at.day == 9 and a.line(NIGHT) == "5:00 PM has already gone today, so it's set for tomorrow."

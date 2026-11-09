@@ -50,8 +50,11 @@ _TIMER = re.compile(
 class Alarm:
     at: datetime
     label: str = ""
+    passed_today: bool = False  # they said today, but that time had gone: it's tomorrow
 
     def line(self, now: datetime) -> str:
+        if self.passed_today:
+            return f"{spoken_time(self.at)} has already gone today, so it's set for tomorrow."
         day = "today" if self.at.date() == now.date() else "tomorrow" if self.at.date() == (now + timedelta(days=1)).date() else self.at.strftime("%A")
         return f"Alarm set for {spoken_time(self.at)} {day}."
 
@@ -114,7 +117,8 @@ def alarm_request(text: str, now: datetime | None = None) -> Alarm | None:
         candidates.append(at)
     # "Alarm for 7" with no am/pm: the next 7 o'clock, morning first when it's tomorrow.
     at = min(candidates) if day != "tomorrow" else candidates[0]
-    return Alarm(at=at, label=(m.group("label") or "").strip())
+    passed = day == "today" and at.date() != now.date()
+    return Alarm(at=at, label=(m.group("label") or "").strip(), passed_today=passed)
 
 
 def timer_request(text: str) -> Timer | None:
