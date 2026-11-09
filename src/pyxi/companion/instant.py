@@ -117,8 +117,8 @@ _SITE_RE = re.compile(
 )
 _APP_RE = re.compile(
     _LEAD
-    + r"(?:open(?: up)?|start|launch|bring up|pull up)\s+(?:up\s+)?(?:the\s+)?"
-    + rf"({_alts([k for k in APPS if k not in ('apps', 'files')])})(?:\s+app)?"
+    + r"(?:open(?: up)?|start|launch|bring up|pull up|show me)\s+(?:up\s+)?(?:the\s+|my\s+)?"
+    + rf"({_alts([k for k in APPS if k not in ('apps', 'files')])})(?:\s+(?:app|folder))?"
     + _TAIL,
     re.I,
 )

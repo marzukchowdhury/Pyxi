@@ -127,3 +127,14 @@ async def test_play_skips_the_model(settings):
     brain._play_music = fake_play
     await brain.turn("Play Blinding Lights by The Weeknd")
     assert asked == [{"query": "Blinding Lights by The Weeknd", "app": "youtube_music"}] and not llm.prompts
+
+
+def test_their_folders_and_more_apps_open_at_once():
+    from pyxi.companion import instant
+    from pyxi.companion.actions import app_target
+
+    hit = instant.match("Open my Downloads folder.")
+    assert hit and hit.action == "open_app" and app_target(hit.value) == "shell:Downloads"
+    assert app_target("my documents folder") == "shell:Personal"
+    assert instant.match("open the clock app").value == "clock"
+    assert instant.match("open the recycle bin") is not None

@@ -46,6 +46,20 @@ APPS: dict[str, str] = {
     "camera privacy": "ms-settings:privacy-webcam",
     "windows update": "ms-settings:windowsupdate",
     "apps": "ms-settings:appsfeatures",
+    "control panel": "control.exe",
+    "clock": "ms-clock:",
+    "camera": "microsoft.windows.camera:",
+    "photos": "ms-photos:",
+    "microsoft store": "ms-windows-store:",
+    "steam": "steam:",
+    # Their own folders, opened in File Explorer ("open my Downloads folder").
+    "downloads": "shell:Downloads",
+    "documents": "shell:Personal",
+    "desktop": "shell:Desktop",
+    "pictures": "shell:My Pictures",
+    "music": "shell:My Music",
+    "videos": "shell:My Video",
+    "recycle bin": "shell:RecycleBinFolder",
 }
 
 
@@ -62,6 +76,7 @@ def safe_url(value: str) -> str | None:
 
 def app_target(name: str) -> str | None:
     key = re.sub(r"\s+", " ", name.lower().strip()).removesuffix(".exe")
+    key = key.removeprefix("my ").removeprefix("the ").removesuffix(" folder").removesuffix(" app")
     return APPS.get(key)
 
 
