@@ -10,6 +10,8 @@ Pyxi is a desktop assistant that can see your screen, read the files you point i
 
 - Pyxi looks at your screen **only when you talk or type to it**, unless you turn on a feature that watches for you (the Memory Palace, price checks while you shop, or Ditto while you show it a task).
 - Passwords, password fields, password managers, banking apps and anything that looks like an API key or token are **blacked out before anything is sent**.
+- Pyxi **refuses to remember secrets**: a password, card number, government ID or key is never saved as a memory, even if you say one.
+- What Pyxi reads is **data, not instructions**. Text in an email, page or document can't make Pyxi act: every send, booking and file change still needs your Allow, and the card says when a recipient came from something Pyxi read.
 - What you ask, plus the screenshot, on-screen text and the parts of files or emails it needs to answer, goes to an AI model to work out the reply. **We don't sell it, and we don't use it to train models.**
 - Your history stays **on your computer**. Conversations are deleted after 30 days; Memory Palace history after 72 hours.
 - Your speech is turned into text **on your computer**. The one exception is Bengali, which is sent to a cloud model to be understood (see below).
@@ -112,13 +114,13 @@ Files Pyxi makes for you go to `Documents\Pyxi`, or beside the file they came fr
 
 ## Using your mouse and keyboard
 
-Pyxi controls your mouse and keyboard only after you press **Allow** on its request card, once or "always". Moving the mouse or pressing <kbd>Esc</kbd> stops it instantly. Sending, paying, booking, buying, deleting, posting, signing in or out, and closing tabs or apps always ask again. Pyxi never types into password fields, never types card numbers or government ID numbers, and never completes a payment: when a booking reaches payment, Pyxi hands the browser window to you.
+Pyxi controls your mouse and keyboard only after you press **Allow** on its request card, once or "always". An "always" grant expires after 30 days, and Settings lists every grant so you can revoke it. <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Pause</kbd> (also in the tray and Settings) stops everything at once: every teammate, the mouse and keyboard, and anything waiting to go out. Moving the mouse or pressing <kbd>Esc</kbd> stops it instantly. Sending, paying, booking, buying, deleting, posting, signing in or out, and closing tabs or apps always ask again. Pyxi never types into password fields, never types card numbers or government ID numbers, and never completes a payment: when a booking reaches payment, Pyxi hands the browser window to you.
 
 ## Your choices
 
-- **See it:** the Memory tab shows what Pyxi remembers. Settings shows what's connected and which folders Pyxi may search.
+- **See it:** the Memory tab shows what Pyxi and the teammates remember. The activity log in the panel lists everything Pyxi did on your behalf, with the time and the teammate (emails sent, buttons pressed, files moved, scripts changed), and can undo what can be undone. Settings shows what's connected, which folders Pyxi may search and which "always allow" grants are active.
 - **Delete it:**
-  - "Forget everything" in the Memory tab wipes the Memory Palace.
+  - "Wipe everything" in the Memory tab forgets every memory, the Memory Palace and the conversations with their screenshots. It asks first.
   - "Forget …" removes a memory.
   - Disconnect an account in Settings to remove its tokens.
   - Turn off "Let Pyxi search my files" in Settings.

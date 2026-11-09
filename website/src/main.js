@@ -3,9 +3,11 @@ import "./styles.css";
 import "./pages.css";
 import "./demos.css";
 import "./motion.css";
+import "./sections.css";
 import "@fontsource-variable/fraunces/wght.css";
 import { initDemos } from "./demos.js";
 import { initMotion } from "./motion.js";
+import { initCatalog } from "./catalog.js";
 import { Firefly } from "./firefly.js";
 
 document.documentElement.classList.add("js");
@@ -207,3 +209,6 @@ fetch("https://api.github.com/repos/marzukchowdhury/Pyxi/releases/latest")
 
 // ------------------------------------------------------------------ clips and the 3D layers
 initMotion({ reduced });
+
+// ------------------------------------------------------------------ ask anything, the team, a day
+initCatalog({ reduced });
