@@ -96,6 +96,24 @@ async def test_escape_alone_does_not_carry_the_words_on(settings):
     assert [t["error"] for t in brain.turns.recent()] == [None, "interrupted"]
 
 
+async def test_dismissed_words_are_not_picked_up_while_waiting_behind_a_routine(settings):
+    llm = Slow(
+        [("say", {"text": "Dropped."})],
+        [("say", {"text": "Sunny all day."})],
+        [("say", {"text": "Everest."})],
+    )
+    brain, _ = make_brain(settings, llm=llm)
+    first = asyncio.create_task(brain.turn(FIRST))
+    await thinking(llm)
+    brain.interrupt()  # dismissed with Escape
+    await first
+    routine = asyncio.create_task(brain.turn("(Routine: say the forecast)", synthetic=True))
+    await thinking(llm, 2)
+    await brain.turn("What is the tallest mountain?")  # sent while the routine is still running
+    await routine
+    assert asked(llm) == "What is the tallest mountain?"
+
+
 async def test_old_words_are_not_carried_into_a_much_later_turn(settings, monkeypatch):
     from pyxi.companion import brain as brain_module
 

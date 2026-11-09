@@ -111,6 +111,9 @@ async def test_a_plain_reply_that_only_promises_is_nudged_too(settings):
     await asyncio.sleep(0.05)
     assert len(llm.prompts) == 2 and "You told them:" in llm.prompts[1]
     assert "out of my reach" in " ".join(s["text"] for s in rec.of("say"))
+    # nothing was opened, so the words may have been the job ("Writing one now." and the poem)
+    assert "If what you said was itself the whole job, add nothing." in llm.prompts[1]
+    assert "opening it is not doing it" not in llm.prompts[1]
 
 
 async def test_no_nudge_when_it_was_done_or_was_only_talk(settings):

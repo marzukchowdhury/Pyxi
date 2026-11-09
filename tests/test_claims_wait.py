@@ -80,6 +80,14 @@ async def test_a_claim_after_the_tool_in_the_reply_is_dropped_too(settings):
     assert said(rec) == ["Google isn't connected yet."]
 
 
+async def test_a_refusal_the_model_says_nothing_about_is_never_on_it(settings):
+    llm = Script([("say", {"text": CLAIM}), ("edit_document", TABLE)], "")  # then silence
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("put a 5 by 5 table in my doc")
+    await asyncio.sleep(0.05)
+    assert said(rec) == ["I couldn't do that just now."]  # not "On it." for a job that never started
+
+
 async def test_a_claim_is_said_once_the_tool_has_agreed(settings):
     llm = Script(
         [

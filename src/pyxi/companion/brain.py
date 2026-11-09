@@ -216,6 +216,7 @@ class Brain:
         self._synthetic = False
         self._pending_say = ""
         self._promise_nudged = False
+        self._refused = False
         self._cut_short = False
         # What a turn they talked over left behind (its words, and what it had done), for the
         # turn their new words start: nothing they said is dropped.
@@ -1835,9 +1836,11 @@ class Brain:
             + ". Do it now with the right tool (use_computer for clicks and settings inside an "
             "app), or tell them plainly, in one short line, that you can't and why. Don't repeat "
             "what you have already said."
+            # "Writing one now." and then the haiku itself: the words were the job.
+            + ("" if opened else " If what you said was itself the whole job, add nothing.")
         )
 
-    def _pick_up(self, user_text: str, waited: bool) -> tuple[str, list[str]]:
+    def _pick_up(self, user_text: str, behind: str) -> tuple[str, list[str]]:
         """They kept talking, or paused mid-sentence and the request arrived in two parts: the
         turn that had started on the first part was cut off. If it had done nothing yet, its
         words go in front of the new ones, so both are answered as one request (and its own row
@@ -1848,7 +1851,7 @@ class Brain:
         if left is None or instant.is_stop(user_text):  # "stop" is never "do that, and stop"
             return user_text, []
         if (
-            not (left["by_words"] or waited)  # cut off by Escape, not by more words
+            not (left["by_words"] or left["turn_id"] == behind)  # cut off by Escape, not words
             or time.monotonic() - left["at"] > _CARRY_S
         ):
             if not left["done"]:  # asked and never answered: the conversation still says so
@@ -1871,7 +1874,7 @@ class Brain:
         """``synthetic``: a routine or a guide step, not words the user actually said (so an
         address in it never counts as the user naming that person)."""
         self.warm_voice()  # the voice loads while the model thinks, if it was let go
-        waited = self._lock.locked()  # typed or said while another turn was still running
+        behind = self._turn_id if self._lock.locked() else ""  # sent while that turn still ran
         async with self._lock:
             self._ctx, self._images, self._usage, self._said, self._calls = (
                 None,
@@ -1893,6 +1896,7 @@ class Brain:
                 self._guide_fresh = True  # a new request: a guide in it counts from step 1
             self._pending_say = ""  # an answer held back during a lookup round
             self._promise_nudged = False  # "you said you'd do it, so do it": once a turn at most
+            self._refused = False  # a tool that can refuse did, this turn
             self._cut_short = False  # a round was dropped because they spoke again
             self._screens_text: str | None = None  # every screen and what's on it, once a turn
             self._shown_screen: str | None = None  # the screen look_again looked at, if it did
@@ -1917,7 +1921,7 @@ class Brain:
                 from pyxi import wakename
 
                 user_text = wakename.normalize(user_text)  # typed or heard: "Your pixxit..." -> "Pyxi, ..."
-                user_text, cut_off = self._pick_up(user_text, waited)
+                user_text, cut_off = self._pick_up(user_text, behind)
                 self._user_text = user_text
             try:
                 hit = None if synthetic else instant.match(user_text)
@@ -2390,10 +2394,11 @@ class Brain:
                 if call.name in CAN_REFUSE:
                     if note and note.startswith(f"{call.name} failed:"):
                         needs_more = True  # it broke: the model says so, instead of the claim
-                    if len(self._said) > spoken or (
+                    self._refused = bool(
                         note and note.startswith((f"{call.name}:", f"{call.name} failed:"))
-                    ):
-                        unsaid = True
+                    )
+                    # It said no, or it said its own line (which is then the true one).
+                    unsaid = unsaid or self._refused or len(self._said) > spoken
                 if note and call.name in safety.UNTRUSTED_TOOLS:
                     if call.name in safety.SOURCE_LABEL:
                         self._turn_reads.append((safety.SOURCE_LABEL[call.name], note))
@@ -2496,6 +2501,10 @@ class Brain:
                     self._speak(f"Here's the gist. {points}")
                 elif self._visual_turn:
                     pass  # the drawing or model narrates itself; a canned line would only interrupt
+                elif self._refused:
+                    # The tool said no, its line was held back, and the model said nothing
+                    # after: never "On it." for a job that did not start.
+                    self._speak("I couldn't do that just now.")
                 elif any(c.get("tool") in _BACKGROUND_TOOLS for c in self._calls):
                     self._speak("On it.")  # started, not finished: "Done." then a failure misleads
                 elif any(
