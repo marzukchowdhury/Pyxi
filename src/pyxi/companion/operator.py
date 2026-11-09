@@ -128,8 +128,10 @@ DONE = ToolSpec(
             "ok": {"type": "boolean"},
             "summary": {
                 "type": "string",
-                "description": "What you did and what they should know, said to them in one or two "
-                "short friendly sentences (if it failed: why, and what they can do).",
+                "description": "What you did, said out loud to them: ONE short plain sentence, the way a "
+                "friend would say it ('Downloads is open.', 'Your 7 am alarm is set.'). No UI words "
+                "(breadcrumb, pane, element, item counts) and no window titles. If it failed: why, and "
+                "what they can do, in one more sentence.",
             },
         },
         "required": ["ok", "summary"],

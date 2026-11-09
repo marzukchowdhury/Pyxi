@@ -82,6 +82,15 @@ def app_target(name: str) -> str | None:
 
 async def open_app(name: str) -> str:
     target = app_target(name)
+    if target == "spotify:":
+        from pyxi import media
+
+        if not media.spotify_installed():
+            # Not installed: Windows would only offer to find an app. The web player is the app.
+            import webbrowser
+
+            await asyncio.to_thread(webbrowser.open, "https://open.spotify.com", 2)
+            return "Opened Spotify in the browser (the app isn't installed)."
     if target is None:
         known = ", ".join(sorted({k for k in APPS if " " not in k})[:14])
         return f"open_app: I can only open apps I know, like {known}."
