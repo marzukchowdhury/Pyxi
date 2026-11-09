@@ -57,7 +57,7 @@ jobs:
           python -m pip install --no-deps -e ../otto -e .
           python -m pytest -q tests/test_macos_windows.py tests/test_macos_hands.py tests/test_macos_misc.py
 
-      - name: The whole Python suite (informational: parts of it still assume Windows)
+      - name: "The whole Python suite (informational, parts of it still assume Windows)"
         working-directory: pyxi
         continue-on-error: true
         run: python -m pytest -q
