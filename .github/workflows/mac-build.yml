@@ -12,6 +12,7 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+    branches: ["claude/mac-port"]  # test builds while the port lives on its own branch
 
 permissions:
   contents: read
