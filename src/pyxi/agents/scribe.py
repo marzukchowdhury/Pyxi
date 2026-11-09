@@ -69,7 +69,11 @@ class Notes:
 
     def action_line(self, a: dict[str, str]) -> str:
         who = a.get("who") or "No owner yet"
-        when = f" (by {a['when']})" if a.get("when") else ""
+        when = str(a.get("when") or "").strip()
+        if re.match(r"(?:By|Before|This|Next|End|Tomorrow|Today|Tonight|Later|Early|Mid)\b", when):
+            when = when[0].lower() + when[1:]  # "(by this week)", not "(by This week)"
+        if when:  # the model's own "by Friday" or "before the launch": no "by by"
+            when = f" ({when})" if re.match(r"(?:by|before)\b", when) else f" (by {when})"
         return f"{who}: {a.get('what', '').rstrip('.')}{when}"
 
     def markdown(self, source: str, minutes: int) -> str:

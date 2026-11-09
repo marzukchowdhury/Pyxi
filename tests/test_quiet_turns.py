@@ -156,3 +156,13 @@ def test_reworded_repeats_with_dates_and_names_are_dropped() -> None:
     said = ["It's a $107.80 phone bill, due Nov 28."]
     keep = "A $15 roaming day pass was charged twice on October 3."
     assert drop_repeats(keep, said) == keep
+
+
+def test_notification_text_is_clipped_at_a_boundary() -> None:
+    from pyxi.companion.brain import clip
+
+    text = "The lease renews on November 1. " + "The deadline for written notice is sixty days before that date, " * 4
+    out = clip(text, 220)
+    assert out == "The lease renews on November 1." or out.endswith("…")
+    assert len(clip(text, 220)) <= 221 and not out.endswith(" n")
+    assert clip("short one", 220) == "short one"

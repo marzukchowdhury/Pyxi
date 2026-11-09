@@ -2951,13 +2951,13 @@ class Brain:
             title = f"{job.agent_name} finished"
             body = " ".join(split_sentences(job.summary)[:2]) if job.summary else "Done."
             if job.role == "writer":
-                title, body = "Your draft is ready", (job.summary or "")[:220]
+                title, body = "Your draft is ready", clip(job.summary or "", 220)
             actions = (["open"] if files else []) + (
                 ["walkthrough"] if job.role == "browser" else []
             )
         else:
             title = f"{job.agent_name} couldn't finish"
-            body = (job.summary or job.status)[:220]
+            body = clip(job.summary or job.status, 220)
             actions = []
         if job.role in specialists.ROLES and data.get("title"):  # a specialist's own card
             title, body = str(data["title"])[:70], str(data.get("body") or body)[:300]
@@ -3134,6 +3134,19 @@ _PROMISE = re.compile(
     r"pulling (it |that )?up|researching)\b",
     re.IGNORECASE,
 )
+
+
+def clip(text: str, limit: int) -> str:
+    """At most ``limit`` characters, ending on a whole sentence when one fits, else a whole
+    word with an ellipsis: never "the deadline for written n"."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    end = max(head.rfind(". "), head.rfind("! "), head.rfind("? "))
+    if end >= limit // 2:
+        return head[: end + 1]
+    return head[: head.rfind(" ")].rstrip(",;:") + "…" if " " in head else head
 
 
 def drop_false_promises(text: str) -> tuple[str, bool]:

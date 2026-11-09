@@ -102,6 +102,16 @@ def _tally(changes: list[str]) -> list[str]:
     return out
 
 
+def plain_markdown(text: str) -> str:
+    """A model's Markdown as plain text for a notification: no **bold**, `code` or # headings
+    (the saved .md file keeps them). Bullets stay as "- "."""
+    text = re.sub(r"(\*\*|__)(.+?)\1", r"\2", text)
+    text = re.sub(r"(?<![\w*])\*(?!\s)([^*\n]+?)\*(?!\w)", r"\1", text)
+    text = re.sub(r"`([^`\n]+)`", r"\1", text)
+    text = re.sub(r"(?m)^[ \t]{0,3}#{1,6}[ \t]+", "", text)
+    return re.sub(r"(?m)^([ \t]*)[*+][ \t]+", r"\1- ", text).strip()
+
+
 def describe_failure(exc: BaseException) -> str:
     """What went wrong, the way you'd tell a person (the notch shows this, never a stack)."""
     text = str(exc)
@@ -519,7 +529,8 @@ class JobManager:
             result = await summarize_document(doc, job.task, llm)
             cost += result.cost_usd
             outputs.append(str(result.path))
-            parts.append(result.text if len(docs) == 1 else f"{doc.name}: {result.text}")
+            text = plain_markdown(result.text)  # the notification is plain text: no **bold**
+            parts.append(text if len(docs) == 1 else f"{doc.name}: {text}")
         job.summary = "\n\n".join(parts)
         job.data = {"draft": job.summary, "outputs": outputs}
         job.outputs, job.cost_usd, job.status = outputs, cost, "done"
@@ -753,7 +764,16 @@ class JobManager:
             job.status = "failed"
             job.summary = result.summary or "I couldn't make that change."
             return
-        parts = [". ".join(_tally(result.changes)[:4]) + "."]
+        # One sentence for the edits: the notification shows the first two sentences, so the
+        # edits that failed and where the copy went are never cut off by a list of edits.
+        done = _tally(result.changes)[:4]
+        first = "; ".join(
+            [done[0]] + [c[:1].lower() + c[1:] if c[1:2].islower() else c for c in done[1:]]
+        )
+        if result.problems:
+            n = len(result.problems)
+            first += f", but {n} edit{'s' if n != 1 else ''} didn't work"
+        parts = [first.rstrip(".") + "."]
         if result.outputs:
             names = ", ".join(Path(o).name for o in result.outputs)
             parts.append(f"Saved as {names}, beside the original.")
@@ -762,7 +782,5 @@ class JobManager:
             parts.append("It's a new file in your Google Drive: " + " ".join(result.links))
         elif result.links:
             parts.append("Edited in Google (File > Version history has the old one): " + " ".join(result.links))
-        if result.problems:
-            parts.append(f"{len(result.problems)} edit(s) didn't work.")
         job.summary = " ".join(parts)
         job.status = "done"

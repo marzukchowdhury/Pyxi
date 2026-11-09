@@ -88,6 +88,29 @@ def _is_total_label(v: Any) -> bool:
     return isinstance(v, str) and bool(re.match(r"\s*(grand\s+)?totals?\b", v, re.I))
 
 
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_DATE_FORMULA = re.compile(r"=\s*DATE\s*\(", re.I)
+
+
+def _dated(ws, cell) -> None:
+    """A date the model wrote (=DATE(2026,10,3), or "2026-10-03" under other dates) shows as a
+    date, not as 46298 or as text: in the column's own date format when it has one."""
+    from datetime import datetime
+
+    from openpyxl.styles.numbers import is_date_format
+
+    above = ws.cell(cell.row - 1, cell.column) if cell.row > 1 else None
+    fmt = getattr(above, "number_format", "") or ""
+    fmt = fmt if is_date_format(fmt) else ""  # a date above (or a =DATE() made a moment ago)
+    v = cell.value
+    if isinstance(v, str) and fmt and _ISO_DATE.fullmatch(v.strip()):
+        cell.value = datetime.fromisoformat(v.strip())
+    elif not (isinstance(v, str) and _DATE_FORMULA.match(v)):
+        return
+    if fmt or cell.number_format == "General":
+        cell.number_format = fmt or "yyyy-mm-dd"
+
+
 class Workbook:
     """An .xlsx opened twice: once for formulas (what we edit) and once for the values Excel last
     calculated (what the outline and summaries quote)."""
@@ -166,6 +189,7 @@ class Workbook:
             raise LedgerError("set_cells needs cells like {'B5': 120, 'C5': '=B5*2'}.")
         for ref, v in cells.items():
             ws[str(ref).upper()] = v
+            _dated(ws, ws[str(ref).upper()])
         return f"Set {len(cells)} cell{'s' if len(cells) != 1 else ''} on {ws.title}"
 
     def op_append_row(self, op: dict[str, Any]) -> str:
@@ -173,7 +197,7 @@ class Workbook:
         values = list(op.get("values") or [])
         r = _last_row(ws) + 1
         for c, v in enumerate(values, 1):
-            ws.cell(r, c, v)
+            _dated(ws, ws.cell(r, c, v))
         return f"Added row {r} on {ws.title}"
 
     def op_totals_row(self, op: dict[str, Any]) -> str:

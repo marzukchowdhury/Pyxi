@@ -31,8 +31,8 @@ from pyxi.mailwatch import (
     RETURNED,
     amount_in,
     merchant,
-    money,
 )
+from pyxi.mailwatch import money as _money
 
 if TYPE_CHECKING:
     from pyxi.agents.jobs import Job, JobManager
@@ -114,6 +114,15 @@ CATEGORIES: list[tuple[str, re.Pattern[str]]] = [
         ),
     ),
 ]
+# "US$0.99", "Total: 0.99 USD": a receipt that says it's in US dollars
+US_DOLLARS = re.compile(r"\bUS\s?\$|\$\s?\d[\d,.]*\s?USD\b|\bUSD\s?\$?\s?\d")
+
+
+def money(amount: float, currency: str) -> str:
+    """mailwatch's money(), but US dollars next to other dollars read "US$"."""
+    return f"US${amount:,.2f}" if currency == "USD" else _money(amount, currency)
+
+
 MONTHS = {
     m: i + 1
     for i, m in enumerate(
@@ -279,6 +288,8 @@ def receipts(
         got = amount_in(body) or amount_in(subject)
         if not got or got[0] <= 0:
             continue
+        if got[1] == "$" and US_DOLLARS.search(f"{subject}\n{body}"):
+            got = (got[0], "USD")  # said so: never mixed into Canadian dollars below
         name = merchant(str(mail.get("from") or ""), subject, body)
         if name.lower() == "uber" and re.search(r"uber ?eats", text, re.I):
             name = "Uber Eats"
@@ -302,12 +313,18 @@ def receipts(
         )
     # A plain "$" next to CA$ receipts is the same Canadian dollars (Amazon.ca, Uber in Canada
     # print just "$"), so they add up together. Same for A$ and NZ$.
+    # A receipt that says US$ or USD stays apart from those; with no other dollars around it's
+    # the same "$" as the rest.
     local = {r.currency for r in out} & {"CAD", "AUD", "NZD"}
     if len(local) == 1:
         (cur,) = local
         for r in out:
             if r.currency == "$":
                 r.currency = cur
+    else:
+        for r in out:
+            if r.currency == "USD":
+                r.currency = "$"
     return out
 
 

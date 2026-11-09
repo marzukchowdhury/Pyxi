@@ -236,7 +236,9 @@ def report(hits: list[Hit], query: str, looked: list[str]) -> dict[str, Any]:
             "summary": f"Nothing found for {query!r} in {places}.",
         }
     top, rest = hits[0], hits[1:5]
-    body = top.line() + "."
+    # The notification names the file; its full path is behind the Open button (and in the
+    # summary, for the model), not spelled out in the notch.
+    body = top.line().replace(f" (the file: {top.path})", "") + "."
     if top.source == "screen":
         body += ' Say "show me" and I\'ll bring that screen back.'
     elif top.source == "file":

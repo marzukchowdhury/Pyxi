@@ -596,6 +596,8 @@ def looks_like_travel(mail: dict[str, Any]) -> bool:
         len(set(IATA_PAREN.findall(text))) >= 2
         or (re.search(r"check[- ]?in", text, re.I) and re.search(r"check[- ]?out", text, re.I))
         or re.search(r"e-?ticket|boarding pass|record locator|booking reference", text, re.I)
+        # "Your reservation code is QX7T2M": a booking written as prose, with no airport codes
+        or REF.search(text)
     )
 
 
@@ -740,13 +742,34 @@ PICK_STOP = {
 }  # fmt: skip
 
 
-def pick(found: list[Trip], want: str, *, strict: bool = False) -> Trip | None:
-    """The trip they named (a city, a hotel, a booking reference or a month), else the next
-    one. ``strict``: None when they named something no trip matches."""
+RELATIVE = re.compile(r"\b(this|next|coming)\s+(week|weekend|month)\b")
+
+
+def pick(
+    found: list[Trip], want: str, *, strict: bool = False, now: datetime | None = None
+) -> Trip | None:
+    """The trip they named (a city, a hotel, a booking reference, a month, or "next month" /
+    "this week"), else the next one. ``strict``: None when they named something no trip
+    matches."""
     want = _plain(want.strip())
     if not found:
         return None
     if want:
+        # "next month", "this weekend": a span of days from today, not a word to look for
+        span: tuple[datetime, datetime] | None = None
+        if m := RELATIVE.search(want):
+            today = (now or clock()).replace(hour=0, minute=0, second=0, microsecond=0)
+            ahead = m.group(1) != "this"
+            if m.group(2) == "month":
+                first = today.replace(day=1)
+                if ahead:
+                    first = (first + timedelta(days=32)).replace(day=1)
+                span = (first, (first + timedelta(days=32)).replace(day=1))
+            else:
+                monday = today - timedelta(days=today.weekday()) + timedelta(weeks=int(ahead))
+                start = monday + timedelta(days=5) if m.group(2) == "weekend" else monday
+                span = (start, monday + timedelta(days=7))
+            want = RELATIVE.sub(" ", want)
         words = [w for w in re.findall(r"[a-z0-9]{3,}", want) if w not in PICK_STOP]
         months = {MONTH_WORDS[w] for w in words if w in MONTH_WORDS}
         words = [w for w in words if w not in MONTH_WORDS]
@@ -759,8 +782,12 @@ def pick(found: list[Trip], want: str, *, strict: bool = False) -> Trip | None:
                 for d in range((t.end - t.start).days + 1)
             ):
                 continue
-            if words or months:
+            if span and not (t.start < span[1] and t.end >= span[0]):
+                continue
+            if words or months or span:
                 return t
+        if strict and span:
+            return None
         if strict and (words or months):
             return None
     return found[0]
@@ -852,7 +879,7 @@ def report(trip: Trip, others: list[Trip], n_reminders: int) -> dict[str, Any]:
     ]
     body = " and ".join(bits) + "."
     if n_reminders:
-        body += " Reminders are set before each flight."
+        body += f" Reminders are set before {'each' if nf > 1 else 'the'} flight."
     if others:
         body += (
             " Also coming up: "
@@ -927,7 +954,7 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         sorted(flights, key=lambda f: f.depart), sorted(stays, key=lambda s: s.check_in), now
     )
     want = str(job.params.get("trip") or "").strip()
-    trip = pick(found, want, strict=True)
+    trip = pick(found, want, strict=True, now=now)
     missed = ""
     if trip is None and found:  # "Tokyo", and the only trips are Paris and Lisbon: say so
         trip = found[0]

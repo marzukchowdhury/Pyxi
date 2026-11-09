@@ -531,6 +531,16 @@ async def _study(brain: Brain, args: dict[str, Any]) -> str:
     if action == "answer":
         if quiz is None or quiz.done:
             return "quiz: there's no question waiting. Offer a quiz."
+        # One reply answers one question. A question asked earlier in this same turn (by
+        # start, or by the answer just marked) hasn't been heard yet: marking it now would
+        # score a reply they never gave and skip ahead.
+        calls = getattr(brain, "_calls", None) or []
+        if any(c.get("tool") == "quiz" for c in calls[:-1]):
+            return (
+                f"quiz: they haven't answered question {quiz.at + 1} yet ({quiz.current().q}); "
+                "it was only just asked. Don't give its answer and don't call quiz again this "
+                "turn: say what the earlier result told you, ask that question, and stop."
+            )
         card = quiz.current()
         right = bool(args.get("right"))
         quiz.mark(right)
@@ -784,7 +794,14 @@ async def after_repeat(brain: Brain, job: Job) -> str:
                 undo={"type": "ditto", "log": str(undo_log)},
             )
         skipped = len(plan.items) - done
-        body = f"{plan.summary} " if done else ""
+        # What happened, not the plan again ("Rename the four remaining invoices..." reads as
+        # if it were still to do).
+        renamed = sum(1 for s, d in moves if s.parent == d.parent)
+        moved = len(moves) - renamed
+        verb = (
+            "Renamed and moved" if renamed and moved else "Moved" if moved else "Renamed"
+        )
+        body = f"{verb} {done} file{'s' if done != 1 else ''} in {folder.name}. " if done else ""
         if skipped:
             body += f"{skipped} skipped (a name clash or a missing file). "
         if done:
