@@ -497,6 +497,7 @@ export type ClientMessage =
   | { type: "ptt_cancel" }
   | { type: "audio"; data: string; mime: string }
   | { type: "dictate"; data: string; mime: string }
+  | { type: "dictating"; on: boolean }
   | { type: "interrupt" }
   | { type: "answer"; request_id: string; value: unknown }
   | { type: "job_control"; job_id: string; action: string; text?: string }

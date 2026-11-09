@@ -75,3 +75,52 @@ def test_the_prompt_says_each_thing_is_said_once() -> None:
     from pyxi.companion import prompts
 
     assert "Say each thing once in a turn" in prompts.SYSTEM
+
+
+def test_the_result_of_a_job_is_not_a_repeat_of_the_line_that_started_it() -> None:
+    """Almost the same words, and the one that differs is the news: it is done."""
+    for start, result in [
+        ("Lowering the brightness to 40 percent now.", "Lowered the brightness to 40 percent."),
+        ("Setting the brightness to 40 percent now.", "Set the brightness to 40 percent."),
+        ("Changing the wallpaper to the blue one.", "Changed the wallpaper to the blue one."),
+        ("Sending the report to Sam now.", "Sent the report to Sam."),
+        ("Moving the three files to Archive.", "I've moved the three files to Archive."),
+    ]:
+        assert drop_repeats(result, [start]) == result, result
+        assert not said_before(result, [start]), result
+    # still only on its way, in other words: that is the start line again
+    said = ["Lowering the brightness to 40 percent now."]
+    assert said_before("I'm lowering the brightness to 40 percent.", said)
+    assert said_before("Lowering the brightness to 40 percent.", said)
+
+
+async def test_the_hands_say_what_came_of_it_however_it_is_worded(settings, monkeypatch):
+    """The hands' closing line is the result. Said after "Setting the brightness to 40
+    percent now.", it shares every word that matters with it, and was dropped unspoken."""
+    from otto.types import Usage
+
+    from pyxi.companion import brain as brain_module
+    from pyxi.companion.operator import Outcome
+
+    class Hands:
+        usage = Usage()
+        cancelled = False
+
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def run(self, task, window, come_back):
+            return Outcome(True, "The brightness is at 40 percent now. It was at 70.")
+
+    monkeypatch.setattr(brain_module, "Operator", Hands)
+    brain, rec = make_brain(settings)
+
+    async def allow(kind, timeout=300, **data):
+        return True
+
+    brain.hub.request = allow  # type: ignore[method-assign]
+    brain._hands_llm = brain.llm
+    brain._said = ["Setting the brightness to 40 percent now."]  # the turn's starting line
+    await brain._drive("set the brightness to 40 percent", None)
+    await asyncio.sleep(0.05)
+    assert [s["text"] for s in rec.of("say")] == ["The brightness is at 40 percent now."]

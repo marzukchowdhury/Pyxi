@@ -195,3 +195,40 @@ def test_the_prompt_says_a_claim_waits_for_the_tool() -> None:
 
     assert "Some tools can say no" in prompts.SYSTEM
     assert "spoken only once the tool has agreed" in " ".join(prompts.SYSTEM.split())
+
+
+async def test_a_streamed_claim_after_a_first_sentence_waits_too(settings):
+    """The first sentence is spoken as it arrives. The claim after it used to follow at once,
+    before the tool had answered: only a claim in the first sentence was held."""
+    llm = Streamed(
+        [
+            ("say", {"text": "A five by five table. Putting it in now."}),
+            ("paste_table", {"rows": []}),  # refused: there is nothing to paste
+        ]
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("put a 5 by 5 table in my doc")
+    await asyncio.sleep(0.05)
+    assert said(rec) == ["A five by five table.", "Okay."]  # the claim was never said
+
+
+async def test_a_streamed_claim_after_a_first_sentence_is_said_once_the_tool_agrees(settings):
+    llm = Streamed(
+        [
+            ("say", {"text": "A note for Sam. Drafting that email now."}),
+            ("errand", {"task": "Email Sam that I'm running late"}),
+        ]
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    connect(brain)
+
+    async def fake_errand(task: str, user_text: str, **kw) -> None:
+        return None
+
+    brain._run_errand = fake_errand  # type: ignore[method-assign]
+    order = watch(brain)
+    await brain.turn("email Sam that I'm running late")
+    await asyncio.sleep(0.05)
+    assert order == ["say", "errand", "say"]  # the first sentence, the tool's answer, the claim
+    assert said(rec) == ["A note for Sam.", "Drafting that email now."]  # each once
+    assert brain._said == ["A note for Sam.", "Drafting that email now."]

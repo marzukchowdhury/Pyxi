@@ -557,7 +557,9 @@ def build_answer(args: dict[str, Any], button: CardLink | None = None) -> Answer
     title = _line(args.get("title"), 70)
     if not title:
         return None
-    facts = [f for f in (_line(x, 90) for x in args.get("facts") or [] if isinstance(x, str)) if f]
+    given = args.get("facts")  # a list; one fact written as a plain string is still one fact
+    given = [given] if isinstance(given, str) else given if isinstance(given, list) else []
+    facts = [f for f in (_line(x, 90) for x in given if isinstance(x, str)) if f]
     return AnswerCard(
         title=title,
         figure=_line(args.get("figure"), 28) or None,

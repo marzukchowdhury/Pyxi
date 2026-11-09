@@ -44,6 +44,13 @@ if (!isPrimary) {
   });
 }
 
+// Answer cards they closed (or that faded). The picture for a card arrives seconds after the
+// card, as the same card sent again: it must not bring back one that was closed.
+const closedAnswers = new Set<string>();
+function answerClosed(card: AnswerCard | null): void {
+  if (card) closedAnswers.add(card.id);
+}
+
 export interface LiveAnnotation extends Annotation {
   bornAt: number;
 }
@@ -169,7 +176,10 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   toasts: [],
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.job_id !== id) }),
   closeNotes: () => set({ notes: null }),
-  closeAnswer: () => set({ answerCard: null }),
+  closeAnswer: () => {
+    answerClosed(get().answerCard);
+    set({ answerCard: null });
+  },
   setStep: (step) => {
     const s = get().scene;
     if (!s) return;
@@ -212,6 +222,7 @@ export const useOverlay = create<OverlayState>((set, get) => ({
     voice.stop();
     brain.send({ type: "interrupt" });
     if (get().guide) brain.send({ type: "guide_cancel" });
+    answerClosed(get().answerCard);
     set({ annotations: [], scene: null, palace: null, object: null, sketch: null, notes: null, answerCard: null, guide: null, walkthrough: null, caption: null, flyTo: null, pins: [] });
   },
 }));
@@ -494,7 +505,7 @@ brain.on((e: BrainEvent) => {
     }
     case "answer":
       // On the main screen, and it survives "clear": opening the shop is what its button is for.
-      if (isPrimary) useOverlay.setState({ answerCard: e.card });
+      if (isPrimary && !closedAnswers.has(e.card.id)) useOverlay.setState({ answerCard: e.card });
       break;
     case "guide":
       useOverlay.setState({

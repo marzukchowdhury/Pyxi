@@ -222,3 +222,90 @@ async def test_no_model_round_is_spent_once_they_have_spoken_again(settings):
     await brain.turn("Open the example page")
     await asyncio.sleep(0.05)
     assert len(llm.prompts) == 1 and not rec.of("say")
+
+
+async def test_a_tool_that_said_no_is_not_passed_on_as_done(settings):
+    """The call is noted before it runs. A refusal used to reach the next turn as "already
+    started or done ... never redo", so the thing was never done at all."""
+    llm = Script(
+        [("quick_action", {"action": "open_url", "value": "https://example.com"})],
+        [("say", {"text": "Full screen it is."})],
+    )
+    brain, _ = make_brain(settings, llm=llm)
+
+    async def fake_quick(action: str, value: str) -> str:
+        brain.begin_listening()  # they speak again as it fails
+        return "quick_action: that address didn't open."
+
+    brain._quick_action = fake_quick  # type: ignore[method-assign]
+    await brain.turn("Open the example page")
+    assert brain._calls[0]["outcome"] == "refused" and brain._done_so_far() == []
+    await brain.turn("and make it full screen.")
+    prompt = llm.prompts[-1]
+    assert "Already started or done" not in prompt
+    # Nothing was done, so both halves are asked as one, and the refusal goes with them.
+    assert asked(llm) == "Open the example page and make it full screen."
+    assert "did not go through (it is NOT done)" in prompt
+    assert "quick_action: that address didn't open." in prompt
+
+
+async def test_a_refusal_beside_something_done_is_told_apart(settings):
+    llm = Script(
+        [
+            ("quick_action", {"action": "open_url", "value": "https://www.amazon.com"}),
+            ("paste_table", {"rows": []}),
+        ],
+        [("say", {"text": "Okay."})],
+    )
+    brain, _ = make_brain(settings, llm=llm)
+
+    async def fake_quick(action: str, value: str) -> None:
+        return None
+
+    real = brain._paste_table
+
+    async def paste(args: dict):
+        note = await real(args)
+        brain.begin_listening()  # they speak again as the paste is refused
+        return note
+
+    brain._quick_action = fake_quick  # type: ignore[method-assign]
+    brain._paste_table = paste  # type: ignore[method-assign]
+    await brain.turn("Get Amazon up and paste my list in")
+    assert brain._done_so_far() == ["quick_action (action: open_url, value: https://www.amazon.com)"]
+    await brain.turn("the short list, I mean.")
+    prompt = llm.prompts[-1]
+    done = prompt.split("Already started or done before the cut: ")[1].split(". Their new")[0]
+    assert "quick_action" in done and "paste_table" not in done
+    assert "did not go through (it is NOT done): paste_table: give rows" in prompt
+
+
+async def test_what_was_already_said_goes_with_the_carried_words(settings, monkeypatch):
+    """It had spoken and looked something up, but done nothing, when they went on: the turn
+    left no trace, and the one that carried its words on said the same line again."""
+    from pyxi import web
+
+    async def fake_search(query, max_results=6):
+        return "Results: the first phone has the better camera."
+
+    monkeypatch.setattr(web, "search_text", fake_search)
+    llm = Slow(
+        [
+            ("say", {"text": "Comparing the two on battery and screen."}),
+            ("web_search", {"query": "phone one vs phone two"}),
+        ],
+        [("say", {"text": "Never said."})],
+        [("say", {"text": "The first one, and its camera is better too."})],
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    first = asyncio.create_task(brain.turn(FIRST))
+    await thinking(llm, 2)  # it has spoken and searched, and is thinking about the answer
+    brain.begin_listening()
+    await brain.turn(SECOND)
+    await first
+    await asyncio.sleep(0.05)
+    assert asked(llm) == f"{FIRST} {SECOND}"
+    assert (
+        'you had already said aloud: "Comparing the two on battery and screen."' in llm.prompts[-1]
+    )
+    assert [s["text"] for s in rec.of("say")][-1] == "The first one, and its camera is better too."

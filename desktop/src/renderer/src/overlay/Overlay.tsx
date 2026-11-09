@@ -96,7 +96,8 @@ export function Overlay() {
   }, []);
 
   // Hold Ctrl + Windows: dictation. Record while held, then the brain types what was said
-  // where the cursor is (it never becomes a question for Pyxi).
+  // where the cursor is (it never becomes a question for Pyxi). The brain is told while the
+  // keys are down, so a job that ends meanwhile is not announced over the dictation.
   useEffect(() => {
     if (!isPrimary) return;
     const rec = new Recorder();
@@ -105,15 +106,19 @@ export function Overlay() {
       if (rec.active || recorder.current.active) return;
       voice.stop();
       drop = false;
+      brain.send({ type: "dictating", on: true });
       useOverlay.setState({ listening: true, state: "listening" });
       try {
         await rec.start((data, mime) => {
           useOverlay.setState({ listening: false, state: "idle" });
-          if (drop) drop = false;
-          else brain.send({ type: "dictate", data, mime });
+          if (drop) {
+            drop = false;
+            brain.send({ type: "dictating", on: false });
+          } else brain.send({ type: "dictate", data, mime }); // the brain takes it from here
         }, false);
       } catch (err) {
         useOverlay.setState({ listening: false, state: "idle" });
+        brain.send({ type: "dictating", on: false });
         const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
         brain.send({ type: "notice", message: `The microphone couldn't start. Check Settings > Privacy & security > Microphone. (${reason})` });
       }

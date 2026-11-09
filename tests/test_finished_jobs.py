@@ -183,3 +183,99 @@ def test_a_result_card_keeps_every_line():
     assert card.sources[0].name == "amazon.ca" and card.sources[1].name == "amazon.ca (2)"
     failed = result_card("Ledger", "", ok=False)
     assert failed.title == "Ledger couldn't finish" and failed.facts
+
+
+# ------------------------------------------------------------------ whose turn it is to talk
+async def test_pressing_talk_while_the_line_is_voiced_keeps_pyxi_listening(settings):
+    """Talk pressed as the announcement was being voiced: they are the one talking now. The
+    state used to go back to idle, and the line was said again over them."""
+    brain, rec = make_brain(settings)
+    real = brain.tts.synthesize
+    presses = []
+
+    async def pressed_mid_line(text, voice=None):
+        if not presses:
+            presses.append(text)
+            brain.begin_listening()  # the app's "ptt_start": they hold the talk key and speak
+            await asyncio.sleep(0.05)
+        return await real(text, voice)
+
+    brain.tts.synthesize = pressed_mid_line  # type: ignore[method-assign]
+    await brain._job_done(scout_job(brain))
+    await asyncio.sleep(0.8)
+    assert presses and brain.state == "listening"
+    assert not rec.of("say"), "it must not talk over the user"
+    await brain.set_state("idle")  # they let go
+    await asyncio.sleep(0.6)
+    assert spoken(rec) == "Scout's done. The full result is on the card."
+
+
+async def test_a_job_that_ends_during_dictation_waits_for_it(settings):
+    brain, rec = make_brain(settings)
+    brain.dictating(True)  # they are holding the dictation keys
+    await brain._job_done(scout_job(brain))
+    await asyncio.sleep(0.6)
+    assert not rec.of("say"), "it must not talk over the dictation"
+    assert rec.of("job_ready") and brain.state == "idle"  # no turn started, nothing interrupted
+    brain.dictating(False)  # let go with nothing to type
+    await asyncio.sleep(0.6)
+    assert spoken(rec) == "Scout's done. The full result is on the card."
+
+
+async def test_dictation_that_is_typed_frees_the_floor_and_a_lost_let_go_lapses(
+    settings, monkeypatch
+):
+    from pyxi.companion import brain as brain_module
+
+    brain, _rec = make_brain(settings)
+
+    class Ears:
+        async def transcribe(self, audio, language="en"):
+            return "the meeting moved to Thursday", 0.1, "en"
+
+    brain.stt = Ears()  # type: ignore[assignment]
+    brain.dictating(True)
+    assert brain._talking()
+    await brain.dictate(b"fake audio")  # they let go: the words are typed
+    assert not brain._talking()
+    monkeypatch.setattr(brain_module, "_DICTATION_S", -1.0)  # the "let go" never arrived
+    brain.dictating(True)
+    assert not brain._talking()
+
+
+async def test_naming_the_teammate_for_new_work_does_not_swallow_the_announcement(settings):
+    """ "Scout's on the flights." is about a new job. It used to count as having told the one
+    that had just ended, because it named Scout."""
+    model = Scripted([say("Scout's on the flights, back with the cheapest.")])
+    brain, rec = make_brain(settings, llm=model)
+    await brain.set_state("listening")  # they're already asking as the job ends
+    await brain._job_done(scout_job(brain))
+    await brain.turn("have Scout find me a flight to Toronto")
+    await asyncio.sleep(0.8)
+    assert spoken(rec) == (
+        "Scout's on the flights, back with the cheapest. "
+        "Scout's done. The full result is on the card."
+    )
+
+
+def test_a_job_is_told_by_its_result_not_by_the_teammates_name():
+    from pyxi.companion.brain import told_already
+
+    result = f"Scout finished {SUMMARY}"
+    assert told_already("Scout's back: the GLADOM tray table is the best value.", "Scout", result)
+    assert not told_already("Scout's on the flights.", "Scout", result)
+    assert not told_already("The GLADOM tray table is the best value.", "Scout", result)  # no name
+    assert not told_already("Scout's checking that now.", "Scout", "Scout finished")
+    assert told_already("Scout finished.", "Scout", "Scout finished")  # nothing more to tell
+
+
+async def test_a_key_in_a_result_is_never_read_out(settings):
+    brain, rec = make_brain(settings)
+    key = "sk-proj-" + "A1b2C3d4" * 4
+    job = scout_job(brain, f"The site rejected the key {key} twice.", status="failed")
+    await brain._job_done(job)
+    await settle(brain)
+    assert key not in spoken(rec)
+    assert spoken(rec) == (
+        "Scout couldn't finish that. The site rejected the key (a key, hidden) twice."
+    )

@@ -394,3 +394,78 @@ def test_results_about_something_else_never_reach_the_answer():
     ]
     assert web.on_topic("bitcoin price right now", news) == news
     assert web.on_topic("the best", hits) == hits  # nothing to go on: left alone
+
+
+async def test_a_card_whose_line_was_dropped_as_a_repeat_still_gets_the_pick_said(
+    settings, monkeypatch
+):
+    """Whether the pick needs saying went by what the model wrote in the round, not by what
+    was spoken: a `say` dropped as a repeat left the card up with not a word."""
+
+    async def fake_search(query, max_results=6):
+        return RESULTS
+
+    async def no_picture(title, links, **kw):
+        return None
+
+    monkeypatch.setattr(web, "search_text", fake_search)
+    monkeypatch.setattr(answers, "find_picture", no_picture)
+    line = "The Soundcore Space A40, about fifty dollars per RTINGS."
+    model = Scripted(
+        [
+            say(line),  # the answer, before the search was even back
+            ToolCall(id="w", name="web_search", arguments={"query": "best budget earbuds"}),
+        ],
+        [say(line, "s2"), ToolCall(id="a", name="show_answer", arguments=PICK)],  # and again
+    )
+    brain, rec = make_brain(settings, llm=model)
+    await brain.turn("find me some budget earbuds")
+    await settle(brain)
+    assert len(rec.of("answer")) == 1
+    said = " ".join(e["text"] for e in rec.of("say"))
+    assert said == (
+        f"{line} My pick is the Anker Soundcore Space A40, about $50. "
+        "Price per RTINGS; shops vary."
+    )
+
+
+async def test_a_teammates_result_card_does_not_take_show_me_away(settings, monkeypatch):
+    from pyxi.companion.notes import result_card
+
+    async def no_picture(title, links, **kw):
+        return None
+
+    monkeypatch.setattr(answers, "find_picture", no_picture)
+    brain, rec = make_brain(settings)
+    await brain._act("show_answer", dict(PICK))
+    await answers.show(brain, result_card("Scout", "Nine tables compared."))
+    assert rec.of("answer")[-1]["card"]["kind"] == "result"  # the card on screen now
+    pick = answers.current(brain)
+    assert pick is not None and pick.title == "Anker Soundcore Space A40"  # still "show me"
+    assert AMAZON in answers.on_screen(brain)
+    brain._pick = (pick, brain._pick[1] - answers.CARD_KEEPS_S - 1)  # a quarter of an hour on
+    assert answers.current(brain) is None and answers.on_screen(brain) == ""
+
+
+def test_facts_given_as_one_string_are_one_fact():
+    card = build_answer({**PICK, "facts": "About 8 hours a charge"})
+    assert card is not None and card.facts == ["About 8 hours a charge"]  # not 22 letters
+    assert build_answer({**PICK, "facts": 8}).facts == []
+    assert build_answer({**PICK, "facts": None}).facts == []
+
+
+def test_a_shop_named_with_its_country_keeps_that_country():
+    # A country Pyxi has no word for used to fall back to this PC's: amazon.de became amazon.ca.
+    assert answers.shop_search("amazon.de", "kettle", where="ca").url == (
+        "https://www.amazon.de/s?k=kettle"
+    )
+    assert answers.shop_search("https://www.amazon.co.jp/", "kettle", where="us").url == (
+        "https://www.amazon.co.jp/s?k=kettle"
+    )
+    assert answers.shop_search("ebay.fr", "kettle", where="uk").url.startswith(
+        "https://www.ebay.fr/sch/"
+    )
+    # A shop whose search address there Pyxi doesn't know: its own site, never another country's.
+    for shop in ("ikea.de", "walmart.com.mx", "bestbuy.de"):
+        link = answers.shop_search(shop, "kettle", where="ca")
+        assert link.name == f"Find it on {shop}" and f"site%3A{shop}" in link.url, shop

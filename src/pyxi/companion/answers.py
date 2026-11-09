@@ -155,22 +155,27 @@ def shop_search(shop: str, query: str, where: str | None = None) -> CardLink | N
     host = urlparse(shop if "://" in shop else "https://" + shop).netloc.removeprefix("www.")
     host = host if "." in host else ""
     key = re.sub(r"[^a-z0-9]", "", (host.split(".")[0] if host else shop))
+    own = ""  # the shop's own ending, when they named a country Pyxi has no word for
     if host.endswith(".ca"):
         cc = "ca"
     elif host.endswith(".co.uk"):
         cc = "uk"
     elif host.endswith(".com.au"):
         cc = "au"
-    elif host.endswith(".com") and key != "ikea":  # ikea.com is every country's site
-        cc = "us"
+    elif host.endswith(".com"):
+        cc = cc if key == "ikea" else "us"  # ikea.com is every country's site
+    elif host:
+        own = host.split(".", 1)[1]  # amazon.de stays amazon.de, never this PC's country
     known = _SHOP_SEARCH.get(f"{key}.{cc}") or _SHOP_SEARCH.get(key)
+    if known is not None and own and ("{tld}" not in known[1] or key in _ONLY_COM_CA):
+        known = None  # no search address known for that country: search its own site instead
     if known is None:
         if not host:
             return None
         url = f"https://duckduckgo.com/?q={quote_plus(f'{query} site:{host}')}"
         return CardLink(name=f"Find it on {host}"[:40], url=url)
     name, pattern = known
-    tld = _TLDS.get(cc, "com")
+    tld = own or _TLDS.get(cc, "com")
     if key in _ONLY_COM_CA and cc not in ("us", "ca"):
         tld = "com"
     path = {"ca": "ca", "uk": "gb", "au": "au"}.get(cc, "us")  # ikea.com/ca/en/...
@@ -192,10 +197,19 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
     if card is None:
         return "show_answer: give the pick's name as title."
     await show(brain, card)
-    if not str(getattr(brain, "_round_say", "") or "").strip():
-        brain._speak(spoken_pick(card))  # a card alone is not an answer: the pick is said too
+    brain._unsaid_pick = card  # type: ignore[attr-defined]  # until the round has spoken (say_pick)
     brain._spawn(add_picture(brain, card))
     return None
+
+
+def say_pick(brain: Brain, said_from: int) -> None:
+    """A card alone is not an answer: the pick is said too. Called once the round's calls have
+    run, and it goes by what was really spoken in the round (``said_from``: how much had been
+    said when it began), not by what the model wrote: a `say` dropped as a repeat is not heard."""
+    card, brain._unsaid_pick = getattr(brain, "_unsaid_pick", None), None  # type: ignore[attr-defined]
+    if card is None or len(brain._said) > said_from or brain._pending_say:
+        return
+    brain._speak(spoken_pick(card))
 
 
 def spoken_pick(card: AnswerCard) -> str:
@@ -205,14 +219,18 @@ def spoken_pick(card: AnswerCard) -> str:
 
 
 async def show(brain: Brain, card: AnswerCard) -> None:
-    brain._answer = (card, time.monotonic())  # type: ignore[attr-defined]
+    brain._answer = (card, time.monotonic())  # type: ignore[attr-defined]  # the card that is up
+    if card.kind == "answer":
+        # Kept apart: a teammate's result card takes the pick's place on screen, and "show me"
+        # still means the pick.
+        brain._pick = brain._answer  # type: ignore[attr-defined]
     await brain.hub.emit("answer", card=card.model_dump(mode="json"))
 
 
 def current(brain: Brain) -> AnswerCard | None:
-    """The answer card they can still be asking about ("show me", "open it")."""
-    card, at = getattr(brain, "_answer", None) or (None, 0.0)
-    if card is None or card.kind != "answer" or time.monotonic() - at > CARD_KEEPS_S:
+    """The pick they can still be asking about ("show me", "open it")."""
+    card, at = getattr(brain, "_pick", None) or (None, 0.0)
+    if card is None or time.monotonic() - at > CARD_KEEPS_S:
         return None
     return card
 
