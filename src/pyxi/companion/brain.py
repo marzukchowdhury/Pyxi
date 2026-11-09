@@ -3537,7 +3537,7 @@ class Brain:
                 *self.history[-11:],
                 (
                     f"(job {job.id} finished: {answers.for_later(job)})",
-                    f"(notified the user: {note['title']}. {note['body']})",
+                    "(notified the user: " + " ".join(f"{note['title']}. {note['body']}".split()) + ")",
                 ),
             ]
             self._announce(
@@ -3619,7 +3619,7 @@ class Brain:
             *self.history[-11:],
             (
                 f"(job {job.id} finished: {answers.for_later(job)})",
-                f"(notified the user: {title}. {body})",
+                "(notified the user: " + " ".join(f"{title}. {body}".split()) + ")",
             ),
         ]
         own_card = booked or bool(files) or (job.role in specialists.ROLES and bool(data.get("title")))

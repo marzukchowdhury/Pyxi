@@ -20,6 +20,7 @@ import ipaddress
 import json
 import logging
 import re
+import socket
 import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote_plus, urljoin, urlparse
@@ -27,7 +28,7 @@ from urllib.parse import quote_plus, urljoin, urlparse
 import httpx
 from otto.llm.base import ToolSpec
 
-from pyxi import web
+from pyxi import safety, web
 from pyxi.companion.notes import AnswerCard, CardLink, build_answer, site_name
 from pyxi.httpshared import shared
 from pyxi.voice import split_sentences
@@ -310,32 +311,82 @@ def names_pick(pick: str, page_title: str) -> bool:
     return sum(w in have for w in want) / len(want) >= 0.6
 
 
-def _public(url: str) -> bool:
-    """A web address out on the internet: never this PC, the home network or a bare name."""
-    p = urlparse(url)
-    host = (p.hostname or "").lower()
-    if (
-        p.scheme not in ("http", "https")
-        or "." not in host
-        or host.endswith((".local", ".internal"))
-    ):
-        return False
+def _global(address: str) -> bool:
+    """An address out on the internet: not loopback, private, link-local or reserved."""
     try:
-        ip = ipaddress.ip_address(host)
+        ip = ipaddress.ip_address(address.split("%")[0])
     except ValueError:
-        return True
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped  # ::ffff:10.0.0.1 is 10.0.0.1
     return ip.is_global
 
 
+def _plausible(url: str) -> bool:
+    """A web address that could be out on the internet, going by how it is written: never a
+    bare name, this PC, or a private address. Cheap; ``_public`` also looks the name up."""
+    p = urlparse(url)
+    host = (p.hostname or "").lower().rstrip(".")
+    if (
+        p.scheme not in ("http", "https")
+        or "." not in host
+        or host.endswith((".local", ".internal", ".localhost", ".lan", ".home", ".home.arpa"))
+    ):
+        return False
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return _global(host)
+
+
+def _addresses(host: str) -> list[str]:
+    """Every address a name resolves to. Blocking: called off the event loop."""
+    return [str(info[4][0]) for info in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)]
+
+
+async def _public(url: str) -> bool:
+    """A web address out on the internet: never this PC or the home network. A name says
+    nothing by itself ("router.lan", "nas.home", "10.0.0.1.nip.io"), so it is looked up, and
+    every address it has must be a public one."""
+    if not _plausible(url):
+        return False
+    host = (urlparse(url).hostname or "").rstrip(".")
+    try:
+        ipaddress.ip_address(host)
+        return True  # written as a number: _plausible has checked it
+    except ValueError:
+        pass
+    try:
+        found = await asyncio.to_thread(_addresses, host)
+    except (OSError, UnicodeError):
+        return False
+    return bool(found) and all(_global(a) for a in found)
+
+
+HEAD_KEEPS = 100_000  # characters of a page read for its title and picture
+_HEAD_END = re.compile(r"</head\s*>", re.I)
+_TITLE = re.compile(r"<title[^<>]*>", re.I)
+_TITLE_END = re.compile(r"</title", re.I)
+
+
 def page_picture(page: str, url: str) -> tuple[str, str]:
-    """(the page's title, the picture it gives as its own preview), either may be ''."""
+    """(the page's title, the picture it gives as its own preview), either may be ''. Only
+    the page's head is read (it is where both are), and never more than ``HEAD_KEEPS``
+    characters: a page built to be slow to parse costs a moment, not the event loop."""
     from pyxi.shopping import _meta
 
-    title = _meta(page, "og:title") or web._text(
-        (re.search(r"<title[^>]*>(.*?)</title>", page, re.S | re.I) or [None, ""])[1]
-    )
+    end = _HEAD_END.search(page, 0, HEAD_KEEPS)
+    page = page[: end.start() if end else HEAD_KEEPS]
+    title = _meta(page, "og:title")
+    if not title and (start := _TITLE.search(page)):
+        stop = _TITLE_END.search(page, start.end())
+        title = web._text(page[start.end() : stop.start()][:300]) if stop else ""
     image = _meta(page, "og:image:secure_url", "og:image", "twitter:image", "twitter:image:src")
     return title, urljoin(url, image) if image else ""
+
+
+PICTURE_MAX_SIDE = 4000  # a "picture" larger than this is never decoded
 
 
 def thumbnail(raw: bytes) -> str | None:
@@ -344,7 +395,9 @@ def thumbnail(raw: bytes) -> str | None:
     from PIL import Image
 
     try:
-        img = Image.open(io.BytesIO(raw))
+        img = Image.open(io.BytesIO(raw))  # reads the header only
+        if max(img.size) > PICTURE_MAX_SIDE:
+            return None  # its size is checked before it is decoded: a few bytes can claim gigabytes
         img.load()
     except Exception:
         return None
@@ -363,20 +416,31 @@ def thumbnail(raw: bytes) -> str | None:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+MAX_HOPS = 3  # redirects followed for one page or picture
+
+
 async def _get(url: str, limit: int) -> tuple[bytes, str]:
-    """Up to ``limit`` bytes of a page or picture and its content type; nothing on any failure."""
-    async with (
-        shared("web", headers=web.HEADERS, timeout=web.TIMEOUT, follow_redirects=True) as c,
-        c.stream("GET", url) as r,
-    ):
-        if r.status_code != 200 or not _public(str(r.url)):
-            return b"", ""
-        got = bytearray()
-        async for chunk in r.aiter_bytes():
-            got += chunk
-            if len(got) >= limit:  # a page's head is enough; a huge "picture" isn't one
-                break
-        return bytes(got[:limit]), r.headers.get("content-type", "")
+    """Up to ``limit`` bytes of a page or picture and its content type; nothing on any failure.
+    Redirects are followed by hand, ``MAX_HOPS`` at most, and every address on the way has to
+    be a public one: a page that sends the request on to this PC or the home network gets
+    nothing fetched for it."""
+    async with shared("web", headers=web.HEADERS, timeout=web.TIMEOUT, follow_redirects=True) as c:
+        for _ in range(MAX_HOPS + 1):
+            if not await _public(url):
+                return b"", ""
+            async with c.stream("GET", url, follow_redirects=False) as r:
+                if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
+                    url = urljoin(url, r.headers["location"])
+                    continue
+                if r.status_code != 200:
+                    return b"", ""
+                got = bytearray()
+                async for chunk in r.aiter_bytes():
+                    got += chunk
+                    if len(got) >= limit:  # a page's head is enough; a huge "picture" isn't one
+                        break
+                return bytes(got[:limit]), r.headers.get("content-type", "")
+    return b"", ""  # still being sent on after MAX_HOPS
 
 
 async def find_picture(
@@ -388,20 +452,26 @@ async def find_picture(
     tried: set[str] = set()
 
     async def from_page(url: str) -> str | None:
-        if url in tried or not _public(url):
+        if url in tried or not _plausible(url):
             return None
         tried.add(url)
         try:
             raw, kind = await get(url, 600_000)
             if not raw or "html" not in (kind or "html"):
                 return None
-            page_title, image = page_picture(raw.decode("utf-8", "replace"), url)
+            # Parsing and decoding are work for another thread: speech and the app's
+            # connection share this one.
+            page_title, image = await asyncio.to_thread(
+                page_picture, raw.decode("utf-8", "replace"), url
+            )
             if not image or not names_pick(title, page_title) or _NOT_A_PHOTO.search(image):
                 return None
-            if not _public(image):
+            if not _plausible(image):
                 return None
             data, kind = await get(image, 4_000_000)
-            return thumbnail(data) if data and kind.startswith("image/") else None
+            if not data or not kind.startswith("image/"):
+                return None
+            return await asyncio.to_thread(thumbnail, data)
         except (httpx.HTTPError, ValueError) as exc:
             log.info("no picture from %s: %s", site_name(url), type(exc).__name__)
             return None
@@ -455,7 +525,9 @@ RESULT_KEEPS = 6000  # characters of a finished job's result that later turns ca
 
 def for_later(job: Any) -> str:
     """A finished job's result as later turns see it: all of it (it used to stop at 600
-    characters, two items into a list of nine), plus what a browser teammate collected."""
+    characters, two items into a list of nine), plus what a browser teammate collected. It is
+    what a teammate read on the web or in files and it sits in the conversation, so it is
+    fenced like a search result: a line inside it can't pass for the user or for instructions."""
     text = (job.summary or job.status or "").strip()
     out = text[:RESULT_KEEPS] + (" (cut here: it was longer)" if len(text) > RESULT_KEEPS else "")
     if job.role == "browser" and job.data:
@@ -463,7 +535,7 @@ def for_later(job: Any) -> str:
             out += "\nCollected: " + json.dumps(job.data, default=str)[:2000]
         except (TypeError, ValueError):
             pass
-    return out
+    return safety.fence(f"{job.agent_name}'s result", out)
 
 
 def spoken_line(agent: str, *, ok: bool, title: str, summary: str, on_card: bool) -> str:

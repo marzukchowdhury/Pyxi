@@ -469,3 +469,187 @@ def test_a_shop_named_with_its_country_keeps_that_country():
     for shop in ("ikea.de", "walmart.com.mx", "bestbuy.de"):
         link = answers.shop_search(shop, "kettle", where="ca")
         assert link.name == f"Find it on {shop}" and f"site%3A{shop}" in link.url, shop
+
+
+def test_a_page_built_to_be_slow_to_parse_costs_a_moment():
+    """Measured before: 64 KB of "<meta" with no ">" took 41 seconds, on the event loop."""
+    import time
+
+    from pyxi.shopping import _meta
+
+    pages = [
+        "<meta " * 3000,
+        "<meta " + 'property="og:title" ' * 5000,
+        "<head>" + "<title" * 15_000,
+        "<title>" + "<a " * 20_000 + "</title>",
+        "<meta " * 100_000,  # far past what is read
+    ]
+    for page in pages:
+        started = time.perf_counter()
+        answers.page_picture(page, "https://shop.example.com/x")
+        assert time.perf_counter() - started < 1.0, page[:40]
+    started = time.perf_counter()
+    assert _meta("<meta " * 3000, "og:title", "og:image") == ""  # the price check's use of it
+    assert time.perf_counter() - started < 1.0
+    # What it is for still works, in either order of the attributes, and only in the head.
+    page = (
+        '<html><head><meta content="/a.jpg" property="og:image">'
+        "<title>Space A40 &amp; case</title></head><body>"
+        '<meta property="og:title" content="Not this one"></body></html>'
+    )
+    assert answers.page_picture(page, "https://shop.example.com/x") == (
+        "Space A40 & case",
+        "https://shop.example.com/a.jpg",
+    )
+    assert _meta('<meta name="og:title" content="A40">', "twitter:title", "og:title") == "A40"
+
+
+async def test_parsing_and_decoding_stay_off_the_event_loop(monkeypatch):
+    import threading
+
+    where = {}
+    real_page, real_thumb = answers.page_picture, answers.thumbnail
+
+    def page_picture(page, url):
+        where["page"] = threading.current_thread()
+        return real_page(page, url)
+
+    def thumbnail(raw):
+        where["picture"] = threading.current_thread()
+        return real_thumb(raw)
+
+    monkeypatch.setattr(answers, "page_picture", page_picture)
+    monkeypatch.setattr(answers, "thumbnail", thumbnail)
+    product = (
+        "<html><head><title>soundcore Space A40 by Anker</title>"
+        '<meta property="og:image" content="/media/space-a40.jpg"></head></html>'
+    )
+    pages = {
+        "https://www.soundcore.com/products/space-a40": (product.encode(), "text/html"),
+        "https://www.soundcore.com/media/space-a40.jpg": (jpeg(), "image/jpeg"),
+    }
+
+    async def get(url, limit):
+        return pages.get(url, (b"", ""))
+
+    async def nothing(query, n):
+        return []
+
+    picture = await answers.find_picture(
+        "Anker Soundcore Space A40", list(pages)[:1], search=nothing, get=get
+    )
+    assert picture and picture.startswith("data:image/jpeg;base64,")
+    main = threading.main_thread()
+    assert where["page"] is not main and where["picture"] is not main
+
+
+NAMES = {
+    "shop.example.com": ["93.184.216.34"],
+    "cdn.example.com": ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"],
+    "10.0.0.1.nip.io": ["10.0.0.1"],
+    "router.example.net": ["192.168.1.1"],
+    "both.example.com": ["93.184.216.34", "127.0.0.1"],  # one public address is not enough
+    "six.example.com": ["::1"],
+    "mapped.example.com": ["::ffff:10.0.0.1"],
+    "metadata.example.com": ["169.254.169.254"],
+}
+
+
+def lookup(host: str) -> list[str]:
+    if host not in NAMES:
+        raise OSError("no such name")
+    return NAMES[host]
+
+
+async def test_only_addresses_out_on_the_internet_count_as_public(monkeypatch):
+    """The check used to read the address as text: any name with a dot in it passed."""
+    monkeypatch.setattr(answers, "_addresses", lookup)
+    assert await answers._public("https://shop.example.com/x")
+    assert await answers._public("https://cdn.example.com/a.jpg")
+    assert await answers._public("https://93.184.216.34/a.jpg")
+    for bad in [
+        "http://10.0.0.1.nip.io/",
+        "http://router.example.net/admin",
+        "http://both.example.com/",
+        "http://six.example.com/",
+        "http://mapped.example.com/",
+        "http://metadata.example.com/latest/meta-data",
+        "http://nowhere.example.com/",  # a name that doesn't resolve
+        "http://localhost./",
+        "http://router.lan/",
+        "http://nas.home/photos",
+        "http://printer.local/",
+        "http://intranet/",
+        "http://127.0.0.1:8766/x",
+        "http://169.254.169.254/latest",
+        "http://[::1]:8766/x",
+        "http://[::ffff:192.168.1.1]/",
+        "ftp://shop.example.com/x",
+        "file:///C:/Windows/win.ini",
+    ]:
+        assert not await answers._public(bad), bad
+
+
+async def test_a_redirect_is_followed_by_hand_and_checked_at_every_hop(monkeypatch):
+    """Only the last address used to be checked, after the request to it had been made."""
+    import httpx
+
+    asked: list[str] = []
+
+    def site(request: httpx.Request) -> httpx.Response:
+        asked.append(str(request.url))
+        host, path = request.url.host, request.url.path
+        if host == "cdn.example.com":
+            return httpx.Response(200, content=b"a picture", headers={"content-type": "image/jpeg"})
+        if host != "shop.example.com":
+            return httpx.Response(200, content=b"the router's admin page")
+        to = {
+            "/moved": "https://cdn.example.com/a.jpg",
+            "/twice": "/moved",
+            "/home": "http://127.0.0.1:8766/secret",
+            "/lan": "http://router.example.net/admin",
+            "/file": "file:///C:/Windows/win.ini",
+            "/loop": "/loop",
+        }
+        if path in to:
+            return httpx.Response(302, headers={"location": to[path]})
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(site), follow_redirects=True)
+
+    class Keep:
+        async def __aenter__(self):
+            return client
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(answers, "shared", lambda *a, **kw: Keep())
+    monkeypatch.setattr(answers, "_addresses", lookup)
+    assert await answers._get("https://shop.example.com/moved", 100) == (b"a picture", "image/jpeg")
+    assert await answers._get("https://shop.example.com/twice", 4) == (b"a pi", "image/jpeg")
+    for path in ("/home", "/lan", "/file", "/missing"):
+        assert await answers._get(f"https://shop.example.com{path}", 100) == (b"", ""), path
+    assert not [u for u in asked if "127.0.0.1" in u or "router" in u]  # never even asked
+    asked.clear()
+    assert await answers._get("https://shop.example.com/loop", 100) == (b"", "")
+    assert len(asked) == answers.MAX_HOPS + 1  # three redirects followed, then it gives up
+    assert await answers._get("http://10.0.0.1.nip.io/x", 100) == (b"", "") and len(asked) == 4
+    await client.aclose()
+
+
+def test_a_picture_that_claims_to_be_huge_is_never_decoded(monkeypatch):
+    from PIL import ImageFile
+
+    decoded = []
+    real = ImageFile.ImageFile.load
+
+    def load(self, *a, **kw):
+        decoded.append(self.size)
+        return real(self, *a, **kw)
+
+    monkeypatch.setattr(ImageFile.ImageFile, "load", load)
+    buf = io.BytesIO()
+    Image.new("L", (4200, 4200)).save(buf, format="PNG")  # a few kilobytes on the wire
+    assert answers.thumbnail(buf.getvalue()) is None and decoded == []
+    assert answers.thumbnail(jpeg()) is not None and decoded  # a real photo still is
