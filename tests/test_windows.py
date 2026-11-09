@@ -114,5 +114,32 @@ async def test_three_parts_in_one_call(settings, monkeypatch):
     assert placed == {7: (0, 0, 640, 1032), 9: (640, 0, 640, 1032), 8: (1280, 0, 640, 1032)}
 
 
+
+async def test_panes_end_up_in_front_of_the_window_they_were_in(settings, monkeypatch):
+    """Live: "Facebook on the left, YouTube on the right" from a full-screen New Tab put both
+    panes behind it, because the New Tab got the focus back at the end."""
+    from test_brain_and_server import make_brain
+
+    focused: list[int] = []
+    monkeypatch.setattr(windows, "available", lambda: True)
+    monkeypatch.setattr(windows, "work_area", lambda hwnd: (0, 0, 1920, 1032))
+    monkeypatch.setattr(windows, "place", lambda hwnd, *rect: None)
+    monkeypatch.setattr(windows, "focus", lambda hwnd: focused.append(hwnd) or True)
+    monkeypatch.setattr(
+        windows,
+        "open_windows",
+        lambda minimized=False: [
+            (7, "Mozilla Firefox", "firefox.exe"),  # the New Tab they were in
+            (8, "(1) Facebook - Mozilla Firefox", "firefox.exe"),
+            (9, "Music - YouTube - Mozilla Firefox", "firefox.exe"),
+        ],
+    )
+    monkeypatch.setattr("pyxi.companion.brain.asyncio.sleep", _no_sleep)
+    brain, _ = make_brain(settings)
+    brain._ctx = type("C", (), {"window": type("W", (), {"hwnd": 7})()})()
+    await brain._arrange_windows({"layout": "panes", "arrangement": "columns", "panes": ["Facebook", "YouTube"]})
+    assert 7 not in focused and set(focused) == {8, 9}
+
+
 async def _no_sleep(_s):
     return None

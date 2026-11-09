@@ -653,7 +653,12 @@ class Brain:
         await asyncio.sleep(0.8)
         for win, rect in placed:  # browsers sometimes resize a new window a moment after opening
             windows.place(win, *rect)
-        windows.focus(hwnd)
+        # Every pane in front. The window they were in only gets the focus back if it's one of
+        # the panes: focusing it otherwise put a full-screen New Tab on top of both panes.
+        for win, _ in placed:
+            windows.focus(win)
+        if any(win == hwnd for win, _ in placed):
+            windows.focus(hwnd)
         if missing:
             return (
                 f"arrange_windows: placed {len(placed)} of {len(panes)}; couldn't open "
