@@ -20,6 +20,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
+from pyxi.httpshared import shared
+
 log = logging.getLogger(__name__)
 
 BROWSER_UA = (
@@ -100,7 +102,7 @@ def _unbing(url: str) -> str:
 
 async def search(query: str, max_results: int = 6) -> list[Hit]:
     """Web results for a query. Never raises: an empty list if every engine fails."""
-    async with httpx.AsyncClient(headers=HEADERS, timeout=TIMEOUT, follow_redirects=True) as c:
+    async with shared("web", headers=HEADERS, timeout=TIMEOUT, follow_redirects=True) as c:
         for name, fetch, parse in (
             (
                 "duckduckgo",
@@ -133,7 +135,7 @@ async def read(url: str, max_chars: int = 5000) -> tuple[str, str]:
     """(title, readable text) of a web page; raises httpx errors for the caller to report."""
     if not re.match(r"https?://", url):
         url = "https://" + url
-    async with httpx.AsyncClient(headers=HEADERS, timeout=TIMEOUT, follow_redirects=True) as c:
+    async with shared("web", headers=HEADERS, timeout=TIMEOUT, follow_redirects=True) as c:
         r = await c.get(url)
         if r.status_code in (403, 429):
             r = await c.get(url, headers={"User-Agent": HONEST_UA})
@@ -223,7 +225,7 @@ def _ago(rfc822: str) -> str:
 
 async def news(query: str, max_results: int = 6) -> list[NewsHit]:
     """Recent news articles: Bing News, with Google News as a fallback. Never raises."""
-    async with httpx.AsyncClient(headers=HEADERS, timeout=TIMEOUT, follow_redirects=True) as c:
+    async with shared("web", headers=HEADERS, timeout=TIMEOUT, follow_redirects=True) as c:
         hits: list[NewsHit] = []
         try:
             r = await c.get(

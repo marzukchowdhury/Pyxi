@@ -354,6 +354,30 @@ def bundled_client() -> Path | None:
     return path if path.is_file() else None
 
 
+# Links in an email. Both run in time proportional to the email: the old text pattern
+# ("([^\n]{0,60}?)\s*(https?://...)") backtracked on long runs of spaces, and one newsletter
+# froze Penny's receipt check for minutes.
+_HTML_LINK = re.compile(r"""<a\b[^>]{0,2000}?href=["']([^"']{1,2000})["'][^>]{0,2000}>(.{0,500}?)</a>""", re.S | re.I)
+_URL = re.compile(r"""https?://[^\s<>"')]+""")
+
+
+def _tidy_text(text: str, limit: int = 60_000) -> str:
+    """An email's text for Pyxi's own checks: runs of spaces squeezed to one, at most three
+    blank lines in a row, and a sane length. Every pattern that reads mail then runs fast."""
+    text = re.sub(r"[ \t ​‌͏]{2,}", " ", text[: limit * 4])
+    text = re.sub(r"\n[ \t]*(?:\n[ \t]*){3,}", "\n\n\n", text)
+    return text[:limit]
+
+
+def _text_links(text: str) -> list[tuple[str, str]]:
+    """(the words just before it on its line, the link) for each link in plain text."""
+    out = []
+    for m in _URL.finditer(text[:400_000]):
+        before = text[max(0, m.start() - 60) : m.start()].rsplit("\n", 1)[-1]
+        out.append((before.strip(" :-\t"), m.group(0)))
+    return out
+
+
 class GoogleConnector(Connector):
     id = "google"
     name = "Google (Gmail, Calendar, Docs, Sheets)"
@@ -497,10 +521,20 @@ class GoogleConnector(Connector):
             secretstore.write_json(self.token_path, data)
         return self._creds.token
 
+    def _client(self) -> httpx.AsyncClient:
+        """One HTTP client for every Google call, kept open. A new client per call reloaded the
+        certificate store each time (about 0.25 s of CPU on the event loop), so 25 'parallel'
+        Gmail reads took 6.6 s, one after another."""
+        loop = asyncio.get_running_loop()
+        client = getattr(self, "_http", None)
+        if client is None or client.is_closed or getattr(self, "_http_loop", None) is not loop:
+            client = httpx.AsyncClient(timeout=30, limits=httpx.Limits(max_connections=30))
+            self._http, self._http_loop = client, loop
+        return client
+
     async def _api(self, method: str, url: str, **kw: Any) -> Any:
         headers = {"Authorization": f"Bearer {await self._token()}"}
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.request(method, url, headers=headers, **kw)
+        r = await self._client().request(method, url, headers=headers, **kw)
         if r.status_code >= 400:
             raise RuntimeError(google_error(r.status_code, r.text))
         return r.json() if r.content else {}
@@ -669,15 +703,15 @@ class GoogleConnector(Connector):
 
     async def gmail_fetch(self, query: str, n: int = 40) -> list[dict[str, Any]]:
         """Whole emails for Pyxi's own background checks (receipts, orders): sender, subject,
-        date, plain text and every link with its words. Fetched ten at a time, so a big scan
+        date, plain text and every link with its words. Fetched 25 at a time, so a big scan
         stays under Gmail's rate limit."""
         ids = await self._list(query, min(n, 100))
         msgs: list[dict[str, Any]] = []
-        for i in range(0, len(ids), 10):
+        for i in range(0, len(ids), 25):  # 25 at a time: well inside Gmail's per-second quota
             msgs += await asyncio.gather(
                 *(
                     self._api("GET", f"{GMAIL}/messages/{m}", params={"format": "full"})
-                    for m in ids[i : i + 10]
+                    for m in ids[i : i + 25]
                 )
             )
         out = []
@@ -687,20 +721,17 @@ class GoogleConnector(Connector):
             raw = self._html(payload)
             links = [
                 (_strip_html(text).strip(), html.unescape(url))
-                for url, text in re.findall(
-                    r"""<a\b[^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>""", raw, re.S | re.I
-                )
+                for url, text in _HTML_LINK.findall(raw[:400_000])
             ]
             text = self._body(payload)
-            for m in re.finditer(r"([^\n]{0,60}?)\s*(https?://[^\s<>\"')]+)", text):
-                links.append((m.group(1).strip(" :-"), m.group(2)))
+            links += _text_links(text)
             out.append(
                 {
                     "id": msg.get("id", ""),
                     "from": h.get("from", ""),
                     "subject": h.get("subject", ""),
                     "date": _when(msg, h),
-                    "text": text or _strip_html(raw),
+                    "text": _tidy_text(text or _strip_html(raw)),
                     "links": links,
                 }
             )
@@ -847,7 +878,7 @@ class GoogleConnector(Connector):
             except Exception as exc:
                 from pyxi.localzone import local_zone
 
-                if re.search(r"403|insufficient", str(exc)):
+                if re.search(r"\b403\b|insufficient", str(exc)):
                     # The calendar settings scope isn't granted: that won't change this session,
                     # so use this PC's own zone from now on (and stop asking every turn).
                     self._tz = local_zone()

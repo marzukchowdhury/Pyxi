@@ -60,7 +60,15 @@ const activeHotkeys: Record<HotkeyName, string | null> = { talk: null, panel: nu
 function registerHotkeys(handlers: Record<HotkeyName, () => void>): void {
   for (const name of Object.keys(HOTKEY_CHOICES) as HotkeyName[]) {
     for (const accelerator of HOTKEY_CHOICES[name]) {
-      if (globalShortcut.register(accelerator, handlers[name])) {
+      let ok = false;
+      try {
+        ok = globalShortcut.register(accelerator, handlers[name]);
+      } catch (err) {
+        // Electron throws (not false) for a key it can't use on this keyboard, e.g. "Pause".
+        // Without this, every option after it, and every hotkey after it, went unregistered.
+        console.warn(`[pyxi] ${accelerator} can't be a shortcut here (${(err as Error).message}); trying the next.`);
+      }
+      if (ok) {
         activeHotkeys[name] = accelerator;
         break;
       }

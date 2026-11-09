@@ -393,7 +393,9 @@ POLICIES = {
     "nike": (60, "purchase"),
 }
 ORDER_NO = re.compile(
-    r"order\s*(?:#|no\.?|number)?\s*:?\s*#?\s*(?P<n>(?=[A-Z0-9-]*[0-9])[A-Z0-9][A-Z0-9-]{4,})", re.I
+    # One run of separators, not three neighbouring \s* (they backtracked for minutes on a
+    # newsletter full of spaces).
+    r"order[ \t]{0,3}(?:#|no\.?|number)?[\s:#]{0,6}(?P<n>(?=[A-Z0-9-]{0,40}[0-9])[A-Z0-9][A-Z0-9-]{4,40})", re.I
 )
 ORDER_MAIL = re.compile(
     r"order|shipped|has shipped|on (?:its|the) way|out for delivery|delivered|your package|purchase",

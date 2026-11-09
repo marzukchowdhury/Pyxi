@@ -13,6 +13,8 @@ from datetime import date, datetime
 
 import httpx
 
+from pyxi.httpshared import shared
+
 GEO = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST = "https://api.open-meteo.com/v1/forecast"
 TIMEOUT = httpx.Timeout(6.0, connect=3.0)
@@ -132,7 +134,7 @@ async def forecast(place: str) -> Forecast | None:
     place = place.strip()
     if not place:
         return None
-    async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+    async with shared("weather", timeout=TIMEOUT) as c:
         try:
             geo = await c.get(
                 GEO, params={"name": place.split(",")[0], "count": 1, "language": "en"}
