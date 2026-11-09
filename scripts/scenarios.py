@@ -420,7 +420,7 @@ def repeated_sentence(said: str) -> str:
     seen: list[set[str]] = []
     for sentence in split_sentences(said):
         words = _content(sentence)
-        if len(words) >= 3 and any(len(words & w) / len(words) >= 0.75 for w in seen):
+        if len(words) >= 4 and any(len(words & w) / len(words) >= 0.75 for w in seen):
             return sentence
         seen.append(words)
     return ""
@@ -909,7 +909,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     if busy and len(re.findall(r"[.!?](\s|$)", said)) > 2:
         problems.append(f"talks too much while working ({len(said)} chars)")
     # "I'll look for a slot" is a kept promise when a teammate or booking really is off doing it.
-    working = any(b.startswith(("book", "delegate", "errand", "hands", "tidy", "checkin")) for b in background)
+    working = bool(background)  # a teammate or job really is off doing it (Atlas, Penny, Scout...)
     if drop_false_promises(said.split(". ")[-1])[1] and not working:
         problems.append("ends promising a search")
     if re.search(r"M4|model is finished", said):

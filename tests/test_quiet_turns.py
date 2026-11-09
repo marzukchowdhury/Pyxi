@@ -135,3 +135,11 @@ def test_symbols_and_units_read_naturally() -> None:
     assert speakable("3.7 km away, 7 min") == "3.7 kilometres away, 7 minutes"
     assert speakable("Select A1:C13") == "Select A1 to C13"
     assert speakable("Version 10:30 AM") == "Version 10:30 AM"
+
+
+def test_a_card_point_that_repeats_the_intro_keeps_only_its_mark() -> None:
+    from pyxi.companion.brain import drop_repeats
+
+    said = ["It's a $107.80 Maplewave phone bill, due November 28."]
+    out = drop_repeats("[note:1] You owe $107.80, and it's due November 28. [note:2] Roaming was billed twice.", said)
+    assert out.startswith("[note:1]") and "owe" not in out and "Roaming was billed twice." in out

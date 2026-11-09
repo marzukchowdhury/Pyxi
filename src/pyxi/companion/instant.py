@@ -109,7 +109,9 @@ _BLANK_RE = re.compile(
 )
 _SITE_RE = re.compile(
     _LEAD
-    + rf"(?:open(?: up)?|go to|pull up|bring up|launch)\s+(?:up\s+)?({_alts(list(_SITES))})"
+    + rf"(?:open(?: up)?|go to|pull up|bring up|launch)\s+(?:up\s+)?"
+    + r"(?:(?:a\s+)?new\s+(?:tab|window)\s+(?:with|to|for|on|of)\s+)?"  # "open a new tab with Google Maps"
+    + rf"({_alts(list(_SITES))})"
     + _TAIL,
     re.I,
 )

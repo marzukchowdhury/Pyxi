@@ -2011,8 +2011,10 @@ class Brain:
                     pass  # the drawing or model narrates itself; a canned line would only interrupt
                 elif any(c.get("tool") in _BACKGROUND_TOOLS for c in self._calls):
                     self._speak("On it.")  # started, not finished: "Done." then a failure misleads
-                elif self._calls:
-                    self._speak("Done.")
+                elif any(
+                    c.get("tool") not in INFO_TOOLS | QUIET_NOTES | {"guide"} for c in self._calls
+                ):
+                    self._speak("Done.")  # something was really done (a looked-at screen or a guide arrow isn't)
                 else:
                     self._speak("Hmm, I'm not sure what to say to that.")
             return {}
@@ -3211,13 +3213,13 @@ def drop_repeats(text: str, earlier: list[str]) -> str:
     for sentence in split_sentences(text):
         words = set(_WORD.findall(split_markers(sentence)[0].lower()))
         content = _content(sentence)
-        if MARKER.search(sentence):
-            pass  # a pointer or a note mark is never a repeat: it draws as it's said
-        elif len(words) >= 4 and any(
-            len(words & w) / len(words | w) >= 0.6 for w in seen if len(w) >= 4
-        ):
-            continue
-        elif said_words and len(content) >= 2 and len(content - said_words) <= len(content) // 5:
+        again = (
+            len(words) >= 4 and any(len(words & w) / len(words | w) >= 0.6 for w in seen if len(w) >= 4)
+        ) or (said_words and len(content) >= 2 and len(content - said_words) <= len(content) // 5)
+        if again:
+            marks = " ".join(m.group(0) for m in MARKER.finditer(sentence))
+            if marks:
+                kept.append(marks)  # the card point or pointer still appears; only the words go
             continue
         kept.append(sentence)
         seen.append(words)
