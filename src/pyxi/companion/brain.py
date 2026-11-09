@@ -1732,6 +1732,10 @@ class Brain:
             started = time.monotonic()
             await self.hub.emit("user", text=shown or user_text, turn_id=turn_id)
             error = None
+            if not synthetic:
+                from pyxi import wakename
+
+                user_text = wakename.normalize(user_text)  # typed or heard: "Your pixxit..." -> "Pyxi, ..."
             try:
                 hit = None if synthetic else instant.match(user_text)
                 asked = None if synthetic or hit else weather.simple_question(user_text)
