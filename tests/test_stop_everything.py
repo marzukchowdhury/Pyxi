@@ -63,3 +63,23 @@ def test_the_desktop_app_stops_it_with_the_launch_key(settings):
         assert client.post("/api/stop").status_code == 401  # no other program can
         r = client.post("/api/stop", headers={"x-pyxi-key": "k"})
         assert r.status_code == 200 and r.json()["message"].startswith("Stopped everything")
+
+
+async def test_saying_stop_stops_for_real(settings):
+    brain = _brain(settings)
+    job = await brain.jobs.track("Scout", "Book the dentist")
+    brain.jobs._tasks[job.id] = asyncio.create_task(asyncio.sleep(60))
+    said: list[str] = []
+    brain._speak = lambda text, **kw: said.append(text)  # type: ignore[method-assign]
+    await brain.turn("Okay stop stop")
+    await asyncio.sleep(0.05)
+    assert brain.jobs.jobs[job.id].status == "stopped"
+    assert said == ["Stopped."]
+    assert [c["tool"] for c in brain._calls] == ["stop_everything"]
+
+
+def test_only_a_plain_stop_counts() -> None:
+    from pyxi.companion.instant import is_stop
+
+    assert is_stop("Stop.") and is_stop("cancel that") and is_stop("Hey Pyxi, stop!")
+    assert not is_stop("stop the music") and not is_stop("stop sharing my screen")

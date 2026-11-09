@@ -206,3 +206,18 @@ def play_request(text: str) -> tuple[str, str] | None:
         return None
     app = (m.group("app") or "").lower().replace(" ", "_") or "youtube_music"
     return q, app
+
+
+# "Stop.", "okay stop stop", "cancel that", "never mind": the same as the Stop everything hotkey,
+# at once. A longer sentence ("stop the music", "stop sharing my screen") goes elsewhere.
+_STOP = re.compile(
+    r"^\W*(?:(?:ok|okay|no|hey|pyxi|wait|hold on|please)[,.!]?\s+)*"
+    r"(?:stop(?:[,.!]?\s+(?:it|that|now|everything|please|stop|right now))*"
+    r"|cancel(?:\s+(?:it|that|everything))?|never\s*mind|that'?s enough|enough)"
+    r"(?:[,.!]?\s+(?:please|pyxi))?[\s.!]*$",
+    re.I,
+)
+
+
+def is_stop(text: str) -> bool:
+    return bool(_STOP.match(" ".join(text.split())))

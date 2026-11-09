@@ -1576,7 +1576,15 @@ class Brain:
                 hit = None if synthetic else instant.match(user_text)
                 asked = None if synthetic or hit else weather.simple_question(user_text)
                 song = None if synthetic or hit or asked else instant.play_request(user_text)
-                if asked is not None and await self._weather_now(*asked):
+                if not synthetic and instant.is_stop(user_text):
+                    # A spoken "stop" stops for real: jobs, the hands, cards and anything queued,
+                    # like the hotkey. Before, it only made the model say "Stopping."
+                    message = await self.stop_everything()
+                    self._calls.append(
+                        {"round": 1, "tool": "stop_everything", "arguments": {}, "instant": True}
+                    )
+                    self._speak("Stopped." if "Nothing was running" not in message else "Okay.")
+                elif asked is not None and await self._weather_now(*asked):
                     pass  # answered from the forecast in about a second
                 elif song is not None:
                     self._calls.append(
