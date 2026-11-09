@@ -122,3 +122,41 @@ After the first report, the founder tested Pyxi live, then left the PC on overni
 | 46 | "Pause the music" crashed (a local import named like a module) | Fixed |
 | 47 | Ledger's report said "bold" when it made the text bold and blue | Says every change |
 | 48 | Scout's second job in a row failed; bot checks kept it waiting 2 minutes | Fixed in Otto (two commits) |
+| 49 | "What alarms do I have?", "cancel my 6:30 alarm" took 9-10 s through the model | Both instant |
+| 50 | "What's on my right screen?" took two model rounds (15.7 s) | That screen is looked at from the start |
+| 51 | "Okay, done, that's the first one" sometimes made Pyxi ask what the task was | Ditto stops watching on "done" at once (the scenario check for it never set Ditto up; fixed too) |
+| 52 | "Quiz me on the heart" asked for slides; "I'll remind you" phrasing, alarm repeat days said as "mon" | Fixed |
+
+## Final results (all fixes in)
+
+| Suite | Result |
+|---|---|
+| Live A–Z on the real app, round 1 | 107 cases. Brain froze at Penny (fixed); the rest found 20 bugs |
+| Live A–Z, round 2 (138 cases) | 134/138; the 4 misses fixed |
+| Live A–Z, round 3 (138 cases) | 135/138; the 3 misses fixed |
+| Recheck of everything changed after round 3 (28 cases) | 28/28 |
+| Scenarios on recorded screens (199) | 199/199 ($0.30) |
+| Python tests | 688 passed |
+| Desktop tests and typecheck | 47 passed, clean |
+| Otto tests | 49 passed |
+
+**Speed now:**
+- Opens, searches, alarms, timers, reminders, alarm lists and "close it": under 0.3 s.
+- Weather: about 1 s.
+- Quick answers: 2-4 s.
+- Web lookups: 7-9 s.
+- Sheets and Docs edits: 5-13 s.
+- 3D builds: 20-30 s.
+
+**Model cost:** a full 138-case round on the real app cost $0.18.
+
+## Still open, and for you to check
+
+- **Notepad:** twelve windows are open, most "Untitled" from the tests; one holds unsaved test text ("Pyxi night test, line one"). They're left for you, as they may hold your own tabs.
+- **Google Drive:** the tests made "Pyxi test sheet", "Pyxi test doc" and several blank "Untitled" docs and sheets. Nothing was deleted.
+- **Browser:** the tests opened tabs in Firefox (YouTube, Gmail, Maps, Wikipedia, searches).
+- **Windows "Sign in required" box:** it has been on the left screen all night (a work or school account). It isn't from Pyxi.
+- **One sender's charges:** Penny counts several October charges from one sender that no email clearly calls paid. Worth a look.
+- **Atlas** found no upcoming flights in your mail. That's correct if there are none.
+- **The 7:00 AM alarm** is set; the test alarms and reminders are gone. The Windows Clock app also still has a 7:00 AM alarm and a 7:00 PM "Alarm (1)" from yesterday's test.
+- **Not tested:** real email sending, meeting invites, purchases, folder tidying and file deletion (left out on purpose); Spotify desktop (not installed); the Mac version (not started).
