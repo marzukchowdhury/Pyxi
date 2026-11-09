@@ -1,0 +1,47 @@
+# What the Mac app's bundled Python needs: Pyxi's and Otto's dependencies (installer.in without
+# the Windows-only ones) plus the Apple frameworks through pyobjc. Otto and Pyxi themselves come
+# from the local checkouts (scripts/build_mac.py).
+#
+# Not hash-locked yet: lock it on a Mac with
+#   pip-compile --generate-hashes requirements/mac.in -o requirements/mac.txt
+# and build_mac.py installs from mac.txt with --require-hashes once it exists.
+#
+# Developing on a Mac: pip install -e . -r requirements/mac.in
+fastapi>=0.110
+uvicorn[standard]>=0.29
+mss>=9.0
+pillow>=10.0
+numpy>=1.26
+kokoro-onnx>=0.4
+soundfile>=0.12
+faster-whisper>=1.0
+httpx>=0.27
+google-auth-oauthlib>=1.2
+python-docx>=1.1
+pypdf>=4.0
+openpyxl>=3.1
+python-pptx>=1.0
+pypdfium2>=4.0
+reportlab>=4.0
+pillow-heif>=0.18
+rapidocr-onnxruntime>=1.4
+tzdata>=2024.1
+playwright>=1.48
+langgraph>=1.0
+anthropic>=2.0
+openai>=1.50
+pydantic>=2.7
+pydantic-settings>=2.4
+typer>=0.12
+rich>=13.7
+pyyaml>=6.0
+# macOS: the window list, events and screens (Quartz), apps and screens (AppKit, Foundation),
+# Accessibility (ApplicationServices), text recognition (Vision) and the Keychain (Security).
+pyobjc-core>=10.3
+pyobjc-framework-Quartz>=10.3
+pyobjc-framework-Cocoa>=10.3
+pyobjc-framework-ApplicationServices>=10.3
+pyobjc-framework-Vision>=10.3
+pyobjc-framework-Security>=10.3
+# AES-GCM for tokens at rest, under the Keychain-held key (pyxi/macos/secretstore.py)
+cryptography>=42

@@ -1,0 +1,104 @@
+# Builds the macOS app (one .dmg per architecture) on GitHub's Mac runners, and runs the Mac
+# tests there. Nothing is published: the dmgs are kept as workflow artifacts for a week.
+#
+# Signing and notarizing need an Apple Developer ID (docs/MAC-PORT.md). Until the repository has
+# these secrets the app is ad-hoc signed and Gatekeeper warns on first open:
+#   MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD            the Developer ID Application certificate (.p12, base64)
+#   APPLE_TEAM_ID                                  the team
+#   APPLE_API_KEY_P8, APPLE_API_KEY_ID, APPLE_API_ISSUER   an App Store Connect API key, for notarizing
+name: mac-build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x64]
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - name: Pyxi
+        uses: actions/checkout@v4
+        with:
+          path: pyxi
+      - name: Otto (the browser agent, built in from ../otto)
+        uses: actions/checkout@v4
+        with:
+          repository: marzukchowdhury/otto
+          path: otto
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: pyxi/desktop/package-lock.json
+
+      - name: Rosetta (to build the Intel Python on an Apple silicon runner)
+        if: matrix.arch == 'x64'
+        run: softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Python tests (the Mac paths, against Apple's real frameworks being present)
+        working-directory: pyxi
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/mac.in pytest pytest-asyncio
+          python -m pip install --no-deps -e ../otto -e .
+          python -m pytest -q tests/test_macos_windows.py tests/test_macos_hands.py tests/test_macos_misc.py
+
+      - name: The whole Python suite (informational: parts of it still assume Windows)
+        working-directory: pyxi
+        continue-on-error: true
+        run: python -m pytest -q
+
+      - name: Desktop typecheck and tests
+        working-directory: pyxi/desktop
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
+      - name: Build the app
+        working-directory: pyxi
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          if [ -n "$APPLE_API_KEY_P8" ]; then
+            echo "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+            export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
+          fi
+          # Empty secrets mean "not set": electron-builder must not try to sign with nothing.
+          [ -z "$CSC_LINK" ] && unset CSC_LINK CSC_KEY_PASSWORD
+          python scripts/build_mac.py --arch ${{ matrix.arch }}
+
+      - name: Smoke test (the bundled brain starts and answers)
+        working-directory: pyxi/desktop
+        run: |
+          APP=$(ls -d dist/mac*/Pyxi.app | head -1)
+          PY="$APP/Contents/Resources/python/bin/python3"
+          if [ "${{ matrix.arch }}" = "x64" ]; then PY="arch -x86_64 $PY"; fi
+          $PY -c "import pyxi.server, pyxi.macos.uia, Quartz; print('brain imports ok')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Pyxi-mac-${{ matrix.arch }}
+          path: |
+            pyxi/desktop/dist/*.dmg
+            pyxi/desktop/dist/*.zip
+          retention-days: 7
+          if-no-files-found: error
