@@ -2299,6 +2299,10 @@ class Brain:
                     continue
                 if call.name == "say" and retrying and self._said:
                     continue  # a retried drawing mustn't make Pyxi say its reply twice
+                if call.name == "say" and said_before(
+                    str(call.arguments.get("text", "")), self._said
+                ):
+                    continue  # the same thing again, in the same or other words: said once
                 self._calls.append(
                     {"round": round_no, "tool": call.name, "arguments": call.arguments}
                 )
@@ -3729,7 +3733,9 @@ def drop_repeats(text: str, earlier: list[str]) -> str:
     the next round ("New doc, opening a blank one." then "Got you, opening a new blank doc."), or
     leaks a tool's name ("[say] Ledger can't..."). A sentence is dropped when it mostly repeats one
     sentence already said, or when everything it says (its words that carry meaning) was already
-    said this turn."""
+    said this turn. A short line goes too when it is one already said word for word ("Opening
+    Settings." twice), or the start line again in other words ("Putting the 5 by 5 table in
+    now." then "The table's going in now."); what came of it ("The table is in.") always stays."""
     text = _TOOL_TAG.sub("", text)
     seen = [set(_WORD.findall(s.lower())) for e in earlier for s in split_sentences(e)]
     said_words: set[str] = set().union(*(_content(s) for e in earlier for s in split_sentences(e)))
@@ -3744,7 +3750,13 @@ def drop_repeats(text: str, earlier: list[str]) -> str:
             and len(content) >= 2
             # all of it said already, or (in a longer sentence) three quarters of it
             and len(content - said_words) <= (len(content) // 4 if len(content) >= 4 else 0)
-        )
+        ) or (
+            # still only "it's under way", about the one thing already named
+            len(content) == 1
+            and content <= said_words
+            and bool(_UNDERWAY.search(sentence))
+            and not _SETTLED.search(sentence)
+        ) or (bool(words) and words in seen)  # the same line, word for word, however short
         if again:
             marks = " ".join(m.group(0) for m in MARKER.finditer(sentence))
             if marks:
@@ -3754,6 +3766,28 @@ def drop_repeats(text: str, earlier: list[str]) -> str:
         seen.append(words)
         said_words |= content
     return " ".join(kept)
+
+
+# A line that only says the work is under way: "Putting it in now.", "The table's going in.",
+# "Ledger is drawing the pivot.", "A new doc, coming up.", "I'll add it."
+_UNDERWAY = re.compile(
+    r"^\W*[a-z]{2,}ing\b"
+    r"|(?:\b(?:is|are|am)|'s|'re|'m)\s+(?:(?:now|just|already|still)\s+)?"
+    r"(?!(?:no|some|any|every)thing\b)[a-z]{2,}ing\b"
+    r"|\b(?:coming (?:right )?up|on (?:its|the|their) way|i'?ll|i will|let me)\b",
+    re.IGNORECASE,
+)
+# ...unless it reports how things turned out, which is news.
+_SETTLED = re.compile(
+    r"\b(?:done|finished|ready|not|no|never|cannot|failed|sorry|but|instead|because|since)\b|n't\b",
+    re.IGNORECASE,
+)
+
+
+def said_before(text: str, earlier: list[str]) -> bool:
+    """Is all of this `say` something already said this turn, in the same or other words? Then
+    the whole call goes. A line with a pointer or note marker never counts: its mark still draws."""
+    return bool(earlier and text.strip()) and not drop_repeats(strip_filler(text), earlier).strip()
 
 
 def vary_ack(text: str, recent: list[str], pick: Any = random.choice) -> str:

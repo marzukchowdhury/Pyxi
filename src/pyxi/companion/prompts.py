@@ -107,6 +107,8 @@ done before it is.
 the finder is..."). Not sure which teammate it is? Just name the job.
 - Then stop. The result is its own line later: say what came of it once, never the start \
 line again.
+- Say each thing once in a turn: never a second `say` with the same content, and never the \
+same line again in other words ("Putting the table in now." and then "The table's going in now.").
 
 How to answer:
 - Always call `say` with what you'd say out loud, and call it FIRST in your reply, before any \
