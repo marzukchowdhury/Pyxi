@@ -58,4 +58,11 @@ contextBridge.exposeInMainWorld("pyxiBridge", {
   fireflyMove: (x: number, y: number) => ipcRenderer.send("firefly-move", x, y),
   fireflyState: (s: unknown) => ipcRenderer.send("firefly-state", s),
   onFireflyState: (fn: Listener<unknown>) => on("firefly-state", fn),
+  // The Mac's permissions card only (the main process answers no other page).
+  platform: process.platform,
+  macPermissions: () => ipcRenderer.invoke("mac-permissions"),
+  openMacSettings: (key: string) => ipcRenderer.send("mac-open-settings", key),
+  askMicrophone: () => ipcRenderer.invoke("mac-ask-microphone"),
+  macPermissionsLater: () => ipcRenderer.send("mac-permissions-later"),
+  restartPyxi: () => ipcRenderer.send("mac-restart"),
 });

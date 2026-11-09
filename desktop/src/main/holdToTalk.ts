@@ -10,6 +10,11 @@
  *
  * Double-tapping Ctrl (two quick taps, nothing else pressed) opens the notch's text box.
  * Holding Ctrl + (left) Windows the same way dictates: the words are typed where the cursor is.
+ *
+ * On a Mac the same chords are Control + Option (talk) and Control + Command (dictate). Either
+ * chord can be changed (see `chordsFrom`): any two or three of ctrl, alt/option, meta/cmd/win.
+ * The hook needs the Accessibility permission there (and Input Monitoring on some macOS
+ * versions); without it `startHoldToTalk` returns false and the shortcuts still work.
  */
 import { UiohookKey, uIOhook } from "uiohook-napi";
 
@@ -28,6 +33,16 @@ export interface HoldToTalkEvents {
   move?(): void;
 }
 
+/** The modifiers a chord can be made of. "alt" is Option on a Mac, "meta" is Windows or Command. */
+export type Mod = "ctrl" | "alt" | "meta";
+
+export interface HoldToTalkOptions {
+  talk?: Mod[];
+  dictate?: Mod[];
+  /** Tap F24 when dictation starts (Windows opens Start when the Windows key goes up alone). */
+  quietTap?: boolean;
+}
+
 /** libuiohook's mouse moved and mouse dragged events (uiohook-napi names only the first). */
 const MOUSE_MOVES = new Set<number>([9, 10]);
 
@@ -43,10 +58,60 @@ const TAP_GAP_MS = 360; // ...and the second tap must start within this of the f
 
 type Chord = "talk" | "dictate";
 
-export function startHoldToTalk(events: HoldToTalkEvents): boolean {
-  let ctrl = false;
-  let alt = false;
-  let win = false;
+const MOD_NAMES: Record<string, Mod> = {
+  ctrl: "ctrl",
+  control: "ctrl",
+  alt: "alt",
+  option: "alt",
+  opt: "alt",
+  meta: "meta",
+  win: "meta",
+  windows: "meta",
+  cmd: "meta",
+  command: "meta",
+  super: "meta",
+};
+
+/** "ctrl+option" -> ["ctrl", "alt"]. Null unless it's two or three different modifiers. */
+export function parseChord(text: string | null | undefined): Mod[] | null {
+  if (!text) return null;
+  const mods = text
+    .toLowerCase()
+    .split("+")
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => MOD_NAMES[p]);
+  if (mods.some((m) => !m)) return null;
+  const unique = [...new Set(mods)] as Mod[];
+  return unique.length >= 2 && unique.length === mods.length ? unique : null;
+}
+
+/** Talk and dictate chords: the user's choice (env, then saved settings), else the defaults. */
+export function chordsFrom(
+  saved: { talk?: string; dictate?: string } | undefined,
+  env: Record<string, string | undefined> = {},
+): { talk: Mod[]; dictate: Mod[] } {
+  const talk = parseChord(env.PYXI_TALK_CHORD) ?? parseChord(saved?.talk) ?? ["ctrl", "alt"];
+  let dictate = parseChord(env.PYXI_DICTATE_CHORD) ?? parseChord(saved?.dictate) ?? ["ctrl", "meta"];
+  if (same(talk, dictate)) dictate = same(talk, ["ctrl", "meta"]) ? ["ctrl", "alt"] : ["ctrl", "meta"];
+  return { talk, dictate };
+}
+
+const same = (a: Mod[], b: Mod[]) => a.length === b.length && a.every((m) => b.includes(m));
+
+/** How a chord is written for this platform: "Control+Alt" on Windows, "Control+Option" on a Mac. */
+export function chordLabel(mods: Mod[], platform: string = process.platform): string {
+  const mac = platform === "darwin";
+  const names: Record<Mod, string> = { ctrl: "Control", alt: mac ? "Option" : "Alt", meta: mac ? "Command" : "Win" };
+  const order: Mod[] = ["ctrl", "alt", "meta"];
+  return order.filter((m) => mods.includes(m)).map((m) => names[m]).join("+");
+}
+
+export function startHoldToTalk(events: HoldToTalkEvents, options: HoldToTalkOptions = {}): boolean {
+  const talkChord = options.talk ?? ["ctrl", "alt"];
+  const dictateChord = options.dictate ?? ["ctrl", "meta"];
+  const quietTap = options.quietTap ?? process.platform === "win32";
+  const held: Record<Mod, boolean> = { ctrl: false, alt: false, meta: false };
   let tainted = false; // another key was pressed during this chord
   let holding: Chord | null = null;
   let timer: NodeJS.Timeout | null = null;
@@ -54,12 +119,14 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
   let ctrlClean = false; // nothing else was pressed while Ctrl was down
   let lastTapAt = 0;
 
+  const anyHeld = () => held.ctrl || held.alt || held.meta;
+  const isHeld = (chord: Mod[]) => (["ctrl", "alt", "meta"] as Mod[]).every((m) => held[m] === chord.includes(m));
   const clearTimer = () => {
     if (timer) clearTimeout(timer);
     timer = null;
   };
   const chord = (): Chord | null =>
-    ctrl && alt && !win ? "talk" : ctrl && win && !alt && events.dictateDown ? "dictate" : null;
+    isHeld(talkChord) ? "talk" : isHeld(dictateChord) && events.dictateDown ? "dictate" : null;
   const fire = (fn: (() => void) | undefined, what: string) => {
     try {
       fn?.();
@@ -88,18 +155,18 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
     if (e.keycode === QUIET_KEY) return; // our own, see above
     const modifier = CTRL.has(e.keycode) || e.keycode === LEFT_ALT || e.keycode === LEFT_WIN;
     if (CTRL.has(e.keycode)) {
-      if (!ctrl) {
+      if (!held.ctrl) {
         ctrlDownAt = Date.now();
-        ctrlClean = !alt && !win;
+        ctrlClean = !held.alt && !held.meta;
       }
-      ctrl = true;
+      held.ctrl = true;
     } else {
-      if (e.keycode === LEFT_ALT) alt = true;
-      if (e.keycode === LEFT_WIN) win = true;
+      if (e.keycode === LEFT_ALT) held.alt = true;
+      if (e.keycode === LEFT_WIN) held.meta = true;
       ctrlClean = false;
       lastTapAt = 0;
     }
-    if (!modifier && (ctrl || alt || win)) {
+    if (!modifier && anyHeld()) {
       tainted = true;
       clearTimer();
       if (holding) release("cancel");
@@ -117,10 +184,12 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
         if (chord() === wanted && !tainted) {
           holding = wanted;
           if (wanted === "dictate") {
-            try {
-              uIOhook.keyTap(QUIET_KEY);
-            } catch {
-              /* Start may open on release; dictation still works */
+            if (quietTap && dictateChord.includes("meta")) {
+              try {
+                uIOhook.keyTap(QUIET_KEY);
+              } catch {
+                /* Start may open on release; dictation still works */
+              }
             }
             fire(events.dictateDown, "dictation start");
           } else fire(events.down, "push-to-talk start");
@@ -132,20 +201,20 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
   uIOhook.on("keyup", safe((e) => {
     if (e.keycode === QUIET_KEY) return;
     if (CTRL.has(e.keycode)) {
-      ctrl = false;
+      held.ctrl = false;
       const now = Date.now();
-      if (ctrlClean && !alt && !win && now - ctrlDownAt < TAP_MS) {
+      if (ctrlClean && !held.alt && !held.meta && now - ctrlDownAt < TAP_MS) {
         if (lastTapAt && ctrlDownAt - lastTapAt < TAP_GAP_MS) {
           lastTapAt = 0;
           events.doubleTap();
         } else lastTapAt = now;
       } else lastTapAt = 0;
-    } else if (e.keycode === LEFT_ALT) alt = false;
-    else if (e.keycode === LEFT_WIN) win = false;
+    } else if (e.keycode === LEFT_ALT) held.alt = false;
+    else if (e.keycode === LEFT_WIN) held.meta = false;
     else return;
     clearTimer();
     if (holding) release("up");
-    if (!ctrl && !alt && !win) tainted = false;
+    if (!anyHeld()) tainted = false;
   }));
 
   uIOhook.on("mousedown", safe((e) => {
@@ -168,10 +237,10 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
   }
 }
 
-/** Press Ctrl+V in whatever window has focus (used to drop a drafted message in). */
-export function pasteText(): void {
+/** Paste in whatever window has focus (used to drop a drafted message in): Ctrl+V, Cmd+V on a Mac. */
+export function pasteText(platform: string = process.platform): void {
   try {
-    uIOhook.keyTap(UiohookKey.V, [UiohookKey.Ctrl]);
+    uIOhook.keyTap(UiohookKey.V, [platform === "darwin" ? UiohookKey.Meta : UiohookKey.Ctrl]);
   } catch (err) {
     console.warn("[pyxi] couldn't paste:", err);
   }

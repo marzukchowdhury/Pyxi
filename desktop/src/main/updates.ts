@@ -15,6 +15,9 @@ import { goodMomentToUpdate } from "./updateTiming";
 const { autoUpdater } = electronUpdater;
 const EVERY = 4 * 60 * 60 * 1000; // check again every four hours while Pyxi is open
 const LOOK_EVERY = 30 * 1000;
+// A Mac only installs an update signed by the same Developer ID as the app (Squirrel.Mac), and
+// the releases carry no latest-mac.yml yet. Turn on once Mac builds are signed and published.
+const MAC_UPDATES = false;
 
 function note(line: string): void {
   try {
@@ -31,6 +34,10 @@ export function startUpdates(
   busy: () => Promise<boolean> = async () => false,
 ): void {
   if (!app.isPackaged) return;
+  if (process.platform === "darwin" && !MAC_UPDATES) {
+    note("automatic updates are off in this Mac build: it isn't signed yet (docs/MAC-PORT.md)");
+    return;
+  }
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true; // quitting Pyxi normally also applies a waiting update
   let installing = false;

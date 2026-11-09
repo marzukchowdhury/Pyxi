@@ -8,11 +8,16 @@ import type { MenuItemConstructorOptions } from "electron";
 export const RELEASES = "https://github.com/marzukchowdhury/Pyxi/releases";
 const ISSUES = "https://github.com/marzukchowdhury/Pyxi/issues/new";
 
-/** A new GitHub issue, filled in with what helps (the version, Windows), never anything personal. */
+/** "Windows 10.0.26100" or "macOS (Darwin 24.1.0)": which system, for a bug report. */
+export function systemName(platform: string = process.platform): string {
+  return platform === "darwin" ? `macOS (Darwin ${release()})` : `Windows ${release()}`;
+}
+
+/** A new GitHub issue, filled in with what helps (the version, the system), never anything personal. */
 export function issueUrl(kind: "bug" | "feature", version: string): string {
   const body =
     kind === "bug"
-      ? `What happened:\n\n\nWhat you expected:\n\n\nSteps to see it again:\n1. \n\n---\nPyxi ${version}, Windows ${release()}`
+      ? `What happened:\n\n\nWhat you expected:\n\n\nSteps to see it again:\n1. \n\n---\nPyxi ${version}, ${systemName()}`
       : `What would you like Pyxi to do?\n\n\nWhy would it help?\n\n\n---\nPyxi ${version}`;
   const params = new URLSearchParams({
     labels: kind === "bug" ? "bug" : "enhancement",
@@ -35,6 +40,8 @@ export interface TrayActions {
   openUrl: (url: string) => void;
   checkForUpdates: () => void;
   quit: () => void;
+  /** On a Mac: the permissions card (Screen Recording, Accessibility, Microphone). */
+  openPermissions?: () => void;
 }
 
 export function trayTemplate(a: TrayActions): MenuItemConstructorOptions[] {
@@ -44,6 +51,7 @@ export function trayTemplate(a: TrayActions): MenuItemConstructorOptions[] {
     { label: a.paused ? "Resume Pyxi" : "Pause Pyxi", click: a.togglePause },
     { label: "Mute Pyxi's voice", type: "checkbox", checked: a.muted, click: (item) => a.setMuted(item.checked) },
     { label: `Stop everything  (${a.hotkey("stop")})`, click: a.stopEverything },
+    ...(a.openPermissions ? [{ label: "Permissions…", click: a.openPermissions }] : []),
     { type: "separator" },
     { label: "Report a Bug…", click: () => a.openUrl(issueUrl("bug", a.version)) },
     { label: "Request a Feature…", click: () => a.openUrl(issueUrl("feature", a.version)) },

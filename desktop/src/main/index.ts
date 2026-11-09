@@ -12,7 +12,8 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
+import { chordLabel, chordsFrom, pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
+import { MAC_HOTKEYS, MAC_RUNNABLE, macKeyName, needsPermissions, permissionRows, settingsUrl, trayTemplatePixels } from "./mac";
 import { trayTemplate } from "./trayMenu";
 import { checkNow, startUpdates } from "./updates";
 import {
@@ -29,9 +30,12 @@ import {
   screen,
   session,
   shell,
+  systemPreferences,
   Tray,
 } from "electron";
 
+/** The Mac build differs in a few places, each marked with IS_MAC; Windows runs as before. */
+const IS_MAC = process.platform === "darwin";
 const BACKEND = process.env.PYXI_BACKEND ?? "http://127.0.0.1:8766";
 // Opt-in: inspect the live overlay and panel from a debugger (developers only).
 if (process.env.PYXI_DEBUG_PORT) app.commandLine.appendSwitch("remote-debugging-port", process.env.PYXI_DEBUG_PORT);
@@ -47,14 +51,16 @@ const keyed = (init: RequestInit = {}): RequestInit => ({ ...init, headers: { "X
 // Each action tries its shortcuts in order and keeps the first one Windows lets us have.
 // Other apps (Discord, overlays, launchers) often own a combination already; without a
 // fallback the shortcut would silently do nothing.
-const HOTKEY_CHOICES = {
+const WINDOWS_HOTKEYS = {
   talk: ["Control+Alt+Space", "Control+Shift+Space", "Alt+Shift+Space", "Control+Alt+T", "F8"],
   panel: ["Control+Alt+W", "Control+Shift+W", "Alt+Shift+W"],
   dismiss: ["Control+Alt+Backspace", "Control+Shift+Backspace"],
   privacy: ["Control+Alt+P", "Control+Shift+P"],
   stop: ["Control+Alt+Pause", "Control+Alt+End", "Control+Shift+Pause"],
 } as const;
-type HotkeyName = keyof typeof HOTKEY_CHOICES;
+type HotkeyName = keyof typeof WINDOWS_HOTKEYS;
+// A Mac keyboard has no Pause or End key: Stop is Control+Option+Escape there.
+const HOTKEY_CHOICES: Record<HotkeyName, readonly string[]> = IS_MAC ? MAC_HOTKEYS : WINDOWS_HOTKEYS;
 const activeHotkeys: Record<HotkeyName, string | null> = { talk: null, panel: null, dismiss: null, privacy: null, stop: null };
 
 function registerHotkeys(handlers: Record<HotkeyName, () => void>): void {
@@ -79,7 +85,8 @@ function registerHotkeys(handlers: Record<HotkeyName, () => void>): void {
   console.log("[pyxi] hotkeys:", JSON.stringify(activeHotkeys));
 }
 
-const pretty = (accelerator: string | null) => (accelerator ?? "unavailable").replace("Control", "Ctrl");
+const pretty = (accelerator: string | null) =>
+  IS_MAC ? (macKeyName(accelerator) ?? "unavailable") : (accelerator ?? "unavailable").replace("Control", "Ctrl");
 
 const overlays = new Map<number, BrowserWindow>();
 let panel: BrowserWindow | null = null;
@@ -105,6 +112,75 @@ function loadShareVisible(): boolean {
   }
 }
 let shareVisible = loadShareVisible();
+
+// Hold-to-talk and dictation chords: PYXI_TALK_CHORD / PYXI_DICTATE_CHORD, else .pyxi/hotkeys.json
+// ({"talk": "ctrl+option", "dictate": "ctrl+cmd"}), else Ctrl+Alt and Ctrl+Win (on a Mac,
+// Control+Option and Control+Command: the same keys by position).
+function loadChords(): ReturnType<typeof chordsFrom> {
+  let saved: { talk?: string; dictate?: string } | undefined;
+  try {
+    saved = JSON.parse(readFileSync(join(HOME, ".pyxi", "hotkeys.json"), "utf-8"));
+  } catch {
+    saved = undefined;
+  }
+  return chordsFrom(saved, process.env);
+}
+const chords = loadChords();
+
+// ---------------------------------------------------------------- the Mac's permissions card
+// Pyxi only reads what's allowed and opens the right page of System Settings; the user flips the
+// switch. Shown at first start until everything's granted (or they close it with "Later").
+const MAC_PERMISSIONS_SEEN = join(HOME, ".pyxi", "mac-permissions.json");
+let permissionsWin: BrowserWindow | null = null;
+
+function macPermissionRows() {
+  return permissionRows({
+    screen: systemPreferences.getMediaAccessStatus("screen"),
+    accessibility: systemPreferences.isTrustedAccessibilityClient(false),
+    microphone: systemPreferences.getMediaAccessStatus("microphone"),
+  });
+}
+
+function openPermissions(): void {
+  if (!IS_MAC) return;
+  if (permissionsWin && !permissionsWin.isDestroyed()) {
+    permissionsWin.show();
+    permissionsWin.focus();
+    return;
+  }
+  permissionsWin = new BrowserWindow({
+    width: 480,
+    height: 640,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    title: "Pyxi needs a few permissions",
+    show: false,
+    webPreferences: { ...SAFE_PREFERENCES },
+  });
+  loadPage(permissionsWin, "permissions", {});
+  permissionsWin.once("ready-to-show", () => {
+    permissionsWin?.show();
+    app.focus({ steal: true });
+  });
+  permissionsWin.on("closed", () => (permissionsWin = null));
+}
+
+function maybeShowPermissions(): void {
+  if (!IS_MAC) return;
+  let seen = false;
+  try {
+    seen = JSON.parse(readFileSync(MAC_PERMISSIONS_SEEN, "utf-8")).later === true;
+  } catch {
+    seen = false;
+  }
+  if (!seen && needsPermissions(macPermissionRows())) openPermissions();
+}
+
+/** Only the permissions page itself may ask these. */
+const fromPermissions = (e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) =>
+  !!permissionsWin && !permissionsWin.isDestroyed() && e.sender === permissionsWin.webContents;
 
 /** Is this one of Pyxi's own pages (the built files, or the dev server while developing)? */
 function ownPage(url: string): boolean {
@@ -144,7 +220,7 @@ const SAFE_PREFERENCES = {
   navigateOnDragDrop: false,
 } as const;
 
-type Page = "overlay" | "panel" | "firefly";
+type Page = "overlay" | "panel" | "firefly" | "permissions";
 
 function rendererUrl(page: Page, query: Record<string, string>): string | null {
   const dev = process.env.ELECTRON_RENDERER_URL;
@@ -158,7 +234,26 @@ function loadPage(win: BrowserWindow, page: Page, query: Record<string, string>)
   else void win.loadFile(join(__dirname, `../renderer/${page}.html`), { query });
 }
 
+/** Where an overlay sits: the whole display, or on a Mac below the menu bar (and the camera notch
+ * of a MacBook) and above the Dock, so Pyxi's notch is never hidden behind either. */
+function overlayArea(d: Display): Electron.Rectangle {
+  return IS_MAC ? d.workArea : d.bounds;
+}
+
 function displayInfo(d: Display) {
+  if (IS_MAC) {
+    // On a Mac the brain speaks points (Accessibility and Quartz do), the same unit as CSS px
+    // here, so the scale between them is 1 whatever the Retina factor.
+    const area = overlayArea(d);
+    return {
+      id: d.id,
+      primary: d.id === primaryId,
+      bounds: area,
+      scaleFactor: 1,
+      physOrigin: { x: area.x, y: area.y },
+      physSize: { width: area.width, height: area.height },
+    };
+  }
   // Physical pixel origin of this display: the brain speaks physical px, the overlay speaks CSS px.
   const phys = process.platform === "win32" ? screen.dipToScreenRect(null, d.bounds) : d.bounds;
   return {
@@ -173,7 +268,9 @@ function displayInfo(d: Display) {
 
 function createOverlay(d: Display): void {
   const win = new BrowserWindow({
-    ...d.bounds,
+    ...overlayArea(d),
+    // A Mac panel floats over full-screen apps and never takes the app's focus by being shown.
+    ...(IS_MAC ? { type: "panel" } : {}),
     transparent: true,
     frame: false,
     resizable: false,
@@ -233,6 +330,7 @@ function createFirefly(): void {
     y: at.y,
     width: FIREFLY_SIZE,
     height: FIREFLY_SIZE,
+    ...(IS_MAC ? { type: "panel" } : {}),
     transparent: true,
     frame: false,
     resizable: false,
@@ -307,7 +405,8 @@ function createPanel(): void {
     minWidth: 380,
     minHeight: 520,
     backgroundColor: "#00000000",
-    backgroundMaterial: "acrylic",
+    // Frosted glass: Windows 11's acrylic, the Mac's own vibrancy.
+    ...(IS_MAC ? { vibrancy: "under-window" as const, visualEffectState: "active" as const } : { backgroundMaterial: "acrylic" as const }),
     titleBarStyle: "hidden",
     webPreferences: { ...SAFE_PREFERENCES },
   });
@@ -373,6 +472,7 @@ function buildTrayMenu(): void {
           new Notification({ title: "Pyxi updates", body: said }).show();
         },
         quit: () => app.quit(),
+        ...(IS_MAC ? { openPermissions } : {}),
       }),
     ),
   );
@@ -448,7 +548,7 @@ async function ensureBrain(): Promise<void> {
   const py =
     process.env.PYXI_PYTHON ??
     (app.isPackaged
-      ? join(process.resourcesPath, "python", "python.exe")
+      ? join(process.resourcesPath, "python", IS_MAC ? "bin/python3" : "python.exe")
       : join(REPO, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"));
   if (!existsSync(py)) {
     console.warn(`[pyxi] Python not found at ${py}; start the brain yourself: pyxi serve`);
@@ -511,6 +611,14 @@ function startCursorFeed(): void {
 }
 
 function trayIcon(): Electron.NativeImage {
+  if (IS_MAC) {
+    // The menu bar wants a template image (black with alpha; macOS tints it for light and dark),
+    // 22 points tall, with a Retina version. Drawn as pixels: SVG isn't a format nativeImage reads.
+    const img = nativeImage.createFromBitmap(trayTemplatePixels(22), { width: 22, height: 22 });
+    img.addRepresentation({ scaleFactor: 2, width: 44, height: 44, buffer: trayTemplatePixels(44) });
+    img.setTemplateImage(true);
+    return img;
+  }
   // The firefly in small, drawn in code so the repo needs no binary assets.
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="-16 -16 32 32"><defs><radialGradient id="g"><stop offset="0" stop-color="#ffe08a" stop-opacity=".9"/><stop offset=".55" stop-color="#ffc861" stop-opacity=".35"/><stop offset="1" stop-color="#ffc861" stop-opacity="0"/></radialGradient></defs><circle r="15" fill="url(#g)"/><ellipse cx="-4.5" cy="-6" rx="5" ry="2.8" transform="rotate(-32 -4.5 -6)" fill="#fffaeb" fill-opacity=".55"/><ellipse cx="4.5" cy="-6" rx="5" ry="2.8" transform="rotate(32 4.5 -6)" fill="#fffaeb" fill-opacity=".55"/><circle r="6" fill="#fff3cf"/></svg>`;
   return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
@@ -541,6 +649,8 @@ if (!app.requestSingleInstanceLock()) {
 
 app.whenReady().then(async () => {
   if (!app.hasSingleInstanceLock()) return;
+  // A Mac menu bar helper: no Dock icon (the menu bar icon and the notch are the interface).
+  if (IS_MAC) app.dock?.hide();
   startUpdates(broadcast, brainBusy);
   // The microphone, for Pyxi's own pages only; nothing else (camera, location, notifications...).
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) =>
@@ -575,7 +685,8 @@ app.whenReady().then(async () => {
 
   // Hold Ctrl + left Alt to talk (the main way to use Pyxi). The shortcut below stays as a
   // press-to-toggle fallback, and also covers keyboards where the hook can't start.
-  holdToTalk = startHoldToTalk({
+  holdToTalk = startHoldToTalk(
+    {
     down: () => broadcast("ptt-down"),
     up: () => broadcast("ptt-up"),
     cancel: () => broadcast("ptt-cancel"),
@@ -596,7 +707,9 @@ app.whenReady().then(async () => {
       if (win && !win.isDestroyed()) win.webContents.send("global-click", { x, y });
     },
     move: () => wakeCursorFeed(),
-  });
+    },
+    { talk: chords.talk, dictate: chords.dictate },
+  );
   registerHotkeys({
     talk: () => broadcast("ptt"),
     panel: toggleNotch,
@@ -609,6 +722,7 @@ app.whenReady().then(async () => {
   tray.setToolTip("Pyxi");
   tray.on("click", toggleNotch);
   buildTrayMenu();
+  maybeShowPermissions();
   // No window pops up at launch: the notch on the top edge is the whole interface.
 });
 
@@ -732,7 +846,7 @@ ipcMain.on("drag-file", (e, path: unknown) => {
 // opened, even inside Pyxi's folders (a downloaded attachment could be one): shown in Explorer.
 const RUNNABLE = /\.(exe|com|bat|cmd|scr|pif|cpl|msi|msp|msc|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|hta|lnk|url|reg|jar|appx|appref-ms|application|gadget|scf|inf|chm|dll|sys)$/i;
 function openSafe(file: string): void {
-  if (RUNNABLE.test(file)) shell.showItemInFolder(file);
+  if (RUNNABLE.test(file) || (IS_MAC && MAC_RUNNABLE.test(file))) shell.showItemInFolder(file);
   else void shell.openPath(file);
 }
 ipcMain.on("open-file", (_e, path: unknown) => {
@@ -776,11 +890,45 @@ ipcMain.on("firefly-state", (e, s: unknown) => {
   if (!liveOverlays().some((w) => w.webContents === e.sender) || typeof s !== "object" || s === null) return;
   liveFirefly()?.webContents.send("firefly-state", s);
 });
-ipcMain.handle("hotkeys", () => ({
-  ...activeHotkeys,
-  hold: holdToTalk ? "Control+Alt" : null,
-  dictate: holdToTalk ? "Control+Win" : null,
-}));
+ipcMain.handle("hotkeys", () =>
+  IS_MAC
+    ? {
+        ...Object.fromEntries(Object.entries(activeHotkeys).map(([k, v]) => [k, macKeyName(v)])),
+        hold: holdToTalk ? chordLabel(chords.talk) : null,
+        dictate: holdToTalk ? chordLabel(chords.dictate) : null,
+      }
+    : {
+        ...activeHotkeys,
+        hold: holdToTalk ? chordLabel(chords.talk) : null,
+        dictate: holdToTalk ? chordLabel(chords.dictate) : null,
+      },
+);
+// The Mac's permissions card (permissions.html): what's allowed, and links to System Settings.
+ipcMain.handle("mac-permissions", (e) => (IS_MAC && fromPermissions(e) ? macPermissionRows() : []));
+ipcMain.on("mac-open-settings", (e, key: unknown) => {
+  const url = IS_MAC && fromPermissions(e) ? settingsUrl(key) : null;
+  if (url) void shell.openExternal(url);
+});
+// The microphone is the one macOS lets an app ask for itself: its own prompt, the user's answer.
+ipcMain.handle("mac-ask-microphone", async (e) =>
+  IS_MAC && fromPermissions(e) ? systemPreferences.askForMediaAccess("microphone") : false,
+);
+ipcMain.on("mac-permissions-later", (e) => {
+  if (!IS_MAC || !fromPermissions(e)) return;
+  try {
+    mkdirSync(join(HOME, ".pyxi"), { recursive: true });
+    writeFileSync(MAC_PERMISSIONS_SEEN, JSON.stringify({ later: true }));
+  } catch (err) {
+    console.warn("[pyxi] couldn't save the permissions choice:", err);
+  }
+  permissionsWin?.close();
+});
+// Screen Recording only takes effect once the app starts again (macOS says so too).
+ipcMain.on("mac-restart", (e) => {
+  if (!IS_MAC || !fromPermissions(e)) return;
+  app.relaunch();
+  app.quit();
+});
 // The notch's text box needs keyboard focus, which a non-focusable overlay can't take on its own.
 ipcMain.on("focus-overlay", (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);
