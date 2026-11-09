@@ -13,7 +13,7 @@ from PIL import Image
 
 from conftest import FakeScreen, Recorder
 from pyxi import web
-from pyxi.companion import answers
+from pyxi.companion import answers, tools
 from pyxi.companion.brain import Brain
 from pyxi.companion.notes import build_answer
 from pyxi.hub import Hub
@@ -339,6 +339,19 @@ async def test_show_me_opens_the_shops_results_for_the_pick_by_address(settings,
     assert len(rec.of("answer")) == 1
 
 
+def test_the_rules_send_a_lookup_to_the_web_and_only_site_work_to_scout():
+    from pyxi.companion import prompts
+
+    by_name = {t.name: t for t in tools.COMPANION_TOOLS}
+    assert "show_answer" in by_name and "show_answer" not in tools.INFO_TOOLS
+    assert "show_answer" in by_name["web_search"].description
+    assert "never for 'find me" in by_name["delegate"].description
+    assert "Answer first, then show." in prompts.SYSTEM
+    assert "looking things up on sites" not in prompts.SYSTEM  # that used to send Scout
+    props = by_name["show_answer"].parameters["properties"]
+    assert set(props) == {"title", "figure", "note", "facts", "sources", "shop", "query"}
+
+
 async def test_a_card_shown_without_a_word_still_gets_the_pick_said(settings, monkeypatch):
     async def fake_search(query, max_results=6):
         return RESULTS
@@ -366,3 +379,18 @@ async def test_a_card_shown_without_a_word_still_gets_the_pick_said(settings, mo
         "Price per RTINGS; shops vary."
     )
 
+
+def test_results_about_something_else_never_reach_the_answer():
+    hits = [
+        web.Hit("Best Buy : Shop Online For Deals & Save", "https://www.bestbuy.ca/en-ca", "TVs"),
+        web.Hit("BEST Definition & Meaning", "https://www.merriam-webster.com/dictionary/best", ""),
+        web.Hit("LACK side table, white", "https://www.ikea.com/ca/en/p/lack-side-table", "IKEA"),
+    ]
+    assert [h.site for h in web.on_topic("best IKEA side table", hits)] == ["ikea.com"]
+    golf = [web.Hit("HOME - Valley Ridge Golf Club", "https://valleyridgegolf.com", "Tee times")]
+    assert web.on_topic("EarFun Air Pro 4", golf) == []
+    news = [
+        web.Hit("Bitcoin price today", "https://www.coindesk.com/price/bitcoin", "BTC at $74,900")
+    ]
+    assert web.on_topic("bitcoin price right now", news) == news
+    assert web.on_topic("the best", hits) == hits  # nothing to go on: left alone

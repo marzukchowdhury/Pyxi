@@ -323,6 +323,11 @@ SCENARIOS = [
     ('near me', 'turn_49b75541', "Find a pharmacy near me that's open now.", 'maps'),
     ('research team', 'turn_49b75541', 'Scout, compare the prices of the iPhone 17 and Pixel 11, then Quill, write me a summary.', 'delegate'),
     ('new teammate', 'turn_49b75541', 'Make me a teammate called Juno who looks up recipes for me.', 'create_agent'),
+    # Answer first: a pick from a web search, on a card, in the same turn. Scout only when a
+    # site has to be worked step by step.
+    ('find earbuds', 'turn_49b75541', 'Find me some good budget wireless earbuds.', 'answer'),
+    ('best table', 'turn_49b75541', "What's the best reviewed IKEA side table on Amazon, and which one is the best value for the price?", 'answer_or_honest'),
+    ('cart job', 'turn_49b75541', 'Go through Amazon and put a pack of AA batteries and a USB-C cable in my cart, but stop before checkout.', 'scout'),
     ('remember', 'turn_49b75541', 'Remember that my favourite colour is green.', 'remember'),
     ('recall', 'turn_49b75541', 'What do you remember about me?', 'nohands'),
     ('email by name', 'turn_49b75541', "Email Sam that I'm running 10 minutes late.", 'errand_noask'),
@@ -722,6 +727,35 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             problems.append("didn't find the story")
         if re.search(r"can.?t (confirm|verify|find)", said, re.I):
             problems.append("said it couldn't confirm")
+    if expect in ("answer", "answer_or_honest"):
+        answer_cards = [e["card"] for e in events if e["type"] == "answer"]
+        if "web_search" not in tools:
+            problems.append("didn't look it up")
+        if any(b.startswith(("delegate", "hands", "book")) for b in background):
+            problems.append("sent someone to click through a shop instead of answering")
+        # What a shop's own ratings say isn't always on the web: saying so plainly is an answer.
+        honest = expect == "answer_or_honest" and not answer_cards and re.search(
+            r"couldn.t|can.t|didn.t (find|turn up|name)|not sure|no (clear|solid)", said, re.I
+        )
+        if honest:
+            pass
+        elif not answer_cards:
+            problems.append("no answer card")
+        else:
+            shown = answer_cards[-1]
+            if not shown["sources"]:
+                problems.append("answer card names no source")
+            if not shown["button"]:
+                problems.append("answer card has no shop button")
+        if not honest and not re.search(r"\$\s?\d|\d+ dollars|\bbucks\b", said):
+            problems.append("no price in what it said")
+        if tools.count("web_search") > 3:
+            problems.append(f"searched {tools.count('web_search')} times")
+    if expect == "scout":
+        if not any(b.startswith("delegate scout") for b in background):
+            problems.append("didn't send Scout")
+        if "show_answer" in tools:
+            problems.append("showed an answer card for a job it hadn't done")
     if expect == "hands" and not any(b.startswith("hands") for b in background):
         problems.append("didn't do it with the mouse and keyboard")
     if re.search(r"can.?t (click|control|use your (mouse|keyboard))", said, re.I):

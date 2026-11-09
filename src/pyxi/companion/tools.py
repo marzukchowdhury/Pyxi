@@ -432,8 +432,11 @@ COMPANION_TOOLS: list[ToolSpec] = [
     ),
     _tool(
         "delegate",
-        "Hand a task to a teammate who works in the background. Browser agents (like Scout) drive a real browser; "
-        "writers (like Quill) draft text; explainers (like Sketch) build 3D scenes. Chain a handoff with then_agent/"
+        "Hand a task to a teammate who works in the background. Browser agents (like Scout) drive a real browser, "
+        "for work that needs a site worked step by step (a form, a sign-in, a cart, a booking, many pages compared "
+        "in depth); that takes a minute or more, so never for 'find me / what's a good / the cheapest / the best X', "
+        "which web_search answers in seconds. "
+        "Writers (like Quill) draft text; explainers (like Sketch) build 3D scenes. Chain a handoff with then_agent/"
         "then_task, e.g. Scout researches then Quill drafts. Give complete, specific instructions. For files use "
         "convert_files (Pixel) and edit_document (Ledger) instead: they're faster and exact.",
         {
@@ -471,7 +474,10 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "web_search",
         "Search the web (about a second). Use it for anything that changes or that you're not sure of: "
         "news, prices, scores, results, release dates, who runs what, whether a claim or quote is "
-        "real, facts about a specific person, product or place. Searches the web and the news together, and "
+        "real, facts about a specific person, product or place. It is also how you answer 'find me / what's a "
+        "good / the cheapest / the best X' (a product, an app, a service): search, then say your pick with its "
+        "price and source and put it on a card with show_answer, in the same turn, instead of sending a teammate "
+        "to click through a shop. Searches the web and the news together, and "
         "news comes with its outlet and age. In the reply where you search, say at most a few words ('Checking "
         "the news.'), never the answer; answer once the results are back, naming the sources. One search is "
         "usually enough; two at most. Never say you're searching unless you call this tool.",
