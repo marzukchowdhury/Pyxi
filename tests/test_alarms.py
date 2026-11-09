@@ -82,3 +82,24 @@ async def test_a_timer_rings_and_stop_cancels_one(settings) -> None:
     await brain.stop_everything()
     await asyncio.sleep(0.05)
     assert all(j.status != "running" for j in brain.jobs.jobs.values())
+
+
+def test_misheard_and_reordered() -> None:
+    a = alarm_request("Hey Pixie, can you sit on alarm for 7 a.m. in the morning tomorrow?", NIGHT)
+    assert a is not None and (a.at.day, a.at.hour) == (9, 7)
+    assert alarm_request("said an alarm for 6:45", NIGHT).at.hour == 6
+
+
+async def test_an_alarm_the_model_sets_without_days_rings_once(settings) -> None:
+    brain = Brain(settings, Hub(), llm=DemoLLM(), screen=FakeScreen())
+    await brain._act("schedule_routine", {"task": "Alarm", "time": "07:00", "alarm": True})
+    (r,) = brain.routines.items
+    assert r.kind == "alarm" and r.on  # a date, so it goes away after ringing
+    await brain._act("schedule_routine", {"task": "Gym", "time": "06:30", "alarm": True, "days": ["weekdays"]})
+    assert brain.routines.items[-1].on is None and brain.routines.items[-1].days == ["weekdays"]
+
+
+def test_cancelling_a_routine_goes_back_to_the_model() -> None:
+    from pyxi.companion.tools import INFO_TOOLS
+
+    assert "cancel_routine" in INFO_TOOLS  # so "make it one-time" can set the new one after

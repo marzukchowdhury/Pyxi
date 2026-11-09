@@ -21,7 +21,7 @@ class Instant:
 
 
 _LEAD = (
-    r"^\W*(?:(?:hey|ok|okay|so|yeah|yes|um|uh|now|and|just|alright)[,.]?\s+)*(?:pyxi[,.]?\s+)?"
+    r"^\W*(?:(?:hey|ok|okay|so|yeah|yes|um|uh|now|and|just|alright)[,.]?\s+)*(?:(?:pyxi|pixie|pixi|pixy|pixey|pixig)[,.]?\s+)?"
     r"(?:(?:can|could|would|will) you\s+|please\s+|i (?:want|need) you to\s+|go ahead and\s+)?"
     r"(?:please\s+|just\s+)?"
 )

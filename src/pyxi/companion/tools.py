@@ -1037,6 +1037,7 @@ COMPANION_TOOLS += [
 
 INFO_TOOLS = {
     "look_again",
+    "cancel_routine",  # back to the model: "change my alarm" is cancel, then set the new one
     "weather",
     "web_search",
     "read_page",

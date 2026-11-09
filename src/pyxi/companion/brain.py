@@ -28,7 +28,7 @@ import re
 import secrets
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -2482,11 +2482,22 @@ class Brain:
         if name == "schedule_routine":
             days = [str(d) for d in args.get("days", []) or []] or None
             alarm = bool(args.get("alarm"))
+            once = None
+            if alarm and not days:
+                # "Set an alarm for 7 tomorrow" said to the model: once, at the next 7:00, not
+                # every day. A repeating alarm names its days ("every day", "weekdays").
+                from pyxi.routines import parse_time
+
+                hhmm = parse_time(str(args.get("time") or "")) or "07:00"
+                now = datetime.now()
+                at = now.replace(hour=int(hhmm[:2]), minute=int(hhmm[3:]), second=0, microsecond=0)
+                once = (at if at > now else at + timedelta(days=1)).date().isoformat()
             r = self.routines.add(
                 str(args["task"]),
                 days=days,
                 time=args.get("time"),
                 every_minutes=None if alarm else args.get("every_minutes"),
+                on=once,
                 kind="alarm" if alarm else "turn",
                 message=str(args["task"]) if alarm else None,
             )

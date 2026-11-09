@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 _LEAD = (
-    r"^\W*(?:(?:hey|ok|okay|so|um|uh|now|and|just|alright|please)[,.]?\s+)*(?:pyxi[,.]?\s+)?"
+    r"^\W*(?:(?:hey|ok|okay|so|um|uh|now|and|just|alright|please)[,.]?\s+)*(?:(?:pyxi|pixie|pixi|pixy|pixey|pixig)[,.]?\s+)?"
     r"(?:(?:can|could|would|will) you\s+|please\s+|i (?:want|need) you to\s+|go ahead and\s+)?"
     r"(?:please\s+|just\s+)?"
 )
@@ -21,10 +21,12 @@ _TIME = r"(?P<h>\d{1,2})(?:[:.](?P<m>\d{2}))?\s*(?P<ampm>a\.?\s?m\.?|p\.?\s?m\.?
 _WHEN = (
     r"(?:\s+(?P<day>tomorrow|today|tonight)(?:\s+(?:morning|evening|night))?)?"
     r"(?:\s+(?:in the\s+)?(?P<part>morning|evening|night|afternoon))?"
+    r"(?:\s+(?P<day2>tomorrow|today|tonight))?"  # "7am in the morning tomorrow"
 )
 _ALARM = re.compile(
     _LEAD
-    + r"(?:(?:set|make|create|put|add|start)\s+(?:up\s+)?(?:an?|my|the)?\s*alarm|alarm|wake me(?: up)?)"
+    # "sit on alarm", "said an alarm": how speech recognition often hears "set an alarm"
+    + r"(?:(?:set|sit|sat|said|make|create|put|add|start)\s+(?:up\s+)?(?:an?|on|my|the)?\s*alarm|alarm|wake me(?: up)?)"
     + r"\s+(?:for|at|to|on)?\s*(?:exactly\s+)?(?P<pre>tomorrow\s+(?:at\s+)?)?"
     + _TIME
     + r"(?:\s+exactly)?"
@@ -91,7 +93,7 @@ def alarm_request(text: str, now: datetime | None = None) -> Alarm | None:
     h, mins = int(m.group("h")), int(m.group("m") or 0)
     ampm = (m.group("ampm") or "").replace(".", "").replace(" ", "").lower()
     part = (m.group("part") or "").lower()
-    day = (m.group("day") or ("tomorrow" if m.group("pre") else "")).lower()
+    day = (m.group("day") or m.group("day2") or ("tomorrow" if m.group("pre") else "")).lower()
     if day == "tonight" and not ampm:
         ampm = "pm"
     if not ampm and part:
