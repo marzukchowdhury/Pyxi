@@ -254,10 +254,8 @@ async def test_quiz_on_a_topic_without_notes_makes_a_deck(settings):
         async def complete(self, *a, **k):
             from types import SimpleNamespace
 
-            from otto.llm.base import Usage
-
             text = '{"title": "The heart", "cards": [{"q": "How many chambers?", "a": "Four."}, {"q": "Which side pumps to the lungs?", "a": "The right."}, {"q": "What stops backflow?", "a": "Valves."}]}'
-            return SimpleNamespace(text=text, usage=Usage(), tool_calls=[])
+            return SimpleNamespace(text=text, usage=SimpleNamespace(cost_usd=0.0), tool_calls=[])
 
     b = Brain(settings, Hub(), llm=Cards(), screen=FakeScreen())
     out = await specialists.handle(b, "quiz", {"action": "start", "deck": "the heart", "questions": 3})
