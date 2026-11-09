@@ -118,6 +118,13 @@ async def _open_google_file(brain: Brain, ref: str) -> str:
     return "" if _UNTITLED.match(ref) else ref
 
 
+# Ledger can't open the file, but the file is open in front of them: cells can still go in.
+_PASTE_INSTEAD = (
+    " BUT if what they asked for is cells put in (data, rows, a table, an empty table of some "
+    "size), don't stop or offer anything: call paste_table now, which pastes it into the file "
+    "that's open in front of them whatever account it's in."
+)
+
 _SAMPLE = re.compile(r"(?i)\b(sample|example|dummy|made[- ]up|fake|test|demo|practice)\b")
 
 
@@ -237,14 +244,14 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
                     f"into {kind}s it made itself; one more OK lets it edit theirs. Tell them in "
                     f"one short line: open Settings and press {label} next to Google, then ask "
                     f"again. Or offer to make a new {kind} now instead. Don't say it's a "
-                    "different account."
+                    "different account." + _PASTE_INSTEAD
                 )
             if not _SAMPLE.search(task):
                 return (
                     f"edit_document: the {kind} open on their screen is in a different Google "
                     f"account; Pyxi is connected as {who}, which can't open it. Tell them in one "
                     f"short line, and offer to make a new {kind} in {who} instead (or they can "
-                    "connect the other account in Settings)."
+                    "connect the other account in Settings)." + _PASTE_INSTEAD
                 )
             # Sample data doesn't need that file: make a new one where Pyxi can, and show it.
             title = "Sample data" if kind == "sheet" else "Sample document"

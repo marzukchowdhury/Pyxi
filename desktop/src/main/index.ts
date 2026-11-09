@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync 
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
+import { tableClip } from "./tableClip";
 import { TRAY_PNG_16, TRAY_PNG_32, TRAY_PNG_64 } from "./trayImage";
 import { trayTemplate } from "./trayMenu";
 import { checkNow, startUpdates } from "./updates";
@@ -21,6 +22,7 @@ import {
   BrowserWindow,
   webContents,
   clipboard,
+  ClipboardItem,
   Notification,
   type Display,
   globalShortcut,
@@ -665,7 +667,11 @@ ipcMain.on("action", async (_e, kind: string, value: string) => {
   if (typeof value !== "string" || !value) return;
   if (kind === "open_url") openExternalSafe(value);
   else if (kind === "copy") clipboard.writeText(value);
-  else if (kind === "insert") {
+  else if (kind === "insert" || kind === "insert_table") {
+    // A table goes on the clipboard twice (cells as text, and as an HTML table), so a
+    // spreadsheet takes a grid and a document a real table.
+    const clip = kind === "insert_table" ? tableClip(value) : { text: value, html: "" };
+    if (!clip) return;
     const focused = BrowserWindow.getFocusedWindow();
     if (focused) {
       // Typing went to Pyxi's own window (the notch text box); hand focus back first.
@@ -673,7 +679,8 @@ ipcMain.on("action", async (_e, kind: string, value: string) => {
       await new Promise((r) => setTimeout(r, 180));
     }
     const previous = await Promise.resolve(clipboard.readText()); // async in newer Electron
-    clipboard.writeText(value);
+    if (clip.html) await clipboard.write([new ClipboardItem({ "text/plain": clip.text, "text/html": clip.html })]);
+    else await clipboard.writeText(clip.text);
     await new Promise((r) => setTimeout(r, 60));
     pasteText();
     setTimeout(() => clipboard.writeText(previous), 900);

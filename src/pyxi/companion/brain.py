@@ -925,18 +925,55 @@ class Brain:
             # one Pyxi was looking at. The paste goes to whatever has the focus, so that window
             # is brought to the front first (live, a packing list "in Notepad" went into the
             # calculator, which had the focus).
-            target = self._named_window(self._user_text or "", None) or (
-                self._ctx.window.hwnd if self._ctx and self._ctx.window.hwnd else None
-            )
-            if target and windows.available():
-                windows.focus(target)
-                await asyncio.sleep(0.2)
-                if windows.foreground() != target:
-                    await self.hub.emit("action", kind="copy", value=value)
-                    return "insert: Windows wouldn't bring that window to the front, so it was copied instead. Tell them to paste it (ctrl+v)."
+            if not await self._front_for_paste():
+                await self.hub.emit("action", kind="copy", value=value)
+                return "insert: Windows wouldn't bring that window to the front, so it was copied instead. Tell them to paste it (ctrl+v)."
             await self.hub.emit("action", kind="insert", value=value)
             return None
         return f"Unknown quick action {action}."
+
+    def _paste_target(self) -> int | None:
+        """The window a paste is meant for: the one the request names ("in Notepad"), else the
+        one Pyxi was looking at."""
+        return self._named_window(self._user_text or "", None) or (
+            self._ctx.window.hwnd if self._ctx and self._ctx.window.hwnd else None
+        )
+
+    async def _front_for_paste(self) -> bool:
+        """Bring that window to the front, since a paste goes to whatever has the focus.
+        False when Windows won't hand the focus over."""
+        target = self._paste_target()
+        if target and windows.available():
+            windows.focus(target)
+            await asyncio.sleep(0.2)
+            return windows.foreground() == target
+        return True
+
+    async def _paste_table(self, args: dict[str, Any]) -> str | None:
+        """A whole table into whatever is open in front of them, at the cursor or selected
+        cell, in one paste: any app, any browser tab, any account. (Seen in a competitor's demo:
+        a sample table landed in Excel on the web in under a second, where Pyxi's only route
+        was a Google connection that couldn't reach the file.)"""
+        from pyxi.companion.paste import PasteError, looks_like_a_sheet, table_clip
+
+        target = self._paste_target()
+        title = ""
+        if target and windows.available():
+            title = next((t for h, t, _ in windows.open_windows() if h == target), "")
+        if not title and self._ctx:
+            title = self._ctx.window.title or ""
+        try:
+            clip = table_clip(args.get("rows"), bordered=not looks_like_a_sheet(title))
+        except PasteError as exc:
+            return f"paste_table: {exc}"
+        if not await self._front_for_paste():
+            await self.hub.emit("action", kind="copy", value=clip["text"])
+            return (
+                "paste_table: Windows wouldn't bring that window to the front, so the table was "
+                "copied instead. Tell them to click where it should go and press ctrl+v."
+            )
+        await self.hub.emit("action", kind="insert_table", value=json.dumps(clip))
+        return None
 
     async def _capture(self, follow_mouse: bool = True, hwnd: int | None = None) -> ScreenContext:
         """Take Pyxi's screenshot. If the overlay is visible to captures (so a Discord stream can
@@ -2810,6 +2847,8 @@ class Brain:
             return f"look_again: this is the screen now ({ctx.window.title[:80]!r})."
         if name == "quick_action":
             return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
+        if name == "paste_table":
+            return await self._paste_table(args)
         if name == "start_walkthrough":
             await self.start_walkthrough(args.get("job_id"))
             return None

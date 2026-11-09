@@ -580,6 +580,27 @@ COMPANION_TOOLS += [
         ["action", "value"],
     ),
     _tool(
+        "paste_table",
+        "Paste a whole table into whatever is open in front of them, at their cursor or selected cell, in "
+        "one step (under a second, no mouse): a grid in any spreadsheet, a real table in any document, in "
+        "any app, any browser tab and whatever account they're signed in to (Excel or Word on the web, "
+        "Google Sheets or Docs, Excel, Word, Notion, Airtable, an email). Use it to put data, a sample "
+        "table, a list of rows or an empty table into the file they're looking at whenever Ledger can't "
+        "reach that file: it's Excel or Word in a browser tab, another app or site, or edit_document said "
+        "it can't open it. It only fills cells: a cell that starts with = is a formula in a spreadsheet, "
+        "but a pivot, a chart or formatting needs edit_document. It lands where their cursor is, so if "
+        "nothing is selected yet say 'click the cell where it should start' first. Say one short line.",
+        {
+            "rows": {
+                "type": "array",
+                "items": {"type": "array", "items": {"type": ["string", "number", "boolean", "null"]}},
+                "description": "The table, row by row, the header row first: [[\"Region\", \"Sales\"], "
+                "[\"West\", 1200]]. Empty strings make an empty table of that size.",
+            },
+        },
+        ["rows"],
+    ),
+    _tool(
         "book",
         "Book something for them in a browser they can watch: a dentist, chiropractor, doctor or "
         "clinic appointment, a haircut, movie tickets, a restaurant table. Scout finds the slot, fills "
