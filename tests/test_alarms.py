@@ -103,3 +103,13 @@ def test_cancelling_a_routine_goes_back_to_the_model() -> None:
     from pyxi.companion.tools import INFO_TOOLS
 
     assert "cancel_routine" in INFO_TOOLS  # so "make it one-time" can set the new one after
+
+
+async def test_a_label_that_only_says_alarm_rings_as_time_to_get_up(settings) -> None:
+    brain = Brain(settings, Hub(), llm=DemoLLM(), screen=FakeScreen())
+    said: list[str] = []
+    brain._speak = lambda text, **kw: said.append(text)  # type: ignore[method-assign]
+    await brain._act("schedule_routine", {"task": "Alarm: tomorrow, Monday 9 November", "time": "07:00", "alarm": True})
+    (r,) = brain.routines.items
+    await brain.run_due_routines(datetime.fromtimestamp(r.next_run + 5))
+    assert said[-1].endswith("Time to get up.") and "November" not in said[-1]

@@ -2499,7 +2499,11 @@ class Brain:
                 every_minutes=None if alarm else args.get("every_minutes"),
                 on=once,
                 kind="alarm" if alarm else "turn",
-                message=str(args["task"]) if alarm else None,
+                # A label that only says it's an alarm ("Alarm: tomorrow, Monday 9 November")
+                # rings as "Time to get up."; a real one ("Gym") is said.
+                message=(None if re.match(r"(?i)\W*(?:my\s+)?alarm\b", str(args["task"])) else str(args["task"]))
+                if alarm
+                else None,
             )
             await self.hub.emit("routines", routines=self.routines.public())
             when = datetime.fromtimestamp(r.next_run).strftime("%a %H:%M")
