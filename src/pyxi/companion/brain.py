@@ -2063,7 +2063,14 @@ class Brain:
                 jobs=jobs,
                 memories=memories,
                 notes=state.get("notes", []),
-                on_screen=object_summary(self._object) if self._object else "",
+                on_screen="\n".join(
+                    x
+                    for x in (
+                        object_summary(self._object) if self._object else "",
+                        answers.on_screen(self),
+                    )
+                    if x
+                ),
                 now=await self._now(),
                 language=self._reply_language(),
                 budget_line=f"spent today ${self.turns.spent_today():.3f} of ${budget.daily_cost_usd:.2f}; this turn ${self._usage.cost_usd:.3f} of ${budget.max_cost_usd:.2f}",
@@ -2299,7 +2306,8 @@ class Brain:
                 await self._act("look_again", {"seconds": 3})
                 needs_more = True
                 notes.append(
-                    "It's open on their screen now (you're looking at it). Answer their question "
+                    answers.opened_note(self, calls)
+                    or "It's open on their screen now (you're looking at it). Answer their question "
                     "from it: mark the best options with explain_on_screen and say your pick. "
                     "Don't open it again."
                 )

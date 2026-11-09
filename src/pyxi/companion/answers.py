@@ -212,6 +212,41 @@ def current(brain: Brain) -> AnswerCard | None:
     return card
 
 
+def on_screen(brain: Brain) -> str:
+    """What the model is told about the card it put up, so "show me" opens the right place."""
+    card = current(brain)
+    if card is None:
+        return ""
+    line = f"An answer card for your pick: {card.title}" + (
+        f" ({card.figure})" if card.figure else ""
+    )
+    if card.button:
+        line += (
+            f". If they want to see it ('show me', 'open it', 'take me there'): quick_action "
+            f"open_url {card.button.url} (the shop's search results for it, opened by address; "
+            "say plainly they're search results, not a verified product page), then mark your "
+            "pick and its price on the page."
+        )
+    return line + "."
+
+
+def opened_note(brain: Brain, calls: list[Any]) -> str:
+    """After the card's shop results were opened and looked at: what to do with the page."""
+    card = current(brain)
+    if card is None or card.button is None:
+        return ""
+    opened = [str(c.arguments.get("value") or "") for c in calls if c.name == "quick_action"]
+    if card.button.url not in opened:
+        return ""
+    return (
+        f"The shop's search results for your pick are open on their screen now (you're looking "
+        f"at them). Find {card.title} among them and mark it and its price with highlight (an "
+        "element id, or the exact words as quote). Say in one short line what the page shows, "
+        "and that these are search results, not a verified product page. If it isn't among "
+        "them, or the price differs from the card, say so plainly. Don't open it again."
+    )
+
+
 # ---------------------------------------------------------------------------------- pictures
 # A search result carries a title, a site, a link and a snippet: no picture. A real one can be
 # had from a page that is about the pick itself (the maker's page, a shop's listing, a review of

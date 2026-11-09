@@ -290,6 +290,55 @@ def test_a_page_counts_only_if_its_title_names_the_pick():
     assert not answers.names_pick("Earbuds", "Earbuds")  # too vague to be sure of
 
 
+async def test_show_me_opens_the_shops_results_for_the_pick_by_address(settings, monkeypatch):
+    async def no_picture(title, links, **kw):
+        return None
+
+    monkeypatch.setattr(answers, "find_picture", no_picture)
+    model = Scripted(
+        [
+            say(
+                "Amazon's results for the Space A40. These are search results, not a verified listing."
+            ),
+            ToolCall(
+                id="q", name="quick_action", arguments={"action": "open_url", "value": AMAZON}
+            ),
+        ],
+        [
+            say("There it is, at $49.99.", "s2"),
+            ToolCall(id="h", name="highlight", arguments={"element_id": 4, "label": "Space A40"}),
+        ],
+    )
+    brain, rec = make_brain(settings, llm=model)
+
+    class Looks(FakeScreen):  # the look after opening asks for the window in front
+        async def capture(self, pixels=True, **kw):
+            return await super().capture(pixels)
+
+    brain.screen = Looks()
+    real_sleep = asyncio.sleep
+
+    async def no_wait(seconds, *a):  # the page "loads" at once
+        await real_sleep(min(seconds, 0.01))
+
+    monkeypatch.setattr(asyncio, "sleep", no_wait)
+    await brain._act("show_answer", dict(PICK))
+    await brain.turn("show me it on Amazon")
+    # The model is told what the card's button opens, and to say they're search results.
+    first = model.prompts[0]
+    assert AMAZON in first and "search results, not a verified product page" in first
+    # Opened by address: one open-link action, no typing into the page, nobody driving a browser.
+    assert [(e["kind"], e["value"]) for e in rec.of("action")] == [("open_url", AMAZON)]
+    assert not brain.jobs.jobs
+    assert not any(c["tool"] == "use_computer" for c in brain.turns.recent(1)[0]["tool_calls"])
+    # It then looks at the page and is asked to mark the pick and its price there.
+    second = model.prompts[1]
+    assert "Find Anker Soundcore Space A40 among them" in second and "highlight" in second
+    assert rec.of("annotate")  # marked with the existing on-screen tools
+    # The card stays up through all of this: it isn't one of the things "clear" removes.
+    assert len(rec.of("answer")) == 1
+
+
 async def test_a_card_shown_without_a_word_still_gets_the_pick_said(settings, monkeypatch):
     async def fake_search(query, max_results=6):
         return RESULTS
