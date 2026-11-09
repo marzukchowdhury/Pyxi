@@ -35,7 +35,16 @@
               <svg class="win" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2.3 6.6 1.5v5.4H1zM7.4 1.4 15 .3v6.6H7.4zM1 7.7h5.6v5.4L1 12.3zM7.4 7.7H15v6.6l-7.6-1.1z" /></svg>
               Download {{downloadFile}}
             </a>
-            <p class="dl-mac"><!--if:macWaitlistUrl-->On a Mac? <a href="{{macWaitlistUrl}}">Join the Mac waitlist</a>.<!--else-->On a Mac? A Mac version is next on the roadmap.<!--end--></p>
+<!--if:macDownloadUrl-->
+            <a class="btn btn-ghost btn-lg dl-btn" href="{{macDownloadUrl}}" data-track="download-mac">Download for Mac</a>
+            <p class="dl-mac">Mac beta for Apple silicon, macOS 12 or later, {{macDownloadSize}}. <a href="#mac">How to open it the first time</a>.</p>
+<!--end--><!--if:macIntelDownloadUrl-->
+            <p class="dl-mac">On an Intel Mac? <a href="{{macIntelDownloadUrl}}" data-track="download-mac-intel">Get the Intel version</a>.</p>
+<!--end--><!--if:macWaitlistOnly-->
+            <p class="dl-mac">On a Mac? <a href="{{macWaitlistUrl}}">Join the Mac waitlist</a>.</p>
+<!--end--><!--if:macNotYet-->
+            <p class="dl-mac">On a Mac? A Mac version is next on the roadmap.</p>
+<!--end-->
             <p class="dl-legal">By installing Pyxi you agree to the <a href="/terms">terms of use</a>. See how it handles your data in the <a href="/privacy">privacy policy</a>.</p>
           </aside>
         </div>
@@ -141,6 +150,21 @@
               </div>
             </li>
           </ol>
+<!--if:macDownloadUrl-->
+          <div class="step solo reveal" id="mac" data-say="On a Mac? Right-click, Open, then let me see the screen.">
+            <div class="step-copy">
+              <h2>On a Mac</h2>
+              <p>The Mac version is a newer beta, so expect a few rough edges and tell us what you find.</p>
+              <ol>
+                <li>Open the <code>.dmg</code> and drag Pyxi into <b>Applications</b>.</li>
+                <li>The beta isn't notarized by Apple yet, so the first time, Control-click Pyxi in Applications, choose <b>Open</b>, then <b>Open</b> again. If there's no Open button, go to <b>System Settings</b>, <b>Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>.</li>
+                <li>A card asks for three permissions, and each button opens the right page in System Settings: <b>Screen Recording</b> so Pyxi can see what you ask about, <b>Accessibility</b> so it can point and click when you let it, and <b>Microphone</b> so it can hear you.</li>
+                <li>Join the beta with your invite code in Settings, the same as on Windows.</li>
+                <li>Hold <kbd>Control</kbd> <kbd>Option</kbd> and ask about anything on your screen.</li>
+              </ol>
+            </div>
+          </div>
+<!--end-->
         </div>
       </section>
 

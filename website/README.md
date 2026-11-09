@@ -19,7 +19,9 @@ npm run build      # dist/
 | `downloadUrl` | Where every "Download for Windows" button points. The installer (about 304 MB) is too big for a Vercel static file, so host it on GitHub Releases or Vercel Blob and paste the URL here. |
 | `downloadFile`, `downloadSize`, `version` | Shown next to the buttons. |
 | `siteUrl` | The deployed address, used in canonical links and social previews. |
-| `macWaitlistUrl` | Optional. When set, "Join the Mac waitlist" links appear. Empty means "Mac is next on the roadmap". |
+| `macDownloadUrl` | Optional. The Apple silicon `.dmg` on a GitHub release (its name has the version in it, so update this with each Mac release). When set, "Download for Mac" buttons and the Mac install steps (`/download#mac`) appear, in place of the waitlist. Leave it empty until a Mac build has been tried on a real Mac. |
+| `macIntelDownloadUrl`, `macDownloadSize` | Optional. The Intel `.dmg`, and the size shown next to the Mac button. |
+| `macWaitlistUrl` | Optional. When set (and there's no Mac download), "Join the Mac waitlist" links appear. With neither, the site says "Mac is next on the roadmap". |
 | `contactEmail` | Optional. Fills the contact placeholder in the privacy policy and the "No code yet?" line. |
 
 ## The firefly
