@@ -39,22 +39,34 @@ async def test_open_copy_and_insert_go_to_the_desktop_app(settings):
     ]
 
 
-async def test_insert_falls_back_to_copy_if_they_switched_apps(settings):
+async def test_insert_brings_the_named_app_forward_or_copies(settings, monkeypatch):
+    """Live: "write a packing list in Notepad" was pasted into the calculator, which had the focus."""
+    from pyxi import windows
+
+    focused: list[int] = []
+    front = {"hwnd": 0}
+    monkeypatch.setattr(windows, "available", lambda: True)
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(4, "Untitled - Notepad", "notepad.exe"), (5, "Calculator", "calc.exe")])
+    monkeypatch.setattr(windows, "focus", lambda hwnd: focused.append(hwnd) or front.update(hwnd=hwnd) or True)
+    monkeypatch.setattr(windows, "foreground", lambda: front["hwnd"])
     llm = Scripted(
-        [("quick_action", {"action": "insert", "value": "hello"}), ("say", {"text": "Ok."})]
+        [("quick_action", {"action": "insert", "value": "socks"}), ("say", {"text": "Ok."})]
     )
     brain, rec = make_brain(settings, llm=llm)
-    original = brain.screen.capture
-
-    async def switched(pixels: bool = True):
-        ctx = await original(pixels)
-        if not pixels:  # the check right before typing sees a different app
-            return fake_context(app="notepad.exe")
-        return ctx
-
-    brain.screen.capture = switched
-    await brain.turn("write hello in there")
-    assert [a["kind"] for a in rec.of("action")] == ["copy"]
+    brain._named_window = lambda text, ctx: 4 if "notepad" in text.lower() and ctx is None else None  # type: ignore[method-assign]
+    await brain.turn("write socks in Notepad")
+    assert focused and focused[0] == 4
+    assert [a["kind"] for a in rec.of("action")] == ["insert"]
+    # Windows won't hand over the focus: copied, and they're told to paste
+    monkeypatch.setattr(windows, "focus", lambda hwnd: False)
+    front["hwnd"] = 5
+    llm2 = Scripted(
+        [("quick_action", {"action": "insert", "value": "socks"}), ("say", {"text": "Ok."})]
+    )
+    brain2, rec2 = make_brain(settings, llm=llm2)
+    brain2._named_window = lambda text, ctx: 4 if ctx is None else None  # type: ignore[method-assign]
+    await brain2.turn("write socks in Notepad")
+    assert [a["kind"] for a in rec2.of("action")] == ["copy"]
 
 
 async def test_what_do_you_know_and_forget(settings):

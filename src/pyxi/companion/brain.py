@@ -869,16 +869,19 @@ class Brain:
             await self.hub.emit("action", kind="copy", value=value)
             return None
         if action == "insert":
-            # Only type into the app they asked from; if they've switched away, don't guess.
-            asked_in = self._ctx.window.app if self._ctx else None
-            try:
-                now = await self.screen.capture(pixels=False)
-                current = now.window.app
-            except Exception:
-                current = asked_in
-            if asked_in and current and current != asked_in:
-                await self.hub.emit("action", kind="copy", value=value)
-                return f"insert: they switched from {asked_in} to {current}, so it was copied instead. Tell them to paste it."
+            # Type into the app they meant: the one the request names ("in Notepad"), else the
+            # one Pyxi was looking at. The paste goes to whatever has the focus, so that window
+            # is brought to the front first (live, a packing list "in Notepad" went into the
+            # calculator, which had the focus).
+            target = self._named_window(self._user_text or "", None) or (
+                self._ctx.window.hwnd if self._ctx and self._ctx.window.hwnd else None
+            )
+            if target and windows.available():
+                windows.focus(target)
+                await asyncio.sleep(0.2)
+                if windows.foreground() != target:
+                    await self.hub.emit("action", kind="copy", value=value)
+                    return "insert: Windows wouldn't bring that window to the front, so it was copied instead. Tell them to paste it (ctrl+v)."
             await self.hub.emit("action", kind="insert", value=value)
             return None
         return f"Unknown quick action {action}."
