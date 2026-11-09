@@ -7,7 +7,7 @@ Each agent has a *role* that decides what it can do:
 * ``writer`` drafts text from context (messages, summaries, emails). No browser access.
 * ``explainer`` turns a topic into a 3D scene.
 * ``files`` converts files: PDFs, images, Word to PDF, CSV and Excel (Pixel).
-* ``documents`` edits Excel, Word and PowerPoint files and Google Sheets and Docs (Ledger).
+* ``documents`` edits Excel, Word and PowerPoint files and Google Sheets, Docs and Slides (Ledger).
 * ``travel`` builds trip itineraries from the confirmations in the user's mail (Atlas).
 * ``money`` sums up spending from receipts, keeps budgets, puts receipts in a sheet (Penny).
 * ``meetings`` turns a recording into notes, decisions, action items and a follow-up (Scribe).
@@ -138,7 +138,7 @@ DEFAULT_ROSTER = [
         builtin=True,
         persona="Careful numbers person. Edits spreadsheets, documents and decks directly, writes "
         "real formulas instead of pasted numbers, and keeps your original safe.",
-        skills=["Excel formulas & totals", "pivot summaries", "Word & PowerPoint", "Google Sheets & Docs"],
+        skills=["Excel formulas & totals", "pivot summaries", "Word & PowerPoint", "Google Sheets, Docs & Slides"],
         max_cost_usd=0.3,
     ),
     AgentProfile(

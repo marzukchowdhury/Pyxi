@@ -49,6 +49,8 @@ SCOPES = [
     # Ledger edits Google Sheets, and finds a Sheet or Doc by its name ("my sales sheet").
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.metadata.readonly",
+    # Ledger edits Google Slides decks the user already has (ones Pyxi makes need only drive.file).
+    "https://www.googleapis.com/auth/presentations",
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
 ]
@@ -57,7 +59,10 @@ CAL = "https://www.googleapis.com/calendar/v3/calendars/primary"
 DOCS = "https://docs.googleapis.com/v1/documents"
 SHEETS = "https://sheets.googleapis.com/v4/spreadsheets"
 DRIVE = "https://www.googleapis.com/drive/v3/files"
+SLIDES = "https://slides.googleapis.com/v1/presentations"
 SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
+SLIDES_SCOPE = "https://www.googleapis.com/auth/presentations"
+DOCS_SCOPE = "https://www.googleapis.com/auth/documents"
 
 
 def google_error(status: int, body: str) -> str:
@@ -425,9 +430,10 @@ class GoogleConnector(Connector):
     def status(self) -> Status:
         if self.connected():
             detail = self._saved_email() or "Connected"
-            if self.missing_scopes():
-                detail += ". Press Allow Sheets so Pyxi can work in Google Sheets too"
-                return Status(self.id, self.name, True, detail, needs="Allow Sheets")
+            if label := self.needs_ok():
+                apps = label.removeprefix("Allow ")
+                detail += f". Press {label} so Pyxi can work in your Google {apps} too"
+                return Status(self.id, self.name, True, detail, needs=label)
             return Status(self.id, self.name, True, detail)
         setup = [
             "Open console.cloud.google.com and create a project (free).",
@@ -449,6 +455,28 @@ class GoogleConnector(Connector):
     def granted_scopes(self) -> set[str]:
         scopes = (self._saved() or {}).get("scopes") or []
         return set(scopes.split() if isinstance(scopes, str) else scopes)
+
+    def needs_ok(self, kind: str = "") -> str:
+        """The button that gets the missing Google permissions ("Allow Docs and Slides"), or
+        "" when nothing is missing. With ``kind`` (doc, sheet or deck): only if that app's
+        permission is the one missing."""
+        missing = self.missing_scopes()
+        apps = [
+            name
+            for scope, name, what in (
+                (DOCS_SCOPE, "Docs", "doc"),
+                (SHEETS_SCOPE, "Sheets", "sheet"),
+                (SLIDES_SCOPE, "Slides", "deck"),
+            )
+            if scope in missing and kind in ("", what)
+        ]
+        if kind and not apps:
+            return ""
+        if not missing:
+            return ""
+        if not apps:
+            return "Allow Sheets"  # some other permission: the same button asks for all of them
+        return "Allow " + (apps[0] if len(apps) == 1 else ", ".join(apps[:-1]) + " and " + apps[-1])
 
     def missing_scopes(self) -> list[str]:
         """Scopes added since they connected (Sheets came later). Connect again to grant them."""
@@ -1023,8 +1051,19 @@ class GoogleConnector(Connector):
     async def sheets_meta(self, sheet_id: str) -> dict[str, Any]:
         self._need_sheets()
         return await self._api(
-            "GET", f"{SHEETS}/{sheet_id}", params={"fields": "properties.title,sheets.properties"}
+            "GET",
+            f"{SHEETS}/{sheet_id}",
+            params={
+                "fields": "properties.title,sheets.properties,"
+                "sheets.charts(chartId,spec.title,position)"
+            },
         )
+
+    async def sheets_charts(self, sheet_id: str) -> list[dict[str, Any]]:
+        """Every chart with its whole spec (changing a chart means sending the spec back)."""
+        self._need_sheets()
+        data = await self._api("GET", f"{SHEETS}/{sheet_id}", params={"fields": "sheets.charts"})
+        return [c for s in data.get("sheets", []) for c in s.get("charts") or []]
 
     async def sheets_values(
         self, sheet_id: str, a1: str, *, formulas: bool = False
@@ -1066,11 +1105,53 @@ class GoogleConnector(Connector):
     async def docs_batch(self, doc_id: str, requests: list[dict[str, Any]]) -> Any:
         return await self._api("POST", f"{DOCS}/{doc_id}:batchUpdate", json={"requests": requests})
 
+    async def slides_get(self, deck_id: str) -> dict[str, Any]:
+        try:
+            return await self._api("GET", f"{SLIDES}/{deck_id}")
+        except Exception as exc:
+            raise self._slides_error(exc) from None
+
+    async def slides_batch(self, deck_id: str, requests: list[dict[str, Any]]) -> Any:
+        try:
+            return await self._api(
+                "POST", f"{SLIDES}/{deck_id}:batchUpdate", json={"requests": requests}
+            )
+        except Exception as exc:
+            raise self._slides_error(exc) from None
+
+    def _slides_error(self, exc: Exception) -> Exception:
+        """Google's two "not allowed" answers for Slides, in words the user can act on."""
+        text = str(exc)
+        if "has not been used in project" in text or "is disabled" in text:
+            return RuntimeError(
+                "Google Slides isn't switched on for Pyxi's Google project yet (the Google "
+                "Slides API has to be enabled in the Google Cloud console)."
+            )
+        if "insufficient" in text.lower() and SLIDES_SCOPE in self.missing_scopes():
+            return RuntimeError(
+                "Pyxi needs one more OK from Google to work in your Slides: in Settings, press "
+                "Allow Slides next to Google."
+            )
+        return exc
+
+    async def drive_rename(self, file_id: str, name: str) -> None:
+        """Rename a Sheet, Doc or deck. Google only lets Pyxi rename files it made itself."""
+        try:
+            await self._api("PATCH", f"{DRIVE}/{file_id}", json={"name": name})
+        except Exception as exc:
+            if re.search(r"\b(403|404)\b", str(exc)):
+                raise RuntimeError(
+                    "Google only lets Pyxi rename files it made itself. Rename this one by "
+                    "clicking its title at the top."
+                ) from None
+            raise
+
     async def drive_find(self, name: str, kind: str) -> list[dict[str, Any]]:
-        """Sheets or Docs whose name contains these words, newest first."""
+        """Sheets, Docs or Slides whose name contains these words, newest first."""
         mime = {
             "sheet": "application/vnd.google-apps.spreadsheet",
             "doc": "application/vnd.google-apps.document",
+            "slides": "application/vnd.google-apps.presentation",
         }[kind]
         words = [w.replace("'", "\\'") for w in re.findall(r"[\w-]+", name)[:4]]
         q = " and ".join(
@@ -1089,43 +1170,69 @@ class GoogleConnector(Connector):
         return data.get("files", [])
 
     async def open_for_edit(self, ref: str) -> Any:
-        """A Google Sheet or Doc for Ledger, from a link, an id, or words from its name."""
-        from pyxi.agents.ledger import GoogleDoc, GoogleSheet, LedgerError
+        """A Google Sheet, Doc or Slides deck for Ledger, from a link, an id, or words from
+        its name."""
+        from pyxi.agents.ledger import GoogleDoc, GoogleSheet, GoogleSlides, LedgerError
 
         ref = ref.strip()
+        made_of = {"sheet": GoogleSheet, "doc": GoogleDoc, "slides": GoogleSlides}
         if m := re.search(r"/spreadsheets/d/([\w-]+)", ref):
             return GoogleSheet(self, m.group(1))
         if m := re.search(r"/document/d/([\w-]+)", ref):
             return GoogleDoc(self, m.group(1))
-        if m := re.match(r"(?i)new (sheet|doc)\s*:\s*(.+)", ref):  # make one for them
+        if m := re.search(r"/presentation/d/([\w-]+)", ref):
+            return GoogleSlides(self, m.group(1))
+        if m := re.match(  # make one for them
+            r"(?i)new (sheet|doc|slides|deck|presentation)\s*:\s*(.+)", ref
+        ):
             title = m.group(2).strip()[:120]
-            if m.group(1).lower() == "sheet":
+            what = m.group(1).lower()
+            if what == "sheet":
                 self._need_sheets()
                 made = await self._api("POST", SHEETS, json={"properties": {"title": title}})
                 return GoogleSheet(self, made["spreadsheetId"])
-            made = await self._api("POST", DOCS, json={"title": title})
-            return GoogleDoc(self, made["documentId"])
+            if what == "doc":
+                made = await self._api("POST", DOCS, json={"title": title})
+                return GoogleDoc(self, made["documentId"])
+            try:
+                made = await self._api("POST", SLIDES, json={"title": title})
+            except Exception as exc:
+                raise self._slides_error(exc) from None
+            return GoogleSlides(self, made["presentationId"])
         if re.fullmatch(r"[\w-]{25,}", ref):  # a bare id: ask Drive which kind it is
             meta = await self._api("GET", f"{DRIVE}/{ref}", params={"fields": "mimeType"})
-            if "document" in meta.get("mimeType", ""):
+            mime = meta.get("mimeType", "")
+            if "presentation" in mime:
+                return GoogleSlides(self, ref)
+            if "document" in mime:
                 return GoogleDoc(self, ref)
             return GoogleSheet(self, ref)
-        kind = "doc" if re.search(r"\bdoc(ument)?s?\b", ref, re.I) else "sheet"
+        kind = (
+            "slides"
+            if re.search(r"\b(slides?|deck|presentation)\b", ref, re.I)
+            else "doc"
+            if re.search(r"\bdoc(ument)?s?\b", ref, re.I)
+            else "sheet"
+        )
         words = re.sub(
-            r"(?i)\b(my|the|a|google|sheets?|spreadsheet|docs?|document|in|on|called|named)\b",
+            r"(?i)\b(my|the|a|google|sheets?|spreadsheet|docs?|document|slides?|deck|"
+            r"presentation|in|on|called|named)\b",
             " ",
             ref,
         ).strip()
         found = await self.drive_find(words or ref, kind)
         if not found:
-            other = "sheet" if kind == "doc" else "doc"
-            found = await self.drive_find(words or ref, other)
-            kind = other if found else kind
+            for other in ("sheet", "doc", "slides"):
+                if other == kind:
+                    continue
+                found = await self.drive_find(words or ref, other)
+                if found:
+                    kind = other
+                    break
         if not found:
-            what = "Doc" if kind == "doc" else "Sheet"
+            what = {"doc": "Doc", "sheet": "Sheet", "slides": "Slides deck"}[kind]
             raise LedgerError(f"I couldn't find a Google {what} called {ref!r}.")
-        f = found[0]
-        return GoogleDoc(self, f["id"]) if kind == "doc" else GoogleSheet(self, f["id"])
+        return made_of[kind](self, found[0]["id"])
 
     async def sheets_read(self, args: dict[str, Any]) -> Result:
         target = await self.open_for_edit(str(args["sheet"]))

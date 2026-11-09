@@ -987,12 +987,18 @@ COMPANION_TOOLS += [
     _tool(
         "edit_document",
         "Ledger edits spreadsheets, documents and decks in the background, straight in the file, with no "
-        "Office license and no app window: Excel (formulas, a totals row, a pivot-style summary, "
-        "formatting, a table or chart), Word (headings, bullets, paragraphs, tables, replace text), "
-        "PowerPoint (slides, titles, bullets, notes), and Google Sheets and Docs (totals, a real pivot "
-        "table, headings, bullets) through Google. A local file is saved as a copy beside the original; "
-        "Google files are edited in place. For fixing the grammar of a document, delegate to Quill "
-        "instead. Say one short line that names the job; they get a notification.",
+        "Office license and no app window. It does what a person would do by hand in Excel, Word and "
+        "PowerPoint files and in Google Sheets, Docs and Slides: cells, formulas, totals, pivots, "
+        "charts (add, move, resize, retitle, delete), sorting, filters, freezing rows, conditional "
+        "colours, dropdowns, column widths, merging, tabs; headings, paragraphs, bullets, fonts and "
+        "colours, spacing, tables (add one, fill or change its cells, add or delete rows and columns, "
+        "shade it), pictures, page margins and orientation, headers and footers; slides, layouts, "
+        "text boxes, shapes, pictures, tables and charts on a slide, moving and resizing things, "
+        "backgrounds, speaker notes. Changing something already there (the table in this doc, the "
+        "chart on this sheet) is this tool too: say which one in the task. A local file is saved as "
+        "a copy beside the original; Google files are edited in place. For fixing the grammar of a "
+        "document, delegate to Quill instead. Say one short line that names the job; they get a "
+        "notification.",
         {
             "task": {
                 "type": "string",
@@ -1007,9 +1013,10 @@ COMPANION_TOOLS += [
             "google": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Google Sheets or Docs: the link (from the address bar), words "
-                "from the file's name ('sales sheet'), or 'new sheet: <title>' / 'new doc: <title>' "
-                "to make a new one.",
+                "description": "Google Sheets, Docs or Slides: the link (from the address bar), "
+                "words from the file's name ('sales sheet'), 'this sheet' / 'this doc' / 'this "
+                "deck' for the one open on screen, or 'new sheet: <title>' / 'new doc: <title>' / "
+                "'new slides: <title>' to make a new one.",
             },
         },
         ["task"],

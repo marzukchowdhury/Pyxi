@@ -64,7 +64,9 @@ async def consent(brain: Brain) -> files_access.FileAccess | str:
     return access
 
 
-_GOOGLE_LINK = re.compile(r"/(spreadsheets|document)/d/[\w-]+")
+_GOOGLE_LINK = re.compile(r"/(spreadsheets|document|presentation)/d/[\w-]+")
+_KIND = {"spreadsheets": "sheet", "document": "doc", "presentation": "deck"}
+_NEW = {"sheet": "new sheet", "doc": "new doc", "deck": "new slides"}
 _THIS = re.compile(r"(?i)^\W*(this|the open|the current|current|open|my open)\b")
 
 
@@ -96,7 +98,15 @@ async def _open_google_file(brain: Brain, ref: str) -> str:
 
     want = ref.strip().lower()
     generic = bool(_THIS.match(ref)) or not want
-    kind = "Docs" if re.search(r"(?i)\bdoc", ref) else "Sheets" if re.search(r"(?i)sheet|spreadsheet", ref) else ""
+    kind = (
+        "Docs"
+        if re.search(r"(?i)\bdoc", ref)
+        else "Sheets"
+        if re.search(r"(?i)sheet|spreadsheet", ref)
+        else "Slides"
+        if re.search(r"(?i)slide|deck|presentation", ref)
+        else ""
+    )
     for hwnd, title in _google_windows(brain):
         t = title.lower()
         if kind and f"google {kind.lower()}" not in t and _GOOGLE_TITLE.search(title):
@@ -123,6 +133,12 @@ async def _reachable(brain: Brain, ref: str) -> bool:
     try:
         if m.group(1) == "spreadsheets":
             await g.sheets_meta(file_id)
+        elif m.group(1) == "presentation":
+            await g._api(
+                "GET",
+                f"https://slides.googleapis.com/v1/presentations/{file_id}",
+                params={"fields": "title"},
+            )
         else:
             await g._api("GET", f"https://docs.googleapis.com/v1/documents/{file_id}", params={"fields": "title"})
     except Exception as exc:
@@ -210,7 +226,19 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         made_instead = False
         if out_of_reach:
             who = brain.connectors.google._saved_email() or "the connected Google account"
-            kind = "doc" if "/document/" in out_of_reach[0] else "sheet"
+            kind = _KIND[_GOOGLE_LINK.search(out_of_reach[0]).group(1)]
+            needs_ok = getattr(brain.connectors.google, "needs_ok", None)
+            if label := (needs_ok(kind) if needs_ok else ""):
+                # Not another account: Google hasn't been asked for this app yet, so Pyxi can
+                # open only the files it made itself. (One test: "that doc belongs to a
+                # different account", about a doc in the very account Pyxi was connected to.)
+                return (
+                    f"edit_document: Pyxi can't open that {kind} yet. Google has only let Pyxi "
+                    f"into {kind}s it made itself; one more OK lets it edit theirs. Tell them in "
+                    f"one short line: open Settings and press {label} next to Google, then ask "
+                    f"again. Or offer to make a new {kind} now instead. Don't say it's a "
+                    "different account."
+                )
             if not _SAMPLE.search(task):
                 return (
                     f"edit_document: the {kind} open on their screen is in a different Google "
@@ -220,7 +248,7 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
                 )
             # Sample data doesn't need that file: make a new one where Pyxi can, and show it.
             title = "Sample data" if kind == "sheet" else "Sample document"
-            google = [f"new {kind}: {title}" if g in out_of_reach else g for g in google]
+            google = [f"{_NEW[kind]}: {title}" if g in out_of_reach else g for g in google]
             made_instead = True
         job = await brain.jobs.start("ledger", task, files=files, params={"google": google})
         if not made_instead and any(g.lower().startswith("new ") for g in google):
