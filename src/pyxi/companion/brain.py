@@ -976,7 +976,13 @@ class Brain:
         cell, in one paste: any app, any browser tab, any account. (Seen in a competitor's demo:
         a sample table landed in Excel on the web in under a second, where Pyxi's only route
         was a Google connection that couldn't reach the file.)"""
-        from pyxi.companion.paste import PasteError, looks_like_a_sheet, table_clip
+        from pyxi.companion.paste import (
+            PasteError,
+            clip_message,
+            looks_like_a_sheet,
+            plain_cells,
+            table_clip,
+        )
 
         target = self._paste_target()
         title = ""
@@ -984,8 +990,22 @@ class Brain:
             title = next((t for h, t, _ in windows.open_windows() if h == target), "")
         if not title and self._ctx:
             title = self._ctx.window.title or ""
+        rows, changed = args.get("rows"), ""
+        read = sorted({label for label, _ in getattr(self, "_turn_reads", [])})
+        if read:
+            # This turn read a page, mail or a file, so the cells may be its words, not theirs:
+            # nothing from there is pasted as a live formula.
+            rows, inert = plain_cells(rows)
+            if inert:
+                changed = (
+                    f"{inert} cell{'s' if inert != 1 else ''} that began like a formula (=, +, - "
+                    "or @) went in as plain text, with an apostrophe in front, because this "
+                    f"turn took in outside content ({', '.join(read)}) and a formula from there "
+                    "is never run. Tell them so in one short line."
+                )
         try:
-            clip = table_clip(args.get("rows"), bordered=not looks_like_a_sheet(title))
+            clip = table_clip(rows, bordered=not looks_like_a_sheet(title))
+            message = clip_message(clip)
         except PasteError as exc:
             return f"paste_table: {exc}"
         if not await self._front_for_paste():
@@ -993,9 +1013,10 @@ class Brain:
             return (
                 "paste_table: Windows wouldn't bring that window to the front, so the table was "
                 "copied instead. Tell them to click where it should go and press ctrl+v."
+                + (f" {changed}" if changed else "")
             )
-        await self.hub.emit("action", kind="insert_table", value=json.dumps(clip))
-        return None
+        await self.hub.emit("action", kind="insert_table", value=message)
+        return f"The table is pasted. {changed}" if changed else None
 
     async def _capture(self, follow_mouse: bool = True, hwnd: int | None = None) -> ScreenContext:
         """Take Pyxi's screenshot. If the overlay is visible to captures (so a Discord stream can
@@ -2464,6 +2485,8 @@ class Brain:
                     )
                     # It said no, or it said its own line (which is then the true one).
                     unsaid = unsaid or self._refused or len(self._said) > spoken
+                    if call.name == "paste_table" and note and not self._refused:
+                        needs_more = True  # it went in changed (formulas made plain): they hear so
                 if note and call.name in safety.UNTRUSTED_TOOLS:
                     if call.name in safety.SOURCE_LABEL:
                         self._turn_reads.append((safety.SOURCE_LABEL[call.name], note))

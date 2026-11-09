@@ -8,6 +8,7 @@ and any account: it needs no connection to the file, only the cursor.
 
 from __future__ import annotations
 
+import json
 import re
 from html import escape
 from typing import Any
@@ -15,6 +16,9 @@ from typing import Any
 MAX_ROWS = 500
 MAX_COLS = 50
 MAX_CHARS = 200_000
+# The longest message the app takes for one paste (MAX in desktop/src/main/tableClip.ts). Over
+# it the app pastes nothing and says nothing, so it is refused here, where the model hears why.
+MAX_MESSAGE = 2_000_000
 
 # Windows whose paste should be bare cells (no borders drawn around them).
 _SHEET = re.compile(
@@ -38,6 +42,38 @@ def _cell(value: Any) -> str:
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value)
+
+
+# What a spreadsheet runs instead of showing: =SUM(..), @SUM(..), +A1, -A1, -(A1), and the old
+# "-1+cmd|..." that starts a program. "-5", "+12%" and "- a note" are left as they are.
+_FORMULA = re.compile(r"^\s*(?:[=@]|[+-][A-Za-z(@=]|[+-].*\|)")
+
+
+def plain_cells(rows: Any) -> tuple[Any, int]:
+    """The rows with every cell a spreadsheet would run as a formula turned into plain text
+    (an apostrophe in front), and how many there were. For rows whose words may have come
+    from a page, mail or a file rather than from the user: their own formulas stay live."""
+    if not isinstance(rows, list):
+        return rows, 0
+    out, changed = [], 0
+    for row in rows:
+        cells = list(row) if isinstance(row, list) else [row]
+        for i, cell in enumerate(cells):
+            if isinstance(cell, str) and _FORMULA.match(cell):
+                cells[i] = "'" + cell
+                changed += 1
+        out.append(cells)
+    return out, changed
+
+
+def clip_message(clip: dict[str, str]) -> str:
+    """The clip as the one message the app takes. Characters go as they are (escaped, a large
+    table in Chinese or Japanese was six times its size and over the app's limit). The app
+    counts the way JavaScript does, in UTF-16 units, so that is how it is counted here."""
+    message = json.dumps(clip, ensure_ascii=False)
+    if len(message.encode("utf-16-le", "surrogatepass")) // 2 > MAX_MESSAGE:
+        raise PasteError("that's too much text to paste in one go.")
+    return message
 
 
 def table_clip(rows: Any, *, bordered: bool) -> dict[str, str]:

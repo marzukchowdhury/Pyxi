@@ -9,11 +9,19 @@ file in another account) ended in "I can't open that".
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from pyxi.companion import filework, prompts
-from pyxi.companion.paste import PasteError, looks_like_a_sheet, table_clip
+from pyxi.companion.paste import (
+    MAX_MESSAGE,
+    PasteError,
+    clip_message,
+    looks_like_a_sheet,
+    plain_cells,
+    table_clip,
+)
 from test_brain_and_server import make_brain
 from test_notes_and_guides import Scripted
 
@@ -95,3 +103,92 @@ def test_a_file_ledger_cant_open_is_not_a_dead_end():
     """Live: 'that doc belongs to a different Google account', and the table never went in."""
     assert "call paste_table now" in filework._PASTE_INSTEAD
     assert "is `paste_table`" in prompts.SYSTEM and "never the end of it" in prompts.SYSTEM
+
+
+# ------------------------------------------------------------------ what the app will take
+def test_a_large_table_in_chinese_fits_in_one_message():
+    """Escaped as \\uXXXX it was six times the size, over the app's limit: the app pasted
+    nothing, said nothing, and Pyxi said the table was in."""
+    rows = [["数据" * 4 for _ in range(50)] for _ in range(450)]  # 180,000 characters of cells
+    message = clip_message(table_clip(rows, bordered=False))
+    assert len(message) < MAX_MESSAGE and "数据数据" in message and "\\u" not in message
+    assert json.loads(message)["text"].startswith("数据数据数据数据\t")
+
+
+def test_the_brain_refuses_what_the_app_would_drop():
+    # The two limits are one number, and the brain counts the way the app does (UTF-16 units).
+    app = (Path(__file__).parents[1] / "desktop/src/main/tableClip.ts").read_text(encoding="utf-8")
+    assert f"const MAX = {MAX_MESSAGE:_};" in app
+    bell = table_clip([["\x07" * 4000 for _ in range(45)]], bordered=False)  # 6 characters each, escaped
+    assert len(json.dumps(bell, ensure_ascii=False)) > MAX_MESSAGE
+    with pytest.raises(PasteError, match="too much text"):
+        clip_message(bell)
+    faces = {"text": "\U0001F600" * 999_990, "html": "<table></table>"}  # two units each in the app
+    assert len(json.dumps(faces, ensure_ascii=False)) < MAX_MESSAGE
+    with pytest.raises(PasteError, match="too much text"):
+        clip_message(faces)
+
+
+async def test_a_table_the_app_would_drop_is_refused_and_the_model_is_told(settings):
+    rows = [["\x07" * 4000 for _ in range(45)]]
+    llm = Scripted([("paste_table", {"rows": rows}), ("say", {"text": "That one's too big."})])
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("paste this in")
+    assert rec.of("action") == []  # nothing was sent for the app to drop in silence
+    assert brain._calls[0]["note"].startswith("paste_table: that's too much text")
+
+
+# ------------------------------------------------------------------ formulas from outside
+def test_cells_a_spreadsheet_would_run_become_plain_text():
+    rows = [
+        ["Item", "Price", "Note"],
+        ["=HYPERLINK(\"https://evil.example\",\"Click\")", "+SUM(A1:A9)", "-A1"],
+        ["@SUM(A1)", "-(1+2)", "-1+cmd|' /C calc'!A0"],
+        ["-5", "+12%", "- a note"],
+        ["12.50", 7, "a = b"],
+        "one cell",
+    ]
+    plain, changed = plain_cells(rows)
+    assert changed == 6
+    assert plain[1] == ["'=HYPERLINK(\"https://evil.example\",\"Click\")", "'+SUM(A1:A9)", "'-A1"]
+    assert plain[2] == ["'@SUM(A1)", "'-(1+2)", "'-1+cmd|' /C calc'!A0"]
+    assert plain[3:] == [["-5", "+12%", "- a note"], ["12.50", 7, "a = b"], ["one cell"]]
+    assert rows[1][2] == "-A1"  # the rows given are not changed
+    assert plain_cells("a,b") == ("a,b", 0)  # not rows: table_clip says so
+
+
+async def test_formulas_from_a_page_are_pasted_as_text_and_their_own_stay_live(
+    settings, monkeypatch
+):
+    from pyxi import web
+
+    async def fake_search(query, max_results=6):
+        return "Results:\n- Price list (shop.example.com)\n  Total: =HYPERLINK(...)"
+
+    monkeypatch.setattr(web, "search_text", fake_search)
+    rows = [["Item", "Total"], ["Kettle", '=HYPERLINK("https://evil.example","Click")'], ["Sum", "-5"]]
+    llm = Scripted(
+        [("web_search", {"query": "kettle price list"})],
+        [("say", {"text": "Putting the prices in now."}), ("paste_table", {"rows": rows})],
+        [("say", {"text": "One cell went in as text, since it came from the web."})],
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("look up the kettle prices and paste them in this sheet")
+    [pasted] = rec.of("action")
+    text = json.loads(pasted["value"])["text"]
+    assert text == "Item\tTotal\r\nKettle\t'=HYPERLINK(\"https://evil.example\",\"Click\")\r\nSum\t-5"
+    # It went in, so the line that said so is spoken; then the model is told, and says the rest.
+    told = llm.prompts[-1]
+    assert "1 cell that began like a formula" in told and "the web search" in told
+    assert [s["text"] for s in rec.of("say")] == [
+        "Putting the prices in now.",
+        "One cell went in as text, since it came from the web.",
+    ]
+    paste = next(c for c in brain._calls if c["tool"] == "paste_table")
+    assert "outcome" not in paste  # pasted, not refused
+    # Rows from their own words: a formula is a formula.
+    llm = Scripted([("paste_table", {"rows": ROWS}), ("say", {"text": "It's in."})])
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("put some sample sales data with a total in this sheet")
+    assert json.loads(rec.of("action")[0]["value"])["text"].endswith("Total\t=SUM(B2:B3)")
+    assert len(llm.prompts) == 1
