@@ -6,6 +6,9 @@ the answer on a card: the name, the figure, up to three facts, the sources by na
 when a real one can be had, and one button that opens the shop's search results for the pick
 by address. Nobody clicks through a shop for that; Scout is for work that needs a site worked
 step by step.
+
+The same card carries a teammate's finished result in full, with one short spoken line, so a
+job that ends while nobody is looking at the notch is never missed (``spoken_line``).
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import asyncio
 import base64
 import io
 import ipaddress
+import json
 import logging
 import re
 import time
@@ -26,6 +30,7 @@ from otto.llm.base import ToolSpec
 from pyxi import web
 from pyxi.companion.notes import AnswerCard, CardLink, build_answer, site_name
 from pyxi.httpshared import shared
+from pyxi.voice import split_sentences
 
 if TYPE_CHECKING:
     from pyxi.companion.brain import Brain
@@ -411,3 +416,55 @@ async def add_picture(brain: Brain, card: AnswerCard) -> None:
         card.image = picture
         await brain.hub.emit("answer", card=card.model_dump(mode="json"))
 
+
+# ---------------------------------------------------------------------------------- finished jobs
+
+_UNSPEAKABLE = re.compile(r"https?://|www\.|[A-Za-z]:\\|[/\\]\w+[/\\]|\w+@\w+\.|[{}\[\]<>|=]")
+_FIRST_PERSON = re.compile(r"^\W*(i|i'm|i've|i'll|i'd|my|we|we're|we've)\b", re.I)
+
+
+def headline(summary: str, limit: int = 140) -> str:
+    """The first sentence of a result if it can be said aloud as Pyxi's own: short, no
+    addresses or paths, and not the teammate talking about itself ("I compared...")."""
+    first = next(iter(split_sentences(" ".join(str(summary or "").split()))), "")
+    if not first or len(first) > limit or _UNSPEAKABLE.search(first) or _FIRST_PERSON.match(first):
+        return ""
+    return first if first[-1:] in ".!?" else first + "."
+
+
+RESULT_KEEPS = 6000  # characters of a finished job's result that later turns can see
+
+
+def for_later(job: Any) -> str:
+    """A finished job's result as later turns see it: all of it (it used to stop at 600
+    characters, two items into a list of nine), plus what a browser teammate collected."""
+    text = (job.summary or job.status or "").strip()
+    out = text[:RESULT_KEEPS] + (" (cut here: it was longer)" if len(text) > RESULT_KEEPS else "")
+    if job.role == "browser" and job.data:
+        try:
+            out += "\nCollected: " + json.dumps(job.data, default=str)[:2000]
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def spoken_line(agent: str, *, ok: bool, title: str, summary: str, on_card: bool) -> str:
+    """The one short line Pyxi says when background work ends. The details stay on the card."""
+    generic = title in (f"{agent} finished", f"{agent} couldn't finish", "")
+    if not ok:
+        why = headline(summary, 160)
+        lead = (
+            f"{agent} couldn't finish that."
+            if generic
+            else (title if title[-1:] in ".!?" else f"{title}.")
+        )
+        return (
+            f"{lead} {why}"
+            if why and why.rstrip(".") != title.rstrip(".")
+            else (f"{lead} The card says why." if on_card else lead)
+        )
+    if not generic:
+        line = title if title[-1:] in ".!?" else f"{title}."
+    else:
+        line = f"{agent}'s done. {headline(summary)}".strip()
+    return f"{line} The full result is on the card." if on_card else line

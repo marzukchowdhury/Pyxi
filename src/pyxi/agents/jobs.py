@@ -152,7 +152,9 @@ BROWSER_RULES = """How to work:
 - A reputable source (the maker's own site, Wikipedia, a major newspaper or reference site)
   counts as reliable unless the user asked for something stricter. Name it in your summary.
 - Finish with success=true whenever you found the answer, adding a short caveat if it
-  matters. Use success=false only when you really could not find or do it."""
+  matters. Use success=false only when you really could not find or do it.
+- Start your summary with the result itself in one plain sentence (the pick and its price,
+  the fact, what was done): it is read aloud. Then the details, a list one item per line."""
 
 
 def plain_card(

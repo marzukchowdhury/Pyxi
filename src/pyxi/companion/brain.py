@@ -65,6 +65,7 @@ from pyxi.companion.notes import (
     card_size,
     picture_rect,
     place_stage,
+    result_card,
     target_rect,
 )
 from pyxi.companion.operator import Operator, Outcome
@@ -1378,6 +1379,7 @@ class Brain:
             log.exception("errand failed")
             await self.jobs.settle(job, ok=False, summary=str(exc)[:200])
             await self._notify(job.id, ok=False, title="Couldn't finish that", body=str(exc)[:200])
+            self._spawn(self._say_when_free("I couldn't finish that. The notification says why."))
             return
         self.turns.add_spend("errand", result.cost_usd)
         await self.jobs.settle(
@@ -1397,6 +1399,7 @@ class Brain:
         await self._notify(
             job.id, ok=result.ok, title=result.title, body=result.summary, link=result.link
         )
+        self._announce(job, ok=result.ok, title=result.title, body=result.summary, own_card=True)
 
     # ------------------------------------------------------------------ money in their mail
     async def _scan(self, what: str, query: str, n: int) -> tuple[Any, list[dict[str, Any]]]:
@@ -3289,8 +3292,9 @@ class Brain:
         )
         if job.then and job.status == "done":
             return  # the next teammate takes it from here
-        # Background work is quiet: no voice, just a notification with the result and the files.
-        # (You asked Pyxi to go off and do it; it shouldn't start talking over you when it's done.)
+        # Background work never talks over you, but it is never missed either: a notification
+        # with the result and the files, one short spoken line once nobody is talking, and the
+        # whole result on a card when the notification can't hold it (_announce).
         data = job.data if isinstance(job.data, dict) else {}
         if (note := paperwork.notice(job, data)) is not None:  # a check-in or a filled form
             await self.hub.emit(
@@ -3305,10 +3309,17 @@ class Brain:
             self.history = [
                 *self.history[-11:],
                 (
-                    f"(job {job.id} finished: {job.summary[:600]})",
+                    f"(job {job.id} finished: {answers.for_later(job)})",
                     f"(notified the user: {note['title']}. {note['body']})",
                 ),
             ]
+            self._announce(
+                job,
+                ok=bool(note.get("ok", True)),
+                title=str(note["title"]),
+                body=str(note["body"]),
+                own_card=True,
+            )
             return
         fixed = data.get("fixed") or []
         files = [str(f) for f in (fixed or job.outputs)]
@@ -3375,16 +3386,76 @@ class Brain:
                 else None
             ),
         )
-        # The model still gets the full result (file paths included) for "send it back".
+        # The model still gets the full result (file paths included) for "send it back", and
+        # every item of a long one for "what did Scout find?".
         self.history = [
             *self.history[-11:],
             (
-                f"(job {job.id} finished: {job.summary[:600]})",
+                f"(job {job.id} finished: {answers.for_later(job)})",
                 f"(notified the user: {title}. {body})",
             ),
         ]
+        own_card = booked or bool(files) or (job.role in specialists.ROLES and bool(data.get("title")))
+        self._announce(job, ok=job.status == "done", title=title, body=body, own_card=own_card)
         if job.role in specialists.ROLES:  # reminders, check-ins, the next monthly summary
             await specialists.after_job(self, job)
+
+    def _announce(self, job: Job, *, ok: bool, title: str, body: str, own_card: bool) -> None:
+        """A finished or failed job is told once: the whole result on a card whenever the
+        notification had to cut it (a list of nine stays nine), and one short spoken line,
+        held until neither Pyxi nor the user is talking. A job they stopped themselves needs
+        neither."""
+        told = getattr(self, "_told_jobs", None)
+        if told is None:
+            told = self._told_jobs = set()
+        if job.id in told or job.status == "stopped":
+            return
+        told.add(job.id)
+        whole = " ".join((job.summary or "").split())
+        cut = bool(whole) and whole != " ".join(body.split())
+        card = None
+        if cut and not own_card:
+            generic = title in (f"{job.agent_name} finished", f"{job.agent_name} couldn't finish")
+            card = result_card(
+                job.agent_name, job.summary, ok=ok, title="" if generic else title
+            )
+            self._spawn(answers.show(self, card))
+        line = answers.spoken_line(
+            job.agent_name, ok=ok, title=title, summary=job.summary, on_card=card is not None
+        )
+        self._spawn(self._say_when_free(line, about=job.agent_name, since=self._turn_id))
+
+    def _talking(self) -> bool:
+        """Is anyone mid-sentence: a turn under way, the user speaking, or Pyxi's voice still
+        playing?"""
+        return (
+            self._lock.locked()
+            or self.state in ("listening", "transcribing")
+            or (self._speech is not None and not self._speech.done())
+            or time.monotonic() < self._talking_until
+        )
+
+    async def _say_when_free(self, line: str, about: str = "", since: str = "") -> None:
+        """Say a background line once the floor is free. If they press talk while it is being
+        voiced it is dropped unheard, so it waits its turn again (three tries, then the card
+        and the notification have to do). If they asked in the meantime and that answer
+        already named the teammate ("Scout's back: ..."), it has been told. ``since``: the
+        turn that was the latest one when the work ended."""
+        for _ in range(3):
+            for _ in range(2400):  # ten minutes at most
+                if not self._talking():
+                    break
+                await asyncio.sleep(0.25)
+            if (
+                about
+                and self._turn_id != since
+                and about.lower() in " ".join(self._said).lower()
+            ):
+                return
+            gen = self._speech_gen
+            await self.say_line(line, record=False)
+            if gen == self._speech_gen:
+                return
 
     # ================================================================== misc
     def _spawn(self, coro: Any) -> None:
