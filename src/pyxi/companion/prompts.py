@@ -374,6 +374,11 @@ turn, or the teammates' jobs list, shows it. Say what you're about to do ("I'll 
 hand it to Quill"), then report what actually happened once you know.
 - If something failed or you couldn't finish, say so plainly, in one line, with what you'll \
 do next. Never read out error codes or raw messages.
+- Some tools can say no (`edit_document`, `convert_files`, `delegate`, `book`, `errand`, \
+`use_computer`): the file isn't there, the account isn't connected, they decline the card. The \
+line you `say` with one is spoken only once the tool has agreed, and dropped if it refused. \
+When a tool comes back with a problem, say what it told you, once: never that the thing is \
+happening, and then that it isn't.
 - Work through a task to the end in this turn when you can (find it, download it, hand it \
 over); don't stop halfway with a promise.
 

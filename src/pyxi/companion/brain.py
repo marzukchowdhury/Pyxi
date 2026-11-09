@@ -2155,14 +2155,20 @@ class Brain:
             scene_preview = {"shown": False}
 
             held = {"say": None}  # a later round's reply, waiting to go just before its card
+            claim = {"say": None}  # a line that says work is under way, until we see what follows
 
-            async def speak_early(call: ToolCall) -> None:
+            async def speak_early(call: ToolCall, wait: bool = True) -> None:
                 # Streamed: start talking the moment the spoken line is complete, while the cue
                 # card and drawings are still arriving.
                 if call.name == "say" and not first_round:
                     held["say"] = call  # may be lookup chatter; only said if a card follows
                     return
                 if call.name == "say" and not early and self._speech_gen == self._turn_gen:
+                    if wait and not head["text"] and claims_work(str(call.arguments.get("text", ""))):
+                        # "Putting the table in now.": true only once the tool has agreed. If the
+                        # next call is one that can refuse, the line waits for its answer.
+                        claim["say"] = call
+                        return
                     early.add(call.id)
                     self._calls.append(
                         {
@@ -2182,11 +2188,15 @@ class Brain:
             async def as_it_streams(i: int, name: str, raw: str) -> None:
                 if self._speech_gen != self._turn_gen:
                     return
+                if claim["say"] is not None and name != "say":
+                    waiting, claim["say"] = claim["say"], None
+                    if name not in CAN_REFUSE:
+                        await speak_early(waiting, wait=False)  # nothing here says no: say it now
                 if name == "say" and first_round and not early and not head["text"]:
                     # The first sentence goes to the voice as soon as it's written.
                     got = partial_string(raw, "text")
                     first = first_chunk(got[0]) if got and not got[1] else ""
-                    if first:
+                    if first and not claims_work(first):
                         head["text"] = first
                         self._noted |= {
                             int(m.group(2))
@@ -2284,6 +2294,14 @@ class Brain:
                 or any(t.info and t.spec.name == c.name for t in connector_tools)
                 for c in calls
             )
+            # A line said with a tool that can refuse waits for that tool's answer: "Putting a
+            # table into your doc now." is never said and then taken back in the next sentence.
+            gate = max((i for i, c in enumerate(calls) if c.name in CAN_REFUSE), default=-1)
+            waits = [c for c in calls[: max(gate, 0)] if c.name == "say" and c.id not in early]
+            if waits:
+                rest = [c for c in calls[: gate + 1] if all(c is not w for w in waits)]
+                calls = [*rest, *waits, *calls[gate + 1 :]]
+            unsaid = False  # the tool refused, or said its own line: this round's line is dropped
             for call in calls:
                 if self._speech_gen != self._turn_gen:
                     # They spoke again mid-round: the rest of it is not done behind their back.
@@ -2303,6 +2321,8 @@ class Brain:
                     str(call.arguments.get("text", "")), self._said
                 ):
                     continue  # the same thing again, in the same or other words: said once
+                if call.name == "say" and unsaid:
+                    continue  # it would claim the job is under way; the model speaks next, knowing
                 self._calls.append(
                     {"round": round_no, "tool": call.name, "arguments": call.arguments}
                 )
@@ -2313,6 +2333,7 @@ class Brain:
                         f"Call {call.name} again, shorter."
                     )
                     needs_more = self._visual_retry = True
+                    unsaid = unsaid or call.name in CAN_REFUSE  # it never ran: nothing to claim yet
                     continue
                 is_info = any(t.info and t.spec.name == call.name for t in connector_tools)
                 lookup = is_info or call.name in INFO_TOOLS
@@ -2332,11 +2353,19 @@ class Brain:
                     self._repeats += 1
                     needs_more = needs_more or self._repeats <= 1
                     continue
+                spoken = len(self._said)
                 try:
                     note = await self._act(call.name, dict(call.arguments))
                 except Exception as exc:
                     log.exception("tool %s failed", call.name)
                     note = f"{call.name} failed: {exc}"
+                if call.name in CAN_REFUSE:
+                    if note and note.startswith(f"{call.name} failed:"):
+                        needs_more = True  # it broke: the model says so, instead of the claim
+                    if len(self._said) > spoken or (
+                        note and note.startswith((f"{call.name}:", f"{call.name} failed:"))
+                    ):
+                        unsaid = True
                 if note and call.name in safety.UNTRUSTED_TOOLS:
                     if call.name in safety.SOURCE_LABEL:
                         self._turn_reads.append((safety.SOURCE_LABEL[call.name], note))
@@ -3554,6 +3583,9 @@ _BACKGROUND_TOOLS = {
     "build_3d_model",
     "explain_in_3d",
 }
+# Tools that can say no (a file that isn't there, an account that isn't connected, a card they
+# decline): a line said with one waits for its answer, and is dropped if the answer is no.
+CAN_REFUSE = {"edit_document", "convert_files", "delegate", "book", "errand", "use_computer"}
 # "Find coffee near me": opening Maps isn't the answer, so Pyxi looks at what opened and
 # answers from it. "I said open Gmail, not GL" asks nothing: one model call, not two.
 _WANTS_ANSWER = re.compile(
@@ -3782,6 +3814,22 @@ _SETTLED = re.compile(
     r"\b(?:done|finished|ready|not|no|never|cannot|failed|sorry|but|instead|because|since)\b|n't\b",
     re.IGNORECASE,
 )
+
+
+# Other ways a line says a job has started: "...now.", "back in a minute", "Scout's on the flights."
+_STARTED = re.compile(
+    r"\b(?:now|right away|in a (?:sec|second|moment|minute)|back (?:in|with|soon)|off to|on it)\b"
+    r"|(?:\bis|'s) on (?:it|the|your|that|those)\b",
+    re.IGNORECASE,
+)
+
+
+def claims_work(text: str) -> bool:
+    """Does this line say a job has started or is about to ("Putting the table in now.",
+    "Scout's on the flights.", "A new doc, coming up.")? Said with a tool that can refuse, such
+    a line waits for the tool's answer. A plain answer ("Real. Only the B version hovers.")
+    does not, and starts being spoken as it arrives."""
+    return any(_UNDERWAY.search(s) or _STARTED.search(s) for s in split_sentences(text))
 
 
 def said_before(text: str, earlier: list[str]) -> bool:
