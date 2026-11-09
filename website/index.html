@@ -136,22 +136,14 @@
                   <li data-layer="2"><b>What Pyxi reads</b><span>Every control, its name and exactly where it sits, from Windows UI Automation. Password fields are blacked out before anything is sent.</span></li>
                   <li data-layer="3"><b>What Pyxi draws</b><span>Rings, threads, notes and 3D models on a see-through layer above your apps. Your clicks go straight through it.</span></li>
                 </ol>
+                <p class="lens-hint"><span class="mouse">Move your mouse over the window: wherever Pyxi hovers, the screen turns to glass. Hover a step to hold it.</span><span class="touch">Pyxi's lens roams the window on its own. Tap a step to hold it.</span></p>
               </div>
-              <div class="layers-stage" role="img" aria-label="Pyxi's three layers lifted apart in 3D: a settings window, the numbered controls Pyxi reads from it, and the ring and thread Pyxi draws on top.">
-                <div class="lyr-world">
-                  <div class="lyr lyr-screen" data-layer="1"><img src="/clips/layer-screen.webp" width="1280" height="800" alt="" loading="lazy" /><i class="lyr-tag">1 &middot; Your screen</i></div>
-                  <div class="lyr lyr-read" data-layer="2">
-                    <span class="mk" style="--x: 310; --y: 241; --w: 820; --h: 38" data-n="1" data-label="Window · Settings">Window &middot; Settings</span>
-                    <span class="mk" style="--x: 324; --y: 297; --w: 161; --h: 31" data-n="2" data-label="General">General</span>
-                    <span class="mk" style="--x: 325; --y: 334; --w: 160; --h: 28" data-n="3" data-label="Appearance">Appearance</span>
-                    <span class="mk" style="--x: 324; --y: 367; --w: 161; --h: 31" data-n="4" data-label="Privacy">Privacy</span>
-                    <span class="mk" style="--x: 324; --y: 402; --w: 161; --h: 31" data-n="5" data-label="Advanced">Advanced</span>
-                    <span class="mk" style="--x: 533; --y: 338; --w: 104; --h: 22" data-n="6" data-label="Dark mode · checkbox">Dark mode &middot; checkbox</span>
-                    <span class="mk" style="--x: 533; --y: 373; --w: 124; --h: 22" data-n="7" data-label="Reduce motion · checkbox">Reduce motion &middot; checkbox</span>
-                    <span class="mk" style="--x: 530; --y: 409; --w: 76; --h: 33" data-n="8" data-label="Export · button">Export &middot; button</span>
-                    <i class="lyr-tag">2 &middot; What Pyxi reads</i>
-                  </div>
-                  <div class="lyr lyr-pyxi" data-layer="3"><img src="/clips/layer-pyxi.png" width="1440" height="900" alt="" loading="lazy" /><i class="lyr-tag">3 &middot; What Pyxi draws</i></div>
+              <div class="layers-stage" role="img" aria-label="A lens over a dark Settings window. Inside the lens the window turns to glass: every control is a wireframe with its role, name and position, and the password field is a black bar. Pyxi's firefly threads light to the Export button.">
+                <div class="lens-world">
+                  <img src="/clips/layer-screen.webp" width="1280" height="800" alt="" loading="lazy" />
+                  <canvas class="lens" aria-hidden="true"></canvas>
+                  <span class="lens-pt" data-label="Export · right here"></span>
+                  <div class="lens-read" aria-hidden="true"></div>
                 </div>
               </div>
             </div>
