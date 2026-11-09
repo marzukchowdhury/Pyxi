@@ -43,7 +43,7 @@ from pyxi import booking, hands, media, safety, tidy, weather, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
 from pyxi import alarms
-from pyxi.companion import filework, instant, paperwork, pricecheck, prompts, specialists
+from pyxi.companion import answers, filework, instant, paperwork, pricecheck, prompts, specialists
 from pyxi.companion.actions import app_target, in_account, open_app, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
@@ -2904,6 +2904,8 @@ class Brain:
             return await paperwork.handle(self, name, args)
         if name in pricecheck.TOOLS:  # cheaper elsewhere: companion/pricecheck.py
             return await pricecheck.handle(self, name, args)
+        if name in answers.TOOLS:  # the answer, on a card: companion/answers.py
+            return await answers.handle(self, name, args)
         # Phrased as a problem note, so the model hears it and tries a real tool.
         return f"{name}: there's no tool by that name. Use one of the tools you have."
 

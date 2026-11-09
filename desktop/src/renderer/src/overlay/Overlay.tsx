@@ -4,6 +4,7 @@ import { Recorder } from "../shared/audio";
 import { bridge } from "../shared/bridge";
 import { brain } from "../shared/socket";
 import { Annotations } from "./Annotations";
+import { AnswerCard } from "./AnswerCard";
 import { NotesCard } from "./NotesCard";
 import { Notch } from "./Notch";
 import { ObjectPanel } from "./ObjectPanel";
@@ -181,6 +182,7 @@ export function Overlay() {
       {backdrop && <FakeDesktop />}
       <Annotations />
       <NotesCard />
+      <AnswerCard />
       <ScenePanel />
       <ObjectPanel />
       <SketchBoard />

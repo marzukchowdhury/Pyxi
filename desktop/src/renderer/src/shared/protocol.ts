@@ -49,6 +49,31 @@ export interface NoteCard {
   style?: "card" | "picture";
 }
 
+/** A named link on an answer card: a source ("RTINGS") or its one button ("Check on Amazon"). */
+export interface CardLink {
+  name: string;
+  url: string;
+}
+
+/**
+ * An answer card (src/pyxi/companion/notes.py AnswerCard): a pick with its price, up to three
+ * facts, its sources and one button; or a teammate's finished result, every line of it.
+ */
+export interface AnswerCard {
+  id: string;
+  kind: "answer" | "result";
+  title: string;
+  figure: string | null;
+  note: string | null;
+  facts: string[];
+  sources: CardLink[];
+  button: CardLink | null;
+  /** A data: address made by the brain from a real picture of the pick, when one was found. */
+  image: string | null;
+  agent: string | null;
+  ok: boolean;
+}
+
 export type Shape =
   | "box" | "sphere" | "cylinder" | "cone" | "torus" | "capsule" | "card" | "chip" | "screen"
   | "server" | "user" | "database" | "cloud";
@@ -369,6 +394,7 @@ export type BrainEvent =
   | { type: "transcript"; text: string; seconds: number }
   | { type: "say"; agent: string; index: number; total: number; text: string; audio: string | null; duration_s: number; annotations: Annotation[]; notes?: number[] }
   | { type: "notes"; card: NoteCard }
+  | { type: "answer"; card: AnswerCard }
   | { type: "action"; kind: "open_url" | "copy" | "insert" | "insert_table"; value: string }
   | { type: "alarm"; title: string; label: string; at: string }
   | { type: "job_ready"; job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null }

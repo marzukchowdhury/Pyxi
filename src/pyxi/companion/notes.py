@@ -16,6 +16,7 @@ real click on it, looks at the new screen and gives the next step.
 from __future__ import annotations
 
 import math
+import re
 import secrets
 from typing import Any, Literal
 
@@ -30,6 +31,11 @@ from pyxi.screen import ScreenContext
 
 ItemKind = Literal["point", "step", "formula", "aside"]
 Mark = Literal["frame", "underline", "circle", "none"]
+_HTTP = re.compile(r"^https?://[^\s/]+\.[^\s/]+", re.I)
+_HOST = re.compile(r"^https?://([^/\s?#]+)", re.I)
+_URL = re.compile(r"https?://[^\s<>\"']+")
+_BULLET = re.compile(r"^\s*(?:[-*•]+|\d{1,2}[.)])\s+")
+_MARKUP = re.compile(r"(\*\*|__|`)(.+?)\1")
 
 
 class NoteItem(BaseModel):
@@ -483,3 +489,111 @@ class Guide(BaseModel):
     step: int = 1
     action: str = "click"
     total: int | None = None
+
+
+# ---------------------------------------------------------------------------- answer cards
+# The cue card's sibling for an answer that isn't about pixels on screen: a pick with its price,
+# a few facts, where they came from and one button; or a teammate's finished result, in full.
+# It keeps the cue card's look, but it isn't tied to a window, so it stays up when the page
+# changes (opening the shop is the whole point of its button).
+
+ANSWER_FACTS = 3  # an answer is a glance, not a page
+RESULT_LINES = 40  # a teammate's result is shown whole (nine items are nine rows)
+
+
+class CardLink(BaseModel):
+    name: str  # what the user reads: "RTINGS", "Check on Amazon"
+    url: str  # http(s) only; opened by the app's safe open-link path
+
+
+class AnswerCard(BaseModel):
+    id: str = Field(default_factory=lambda: "answer_" + secrets.token_hex(3))
+    kind: Literal["answer", "result"] = "answer"
+    title: str
+    figure: str | None = None  # the price or headline number, shown large
+    note: str | None = None  # one small line: where the figure is from, or how sure
+    facts: list[str] = Field(default_factory=list)
+    sources: list[CardLink] = Field(default_factory=list)
+    button: CardLink | None = None
+    image: str | None = None  # a data: URI made by the brain from a real picture, or nothing
+    agent: str | None = None  # a result: whose work it is
+    ok: bool = True
+
+
+def _line(value: Any, limit: int) -> str:
+    """One line of card text: whitespace folded, cut on a word when it's too long."""
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "..."
+
+
+def _web_link(value: Any) -> str | None:
+    url = str(value or "").strip()
+    return url if _HTTP.match(url) and " " not in url else None
+
+
+def site_name(url: str) -> str:
+    """'https://www.rtings.com/x' -> 'rtings.com': what a source is called when it has no name."""
+    host = _HOST.match(url)
+    return host.group(1).lower().removeprefix("www.") if host else url
+
+
+def card_links(raw: Any, limit: int = 4) -> list[CardLink]:
+    """Sources as the model gave them ({name, url} or a bare address): web links only, each
+    address once, a name for every one."""
+    links: list[CardLink] = []
+    for item in raw if isinstance(raw, list) else []:
+        url = _web_link(item.get("url") if isinstance(item, dict) else item)
+        if url is None or any(link.url == url for link in links):
+            continue
+        name = _line(item.get("name") if isinstance(item, dict) else "", 28) or site_name(url)
+        links.append(CardLink(name=name, url=url))
+    return links[:limit]
+
+
+def build_answer(args: dict[str, Any], button: CardLink | None = None) -> AnswerCard | None:
+    """The model's answer as a card payload; None when there's no title to show."""
+    title = _line(args.get("title"), 70)
+    if not title:
+        return None
+    facts = [f for f in (_line(x, 90) for x in args.get("facts") or [] if isinstance(x, str)) if f]
+    return AnswerCard(
+        title=title,
+        figure=_line(args.get("figure"), 28) or None,
+        note=_line(args.get("note"), 110) or None,
+        facts=facts[:ANSWER_FACTS],
+        sources=card_links(args.get("sources")),
+        button=button,
+    )
+
+
+def result_card(agent: str, summary: str, *, ok: bool = True, title: str = "") -> AnswerCard:
+    """A teammate's finished result, whole: every line of it is a row (a list of nine is nine
+    rows), and the addresses in it become the card's links instead of long strings to read."""
+    links: list[CardLink] = []
+    rows: list[str] = []
+    for raw in str(summary or "").splitlines():
+        line = _BULLET.sub("", raw).strip()
+        for url in _URL.findall(line):
+            url = url.rstrip(".,;:)")
+            if not any(link.url == url for link in links):
+                links.append(CardLink(name=site_name(url), url=url))
+            line = line.replace(url, site_name(url))
+        line = _line(_MARKUP.sub(r"\2", line), 400)
+        if line:
+            rows.append(line)
+    # A single name per link reads badly when four go to the same shop: number the repeats.
+    seen: dict[str, int] = {}
+    for link in links:
+        seen[link.name] = seen.get(link.name, 0) + 1
+        if seen[link.name] > 1:
+            link.name = f"{link.name} ({seen[link.name]})"
+    return AnswerCard(
+        kind="result",
+        title=_line(title, 70) or (f"{agent}'s result" if ok else f"{agent} couldn't finish"),
+        facts=rows[:RESULT_LINES] or ["Done." if ok else "It stopped without saying why."],
+        sources=links[:8],
+        agent=agent,
+        ok=ok,
+    )

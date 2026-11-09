@@ -1095,6 +1095,11 @@ from pyxi.companion.pricecheck import TOOL as CHECK_PRICES  # noqa: E402
 
 COMPANION_TOOLS.append(CHECK_PRICES)
 
+# The answer to a "find me / what's a good / cheapest X", on a card (companion/answers.py).
+from pyxi.companion.answers import TOOL as SHOW_ANSWER  # noqa: E402
+
+COMPANION_TOOLS.append(SHOW_ANSWER)
+
 # Specialist teammates: Atlas (travel), Penny (money), Scribe (meetings), Sage (study), Patch (code), Ditto (watch me once), Trace (memory) (companion/specialists.py).
 from pyxi.companion.specialists import INFO as SPECIALIST_INFO  # noqa: E402
 from pyxi.companion.specialists import SPECS as SPECIALIST_TOOLS  # noqa: E402
