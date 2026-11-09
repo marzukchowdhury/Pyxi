@@ -132,17 +132,17 @@ def install(brain: Any, background: list[str], name: str = "") -> None:
 
     async def fake_travel(brain_: Any, args: dict[str, Any]) -> str:
         background.append("travel: " + json.dumps(args)[:200])
-        return "Started job_x: Atlas is reading their travel mail. Say one short line ('On it.')."
+        return "Started job_x: Atlas is reading their travel mail. Say one short line that names the job."
 
     async def fake_money(brain_: Any, args: dict[str, Any]) -> str:
         background.append("money: " + json.dumps(args)[:200])
         if args.get("action") == "budget":
             return "money: Monthly budget set. Say that in a few words."
-        return "Started job_x: Penny is reading their receipts. Say one short line ('On it.')."
+        return "Started job_x: Penny is reading their receipts. Say one short line that names the job."
 
     async def fake_meeting(brain_: Any, args: dict[str, Any]) -> str:
         background.append("meeting: " + json.dumps(args)[:240])
-        return "Started job_x: Scribe is listening to it. Say one short line ('On it.')."
+        return "Started job_x: Scribe is listening to it. Say one short line that names the job."
 
     # A recording on the sample Desktop (the only folder file search may look in).
     from pyxi import files_access

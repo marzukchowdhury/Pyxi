@@ -653,3 +653,60 @@ def test_a_picture_that_claims_to_be_huge_is_never_decoded(monkeypatch):
     Image.new("L", (4200, 4200)).save(buf, format="PNG")  # a few kilobytes on the wire
     assert answers.thumbnail(buf.getvalue()) is None and decoded == []
     assert answers.thumbnail(jpeg()) is not None and decoded  # a real photo still is
+
+
+async def test_open_it_looks_at_the_page_and_marks_the_pick_like_show_me(settings, monkeypatch):
+    """The model is told to open the link and then mark the pick, for "show me", "open it" and
+    "take me there" alike; the look that lets it do so only followed wording like "show me"."""
+
+    async def no_picture(title, links, **kw):
+        return None
+
+    monkeypatch.setattr(answers, "find_picture", no_picture)
+    model = Scripted(
+        [
+            say("Amazon's results for it. These are search results, not a verified listing."),
+            ToolCall(
+                id="q", name="quick_action", arguments={"action": "open_url", "value": AMAZON}
+            ),
+        ],
+        [
+            say("There it is, at $49.99.", "s2"),
+            ToolCall(id="h", name="highlight", arguments={"element_id": 4, "label": "Space A40"}),
+        ],
+    )
+    brain, rec = make_brain(settings, llm=model)
+
+    class Looks(FakeScreen):  # the look after opening asks for the window in front
+        async def capture(self, pixels=True, **kw):
+            return await super().capture(pixels)
+
+    brain.screen = Looks()
+    real_sleep = asyncio.sleep
+
+    async def no_wait(seconds, *a):  # the page "loads" at once
+        await real_sleep(min(seconds, 0.01))
+
+    monkeypatch.setattr(asyncio, "sleep", no_wait)
+    await brain._act("show_answer", dict(PICK))
+    await brain.turn("take me there")
+    assert [(e["kind"], e["value"]) for e in rec.of("action")] == [("open_url", AMAZON)]
+    assert len(model.prompts) == 2  # it looked, and was asked to mark the pick on the page
+    assert "Find Anker Soundcore Space A40 among them" in model.prompts[1]
+    assert rec.of("annotate")
+    # Opening anything else, with words that ask for nothing more, is still one round.
+    other = Scripted(
+        [
+            say("Gmail, coming up."),
+            ToolCall(
+                id="q",
+                name="quick_action",
+                arguments={"action": "open_url", "value": "https://mail.google.com"},
+            ),
+        ]
+    )
+    brain, rec = make_brain(settings, llm=other)
+    brain.screen = Looks()
+    await brain._act("show_answer", dict(PICK))
+    await brain.turn("take me to my inbox")
+    assert len(other.prompts) == 1

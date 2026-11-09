@@ -48,7 +48,7 @@ TRAVEL = ToolSpec(
     "itinerary arrives as a notification. Use it for 'plan my trip', 'what's my itinerary?', "
     "'when's my flight to Toronto?', 'where am I staying in Lisbon?', 'remind me before my "
     "flight'. Set check_in=true only when they also ask to be checked in. Say one short line "
-    "('On it.') and nothing more.",
+    "that names the job and nothing more.",
     {
         "type": "object",
         "properties": {
@@ -73,7 +73,7 @@ MONEY = ToolSpec(
     "spreadsheet (a new Excel file, or `target`: their own .xlsx path or a Google Sheet link "
     "or name, which Ledger adds the rows to). action 'budget': set a monthly budget (`amount`, "
     "optional `category` like 'groceries' or 'eating out'; amount 0 removes it). Summary and "
-    "sheet run in the background: say one short line ('On it.'). Subscriptions, bills and "
+    "sheet run in the background: say one short line that names the job. Subscriptions, bills and "
     "price checks have their own tools.",
     {
         "type": "object",
@@ -100,7 +100,7 @@ MEETING = ToolSpec(
     "notes arrive as a notification. `file` is the recording's full path (search_files first "
     "if they only named it). `to`: the other people's email addresses, only if they want the "
     "follow-up sent (look them up with gmail_people first); they approve it on a card before "
-    "anything is sent. Say one short line ('On it.').",
+    "anything is sent. Say one short line that names the job.",
     {
         "type": "object",
         "properties": {
@@ -118,7 +118,7 @@ FLASHCARDS = ToolSpec(
     "Sage, the study teammate: turns lecture slides, a PDF or notes on this PC into flashcards "
     "(a CSV that Anki and Quizlet import) and a multiple-choice quiz, in the background. "
     "`files` are full paths (search_files first if they only named them). Say one short line "
-    "('On it.'); afterwards they can say 'quiz me'.",
+    "that names the job; afterwards they can say 'quiz me'.",
     {
         "type": "object",
         "properties": {
@@ -282,7 +282,7 @@ async def _travel(brain: Brain, args: dict[str, Any]) -> str:
     )
     return (
         f"Started {job.id}: {job.agent_name} is reading their travel mail in the background. "
-        "Say one short line ('On it.'); the itinerary comes as a notification."
+        "Say one short line that names the job; the itinerary comes as a notification."
     )
 
 
@@ -396,7 +396,7 @@ async def _money(brain: Brain, args: dict[str, Any]) -> str:
     job = await brain.jobs.start("penny", f"{what}: {month}", params=params)
     return (
         f"Started {job.id}: {job.agent_name} is reading their receipts in the background. "
-        "Say one short line ('On it.'); the result comes as a notification."
+        "Say one short line that names the job; the result comes as a notification."
     )
 
 
@@ -434,7 +434,7 @@ async def _meeting(brain: Brain, args: dict[str, Any]) -> str:
     )
     return (
         f"Started {job.id}: {job.agent_name} is listening to {path.name} in the background. "
-        "Say one short line ('On it.'); the notes come as a notification."
+        "Say one short line that names the job; the notes come as a notification."
     )
 
 
@@ -538,7 +538,7 @@ async def _study(brain: Brain, args: dict[str, Any]) -> str:
         )
         return (
             f"Started {job.id}: {job.agent_name} is making the cards in the background. Say one "
-            "short line ('On it.'); they get a notification, then can say 'quiz me'."
+            "short line that names the job; they get a notification, then can say 'quiz me'."
         )
     if action in ("quiz", "again"):
         if action == "again" and quiz and quiz.missed:

@@ -2522,12 +2522,20 @@ class Brain:
                 c.name == "quick_action" and c.arguments.get("action") in ("open_url", "open_app")
                 for c in calls
             )
+            pick_opened = answers.opened_note(self, calls) if opened else ""
             if (
                 opened
                 and all(c.name in ("say", "quick_action") for c in calls)
                 and not needs_more
-                and not _JUST_OPEN.match(self._user_text or "")
-                and _WANTS_ANSWER.search(self._user_text or "")
+                # The card's own link ("open it", "take me there") is always looked at: the model
+                # was told to mark the pick on that page, whatever words asked for it.
+                and (
+                    pick_opened
+                    or (
+                        not _JUST_OPEN.match(self._user_text or "")
+                        and _WANTS_ANSWER.search(self._user_text or "")
+                    )
+                )
                 and round_no < self.settings.budget.max_tool_rounds
             ):
                 # "Find coffee near me": opening Maps isn't the answer. Look at what opened and
@@ -2535,7 +2543,7 @@ class Brain:
                 await self._act("look_again", {"seconds": 3})
                 needs_more = True
                 notes.append(
-                    answers.opened_note(self, calls)
+                    pick_opened
                     or "It's open on their screen now (you're looking at it). Answer their question "
                     "from it: mark the best options with explain_on_screen and say your pick. "
                     "Don't open it again."

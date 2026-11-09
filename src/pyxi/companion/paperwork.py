@@ -173,7 +173,7 @@ async def _fill_form(brain: Brain, args: dict[str, Any]) -> str | None:
     )
     return (
         f"Started {job.id}: Scout is filling it in a window they can watch. Say one short line "
-        "('On it, I'll check with you before it's sent.') and nothing more."
+        "that names the job and that you'll check with them before it's sent, and nothing more."
     )
 
 

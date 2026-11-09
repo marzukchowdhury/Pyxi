@@ -472,14 +472,16 @@ COMPANION_TOOLS: list[ToolSpec] = [
     ),
     _tool(
         "web_search",
-        "Search the web (about a second). Use it for anything that changes or that you're not sure of: "
+        "Search the web (the answer is a few seconds away). Use it for anything that changes or that you're not sure of: "
         "news, prices, scores, results, release dates, who runs what, whether a claim or quote is "
         "real, facts about a specific person, product or place. It is also how you answer 'find me / what's a "
         "good / the cheapest / the best X' (a product, an app, a service): search, then say your pick with its "
         "price and source and put it on a card with show_answer, in the same turn, instead of sending a teammate "
         "to click through a shop. Searches the web and the news together, and "
-        "news comes with its outlet and age. In the reply where you search, say at most a few words ('Checking "
-        "the news.'), never the answer; answer once the results are back, naming the sources. One search is "
+        "news comes with its outlet and age. In the reply where you search, say one short starting line, never "
+        "the answer: for a quick fact (the news, a score, a date, whether a claim is real) a few words "
+        "('Checking the news.'); for a pick or a comparison ('find me', 'the best', 'the cheapest'), the "
+        "criterion you're using or what you're comparing. Answer once the results are back, naming the sources. One search is "
         "usually enough; two at most. Never say you're searching unless you call this tool.",
         {
             "query": {"type": "string", "description": "What you'd type into a search box."},
