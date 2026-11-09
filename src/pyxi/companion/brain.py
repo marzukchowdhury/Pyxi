@@ -215,6 +215,7 @@ class Brain:
         self._turn_id = ""
         self._synthetic = False
         self._pending_say = ""
+        self._promise_nudged = False
         self._cut_short = False
         # What a turn they talked over left behind (its words, and what it had done), for the
         # turn their new words start: nothing they said is dropped.
@@ -1816,6 +1817,26 @@ class Brain:
             done.append(f"{c['tool']} ({args})" if args else str(c["tool"]))
         return done[:6]
 
+    def _promise_nudge(self, round_no: int) -> str | None:
+        """The turn is about to end. If Pyxi said it would do something that no tool call this
+        turn carried out ("Heading to Display to lower the brightness.", and only Settings
+        opened), the note that sends the model back to do it or say plainly that it can't.
+        Once a turn at most, and never past the round limit, so it cannot loop."""
+        if self._promise_nudged or round_no >= self.settings.budget.max_tool_rounds:
+            return None
+        found = undone_promise(self._said, self._calls, self._user_text or "")
+        if found is None:
+            return None
+        self._promise_nudged = True
+        line, opened = found
+        return (
+            f'You told them: "{line}" Nothing in this turn has done that yet'
+            + (" (opening it is not doing it)" if opened else "")
+            + ". Do it now with the right tool (use_computer for clicks and settings inside an "
+            "app), or tell them plainly, in one short line, that you can't and why. Don't repeat "
+            "what you have already said."
+        )
+
     def _pick_up(self, user_text: str, waited: bool) -> tuple[str, list[str]]:
         """They kept talking, or paused mid-sentence and the request arrived in two parts: the
         turn that had started on the first part was cut off. If it had done nothing yet, its
@@ -1871,6 +1892,7 @@ class Brain:
             if not synthetic:
                 self._guide_fresh = True  # a new request: a guide in it counts from step 1
             self._pending_say = ""  # an answer held back during a lookup round
+            self._promise_nudged = False  # "you said you'd do it, so do it": once a turn at most
             self._cut_short = False  # a round was dropped because they spoke again
             self._screens_text: str | None = None  # every screen and what's on it, once a turn
             self._shown_screen: str | None = None  # the screen look_again looked at, if it did
@@ -2270,6 +2292,12 @@ class Brain:
                     }
                 if text:
                     self._speak(text)
+                if nudge := self._promise_nudge(round_no):
+                    return {
+                        "round": round_no,
+                        "needs_more": True,
+                        "notes": [*state.get("notes", []), nudge],
+                    }
                 return {"round": round_no, "needs_more": False}
             notes: list[str] = []
             needs_more = False
@@ -2434,6 +2462,10 @@ class Brain:
                     "You told them you'd check, so check now: call web_search (or delegate for "
                     "deep research), then answer. Don't say again that you're checking."
                 )
+            if not needs_more and (nudge := self._promise_nudge(round_no)):
+                # "Heading to Display to lower the brightness." and then only Settings opened.
+                needs_more = True
+                notes.append(nudge)
             return {
                 "round": round_no,
                 "notes": [*state.get("notes", []), *notes],
@@ -3830,6 +3862,91 @@ def claims_work(text: str) -> bool:
     a line waits for the tool's answer. A plain answer ("Real. Only the B version hovers.")
     does not, and starts being spoken as it arrives."""
     return any(_UNDERWAY.search(s) or _STARTED.search(s) for s in split_sentences(text))
+
+
+def _verb_forms(verbs: str, *, doing_only: bool = False) -> str:
+    """'lower set change' as a regex: lower, lowers, lowering, set, sets, setting, change..."""
+    forms = []
+    for v in verbs.split():
+        stem = v[:-1] if v.endswith("e") else v
+        doing = f"{stem}{stem[-1]}?ing"
+        forms.append(doing if doing_only else f"{v}s?|{doing}")
+    return "|".join(forms)
+
+
+# Getting somewhere, which opening an app or a page really does...
+_GO_VERBS = "open launch start pull bring head go navigate switch"
+# ...and doing something there, which it does not.
+_DO_VERBS = (
+    "set change turn lower raise dim brighten increase decrease reduce mute unmute put add "
+    "insert create make build draft write send email reply book schedule cancel delete remove "
+    "move rename copy paste type click press scroll close save download upload convert merge "
+    "split fill play pause install update fix run arrange snap drop select enable disable "
+    "toggle adjust tidy clean organize organise resize crop rotate share post format print "
+    "sign attach forward archive unsubscribe order"
+)
+# "I'll lower the brightness.", "Let me add that row.", "Lowering the brightness now."
+_WILL_DO = re.compile(
+    r"^\W*(?:(?:okay|ok|alright|right|sure|got it|on it)[,.!]?\s+)?(?:"
+    r"(?:i'?ll|i will|i'?m going to|i am going to|let me|i'?m|i am)\s+"
+    r"(?:(?:just|now|quickly|go ahead and|going ahead and)\s+)?"
+    # ways of talking, not jobs: "I'll put it this way", "let me start with the catch"
+    r"(?!put it\b|make (?:sure|it (?:quick|short|simple|easy|clear))\b|go(?:ing)? (?:with|out on)\b|"
+    r"start (?:with|by|off)\b|add (?:that|one thing)\b|save you\b|fill you in\b|run you\b|"
+    r"drop the\b|play along\b|turn to\b)"
+    rf"(?:{_verb_forms(_GO_VERBS + ' ' + _DO_VERBS)})\b"
+    r"|(?!putting it\b|making (?:sure|it)\b|turning to\b|running (?:the|through)\b|playing it\b)"
+    rf"(?:{_verb_forms('open launch pull bring head navigate switch ' + _DO_VERBS, doing_only=True)})\b)",
+    re.IGNORECASE,
+)
+# "...to lower the brightness", "...and turning it down": more than getting there.
+_THEN_DO = re.compile(
+    r"\b(?:to|and|then|so i can)\s+(?:(?:i'?ll|then|just)\s+)?"
+    rf"(?:{_verb_forms(_DO_VERBS)})\b",
+    re.IGNORECASE,
+)
+_ASKED_TO_DO = re.compile(rf"\b(?:{_verb_forms(_GO_VERBS + ' ' + _DO_VERBS)})\b", re.IGNORECASE)
+# "How do I change it?", "What's going on?": a question to answer, not a job to do.
+_ASKS_A_QUESTION = re.compile(
+    r"^\W*(?:hey,? )?(?:pyxi,? )?(?:how|what|why|who|when|where|which|is|are|was|does|do|did|should)\b",
+    re.IGNORECASE,
+)
+# An offer, a question or a "can't" is not a promise.
+_NO_PROMISE = re.compile(
+    r"\?\s*$|\b(?:if you|want me to|shall i|should i|would you like|do you want|once you|when "
+    r"you|after you|you can|you could|you'll need|you need to|cannot|unable|not able|say the "
+    r"word|let me know|tell me)\b|n't\b",
+    re.IGNORECASE,
+)
+
+
+def undone_promise(
+    said: list[str], calls: list[dict[str, Any]], user_text: str
+) -> tuple[str, bool] | None:
+    """The line in which Pyxi said it would do something that no tool call this turn carried
+    out, and whether something was at least opened. Two shapes only, to stay sure of it:
+    nothing was done at all (the request was for an action, and the line says "I'll..." or
+    "Lowering..."), or the only thing done was opening an app or a page while the line promised
+    more than getting there ("Heading to Display to lower the brightness."). Any other tool
+    call (a teammate, an errand, a drawing, the mouse) counts as carrying it out."""
+    did = [c for c in calls if c.get("tool") != "say" and c.get("tool") not in INFO_TOOLS]
+    opened = bool(did)
+    if any(
+        c.get("tool") != "quick_action"
+        or (c.get("arguments") or {}).get("action") not in ("open_url", "open_app")
+        for c in did
+    ):
+        return None
+    if opened and _JUST_OPEN.match(user_text):
+        return None  # opening it was the whole request
+    if not opened and (not _ASKED_TO_DO.search(user_text) or _ASKS_A_QUESTION.match(user_text)):
+        return None  # a chat, not a job: "I'll be honest" promises nothing
+    for line in (s for text in said for s in split_sentences(text)):
+        if _NO_PROMISE.search(line):
+            continue
+        if (_THEN_DO if opened else _WILL_DO).search(line):
+            return line, opened
+    return None
 
 
 def said_before(text: str, earlier: list[str]) -> bool:

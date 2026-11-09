@@ -61,7 +61,7 @@ async def test_a_repeated_say_is_dropped_from_the_turn(settings):
         ],
     )
     brain, rec = make_brain(settings, llm=llm)
-    await brain.turn("put a 5 by 5 table in my doc")
+    await brain.turn("what is happening with the table?")
     await asyncio.sleep(0.05)
     assert [s["text"] for s in rec.of("say")] == [
         "Putting the 5 by 5 table in now.",
