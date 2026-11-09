@@ -111,9 +111,10 @@ async def _reachable(brain: Brain, ref: str) -> bool:
 async def _open_when_done(brain: Brain, job_id: str) -> None:
     """A sheet or doc Pyxi made (asked for, or because the open one was out of reach): put it
     on their screen when it's ready."""
-    if job_id not in brain.jobs.jobs:
-        return
-    job = await brain.jobs.wait(job_id)
+    try:
+        job = await brain.jobs.wait(job_id)
+    except KeyError:
+        return  # no such job (it was never started): nothing to open
     links = (job.data or {}).get("links") or []
     if job.status == "done" and links:
         await brain._quick_action("open_url", links[0])

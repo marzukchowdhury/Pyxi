@@ -3195,8 +3195,26 @@ _PLAIN = set(
 )
 
 
+_MONTHS = {
+    "jan": "january", "feb": "february", "mar": "march", "apr": "april", "jun": "june",
+    "jul": "july", "aug": "august", "sep": "september", "sept": "september", "oct": "october",
+    "nov": "november", "dec": "december",
+}
+_ORDINAL = re.compile(r"^(\d+)(?:st|nd|rd|th)$")
+
+
+def _norm(word: str) -> str:
+    """'Nov' and 'November', '28th' and '28', "Altman's" and 'Altman' are the same word."""
+    if word.endswith("'s"):
+        word = word[:-2]
+    if m := _ORDINAL.match(word):
+        return m.group(1)
+    return _MONTHS.get(word, word)
+
+
 def _content(sentence: str) -> set[str]:
-    return {w for w in _WORD.findall(split_markers(sentence)[0].lower()) if w not in _PLAIN}
+    words = (_norm(w) for w in _WORD.findall(split_markers(sentence)[0].lower()))
+    return {w for w in words if w and w not in _PLAIN}
 
 
 def drop_repeats(text: str, earlier: list[str]) -> str:
@@ -3215,7 +3233,12 @@ def drop_repeats(text: str, earlier: list[str]) -> str:
         content = _content(sentence)
         again = (
             len(words) >= 4 and any(len(words & w) / len(words | w) >= 0.6 for w in seen if len(w) >= 4)
-        ) or (said_words and len(content) >= 2 and len(content - said_words) <= len(content) // 5)
+        ) or (
+            said_words
+            and len(content) >= 2
+            # all of it said already, or (in a longer sentence) three quarters of it
+            and len(content - said_words) <= (len(content) // 4 if len(content) >= 4 else 0)
+        )
         if again:
             marks = " ".join(m.group(0) for m in MARKER.finditer(sentence))
             if marks:

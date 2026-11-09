@@ -143,3 +143,16 @@ def test_a_card_point_that_repeats_the_intro_keeps_only_its_mark() -> None:
     said = ["It's a $107.80 Maplewave phone bill, due November 28."]
     out = drop_repeats("[note:1] You owe $107.80, and it's due November 28. [note:2] Roaming was billed twice.", said)
     assert out.startswith("[note:1]") and "owe" not in out and "Roaming was billed twice." in out
+
+
+def test_reworded_repeats_with_dates_and_names_are_dropped() -> None:
+    from pyxi.companion.brain import drop_repeats
+
+    said = ["It's a $107.80 phone bill, due Nov 28."]
+    assert drop_repeats("You owe $107.80, and it's due November 28th.", said) == ""
+    said = ["Short version: a news page reposting a viral X post about Sam Altman and RAM."]
+    assert drop_repeats("It's a news page reposting a viral clip of Sam Altman's RAM row.", said) == ""
+    # new facts stay
+    said = ["It's a $107.80 phone bill, due Nov 28."]
+    keep = "A $15 roaming day pass was charged twice on October 3."
+    assert drop_repeats(keep, said) == keep
