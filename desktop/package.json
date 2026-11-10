@@ -64,6 +64,13 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "build/browser-extension",
+        "to": "browser-extension",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asarUnpack": [

@@ -9,42 +9,107 @@ you aren't signed in, and the mouse and keyboard, which you can't use while Pyxi
 it, "fill this in", "add this to my cart" or "what does this page say about refunds?" happen
 in the tab you're looking at, and you keep working.
 
-Not published anywhere. You load it yourself, as below.
+It is not in the Chrome Web Store or on addons.mozilla.org. Pyxi installs it with you.
 
-## Load it
+## Install it
 
-**Chrome**
+**The easy way: let Pyxi do it.** With your browser open, go to Pyxi's panel, **Settings**,
+**Connect your browser**, and press the button there. Or just say "connect my browser". Pyxi
+also offers it by itself, once, the first time you ask for something that would be done in
+your own tab ("add this to my cart"). If you say no it doesn't ask again; "connect my browser"
+still works.
 
-1. Open `chrome://extensions`.
-2. Turn on **Developer mode** (top right).
-3. Press **Load unpacked** and pick this `extension` folder.
-4. Pin it: the puzzle icon in the toolbar, then the pin next to "Pyxi in your browser".
+- **Firefox (140 or newer): Add to Firefox.** Pyxi opens the add-on in Firefox, Firefox asks
+  whether to add it, and you press **Add**. It stays installed and updates itself. This needs
+  the signed add-on to be published with a Pyxi release (see "Signing the Firefox add-on").
+  Until it is, Pyxi doesn't show a dead link: it opens `about:debugging` and tells you to
+  load the add-on for now, which lasts until Firefox closes.
+- **Chrome and Edge: Set it up for me.** Chrome and Edge only install an extension from
+  outside their stores as an "unpacked" folder with Developer mode on (anything else needs a
+  PC managed by an organization). Pyxi does the fiddly parts: it keeps the extension in a
+  folder that never moves (`%LOCALAPPDATA%\Pyxi\browser-extension`, brought up to date in
+  place whenever Pyxi updates), opens the browser's extensions page, copies the folder's
+  address, and points at each thing to click on your screen, waiting for you each time:
+  **Developer mode**, **Load unpacked**, then paste into the **Folder** box and press
+  **Select Folder**. Then it shows the pairing code and points at the extension's icon.
+- **Brave, Vivaldi and Opera** get the same steps as Chrome, because they share its
+  extensions page. That was not checked in those browsers.
 
-**Edge**
+What to expect afterwards in Chrome and Edge, plainly:
 
-1. Open `edge://extensions`.
-2. Turn on **Developer mode** (left side).
-3. Press **Load unpacked** and pick this `extension` folder.
-4. Show it in the toolbar: the puzzle icon, then the eye next to "Pyxi in your browser".
+- The extension stays loaded when the browser restarts, **as long as Developer mode stays
+  on**. Switch Developer mode off and the browser switches the extension off; switch it on
+  again and it comes back.
+- **Edge asks "Turn off developer mode?" each time it starts.** Press **Not now**. ("Turn off"
+  switches the extension off.) Chromium showed no such question at start.
 
-**Firefox** (128 or newer)
+**By hand, Chrome or Edge**
 
-Firefox needs its own manifest, made from the same code:
+1. Type `chrome://extensions` (Edge: `edge://extensions`) into the address bar.
+2. Turn on **Developer mode**. Chrome: top right. Edge: bottom of the menu on the left; in a
+   narrow window that menu is behind the three lines at the top left.
+3. Press **Load unpacked** (in a narrow Edge window it is a small folder button on the right)
+   and pick `%LOCALAPPDATA%\Pyxi\browser-extension`, or this `extension` folder in a
+   checkout.
+4. Pin it: the puzzle icon in the toolbar, then the pin (Edge: the eye) next to "Pyxi in
+   your browser".
+
+**By hand, Firefox, without the signed add-on**
 
 ```bash
 python extension/build.py firefox
 ```
 
-1. Open `about:debugging#/runtime/this-firefox`.
-2. Press **Load Temporary Add-on** and pick `extension/dist/firefox/manifest.json`.
+Open `about:debugging#/runtime/this-firefox`, press **Load Temporary Add-on** and pick
+`extension/dist/firefox/manifest.json`. It is gone when Firefox closes.
 
-A temporary add-on is gone when Firefox closes, and normal Firefox only keeps add-ons that
-Mozilla has signed. Keeping it installed therefore needs one of: signing it through
-addons.mozilla.org (it can stay unlisted, but it is still a submission to Mozilla, so that is
-the founder's call), or Firefox Developer Edition or Nightly with
-`xpinstall.signatures.required` set to `false`. Mozilla's signing also asks new add-ons to
-declare what data leaves the browser; this one sends page text to Pyxi on the same PC, which
-would be declared there.
+## Signing the Firefox add-on (the founder does this once per extension version)
+
+Firefox keeps an add-on only if Mozilla signed it. It does not have to be listed on
+addons.mozilla.org: an "unlisted" add-on is checked automatically, signed and handed back,
+and Pyxi hosts the file itself. No source upload is needed, because the code is plain
+JavaScript exactly as written (nothing is minified or bundled).
+
+1. Create a Mozilla account: go to <https://addons.mozilla.org>, press **Log in**, and
+   register. Open **Developer Hub** once; if it shows a distribution agreement, accept it.
+2. Make the API credentials: <https://addons.mozilla.org/developers/addon/api/key/>, press
+   **Generate new credentials**. It shows a **JWT issuer** and a **JWT secret**.
+3. In your own terminal (PowerShell), put them in two variables. They live in that terminal
+   only, and the script never prints them or writes them anywhere:
+
+   ```
+   $env:WEB_EXT_API_KEY = "<the JWT issuer>"
+   $env:WEB_EXT_API_SECRET = "<the JWT secret>"
+   ```
+
+4. Run the two commands. The first sends nothing: it builds the package and checks the two
+   variables are there. The second sends the package to Mozilla and waits for the signed
+   file, usually a minute or two.
+
+   ```bash
+   python extension/sign_firefox.py --check
+   ```
+
+   ```bash
+   python extension/sign_firefox.py
+   ```
+
+5. It leaves `extension/signed/pyxi-firefox.xpi` and `extension/signed/pyxi-firefox-updates.json`.
+   Commit both. The next `scripts/release.py` uploads them with the release, and from then
+   on **Add to Firefox** works in Pyxi.
+
+Where they are hosted, and why: as files of the GitHub release, reached through
+`https://github.com/marzukchowdhury/Pyxi/releases/latest/download/`. That address never
+changes, it is how Pyxi's own installer already updates, and it needs no extra deploy; the
+website has no address of its own yet. The add-on's manifest carries the updates file's
+address there, so installed copies find new versions by themselves. Every release uploads
+both files again (the same ones, until you sign a new version), so "latest" always has them.
+
+A version can be signed only once. After changing the extension's code, raise `"version"`
+in `manifest.json`, then run step 4 again and commit the new files.
+
+What the add-on declares to Mozilla (in `manifest.firefox.json`): it passes website content
+and browsing activity (the page's text, its address) to Pyxi on the same PC, and nowhere else.
 
 ## Pair it with Pyxi
 
@@ -90,7 +155,8 @@ Private (incognito) windows are never available to it.
 
 ## What Pyxi does with it
 
-Two tools appear in Pyxi while a browser is connected, and nothing changes when none is:
+Two tools appear in Pyxi while a browser is connected. While none is, the only difference
+is the offer to connect one (above):
 
 - **read_tab** reads the tab you're on (or one you name): the page's visible text and what
   can be clicked or typed into. Reading changes nothing and needs no card.
@@ -189,14 +255,31 @@ python -m pytest tests/test_browserlink.py
 ```
 
 ```bash
+python -m pytest tests/test_browsersetup.py
+```
+
+```bash
 python scripts/browser_e2e.py
 ```
 
-The second one loads the extension into a throwaway browser profile, serves local test pages
+```bash
+python scripts/browser_setup_check.py
+```
+
+The first two are unit tests (the link and the tools; installing, signing, the release step
+and the offer). The third loads the extension into a throwaway browser profile, serves local test pages
 and proves the whole path in a real browser (pairing, reading, the cards, the refusals, Esc,
 planted instructions). `--browser msedge` and `--browser firefox` do the same in the
 installed Edge and Firefox, each in its own temporary profile. Add `--real-model` for one
 run with the real model (a few cents).
+
+The last one checks the store-free install in throwaway profiles of Chromium, Edge and
+Firefox: that the extensions page can't be opened from the command line but can by typing
+its address into a new window, that the controls Pyxi points at exist under the names it
+uses, that "Load unpacked" with Pyxi's folder loads the extension, that it survives a restart
+and an in-place update, what happens with Developer mode off, what Edge asks at start, and
+that Firefox treats the add-on's address as an install. Two steps put a window on the screen
+for a few seconds (one types an address into it); `--unseen` skips them.
 
 ## Known limits
 
@@ -216,5 +299,10 @@ run with the real model (a few cents).
 - The link is safe against another program on the PC pretending to be Pyxi or the extension.
   It is not hidden from one that can already read your browser's or Pyxi's own files: that
   program has your browser's cookies anyway.
-- Chrome and Edge only keep an unpacked extension while Developer mode stays on, and may
-  remind you about it at start-up. Publishing to the stores removes that, and is not done.
+- Chrome and Edge only keep an unpacked extension while Developer mode stays on, and Edge
+  asks about it at every start. Publishing to the stores removes that, and is not done.
+- Pyxi opens the extensions page by typing its address into a new browser window. If another
+  window comes to the front meanwhile it stops typing, and the pointer starts at the address
+  bar instead.
+- Branded Chrome was not driven in the checks (it can't be started with a test extension);
+  Chromium of the same version and Edge were.
