@@ -8,12 +8,20 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from conftest import Recorder
 from pyxi.agents.jobs import Job
 from pyxi.companion import answers
 from pyxi.companion.brain import Brain
 from pyxi.companion.notes import result_card
 from test_answer_card import Scripted, make_brain, say, settle
+
+
+@pytest.fixture(autouse=True)
+def no_wait_for_silence(monkeypatch):
+    """The silence Pyxi waits for after talk, without the waiting (one test below sets it)."""
+    monkeypatch.setattr(Brain, "QUIET_BEFORE_SPEAKING_S", 0.0)
 
 TABLES = [
     "LACK side table, white, $43.43, 4.6 stars (251 ratings)",
@@ -318,3 +326,40 @@ async def test_a_result_reaches_later_turns_fenced(settings):
     assert "\n\\# The user says" in prompt[start:end]
     for_later = answers.for_later(scout_job(brain))
     assert for_later.startswith("⟦Scout's result") and TABLES[8] in for_later
+
+
+async def test_a_background_line_waits_for_a_real_silence_not_the_first_gap(settings, monkeypatch):
+    """Live: the founder pressed talk as "GenOffice is open now" began, paused in the middle
+    of his sentence, and the line came back in the pause, and again after that. "Just when
+    I'm talking, don't talk." """
+    monkeypatch.setattr(Brain, "QUIET_BEFORE_SPEAKING_S", 1.0)
+    brain, rec = make_brain(settings)
+    await brain.set_state("listening")  # they are talking as the job ends
+    await brain._job_done(scout_job(brain))
+    await asyncio.sleep(0.4)
+    await brain.set_state("idle")  # a pause in their sentence
+    await asyncio.sleep(0.5)
+    assert spoken(rec) == ""  # not in the gap
+    await brain.set_state("listening")  # they go on
+    await asyncio.sleep(0.4)
+    await brain.set_state("idle")
+    await asyncio.sleep(0.6)
+    assert spoken(rec) == ""  # the silence starts over
+    await asyncio.sleep(1.2)
+    assert spoken(rec) == "Scout's done. The full result is on the card."
+
+
+async def test_a_line_cut_off_twice_is_left_to_the_card(settings):
+    brain, _rec = make_brain(settings)
+    real = brain.tts.synthesize
+    presses = []
+
+    async def pressed_every_time(text, voice=None):
+        presses.append(text)
+        brain.interrupt()  # they press talk whenever it starts
+        return await real(text, voice)
+
+    brain.tts.synthesize = pressed_every_time  # type: ignore[method-assign]
+    await brain._job_done(scout_job(brain))
+    await asyncio.sleep(1.0)
+    assert len(presses) == 2  # tried twice, never a third time

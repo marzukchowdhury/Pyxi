@@ -3764,21 +3764,35 @@ class Brain:
             or time.monotonic() < self._talking_until
         )
 
+    # How long nobody may have spoken before a background line starts, once someone has.
+    QUIET_BEFORE_SPEAKING_S = 2.5
+
     async def _say_when_free(
         self, line: str, about: str = "", since: str = "", result: str = ""
     ) -> None:
         """Say a background line once the floor is free. If they press talk while it is being
-        voiced it is dropped unheard, so it waits its turn again (three tries, then the card
-        and the notification have to do). If they asked in the meantime and that answer
+        voiced it is cut off unheard, so it waits its turn once more (two tries, then the
+        card and the notification have to do). If they asked in the meantime and that answer
         already gave this job's result ("Scout's back: the GLADOM is the best value."), it has
         been told; the teammate's name alone ("Scout's on the flights.", a new job) is not
         that. ``since``: the turn that was the latest one when the work ended. ``result``:
-        the job's own words (its title, notification and summary)."""
-        for _ in range(3):
+        the job's own words (its title, notification and summary).
+
+        After anyone has been talking it waits for a real silence, not the first gap. Live:
+        the founder pressed talk as a job's line began, paused mid-sentence, and the line came
+        back in the pause, and again: "Just when I'm talking, don't talk." """
+        for attempt in range(2):
+            quiet, talked = 0.0, attempt > 0
             for _ in range(2400):  # ten minutes at most
-                if not self._talking():
+                if self._talking():
+                    quiet, talked = 0.0, True
+                elif quiet >= (self.QUIET_BEFORE_SPEAKING_S if talked else 0.0):
                     break
+                else:
+                    quiet += 0.25
                 await asyncio.sleep(0.25)
+            else:
+                return  # they never stopped: the card and the notification have to do
             if (
                 about
                 and self._turn_id != since
