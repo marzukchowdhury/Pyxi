@@ -562,6 +562,14 @@ class JobManager:
             all_notes += result.notes
             notes = "; ".join(result.changes[:5])
             verb = {"translate": "translated", "rewrite": "rewrote"}.get(mode, "fixed")
+            if result.listed:
+                lines.append(
+                    f"{doc.name} is a PDF, and a PDF's layout can't be edited, so nothing in it "
+                    f"was changed or typed out again. {result.changed} correction"
+                    f"{'' if result.changed == 1 else 's'} to make in the file it was made "
+                    f"from, listed in {result.path}" + (f": {notes}" if notes else ".")
+                )
+                continue
             lines.append(
                 f"{doc.name}: {verb} {result.changed} of {result.total} paragraphs, saved as {result.path}"
                 + (f". Notable: {notes}" if notes else "")

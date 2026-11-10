@@ -240,7 +240,8 @@ def test_the_cells_to_look_for_are_plain_words_and_numbers():
     text = table_clip(ROWS, bordered=False)["text"]
     assert check_words(text) == ["region", "sales", "west", "1200", "eastnorth", "800", "total"]  # no formula
     assert check_words(table_clip([[""] * 3] * 3, bordered=False)["text"]) == []  # nothing to tell it by
-    assert seen(["Region | Sales", "W e s t   1200"], ["region", "west", "total"]) == {"region", "west"}
+    assert seen(["Region | Sales", "W e s t   1200"], ["region", "west", "total"]) == 2
+    assert seen(["Region Sales West", "Region Sales West"], ["region", "west", "total"]) == 4  # counted
 
 
 async def test_a_paste_that_never_arrived_is_not_called_done(settings, monkeypatch, fast_paste):
@@ -278,13 +279,22 @@ async def test_a_paste_that_arrived_is_done_and_one_that_cant_be_checked_is_trus
     assert [a["kind"] for a in rec.of("action")] == ["insert_table"]
     assert "outcome" not in next(c for c in brain._calls if c["tool"] == "paste_table")
     assert [s["text"] for s in rec.of("say")] == ["It's in."]
-    # The same table already on screen (pasted there before): nothing new to see, so it is trusted.
+    # The same table pasted beside itself (live: reported as not landed, because no word in
+    # it was new): its cells are on screen twice now, and that is what counts.
+    once = ["Region", "Sales", "West", "1200", "East & North", "800", "Total"]
     brain, rec, _ = _on_a_sheet(
-        settings, monkeypatch, [["Region", "Sales", "West", "1200", "East & North", "800", "Total"]],
+        settings, monkeypatch, [once, once, [*once, *once]],  # the turn's look, before, after
         [[("paste_table", {"rows": ROWS}), ("say", {"text": "It's in."})]],
     )
     await brain.turn("put that table in again")
     assert [a["kind"] for a in rec.of("action")] == ["insert_table"]
+    # And the same table on screen, no more often than before: that one did not arrive.
+    brain, rec, _ = _on_a_sheet(
+        settings, monkeypatch, [once],
+        [[("paste_table", {"rows": ROWS})], [("say", {"text": "It didn't land."})]],
+    )
+    await brain.turn("put that table in again")
+    assert [a["kind"] for a in rec.of("action")] == ["insert_table", "copy"]
     # A window whose text can't be read at all (a private one, a look that fails): trusted too.
     brain, rec, _ = _on_a_sheet(settings, monkeypatch, [[]], [[("paste_table", {"rows": ROWS}), ("say", {"text": "It's in."})]])
     await brain.turn("create a sample sales table here")

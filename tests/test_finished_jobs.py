@@ -174,6 +174,25 @@ def test_work_they_can_see_is_only_said_to_be_done():
     assert failed == "Ledger couldn't finish that. That sheet is view only."
 
 
+def test_its_own_mouse_work_is_done_unless_there_is_something_to_hear():
+    """Live: "Pyxi's done. GenOffice is open and its window is showing on screen." was still
+    being said when the founder asked for the next thing."""
+
+    def line(summary: str) -> str:
+        return answers.spoken_line("Pyxi", ok=True, title="Pyxi finished", summary=summary, on_card=False, role="errand")
+
+    assert line("GenOffice is open and its window is showing on screen.") == "Done."
+    assert line("The AI Sheets editor is open with a new untitled spreadsheet.") == "Done."
+    # What they would not know from watching is still said.
+    found = 'I searched for IEM on the TechLand BD earphone page, and it came back with "No products found."'
+    assert line(found) == "Pyxi's done."  # not "Done.": the card has what it found
+    placed = "The pivot table is built, but I placed it at E1 on the same sheet instead of a new one."
+    assert line(placed) == f"Pyxi's done. {placed}"
+    # A teammate's answer is not "Done.": the answer is the point.
+    scout = answers.spoken_line("Scout", ok=True, title="Scout finished", summary="The GLADOM is the best value.", on_card=False, role="browser")
+    assert scout == "Scout's done. The GLADOM is the best value."
+
+
 def test_the_spoken_line_is_short_and_never_reads_out_addresses_or_scouts_own_words():
     line = answers.spoken_line(
         "Scout", ok=True, title="Scout finished", summary=SUMMARY, on_card=True

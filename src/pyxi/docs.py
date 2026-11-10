@@ -1,7 +1,9 @@
 """Quill's document work: fix (grammar, spelling, clarity), translate, rewrite or summarize,
 keeping the file a file. Word documents keep their paragraph styles (headings stay headings) and are saved as a
 copy beside the original, "<name> (fixed by Pyxi).docx", so nothing is ever overwritten. Plain
-text and Markdown stay text; PDFs come back as an editable Word copy.
+text and Markdown stay text. A PDF's layout can't be edited: a translation or a rewrite of one
+comes back as a Word copy, and a fix (grammar, spelling) comes back as the list of corrections
+to make in the original, never as the page typed out again.
 """
 
 from __future__ import annotations
@@ -66,11 +68,22 @@ MODES = {
 }
 
 
+# "Don't rewrite it", "without rephrasing", "keep the tone": the opposite of asking for one.
+_NOT_THAT = re.compile(
+    r"\b(don'?t|do not|never|no|not|nor|or|without|avoid|keep(ing)?|same|preserv\w*|leave)\b(?:\W+\w+){0,4}?\W+$"
+)
+_PROOFREAD = re.compile(r"\b(grammar|spelling|punctuation|typos?|proof-?read|mistakes?|errors?)\b")
+
+
 def document_mode(task: str) -> str:
-    """fix, translate, rewrite or summarize."""
+    """fix, translate, rewrite or summarize. A word that is only there to rule it out ("fix
+    the grammar, don't rewrite anything") doesn't count. Live: a resume sent for a grammar
+    check, "fix them only, keep the layout", was rewritten from top to bottom because the
+    task named the thing it was told not to do."""
     low = task.lower()
     for mode in ("summarize", "translate", "rewrite"):
-        if re.search(MODES[mode], low):
+        asked = [m for m in re.finditer(MODES[mode], low) if not _NOT_THAT.search(low[: m.start()])]
+        if asked and not (mode == "rewrite" and _PROOFREAD.search(low) and "only" in low):
             return mode
     return "fix"
 
@@ -95,6 +108,7 @@ class FixResult:
     changes: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # worth a look, but not changed without asking
     cost_usd: float = 0.0
+    listed: bool = False  # a PDF: its corrections are listed, nothing was typed out again
 
 
 def _read(path: Path) -> tuple[list[str], object | None]:
@@ -202,15 +216,40 @@ async def fix_document(
                 edits[i] = current[i]
 
     label = {"translate": "translated by Pyxi", "rewrite": "rewritten by Pyxi"}.get(mode, "fixed by Pyxi")
-    out = _write(path, texts, edits, handle, label)
+    listed = mode == "fix" and path.suffix.lower() == ".pdf"
+    if listed:
+        # A PDF is a picture of a page: its words can't be changed where they are, and typing
+        # them out again loses the columns, the spacing and the fonts (live: a resume came
+        # back as one block of text in a Word file, twice). So the corrections are listed.
+        out = _list_corrections(path, changes, list(dict.fromkeys(notes)))
+    else:
+        out = _write(path, texts, edits, handle, label)
     return FixResult(
         path=out,
-        changed=len(edits),
+        changed=len(changes) if listed else len(edits),
         total=sum(1 for t in texts if t.strip()),
-        changes=changes[:12],
+        changes=changes[:40] if listed else changes[:12],
         notes=list(dict.fromkeys(notes))[:5],
         cost_usd=cost,
+        listed=listed,
     )
+
+
+def _list_corrections(path: Path, changes: list[str], notes: list[str]) -> Path:
+    from pyxi.agents.pixel_common import out_dir_for, unique_path
+
+    lines = [f"Corrections for {path.name}", ""]
+    lines += [f"{n}. {c}" for n, c in enumerate(changes, 1)] or ["Nothing to correct."]
+    if notes:
+        lines += ["", "Worth a look:"] + [f"- {n}" for n in notes]
+    lines += [
+        "",
+        "A PDF's layout can't be edited, so nothing in it was changed. Make these in the file "
+        "the PDF was made from (Word, Google Docs, Canva), and export it again.",
+    ]
+    out = unique_path(out_dir_for(path), f"{path.stem} (corrections by Pyxi).txt")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
 
 
 def _write(

@@ -85,11 +85,12 @@ def check_words(text: str, limit: int = 8) -> list[str]:
     return out
 
 
-def seen(lines: Any, words: list[str]) -> set[str]:
-    """Which of those cells are in the text read off the screen (lines with a .text)."""
-    hay = [_plain(getattr(line, "text", line)) for line in lines or []]
-    whole = "".join(hay)
-    return {w for w in words if any(w in h for h in hay) or w in whole}
+def seen(lines: Any, words: list[str]) -> int:
+    """How many times those cells are in the text read off the screen (lines with a .text).
+    Counted, not just found: a table pasted beside the same table shows no new word, only
+    each word once more (live: a second copy was reported as not landed)."""
+    whole = " ".join(_plain(getattr(line, "text", line)) for line in lines or [])
+    return sum(whole.count(w) for w in words)
 
 
 def clip_message(clip: dict[str, str]) -> str:

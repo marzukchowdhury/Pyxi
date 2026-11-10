@@ -1117,10 +1117,10 @@ class Brain:
             )
         return f"The table is pasted. {changed}" if changed else None
 
-    async def _cells_on_screen(self, target: int | None, words: list[str]) -> set[str] | None:
-        """Which of a table's cells can be read in the window it is meant for. None when that
-        can't be looked at (no window known, a private one, sharing paused, no text read), and
-        then the paste is taken on trust as before."""
+    async def _cells_on_screen(self, target: int | None, words: list[str]) -> int | None:
+        """How many times a table's cells can be read in the window it is meant for. None when
+        that can't be looked at (no window known, a private one, sharing paused, no text read),
+        and then the paste is taken on trust as before."""
         from pyxi.companion.paste import seen
 
         if not target:
@@ -1134,15 +1134,15 @@ class Brain:
             return None
         return seen(ctx.text, words)
 
-    async def _pasted(self, target: int | None, words: list[str], before: set[str]) -> bool:
-        """Did the table arrive: are cells of it on screen now that were not there before?
-        Looked at up to three times, since an app can take a moment to draw them."""
-        if len(before) == len(words):
-            return True  # every cell was on screen already (pasted there before): can't tell
+    async def _pasted(self, target: int | None, words: list[str], before: int) -> bool:
+        """Did the table arrive: are its cells on screen more often than before? Two more at
+        least (one, for a table of one or two words): reading text off a screen wavers by a
+        word between looks. Looked at up to three times, since an app can take a moment."""
+        need = 2 if len(words) > 2 else 1
         for wait in (0.6, 0.8, 1.2):
             await asyncio.sleep(wait)
             now = await self._cells_on_screen(target, words)
-            if now is None or now - before:
+            if now is None or now - before >= need:
                 return True
         return False
 

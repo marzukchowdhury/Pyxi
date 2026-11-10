@@ -593,6 +593,11 @@ def for_later(job: Any) -> str:
 # live, after hearing each edit read back to him: "It's all the same thing again and again.
 # When you're done with the work, just tell that you're done. That's all."
 DOERS = {"documents", "files", "automation"}
+# A result that worked, with something they need to hear all the same.
+_CAVEAT = re.compile(
+    r"(?i)\b(but|not|no|none|nothing|couldn'?t|can'?t|didn'?t|doesn'?t|won'?t|wasn'?t|isn'?t|instead|"
+    r"however|although|except|failed|unable|warn\w*|errors?|wrong|mistake|stopped|only|still|already)\b"
+)
 
 
 def spoken_line(
@@ -602,6 +607,11 @@ def spoken_line(
     generic = title in (f"{agent} finished", f"{agent} couldn't finish", "")
     if ok and role in DOERS:
         return f"{agent}'s done."
+    if ok and agent == "Pyxi" and generic and not _CAVEAT.search(summary or ""):
+        # Its own mouse and keyboard, and they watched it happen: "GenOffice is open and its
+        # window is showing on screen" tells them nothing, and was still being said when the
+        # founder asked for the next thing ("you're still talking when I'm talking").
+        return "Done."
     if not ok:
         why = headline(summary, 160)
         lead = (
