@@ -115,8 +115,8 @@ def signed_xpi(version: str | None = None, addon_id: str = ID, sign: bool = True
 class Mozilla:
     """addons.mozilla.org's signing API, as far as the script uses it."""
 
-    def __init__(self, xpi: bytes, *, valid: bool = True, status: str = "public", taken: bool = False) -> None:
-        self.xpi, self.valid, self.status, self.taken = xpi, valid, status, taken
+    def __init__(self, xpi: bytes, *, valid: bool = True, status: str = "public", taken: bool = False, has: bool = False) -> None:
+        self.xpi, self.valid, self.status, self.taken, self.has = xpi, valid, status, taken, has
         self.calls: list[httpx.Request] = []
         self.polls = 0
 
@@ -125,6 +125,8 @@ class Mozilla:
         path = request.url.path
         if not request.headers.get("authorization", "").startswith("JWT "):
             return httpx.Response(401, json={"detail": "no token"})
+        if self.has and path.startswith(f"/api/v5/addons/addon/{ID}/versions/v"):
+            return httpx.Response(200, json={"id": 77})
         if request.method == "POST" and path == "/api/v5/addons/upload/":
             return httpx.Response(201, json={"uuid": "u-1", "processed": False})
         if path == "/api/v5/addons/upload/u-1/":
@@ -163,7 +165,8 @@ def test_signing_sends_the_package_to_mozilla_and_keeps_the_signed_file_and_its_
     assert json.loads((out / "pyxi-firefox-updates.json").read_text(encoding="utf-8")) == sign_firefox.updates(version, xpi)
 
     # What went to Mozilla: the package, for the unlisted channel, then this add-on's version.
-    upload = mozilla.calls[0]
+    assert mozilla.calls[0].url.path.endswith(f"/versions/v{version}/")  # first: is it there already?
+    upload = mozilla.calls[1]
     assert upload.url == "https://addons.mozilla.org/api/v5/addons/upload/"
     body = upload.read()
     assert b'name="channel"\r\n\r\nunlisted' in body and b'name="upload"' in body and b"PK\x03\x04" in body
@@ -250,6 +253,54 @@ def test_signing_gives_up_politely_when_mozilla_takes_too_long_or_refuses_the_ke
     with pytest.raises(SystemExit) as stop:
         sign_firefox.main(["--out", str(tmp_path / "s")], env=SECRETS, client=httpx.Client(transport=httpx.MockTransport(refuse)), sleep=lambda s: None)
     assert "Mozilla refused the API key (401)" in str(stop.value) and SECRETS["WEB_EXT_API_SECRET"] not in str(stop.value)
+
+
+def test_a_version_mozilla_already_has_is_picked_up_and_not_sent_again(tmp_path, capsys):
+    """A run that stopped while Mozilla still had it in the queue said "run this again later";
+    the second run sent the same version again and was told it already exists."""
+    xpi = signed_xpi()
+    slow = Mozilla(xpi, status="unreviewed")
+    slow.polls = 1
+    with pytest.raises(SystemExit) as stop:
+        run_sign(tmp_path, slow, argv=["--timeout", "0"])
+    assert "sends nothing twice" in str(stop.value)
+    again = Mozilla(xpi, has=True)
+    assert run_sign(tmp_path, again) == 0
+    assert [c.method for c in again.calls if c.method != "GET"] == []  # no upload, no new version
+    assert (tmp_path / "signed" / "pyxi-firefox.xpi").read_bytes() == xpi
+    assert "picking it up" in capsys.readouterr().out
+    # A key Mozilla refuses is said at that first question, not taken for "a new version".
+    refuse = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(401)))
+    with pytest.raises(SystemExit) as stop:
+        sign_firefox.main(["--out", str(tmp_path / "s")], env=SECRETS, client=refuse, sleep=lambda s: None)
+    assert "refused the API key (401)" in str(stop.value)
+
+
+def test_the_token_only_goes_to_mozilla(tmp_path):
+    """The signed file's address comes from Mozilla's answer: elsewhere, it is fetched without the token."""
+    seen: list[httpx.Request] = []
+    xpi = signed_xpi()
+    fake = Mozilla(xpi, has=True)
+
+    def elsewhere(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.host != "addons.mozilla.org":
+            return httpx.Response(200, content=xpi)
+        if request.url.path.endswith("/versions/77/"):
+            return httpx.Response(200, json={"file": {"status": "public", "url": "https://files.example.net/pyxi.xpi"}})
+        return fake(request)
+
+    client = httpx.Client(transport=httpx.MockTransport(elsewhere))
+    assert sign_firefox.main(["--out", str(tmp_path / "signed")], env=SECRETS, client=client, sleep=lambda s: None) == 0
+    [other] = [r for r in seen if r.url.host != "addons.mozilla.org"]
+    assert "authorization" not in other.headers
+
+    def plain(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"id": 77, "file": {"status": "public", "url": "http://addons.mozilla.org/x.xpi"}})
+
+    with pytest.raises(SystemExit) as stop:
+        sign_firefox.main(["--out", str(tmp_path / "s")], env=SECRETS, client=httpx.Client(transport=httpx.MockTransport(plain)), sleep=lambda s: None)
+    assert "isn't https" in str(stop.value)
 
 
 # ====================================================================== the release carries them

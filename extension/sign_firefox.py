@@ -27,6 +27,8 @@ carries as ``update_url``).
                                                 variables are set, without contacting Mozilla
 
 A version can only be signed once. To sign changed code, raise "version" in manifest.json.
+Running this again for a version Mozilla already has picks that version up (still in their
+queue, or signed and the files here were lost): nothing is sent twice.
 """
 
 from __future__ import annotations
@@ -55,7 +57,8 @@ sys.path.insert(0, str(HERE))
 from build import manifest, package  # noqa: E402
 
 KEY_VAR, SECRET_VAR = "WEB_EXT_API_KEY", "WEB_EXT_API_SECRET"  # the names Mozilla's own tool uses
-AMO = "https://addons.mozilla.org/api/v5/"
+AMO_SITE = "https://addons.mozilla.org/"
+AMO = AMO_SITE + "api/v5/"
 REPO = "marzukchowdhury/Pyxi"
 LATEST = f"https://github.com/{REPO}/releases/latest/download"
 XPI_NAME = "pyxi-firefox.xpi"
@@ -131,12 +134,17 @@ class Mozilla:
         self.client = client or httpx.Client(timeout=120, follow_redirects=True)
         self.sleep, self.say = sleep, say
 
-    def _ask(self, method: str, url: str, **kw: Any) -> httpx.Response:
-        headers = {"Authorization": f"JWT {token(self._key, self._secret)}"}
+    def _send(self, method: str, url: str, **kw: Any) -> httpx.Response:
+        # The token goes to Mozilla's own address and nowhere else.
+        mozilla = url.startswith(AMO_SITE)
+        headers = {"Authorization": f"JWT {token(self._key, self._secret)}"} if mozilla else {}
         try:
-            r = self.client.request(method, url, headers=headers, **kw)
+            return self.client.request(method, url, headers=headers, **kw)
         except httpx.HTTPError as exc:
             raise SystemExit(f"STOP: couldn't reach Mozilla ({type(exc).__name__}).") from None
+
+    def _ask(self, method: str, url: str, **kw: Any) -> httpx.Response:
+        r = self._send(method, url, **kw)
         if r.status_code in (401, 403):
             raise SystemExit(
                 f"STOP: Mozilla refused the API key ({r.status_code}). Check {KEY_VAR} and "
@@ -150,6 +158,20 @@ class Mozilla:
         if r.status_code >= 400:
             raise SystemExit(f"STOP: Mozilla answered {r.status_code}: {r.text[:300]}")
         return r
+
+    def existing(self, addon_id: str, version: str) -> str | None:
+        """The id of this version if Mozilla already has it: an earlier run stopped while it
+        was in their queue, or the signed files were lost. None when it is new to them."""
+        r = self._send("GET", AMO + f"addons/addon/{addon_id}/versions/v{version}/")
+        if r.status_code == 401:
+            raise SystemExit(
+                f"STOP: Mozilla refused the API key (401). Check {KEY_VAR} and {SECRET_VAR}, "
+                "and that this PC's clock is right."
+            )
+        try:
+            return str(r.json()["id"]) if r.status_code == 200 else None
+        except (ValueError, KeyError, TypeError):
+            return None
 
     def upload(self, package_file: Path) -> str:
         with package_file.open("rb") as f:
@@ -196,11 +218,13 @@ class Mozilla:
             if time.monotonic() >= end:
                 raise SystemExit(
                     "STOP: Mozilla hasn't signed it yet. It is in their queue: run this again "
-                    "later (the same version carries on where it was)."
+                    "later (it picks this version up where it was, and sends nothing twice)."
                 )
             self.sleep(5)
 
     def download(self, url: str) -> bytes:
+        if not url.startswith("https://"):
+            raise SystemExit("STOP: Mozilla gave an address for the signed file that isn't https.")
         return self._ask("GET", url).content
 
 
@@ -242,11 +266,15 @@ def main(
             print("the API key and secret are set, and the package builds. Nothing was sent.")
             return 0
         mozilla = Mozilla(key, secret, client, sleep)
-        print("sending it to Mozilla...")
-        uuid = mozilla.upload(unsigned)
-        mozilla.validated(uuid, args.timeout)
-        print("Mozilla's check passed. Waiting for the signature (usually a minute or two)...")
-        version_id = mozilla.submit(addon_id, uuid)
+        version_id = mozilla.existing(addon_id, version)
+        if version_id:
+            print(f"Mozilla already has {version}: picking it up, nothing is sent again...")
+        else:
+            print("sending it to Mozilla...")
+            uuid = mozilla.upload(unsigned)
+            mozilla.validated(uuid, args.timeout)
+            print("Mozilla's check passed. Waiting for the signature (usually a minute or two)...")
+            version_id = mozilla.submit(addon_id, uuid)
         xpi = mozilla.download(mozilla.signed(addon_id, version_id, args.timeout))
     check_signed(xpi, addon_id, version)
     out = Path(args.out)

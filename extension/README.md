@@ -74,12 +74,17 @@ JavaScript exactly as written (nothing is minified or bundled).
    register. Open **Developer Hub** once; if it shows a distribution agreement, accept it.
 2. Make the API credentials: <https://addons.mozilla.org/developers/addon/api/key/>, press
    **Generate new credentials**. It shows a **JWT issuer** and a **JWT secret**.
-3. In your own terminal (PowerShell), put them in two variables. They live in that terminal
-   only, and the script never prints them or writes them anywhere:
+3. In your own terminal (PowerShell), put them in two variables. Each line asks for the
+   value: paste it and press Enter. Asked for this way they are not kept in PowerShell's
+   command history; they live in that terminal only, and the script never prints them or
+   writes them anywhere:
 
    ```
-   $env:WEB_EXT_API_KEY = "<the JWT issuer>"
-   $env:WEB_EXT_API_SECRET = "<the JWT secret>"
+   $env:WEB_EXT_API_KEY = Read-Host "JWT issuer"
+   ```
+
+   ```
+   $env:WEB_EXT_API_SECRET = Read-Host "JWT secret"
    ```
 
 4. Run the two commands. The first sends nothing: it builds the package and checks the two
@@ -106,7 +111,9 @@ address there, so installed copies find new versions by themselves. Every releas
 both files again (the same ones, until you sign a new version), so "latest" always has them.
 
 A version can be signed only once. After changing the extension's code, raise `"version"`
-in `manifest.json`, then run step 4 again and commit the new files.
+in `manifest.json`, then run step 4 again and commit the new files. If a run stops while
+Mozilla still has the version in its queue, run step 4 again later: it picks that version up
+where it was and sends nothing twice.
 
 What the add-on declares to Mozilla (in `manifest.firefox.json`): it passes website content
 and browsing activity (the page's text, its address) to Pyxi on the same PC, and nowhere else.
