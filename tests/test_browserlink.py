@@ -621,9 +621,12 @@ async def test_nothing_changes_until_a_browser_is_connected(settings):
     brain = _brain(settings)
     names = {t.name for t in COMPANION_TOOLS}
     assert not tabwork.TOOLS & names  # never in the standing list
-    # With no browser connected the model gets one small tool, to set the extension up when
-    # they ask for it, and nothing else of this.
+    # With no browser connected the model's tools are what they always were, except in a
+    # turn that is about the browser: then one small tool, to set the extension up.
+    assert {t.name for t in brain._companion_tools()} - names == set()
+    brain._user_text = "connect my browser"
     assert {t.name for t in brain._companion_tools()} - names == {"connect_browser"}
+    brain._user_text = ""
     assert tabwork.prompt(brain) == ""
     note = await tabwork.handle(brain, "use_tab", {"task": "click it"})
     assert note.startswith("use_tab: Pyxi's browser extension isn't connected")

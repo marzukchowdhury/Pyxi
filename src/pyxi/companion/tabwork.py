@@ -1103,7 +1103,18 @@ def tools(brain: Brain) -> list[ToolSpec]:
     link = getattr(brain, "browser", None)
     if link is None:
         return []
-    return list(SPECS) if link.connected else [browsersetup.CONNECT]
+    if link.connected:
+        return list(SPECS)
+    # Only in a turn whose own words are about the browser. Offered in every turn, one more
+    # tool was enough to change what the model did with requests that have nothing to do
+    # with it (live: "What's this about?" lost its cue card four times in five).
+    return [browsersetup.CONNECT] if _ABOUT_BROWSER.search(getattr(brain, "_user_text", "") or "") else []
+
+
+_ABOUT_BROWSER = re.compile(
+    r"(?i)\b(browsers?|extensions?|add-?ons?|plug-?ins?|chrome|edge|firefox|brave|vivaldi|opera)\b"
+    r"|ব্রাউজার|এক্সটেনশন"
+)
 
 
 def prompt(brain: Brain) -> str:

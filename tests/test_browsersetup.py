@@ -1514,7 +1514,14 @@ async def test_setup_says_so_when_no_browser_is_open_or_one_is_already_connected
 # ====================================================================== when they ask, and Settings
 async def test_connect_my_browser_is_a_tool_only_while_none_is_connected(settings, bundle, monkeypatch, setups):
     brain = _brain(settings)
-    assert [t.name for t in tabwork.tools(brain)] == ["connect_browser"]
+    # Only in a turn whose own words are about the browser: offered in every turn, the extra
+    # tool changed what the model did with requests that had nothing to do with it.
+    for words in ("", "What's this about, in two sentences?", "add milk to my list", "what's on my calendar"):
+        brain._user_text = words
+        assert tabwork.tools(brain) == [], words
+    for words in ("connect my browser", "set up the extension", "Can you work in Chrome?", "install the Firefox add-on", "ব্রাউজার কানেক্ট করো"):
+        brain._user_text = words
+        assert [t.name for t in tabwork.tools(brain)] == ["connect_browser"], words
     cards = Cards(brain.hub, answer=True)
     note = await tabwork.handle(brain, "connect_browser", {})
     assert note.startswith("connect_browser: no browser Pyxi can set up is open") and cards.asked == []

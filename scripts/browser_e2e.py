@@ -1334,8 +1334,11 @@ async def main(opts: argparse.Namespace) -> int:
             # ---------------------------------------------------------- unpairing
             link.forget()
             gone = await until(lambda: not link.connected, 5)
-            left = [t.name for t in tabwork.tools(brain)]  # only the offer to connect one again
-            check("unpairing in Pyxi cuts the browser off at once", gone and left == ["connect_browser"], str(left))
+            brain._user_text = "read this tab"
+            left = [t.name for t in tabwork.tools(brain)]  # the tab tools are gone
+            brain._user_text = "connect my browser"
+            again = [t.name for t in tabwork.tools(brain)]  # asked for, only the offer to connect one again
+            check("unpairing in Pyxi cuts the browser off at once", gone and left == [] and again == ["connect_browser"], f"{left} {again}")
             popup = await ctx.new_page()
             await popup.goto(f"chrome-extension://{ext_id}/popup.html")
             await popup.wait_for_selector("#pair:not([hidden])", timeout=10000)
