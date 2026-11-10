@@ -128,6 +128,16 @@ def _all(root: El) -> list[El]:
     return out
 
 
+def _path(root: El, target: El) -> list[El] | None:
+    if root is target:
+        return [root]
+    for child in root.children:
+        below = _path(child, target)
+        if below is not None:
+            return [root, *below]
+    return None
+
+
 def named(root: El, name: str) -> El:
     return next(el for el in _all(root) if el.name == name and el.role != "Text")
 
@@ -149,7 +159,9 @@ class FakeDriver(screenlink.Driver):
         self.deaf: set[str] = set()  # ways that are accepted and change nothing
         self.lazy_options = False  # Chrome: a dropdown lists its options only while open
         self.open_now: set[int] = set()
-        self.before_key: Any = None
+        self.cursor_outside = False  # the keyboard is in the address bar, not in the page
+        self.lands: Any = None  # open(): the document that turns up, or None for none at all
+        self.asked: list[tuple[int, float]] = []  # (max_nodes, budget_s) of each snapshot
         self.y = 0.0
 
     @property
@@ -182,6 +194,7 @@ class FakeDriver(screenlink.Driver):
         return self._doc(hwnd)
 
     def snapshot(self, hwnd: int, max_nodes: int, budget_s: float) -> Snapshot | None:
+        self.asked.append((max_nodes, budget_s))
         doc = self._doc(hwnd)
         return Snapshot(doc, self.pages[hwnd], (self.y, 30.0)) if doc else None
 
@@ -189,9 +202,24 @@ class FakeDriver(screenlink.Driver):
         if self.slow_state is not None:
             self.slow_state.wait(5)
         for root in self.pages.values():
-            if root.rid == doc and any(el is handle for el in _all(root)):
-                return dataclasses.replace(handle, children=[])
+            if root.rid == doc and doc:
+                path = _path(root, handle)
+                if path is not None:
+                    frames = tuple(el.value for el in path[1:-1] if el.role == "Document")
+                    return dataclasses.replace(handle, children=[], frames=frames)
         return None
+
+    def focused(self, doc: tuple[int, ...]) -> El | None:
+        if self.cursor_outside:
+            return None
+        for root in self.pages.values():
+            for el in _all(root):
+                if el.focused:
+                    return self.state(el, doc)
+        return None
+
+    def inner_text(self, handle: Any) -> str:
+        return screenlink._inner_text(handle)
 
     def do(self, handle: Any, way: str, text: str = "") -> None:
         if self.hold is not None:
@@ -247,7 +275,10 @@ class FakeDriver(screenlink.Driver):
 
     def open(self, hwnd: int, url: str) -> None:
         self.did.append(("open", hwnd, url))
-        self.pages[hwnd] = compose(rid=(9, 9), url=url)
+        if self.lands is None:
+            self.pages[hwnd] = compose(rid=(9, 9), url=url)
+        elif self.lands:
+            self.pages[hwnd] = self.lands
 
     def acted(self) -> list[tuple[Any, ...]]:
         return [d for d in self.did if d[0] not in ("focus", "legacy_focus")]
@@ -255,7 +286,9 @@ class FakeDriver(screenlink.Driver):
 
 def make(exe: str = "chrome.exe", **kw: Any) -> tuple[ScreenLink, FakeDriver]:
     driver = FakeDriver(exe)
-    return ScreenLink(driver, settle_s=0.2, **kw), driver
+    link = ScreenLink(driver, settle_s=0.2, **kw)
+    link.open_wait_s = 2.5
+    return link, driver
 
 
 async def read(link: ScreenLink, **more: Any) -> dict[str, Any]:
@@ -720,7 +753,9 @@ async def test_firefox_takes_a_key_behind_other_windows_and_keys_can_be_switched
     link.keys = False
     no = await refused(do(link, "type", page, "Search mail", text="x", enter=True))
     assert "Pressing keys in the tab is switched off" in str(no)
-    assert driver.did == [("legacy_value", "Search mail", "x")]  # typed, and no key
+    assert driver.did == [] and named(driver.root, "Search mail").value == ""  # nothing typed either
+    out = await do(link, "type", page, "Search mail", text="x")  # without Enter it is typed
+    assert out["value"] == "x"
 
 
 async def test_a_key_is_not_posted_once_the_page_is_no_longer_the_one_that_was_read():
@@ -845,10 +880,25 @@ async def test_the_extension_is_preferred_and_the_setting_decides_the_rest(setti
     text_read = await tabwork.handle(brain, "read_tab", {})
     assert [n for n, _ in browser.did] == ["read"] and driver.did == [] and text_read.startswith("Tab: Compose - Mail")
 
-    brain.browser._conns.clear()  # it goes away again
+    brain.browser._conns.clear()  # it goes away
+    assert screenlink.choose(brain) is None and tabwork.tools(brain) == []  # a blink is not a reason
+    brain._tab_extension_seen -= screenlink.EXTENSION_GRACE_S + 1  # it has been gone a while
     assert screenlink.choose(brain) is link
     settings.screen.tab_fallback = False  # and the user turns the fallback off
     assert screenlink.choose(brain) is None and tabwork.tools(brain) == []
+
+
+READ_CARD = f"Let Pyxi read {SITE} in your browser?"
+
+
+async def _peek_refs(brain: Any) -> dict[str, Any]:
+    """The refs a task will be shown, without going through the card for reading."""
+    link = brain._screen_tab
+    gate, link.read_gate = link.read_gate, None
+    try:
+        return await link.call("read", {"tab": HWND})
+    finally:
+        link.read_gate = gate
 
 
 def _screen_brain(settings, exe: str = "chrome.exe") -> tuple[Any, FakeDriver]:
@@ -867,7 +917,9 @@ async def test_read_tab_reads_the_tab_on_screen(settings, quick):
     shown = await tabwork.handle(brain, "read_tab", {})
     assert shown.startswith(f"Tab: Compose - Mail\nAddress: {URL}")
     assert "Other open tabs" not in shown and "[card number hidden]" in shown and "hunter2" not in shown
-    assert cards.asked == [] and driver.did == []
+    assert cards.asked == [READ_CARD] and driver.did == []  # asked once, for the site
+    await tabwork.handle(brain, "read_tab", {})
+    assert cards.asked == [READ_CARD]
     note = await tabwork.handle(brain, "read_tab", {"tab": "inbox"})
     assert "only the tab that is showing" in note
     driver.pages[HWND] = compose(url="https://www.rbc.example/")
@@ -878,7 +930,7 @@ async def test_read_tab_reads_the_tab_on_screen(settings, quick):
 async def test_use_tab_works_through_it_with_every_card_and_the_log(settings, quick):
     brain, driver = _screen_brain(settings)
     cards = Cards(brain.hub)
-    page = await brain._screen_tab.call("read", {"tab": HWND})
+    page = await _peek_refs(brain)
     to, send, secret = (item(page, n)["ref"] for n in ("To", "Send", "Password"))
     job = await work(
         brain,
@@ -888,7 +940,7 @@ async def test_use_tab_works_through_it_with_every_card_and_the_log(settings, qu
         ("done", {"ok": True, "summary": "Sent."}),
     )
     assert job.status == "done" and job.summary == "Sent."
-    assert cards.asked == [f"Let Pyxi click and type on {SITE} in your browser?", f'Click "Send" on {SITE}']
+    assert cards.asked == [READ_CARD, f"Let Pyxi click and type on {SITE} in your browser?", f'Click "Send" on {SITE}']
     assert "This submits the form on the page." in cards.card()["reason"]
     assert driver.acted() == [("legacy_value", "To", "dana@example.com"), ("legacy", "Send", "")]
     assert logged(brain) == [f'Clicked "Send" on {SITE}', f'Typed "dana@example.com" into "To" on {SITE}']
@@ -898,15 +950,18 @@ async def test_use_tab_works_through_it_with_every_card_and_the_log(settings, qu
 
 async def test_dont_on_the_card_means_nothing_happens_and_stop_everything_reaches_it(settings, quick):
     brain, driver = _screen_brain(settings)
-    Cards(brain.hub, answer=False)
-    page = await brain._screen_tab.call("read", {"tab": HWND})
+    Cards(brain.hub, answer=lambda card: card["action"] == READ_CARD)  # may read, may not act
+    page = await _peek_refs(brain)
     job = await work(brain, "Tick the box", act({"do": "click", "ref": item(page, "Send me a copy")["ref"]}))
     assert job.summary == "Okay, I left that for you." and driver.did == []
-    driver.hold = threading.Event()
+    nobody, driver0 = _screen_brain(settings)
+    Cards(nobody.hub, answer=False)  # may not even read
+    job = await work(nobody, "Tick the box", act({"do": "click", "ref": "e1"}))
+    assert "said no to Pyxi reading" in job.summary and driver0.did == [] and driver0.asked == []
     brain2, driver2 = _screen_brain(settings)
     Cards(brain2.hub)
     driver2.hold = threading.Event()
-    page = await brain2._screen_tab.call("read", {"tab": HWND})
+    page = await _peek_refs(brain2)
     brain2._tab_llm = Scripted(act({"do": "click", "ref": item(page, "Go")["ref"]}))
     assert await tabwork.handle(brain2, "use_tab", {"task": "Press Go"}) is None
     for _ in range(100):
@@ -921,6 +976,471 @@ async def test_dont_on_the_card_means_nothing_happens_and_stop_everything_reache
             break
     assert brain2._tab_operator is None
     assert [j.status for j in brain2.jobs.jobs.values()] == ["stopped"]
+
+
+# ====================================================================== the review's findings
+def _frame(url: str, *children: El, rid: tuple[int, ...] = (7, 1)) -> El:
+    """A frame the way the tree gives one: a document inside the page's document."""
+    return El("Document", name="Frame", value=url, rid=rid, patterns=P("Value"), rect=(0, 0, 300, 90), children=list(children))
+
+
+def _wire(driver: FakeDriver) -> None:
+    for el in _all(driver.root):
+        el.handle = el
+
+
+async def test_a_frame_from_another_site_is_not_part_of_the_page():
+    link, driver = make()
+    press = P("Invoke", "LegacyIAccessible")
+    pay = _frame(
+        "https://pay.example.net/checkout",
+        text("Total: 20 dollars"),
+        El("Edit", name="Name on card", patterns=P("Value", "LegacyIAccessible"), rect=(0, 0, 9, 9), rid=(7, 2)),
+        El("Button", name="Pay now", patterns=press, rect=(0, 0, 9, 9), rid=(7, 3)),
+    )
+    own = _frame(
+        "https://mail.example.com/notes", El("Button", name="Save note", patterns=press, rect=(0, 0, 9, 9), rid=(8, 2)), rid=(8, 1)
+    )
+    driver.root.children += [pay, own]
+    _wire(driver)
+    page = await read(link)
+    labels = [i["label"] for i in page["items"]]
+    assert "Save note" in labels  # the page's own frame is part of the page
+    assert "Pay now" not in labels and "Name on card" not in labels  # another site's is not
+    assert "Total: 20 dollars" not in page["text"]
+    assert "(a frame from pay.example.net: not part of this page" in page["text"]
+    # A frame that was the site's own when the page was read, and belongs to another site by
+    # the time of the action: what is in it is no longer acted on under this site's Allow.
+    own.value = "https://pay.example.net/checkout"
+    no = await refused(do(link, "click", page, "Save note"))
+    assert no.code == "gone" and "a frame from pay.example.net" in str(no) and driver.did == []
+    # And a password field in another site's frame doesn't make this page's fields suspect.
+    pay.children.append(El("Edit", name="PIN", password=True, patterns=P("Value"), rect=(0, 0, 9, 9), rid=(7, 4)))
+    assert screenlink.foreign_frame(pay, URL) == "pay.example.net" and not screenlink.foreign_frame(driver.root, URL)
+
+
+async def test_reading_a_site_needs_their_allow_and_it_is_asked_once():
+    asked: list[tuple[str, str]] = []
+    answer = [True]
+
+    async def gate(site: str, title: str) -> bool:
+        asked.append((site, title))
+        return answer[0]
+
+    link, driver = make(read_gate=gate)
+    assert (await link.call("peek", {}))["url"] == URL and asked == []  # where the tab is, not what is in it
+    page = await read(link)
+    assert asked == [(SITE, "Compose - Mail")] and page["text"].startswith("Compose")
+    await read(link)
+    await do(link, "click", page, "Go")
+    assert len(asked) == 1  # once per site, until Pyxi is closed
+    driver.pages[HWND] = compose(rid=(3, 1), url="https://bank.example.org/accounts")
+    answer[0] = False
+    no = await refused(read(link))
+    assert no.code == "failed" and "said no to Pyxi reading bank.example.org" in str(no)
+    assert asked[-1][0] == "bank.example.org" and driver.asked[-1:] != [] and len(driver.asked) == 2  # nothing was fetched
+    await refused(read(link))
+    assert len(asked) == 2  # not asked again straight after a no
+    # A yes given to the extension is not a yes here, and the other way round.
+    class Base:
+        on_stopped: list[Any] = []
+        allowed = {SITE}
+
+        def site_allowed(self, site: str) -> bool:
+            return site in self.allowed
+
+        def allow_site(self, site: str) -> None:
+            self.allowed.add(site)
+
+    base = Base()
+    other, _ = make(base=base)
+    assert not other.site_allowed(SITE)
+    other.allow_site("shop.example.com")
+    assert other.site_allowed("shop.example.com") and "shop.example.com" not in base.allowed
+
+
+async def test_a_private_field_is_never_called_by_what_is_in_it():
+    link, driver = make()
+    box = (0, 0, 9, 9)
+    form = driver.root.children[2]
+    form.children += [
+        El("Edit", auto_id="ssn", patterns=P("Value"), rect=box, rid=(1, 70), children=[text("123-45-6789")]),
+        El("Edit", auto_id="cardNumber", patterns=P("Value"), rect=box, rid=(1, 71), children=[text("4111 1111 1111 1111")]),
+        El("Edit", patterns=P("Value"), rect=box, rid=(1, 72), children=[text("typed by them")]),
+        El("Button", name="Pay with 4111 1111 1111 1111", patterns=P("Invoke"), rect=box, rid=(1, 73)),
+    ]
+    _wire(driver)
+    page = await read(link)
+    by_kind = {i["label"]: i.get("sensitive") for i in page["items"]}
+    assert by_kind["ssn"] == "id" and by_kind["cardNumber"] == "card"  # called by their ids
+    assert "Pay with [card number hidden]" in by_kind
+    whole = json.dumps(page)
+    assert "123-45-6789" not in whole and "4111" not in whole and "typed by them" not in whole
+    shown = tabwork.render(page)
+    assert 'text field "ssn" (an ID number field: theirs to fill, never yours)' in shown
+
+
+async def test_type_and_enter_types_nothing_when_the_key_cannot_follow():
+    link, driver = make()  # Chrome, not in front
+    page = await read(link)
+    no = await refused(do(link, "type", page, "Search mail", text="invoices", enter=True))
+    assert "isn't in front" in str(no) and driver.did == [] and named(driver.root, "Search mail").value == ""
+    # In front, but the key is refused after the text went in: the field is put back, so
+    # that a failure always means nothing was typed.
+    driver.front = HWND
+    driver.refuse = {"focus", "legacy_focus"}
+    no = await refused(do(link, "type", page, "Search mail", text="invoices", enter=True))
+    assert no.code == "failed" and str(no).endswith("Nothing was typed.") and not no.unanswered
+    assert named(driver.root, "Search mail").value == "" and not [d for d in driver.did if d[0] == "key"]
+    # If it can't be put back, it is reported as something that may have happened, which
+    # tabwork writes in the activity log.
+    real = driver.do
+    calls = {"n": 0}
+
+    def only_once(handle: Any, way: str, words: str = "") -> None:
+        if way in ("value", "legacy_value"):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise RuntimeError("the field is gone")
+        real(handle, way, words)
+
+    driver.do = only_once  # type: ignore[method-assign]
+    no = await refused(do(link, "type", page, "Search mail", text="invoices", enter=True))
+    assert no.unanswered and "The text is in the field, but Enter was not pressed" in str(no)
+
+
+async def test_an_element_with_no_name_of_its_own_is_checked_by_the_words_inside_it():
+    link, driver = make()
+    page = await read(link)
+    more = next(el for el in _all(driver.root) if el.rid == (1, 40))
+    more.children[0].name = "Delete my account"  # the page re-rendered the same element
+    no = await refused(do(link, "click", page, "Show more"))
+    assert no.code == "gone" and driver.did == []
+    more.children[0].name = "Show more"
+    await do(link, "click", page, "Show more")
+    assert driver.did == [("legacy", "", "")]
+
+
+async def test_a_key_with_no_element_named_only_goes_into_the_page():
+    link, driver = make()
+    driver.front = HWND
+    page = await read(link)
+    driver.cursor_outside = True  # the cursor is in the address bar, or a permission bubble
+    for key in ("Escape", "Tab", "Backspace", "Delete", "ArrowDown"):
+        no = await refused(do(link, "press", page, key=key))
+        assert no.code == "failed" and "cursor isn't in the page" in str(no), key
+    assert driver.did == []
+    driver.cursor_outside = False  # nothing has the cursor at all
+    assert "cursor isn't in the page" in str(await refused(do(link, "press", page, key="Escape")))
+    named(driver.root, "To").focused = True  # the cursor is in a field of the page
+    await do(link, "press", page, key="Escape")
+    assert driver.did == [("key", HWND, "Escape")]
+    driver.did.clear()
+    named(driver.root, "To").focused = False
+    inside = El("Edit", name="Card holder", focused=True, patterns=P("Value"), rect=(0, 0, 9, 9), rid=(7, 2))
+    driver.root.children.append(_frame("https://pay.example.net/checkout", inside))
+    _wire(driver)
+    assert "cursor isn't in the page" in str(await refused(do(link, "press", page, key="Escape")))  # another site's frame
+    assert driver.did == []
+
+
+async def test_private_windows_are_refused_and_never_picked():
+    link, driver = make()
+    page = await read(link)
+    driver.wins[0].private = True
+    assert link.pick() == ""
+    for call in (read(link), do(link, "click", page, "Go"), link.call("peek", {"tab": HWND})):
+        no = await refused(call)
+        assert no.code == "browser_page" and "private window" in str(no)
+    no = await refused(link.call("open", {"tab": HWND, "url": "https://shop.example.com/", "expect_host": "shop.example.com"}))
+    assert "private window" in str(no) and driver.did == []  # and no address is opened from one
+    driver.wins.append(Window(200, "News - Mozilla Firefox", "firefox.exe"))
+    assert link.pick() == "w200"  # the ordinary window is the one worked in
+
+
+@pytest.mark.parametrize(
+    "names, ids, private",
+    [
+        (["Ready - Google Chrome", "Ready - Google Chrome (Incognito)"], ["BrowserRootView"], True),
+        (["Ready - [InPrivate] - Microsoft Edge"], [], True),
+        (["Ready - Microsoft Edge (InPrivate)"], [], True),
+        (["Ready \u2014 Mozilla Firefox Private Browsing"], [], True),
+        (["Ready"], ["private-browsing-indicator-button toolbarbutton-1"], True),
+        (["Bereit - Google Chrome (Inkognito)"], [], True),
+        (["Ready - Google Chrome"], ["BrowserRootView", "view_1018"], False),
+        (["What is Incognito mode? - Google Chrome"], [], False),  # a page's title is not the window
+        (["Private Browsing explained \u2014 Mozilla Firefox"], ["toolbarbutton-1"], False),
+    ],
+)
+def test_what_marks_a_private_window(names, ids, private):
+    assert screenlink.private_marks(names, ids) is private
+
+
+def test_the_real_driver_never_opens_an_address_from_a_private_window(monkeypatch):
+    driver = screenlink.UiaDriver()
+    monkeypatch.setattr(driver, "_pid", lambda hwnd: 4242)
+    monkeypatch.setattr(driver, "_exe_path", lambda pid: r"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")
+    started: list[Any] = []
+    monkeypatch.setattr(screenlink.subprocess, "Popen", lambda *a, **k: started.append(a))
+    monkeypatch.setattr(screenlink, "_command_line", lambda pid: "chrome.exe --profile-directory=Default")
+    driver._private[HWND] = True
+    with pytest.raises(BrowserError):
+        driver.open(HWND, "https://shop.example.com/")
+    assert started == []
+    driver._private[HWND] = False
+    driver.open(HWND, "https://shop.example.com/")
+    assert started[0][0][-2:] == ["--profile-directory=Default", "https://shop.example.com/"]
+
+
+# ---- the real driver, on a pretend UI Automation
+class Raw:
+    """One UI Automation element, as far as the driver asks of it."""
+
+    def __init__(self, kind: int = 50026, name: str = "", children: tuple = (), props: dict | None = None) -> None:
+        self.props = {30003: kind, 30005: name, 30001: (0, 0, 100, 20), 30010: True, **(props or {})}
+        self.kids = list(children)
+        self.parent: Raw | None = None
+        self.requests: list[Any] = []
+        for kid in self.kids:
+            kid.parent = self
+
+    def GetCachedPropertyValue(self, prop: int) -> Any:
+        return self.props.get(prop)
+
+    def BuildUpdatedCache(self, request: Any) -> Raw:
+        REQUESTS.append(request)
+        return self
+
+    def GetCachedChildren(self) -> Any:
+        kids = self.kids
+
+        class Array:
+            Length = len(kids)
+
+            def GetElement(self, i: int) -> Raw:
+                return kids[i]
+
+        return Array()
+
+
+REQUESTS: list[Any] = []
+DOC, EDIT, TEXT, BUTTON, GROUP, TAB, TABITEM, PANE = 50030, 50004, 50020, 50000, 50026, 50018, 50019, 50033
+VALUE, HAS_VALUE, RID, OFFSCREEN, CLASS, HELP, LABELLED, RECT = 30045, 30043, 30000, 30022, 30012, 30013, 30104, 30001
+
+
+def uia(monkeypatch, top: Raw | None = None, cursor: Raw | None = None) -> screenlink.UiaDriver:
+    driver = screenlink.UiaDriver()
+
+    class Walker:
+        def GetParentElementBuildCache(self, raw: Raw, request: Any) -> Any:
+            return raw.parent
+
+    class Ui:
+        RawViewWalker = Walker()
+
+        def ElementFromHandle(self, hwnd: int) -> Any:
+            return top
+
+        def GetFocusedElementBuildCache(self, request: Any) -> Any:
+            return cursor
+
+    monkeypatch.setattr(driver, "_uia", lambda: (None, Ui(), "whole", "one", "kids"))
+    monkeypatch.setattr(driver, "scroll_state", lambda doc: None)
+    REQUESTS.clear()
+    return driver
+
+
+def test_a_page_whose_title_has_a_private_word_still_has_its_address(monkeypatch):
+    driver = uia(monkeypatch)
+    for title in ("Reset your password", "Pin on Pinterest", "Passport renewal", "Card number help"):
+        doc = driver._doc(Raw(DOC, title, props={VALUE: "https://example.com/reset", HAS_VALUE: True, RID: (1, 2)}))
+        assert doc.url == "https://example.com/reset" and doc.title == title
+    # A field that is private by its words keeps nothing of what is in it.
+    field = driver._el(Raw(EDIT, "Card number", props={VALUE: "4111 1111 1111 1111", HAS_VALUE: True}), False)
+    assert field.value == "" and driver._el(Raw(EDIT, "City", props={VALUE: "Dhaka", HAS_VALUE: True}), False).value == "Dhaka"
+    # Where a name came from, for the rule about unlabelled fields beside a password.
+    how = lambda props=None, name="Login": driver._el(Raw(EDIT, name, props=props), False).named_by  # noqa: E731
+    assert how({HELP: "Login"}) == "hint" and how({LABELLED: object()}) == "label" and how() == "other" and how(name="") == ""
+
+
+def test_a_big_page_is_read_in_bounded_pieces_and_never_in_one_request(monkeypatch):
+    rows = tuple(Raw(GROUP, children=tuple(Raw(TEXT, f"cell {r}.{c}") for c in range(20))) for r in range(400))
+    page = Raw(DOC, "Huge", children=rows, props={VALUE: "https://example.com/huge", HAS_VALUE: True, RID: (1, 2)})
+    top = Raw(PANE, "Huge - Google Chrome", children=(page,))
+    driver = uia(monkeypatch, top)
+    snap = driver.snapshot(HWND, 500, 6.0)
+    assert snap is not None and snap.cut and len(_all(snap.root)) <= 501
+    assert set(REQUESTS) == {"kids"}  # an element and its children at a time: never the whole page at once
+    assert len(REQUESTS) < 80  # and a text is not asked for children it doesn't have
+    REQUESTS.clear()
+    clock = iter(range(0, 10_000, 4))  # each look at the clock is four seconds later
+    monkeypatch.setattr(screenlink.time, "monotonic", lambda: float(next(clock)))
+    snap = driver.snapshot(HWND, 100_000, 6.0)
+    # The time ran out after the first piece (the page and its rows): it stops there.
+    assert snap is not None and snap.cut and not any(row.children for row in snap.root.children)
+    assert REQUESTS == ["kids", "kids"]
+
+
+async def test_a_read_is_given_a_bound_that_ends_before_its_caller_gives_up():
+    link, driver = make()
+    await read(link)
+    nodes, seconds = driver.asked[0]
+    assert nodes <= 6000 and seconds <= 6.0  # tabwork waits 20 seconds for a read
+    # And a request that does time out is not left to be done later.
+    driver.slow_state = threading.Event()
+    page = await read(link)
+    go = item(page, "Go")
+    args = {"tab": HWND, "page": page["page"], "host": SITE, "ref": go["ref"], "label": "Go"}
+    timed_out = await refused(link.call("click", args, timeout=0.1))
+    assert timed_out.code == "timeout" and not timed_out.unanswered
+    driver.slow_state.set()
+    driver.slow_state = None
+    await asyncio.sleep(0.2)
+    assert driver.did == []  # the worker dropped it instead of pressing late
+    await link.call("click", args)  # and the next request is served
+    assert driver.did == [("legacy", "Go", "")]
+
+
+def test_the_page_is_the_web_page_that_is_showing_and_the_biggest_if_there_are_two():
+    tab, side, hidden, own = object(), object(), object(), object()
+    pick = screenlink.pick_document
+    assert pick([(side, "https://sidebar.example/", True, 300 * 600), (tab, "https://a.example/", True, 900 * 600)]) is tab
+    assert pick([(hidden, "https://b.example/", False, 900 * 600), (tab, "https://a.example/", True, 400 * 300)]) is tab
+    assert pick([(hidden, "https://b.example/", False, 900 * 600)]) is None  # a background tab is never the page
+    assert pick([(hidden, "https://b.example/", False, 9), (own, "chrome://settings/", True, 9)]) is own
+    assert pick([]) is None
+
+
+def test_hundreds_of_tabs_do_not_hide_the_page(monkeypatch):
+    strip = Raw(TAB, children=tuple(Raw(TABITEM, f"Tab {n}", children=(Raw(BUTTON, "Close"),)) for n in range(1500)))
+    page = Raw(DOC, "Ready", props={VALUE: "https://example.com/", HAS_VALUE: True, RID: (1, 2), RECT: (0, 0, 800, 600)})
+    behind = Raw(DOC, "Other", props={VALUE: "https://other.example/", HAS_VALUE: True, RID: (1, 3), OFFSCREEN: True})
+    shell = Raw(DOC, "", props={CLASS: "WebView"})
+    top = Raw(PANE, "Ready - Google Chrome", children=(Raw(PANE, children=(strip,)), shell, Raw(PANE, children=(behind, page))))
+    driver = uia(monkeypatch, top)
+    doc = driver.document(HWND)
+    assert doc is not None and doc.url == "https://example.com/" and doc.rid == (1, 2)
+    assert len(REQUESTS) < 20  # the tab strip was not walked
+
+
+def test_the_real_driver_says_which_frames_an_element_is_in_and_what_is_outside(monkeypatch):
+    button = Raw(BUTTON, "Pay now", props={RID: (7, 3)})
+    frame = Raw(DOC, "Pay", children=(button,), props={VALUE: "https://pay.example.net/checkout", HAS_VALUE: True, RID: (7, 1)})
+    plain = Raw(BUTTON, "Send", props={RID: (1, 5)})
+    page = Raw(DOC, "Mail", children=(Raw(GROUP, children=(frame,)), plain), props={VALUE: URL, HAS_VALUE: True, RID: (1, 2)})
+    bar = Raw(EDIT, "Address and search bar", props={RID: (0, 9)})
+    Raw(PANE, "Mail - Google Chrome", children=(Raw(PANE, children=(bar,)), page))
+    driver = uia(monkeypatch, cursor=bar)
+    assert driver.state(plain, (1, 2)).frames == ()
+    assert driver.state(button, (1, 2)).frames == ("https://pay.example.net/checkout",)
+    assert driver.state(bar, (1, 2)) is None  # the browser's own address bar is not in the page
+    assert driver.state(plain, (5, 5)) is None  # nor is anything in a page that isn't this one
+    assert driver.state(plain, ()) is None  # and a page with no identity holds nothing
+    assert driver.focused((1, 2)) is None  # the cursor is in the address bar
+    assert uia(monkeypatch, cursor=plain).focused((1, 2)).name == "Send"
+
+
+async def test_open_reports_the_page_that_really_loaded():
+    link, driver = make()
+    # The bare address sends the browser on to www.: that page is the answer, by its real address.
+    driver.lands = compose(rid=(9, 9), url="https://www.shop.example.com/")
+    out = await link.call("open", {"tab": HWND, "url": "https://shop.example.com/", "expect_host": "shop.example.com"})
+    assert out["url"] == "https://www.shop.example.com/"
+    # The tab is already on that site and nothing new loads: the old page is not passed off
+    # as the one that was asked for.
+    driver.lands = False
+    link.open_wait_s = 1.0
+    no = await refused(link.call("open", {"tab": HWND, "url": "https://www.shop.example.com/cart", "expect_host": "www.shop.example.com"}))
+    assert no.code == "failed" and no.unanswered and "didn't show up" in str(no)
+    driver.lands = compose(rid=(9, 10), url="https://www.shop.example.com/cart")  # a new document: accepted at once
+    out = await link.call("open", {"tab": HWND, "url": "https://www.shop.example.com/cart", "expect_host": "www.shop.example.com"})
+    assert out["url"].endswith("/cart")
+
+
+async def test_a_cancelled_task_stops_its_work_in_flight_and_what_was_waiting():
+    link, driver = make()
+    page = await read(link)
+    send, go = item(page, "Send"), item(page, "Go")
+    base = {"tab": HWND, "page": page["page"], "host": SITE}
+    driver.slow_state = threading.Event()  # the first is still checking its element
+    first = asyncio.ensure_future(link.call("click", {**base, "ref": send["ref"], "label": "Send"}, run="r_1"))
+    second = asyncio.ensure_future(link.call("click", {**base, "ref": go["ref"], "label": "Go"}, run="r_1"))
+    await asyncio.sleep(0.15)
+    first.cancel()  # the tray's Stop cancels the task; link.stop() is not what runs
+    second.cancel()
+    await asyncio.sleep(0.05)
+    driver.slow_state.set()
+    driver.slow_state = None
+    await asyncio.sleep(0.3)
+    assert driver.did == []  # neither "Send" nor "Go" was pressed afterwards
+    await link.call("click", {**base, "ref": go["ref"], "label": "Go"}, run="r_2")
+    assert driver.did == [("legacy", "Go", "")]
+
+
+async def test_a_document_with_no_identity_is_never_a_page():
+    link, driver = make()
+    driver.pages[HWND] = compose(rid=())
+    no = await refused(read(link))
+    assert no.code == "failed" and link.last_trouble == "the page gave no identity"
+    driver.pages[HWND] = compose()
+    page = await read(link)
+    driver.pages[HWND] = compose(rid=())  # another document, which gives no identity
+    assert (await refused(do(link, "click", page, "Go"))).code in ("failed", "gone") and driver.did == []
+
+
+def test_a_browser_that_a_program_is_driving_is_never_the_users(monkeypatch):
+    assert screenlink.automated(r"chrome.exe --remote-debugging-pipe --user-data-dir=C:\\Temp\\pw")
+    assert screenlink.automated("msedge.exe --enable-automation https://example.com")
+    assert screenlink.automated("firefox.exe -marionette -profile C:\\\\Temp\\\\x")
+    assert not screenlink.automated(r"chrome.exe --profile-directory=Default https://example.com/-marionette-notes")
+    assert not screenlink.automated("")
+    from pyxi import hands
+
+    monkeypatch.setattr(hands, "is_own", lambda hwnd: False)
+    driver = screenlink.UiaDriver()
+    monkeypatch.setattr(driver, "_pid", lambda hwnd: hwnd * 10)
+    lines = {1000: "chrome.exe --remote-debugging-port=9222", 2000: "chrome.exe"}
+    monkeypatch.setattr(screenlink, "_command_line", lambda pid: lines[pid])
+    assert driver.is_own(100) is True and driver.is_own(200) is False  # Pyxi's booking browser; theirs
+
+
+async def test_an_unlabelled_field_beside_a_password_is_left_to_them():
+    def page_with(*fields: El, password: bool = True) -> El:
+        root = compose()
+        form = El("Group", aria="form", children=list(fields))
+        if password:
+            form.children.append(El("Edit", name="Password", password=True, patterns=P("Value"), rect=(0, 0, 9, 9), rid=(2, 9)))
+        root.children = [form]
+        for el in _all(root):
+            el.handle = el
+        return root
+
+    def edit(name: str, how: str, rid: int, **more: Any) -> El:
+        return El("Edit", name=name, named_by=how, patterns=P("Value", "LegacyIAccessible"), rect=(0, 0, 9, 9), rid=(2, rid), **more)
+
+    fields = lambda: (  # noqa: E731
+        edit("Login", "hint", 1, help="Login"),  # named only by its placeholder
+        edit("", "", 2),  # no name at all
+        edit("Email address", "label", 3),  # a label on the page
+        edit("Display name", "other", 4),  # named some other way (aria-label)
+        edit("Find a member", "hint", 5, aria="searchbox", help="Find a member"),
+    )
+    link, driver = make()  # Chrome says where a name came from
+    driver.pages[HWND] = page_with(*fields())
+    page = await read(link)
+    flagged = {i["label"]: i.get("sensitive") for i in page["items"]}
+    assert flagged == {"Login": "unclear", "": "unclear", "Email address": None, "Display name": None, "Find a member": None, "Password": "password"}
+    no = await refused(do(link, "type", page, "Login", text="dana"))
+    assert no.code == "sensitive" and "no clear label, beside a password field" in str(no) and driver.did == []
+    assert (await do(link, "type", page, "Email address", text="dana@example.com"))["value"] == "dana@example.com"
+    assert 'text field "Login" (private: theirs to fill, never yours)' in tabwork.render(page)
+    fox, driver2 = make("firefox.exe")  # Firefox doesn't: only a label on the page clears a field
+    driver2.pages[HWND] = page_with(*fields())
+    flagged = {i["label"]: i.get("sensitive") for i in (await read(fox))["items"]}
+    assert flagged["Display name"] == "unclear" and flagged["Email address"] is None
+    plain, driver3 = make()  # no password field in the form: nothing is suspect
+    driver3.pages[HWND] = page_with(*fields(), password=False)
+    assert not any(i.get("sensitive") for i in (await read(plain))["items"])
 
 
 # ====================================================================== what people read

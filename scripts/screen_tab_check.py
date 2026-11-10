@@ -479,8 +479,9 @@ def version_of(exe: Path) -> str:
 class Browser:
     """One browser this script started, in a profile made for this run."""
 
-    def __init__(self, name: str, tmp: Path) -> None:
+    def __init__(self, name: str, tmp: Path, extra: tuple[str, ...] = ()) -> None:
         self.name = name
+        self.extra = extra  # more command line, e.g. to start in a private window
         self.exe = EXES[name]
         self.engine = "gecko" if name == "firefox" else "chromium"
         self.profile = tmp / f"profile-{name}"
@@ -548,7 +549,7 @@ class Browser:
             (self.profile / "user.js").write_text(
                 "".join(f"user_pref({json.dumps(k)}, {json.dumps(v)});\n" for k, v in prefs.items()), encoding="utf-8"
             )
-            args = [str(self.exe), "-profile", str(self.profile), "-width", str(SIZE[0]), "-height", str(SIZE[1]), url]
+            args = [str(self.exe), "-profile", str(self.profile), "-width", str(SIZE[0]), "-height", str(SIZE[1]), *self.extra, url]
         else:
             args = [
                 str(self.exe),
@@ -562,6 +563,7 @@ class Browser:
                 "--disable-features=PrivacySandboxSettings4,msEdgeWelcomePage",
                 "--hide-crash-restore-bubble",
                 f"--window-size={SIZE[0]},{SIZE[1]}",
+                *self.extra,
                 url,
             ]
         self.other = foreground()
