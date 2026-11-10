@@ -1,6 +1,6 @@
 {
   "name": "pyxi-desktop",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "description": "Pyxi desktop shell: transparent overlay, 3D explanation layer and control panel.",
   "main": "out/main/index.js",
