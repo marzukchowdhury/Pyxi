@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse, JSONResponse
 
 from pyxi import __version__, booking, brainkey, cloud, files_access
-from pyxi.companion import pricecheck
+from pyxi.companion import browsersetup, pricecheck
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
 from pyxi.hub import Hub
@@ -447,16 +447,20 @@ def create_app(
             if hasattr(brain.screen, "set_private_apps"):
                 brain.screen.set_private_apps(apps)
             await hub.emit("private_apps", apps=apps, built_in=private_apps.BUILT_IN)
+        elif kind == "browser_setup":  # Settings, "Set it up for me" / "Add to Firefox"
+            browsersetup.start(brain, str(msg.get("browser") or ""))  # their own press
         elif kind in ("browser_get", "browser_pair", "browser_forget", "browser_site_revoke"):
             # Settings, "Connect your browser": a pairing code, unpair, the sites Pyxi may act on.
             link, extra = brain.browser, {}
+            if kind == "browser_get":
+                brain._spawn(browsersetup.look_up_addon(brain))  # is there an add-on to link to?
             if kind == "browser_pair":
                 extra = link.new_code()
             elif kind == "browser_forget":
                 link.forget(str(msg.get("id") or ""))
             elif kind == "browser_site_revoke":
                 link.revoke_site(str(msg.get("host") or ""))
-            await hub.emit("browser", **link.public(), **extra)
+            await hub.emit("browser", **link.public(), **browsersetup.public(brain), **extra)
         elif kind == "file_access_get":
             await hub.emit("file_access", **files_access.load(settings.data_dir).public())
         elif kind == "file_access_save":

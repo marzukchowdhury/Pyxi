@@ -372,6 +372,18 @@ export interface BrowserState {
   sites: { host: string; granted: number; expires: number }[];
 }
 
+/** Which browser Pyxi would put its extension into, and how (pyxi/companion/browsersetup.py). */
+export interface BrowserSetup {
+  browser: string; // "Chrome", "Edge", "Firefox"... or "" when none is open
+  key: string;
+  kind: "chromium" | "firefox" | "";
+  checked?: boolean; // the guided steps were checked in this browser
+  addon?: boolean | null; // Firefox: a signed add-on is published (null: not known yet)
+  notice?: string; // the line about the browser's developer mode notice
+  steps?: string[]; // the same thing by hand
+  running: boolean;
+}
+
 /** One line of the activity log (pyxi/audit.py). */
 export interface AuditEntry {
   id: string;
@@ -440,7 +452,7 @@ export type BrainEvent =
   | { type: "notice"; message: string }
   | { type: "private_apps"; apps: string[]; built_in: string[] }
   | { type: "grants"; grants: Grant[] }
-  | ({ type: "browser"; code?: string; expires_in?: number } & BrowserState)
+  | ({ type: "browser"; code?: string; expires_in?: number; setup?: BrowserSetup } & BrowserState)
   | { type: "audit"; entries: AuditEntry[] }
   | { type: "memories"; memories: MemoryItem[] }
   | { type: "beta"; ok: boolean; message: string }
@@ -491,6 +503,7 @@ export type ClientMessage =
   | { type: "grants_get" }
   | { type: "browser_get" }
   | { type: "browser_pair" }
+  | { type: "browser_setup"; browser: string }
   | { type: "browser_forget"; id: string }
   | { type: "browser_site_revoke"; host: string }
   | { type: "audit_get" }

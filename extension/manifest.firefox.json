@@ -5,7 +5,11 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "pyxi-in-your-browser@pyxi.local",
-      "strict_min_version": "128.0"
+      "strict_min_version": "140.0",
+      "update_url": "https://github.com/marzukchowdhury/Pyxi/releases/latest/download/pyxi-firefox-updates.json",
+      "data_collection_permissions": {
+        "required": ["websiteContent", "browsingActivity"]
+      }
     }
   }
 }

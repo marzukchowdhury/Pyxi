@@ -1,7 +1,7 @@
 """Make a loadable copy of the extension for one browser.
 
     python extension/build.py chrome     -> extension/dist/chrome   (Chrome and Edge)
-    python extension/build.py firefox    -> extension/dist/firefox  (Firefox 128 or newer)
+    python extension/build.py firefox    -> extension/dist/firefox  (Firefox 140 or newer)
 
 Chrome and Edge can also load this folder as it is (it holds the Chrome manifest). Firefox
 needs its own manifest: the same code, with an event page instead of a service worker and an
@@ -58,6 +58,31 @@ def build(target: str, out: Path | None = None, test_host: str = "") -> Path:
         json.dumps(manifest(target, test_host), indent=2) + "\n", encoding="utf-8"
     )
     return out
+
+
+def package(target: str, out_file: Path) -> Path:
+    """The same build as one file: a zip with the manifest at its root, which is what Mozilla
+    signs (and what an .xpi is). Made the same way every time: same order, same dates, so the
+    same code gives the same bytes."""
+    import zipfile
+
+    files: dict[str, bytes] = {
+        "manifest.json": (json.dumps(manifest(target), indent=2) + "\n").encode("utf-8")
+    }
+    for name in SHIPPED:
+        src = HERE / name
+        for path in sorted(src.rglob("*")) if src.is_dir() else [src]:
+            if path.is_file():
+                files[path.relative_to(HERE).as_posix()] = path.read_bytes()
+    out_file = Path(out_file)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(out_file, "w", zipfile.ZIP_DEFLATED) as z:
+        for name in sorted(files):
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            z.writestr(info, files[name])
+    return out_file
 
 
 if __name__ == "__main__":

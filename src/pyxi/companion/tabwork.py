@@ -57,6 +57,7 @@ from otto.llm.base import Message, TextPart, ToolSpec
 
 from pyxi import safety
 from pyxi.browserlink import BrowserError, BrowserLink, host_of, site_of
+from pyxi.companion import browsersetup  # getting the extension installed
 from pyxi.companion.actions import safe_url
 from pyxi.companion.operator import RISKY, Outcome, Step
 
@@ -65,7 +66,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-TOOLS = {"read_tab", "use_tab"}
+TOOLS = {"read_tab", "use_tab", "connect_browser"}
 INFO = {"read_tab"}  # its result goes back to the model for another round
 AGENT = "Pyxi (in your browser)"  # the activity log's "who"
 
@@ -1078,7 +1079,7 @@ def setup(brain: Brain) -> None:
     brain._tab_operator = None
 
     async def changed() -> None:
-        await brain.hub.emit("browser", **link.public())
+        await browsersetup.announce(brain)
 
     def stopped(run: str, how: str) -> None:
         # Esc in the tab (or the marker's Stop). With no task named (the extension was
@@ -1093,12 +1094,16 @@ def setup(brain: Brain) -> None:
 
     link.on_change = changed
     link.on_stopped.append(stopped)
+    browsersetup.attach(brain)
 
 
 def tools(brain: Brain) -> list[ToolSpec]:
-    """The tab tools, only while a browser is connected (otherwise nothing changes)."""
+    """The tab tools while a browser is connected; while none is, the one tool that sets the
+    extension up when they ask for it."""
     link = getattr(brain, "browser", None)
-    return list(SPECS) if link is not None and link.connected else []
+    if link is None:
+        return []
+    return list(SPECS) if link.connected else [browsersetup.CONNECT]
 
 
 def prompt(brain: Brain) -> str:
@@ -1156,6 +1161,8 @@ def _prefer(brain: Brain) -> str:
 
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
     link: BrowserLink | None = getattr(brain, "browser", None)
+    if name == "connect_browser" and link is not None:
+        return await browsersetup.connect(brain, args)
     if link is None or not link.connected:
         return (
             f"{name}: Pyxi's browser extension isn't connected, so this can't be done in their "
@@ -1434,7 +1441,10 @@ def _llm(brain: Brain) -> Any:
 
 
 # ---------------------------------------------------------------------- after reading, before fetching
-FETCHES = {"read_page", "web_search"}
+# What the brain checks with before_fetch before it runs them: the two fetches, and the
+# two routes that stand in for the user's own tab while no browser is connected (there
+# Pyxi may offer to set the extension up first: companion/browsersetup.py).
+FETCHES = {"read_page", "web_search"} | browsersetup.OFFERS
 _URL = re.compile(r"https?://[^\s<>\"')\]]+", re.I)
 
 
@@ -1450,6 +1460,8 @@ async def before_fetch(brain: Brain, name: str, args: dict[str, Any]) -> str | N
     document, a browser tab): an address the model wrote itself, which the user didn't say
     and which wasn't in what was read, could be carrying what was read to someone. They're
     asked first. Returns a note for the model when they say no, else None."""
+    if name in browsersetup.OFFERS:
+        return await browsersetup.offer(brain, name, args)
     reads = list(getattr(brain, "_turn_reads", []) or [])
     if not reads:
         return None
