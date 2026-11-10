@@ -22,8 +22,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, x64]
-    runs-on: macos-latest
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x64
+            runner: macos-15-intel  # native Intel: no Rosetta, and wheels match the machine
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
       - name: Pyxi
@@ -44,10 +48,6 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: pyxi/desktop/package-lock.json
-
-      - name: Rosetta (to build the Intel Python on an Apple silicon runner)
-        if: matrix.arch == 'x64'
-        run: softwareupdate --install-rosetta --agree-to-license || true
 
       - name: Python tests (the Mac paths, against Apple's real frameworks being present)
         working-directory: pyxi
@@ -92,7 +92,6 @@ jobs:
         run: |
           APP=$(ls -d dist/mac*/Pyxi.app | head -1)
           PY="$APP/Contents/Resources/python/bin/python3"
-          if [ "${{ matrix.arch }}" = "x64" ]; then PY="arch -x86_64 $PY"; fi
           $PY -c "import pyxi.server, pyxi.macos.uia, Quartz; print('brain imports ok')"
 
       - uses: actions/upload-artifact@v4
