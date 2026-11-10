@@ -156,3 +156,45 @@ def test_a_plain_command_after_a_reason():
     assert instant.match("I need to check my email, open Gmail.").value == "https://mail.google.com"
     assert instant.match("I want to watch something. Go to YouTube.").value == "https://www.youtube.com"
     assert instant.match("Open Gmail and summarize my latest email") is None  # more to it: the model
+
+
+# ---------------------------------------------------------------------- any program on the PC
+def test_a_program_is_found_by_the_name_they_say(monkeypatch):
+    """Live: "open Gen Office" got "GenOffice, coming up" and nothing opened: the opener only
+    knew a short list. Anything in the Start menu or on the desktop opens now."""
+    from pyxi.companion import actions
+
+    start = [
+        ("GenOffice", "shell:AppsFolder/com.genoffice.app"),
+        ("Visual Studio Code", "shell:AppsFolder/Microsoft.VisualStudioCode"),
+        ("Google Chrome", "shell:AppsFolder/Chrome"),
+        ("Office Language Preferences", "shell:AppsFolder/SETLANG"),
+        ("Steam", "shell:AppsFolder/Steam"),
+        ("Steam Support Center", "shell:AppsFolder/SteamSupport"),
+        ("Uninstall GenOffice", "shell:AppsFolder/uninstall"),
+    ]
+    monkeypatch.setattr(actions, "_start_apps", lambda: start)
+    monkeypatch.setattr(actions, "_desktop_shortcuts", lambda: [("OBS Studio", "C:/Users/x/Desktop/OBS Studio.lnk")])
+    monkeypatch.setattr(actions, "_INSTALLED", (0.0, {}))
+    found = actions.installed_app
+    assert found("Gen Office") == ("GenOffice", "shell:AppsFolder/com.genoffice.app")
+    assert found("the gen office app")[0] == "GenOffice"
+    assert found("vs code")[0] == "Visual Studio Code"  # how people say it
+    assert found("chrome")[0] == "Google Chrome"  # most of its name
+    assert found("obs studio")[0] == "OBS Studio"  # only on the desktop
+    assert found("steam")[0] == "Steam"  # its exact name, though another starts with it
+    assert found("office")[0] == "GenOffice"  # most of that name, and a word of the long one is not it
+    assert found("language") is None and found("support") is None
+    assert found("uninstall genoffice") is None and found("zzz") is None and found("") is None
+
+
+async def test_opening_a_program_pyxi_has_no_word_for(monkeypatch):
+    from pyxi.companion import actions
+
+    started = []
+    monkeypatch.setattr(actions, "installed_app", lambda name: ("GenOffice", "shell:AppsFolder/com.genoffice.app") if "gen" in name.lower() else None)
+    monkeypatch.setattr(actions.os, "startfile", started.append, raising=False)
+    assert await actions.open_app("Gen Office") == "Opened GenOffice."
+    assert started == ["shell:AppsFolder/com.genoffice.app"]
+    note = await actions.open_app("Blorbo")
+    assert note.startswith("open_app: there's no program called 'Blorbo'") and len(started) == 1

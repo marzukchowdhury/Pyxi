@@ -747,5 +747,6 @@ async def test_the_made_up_address_is_never_opened(settings):
     brain, rec = make_brain(settings, llm=llm)
     await brain.turn("open the IEM earphones on this website")
     assert [a["value"] for a in rec.of("action")] == ["https://duckduckgo.com/?q=IEM+site%3Atechlandbd.com"]
-    opened = next(c for c in brain._calls if c["tool"] == "quick_action")
-    assert "has no search address you have seen" not in str(opened.get("note", ""))  # it was opened, not refused
+    # It was done another way than asked, so the model is told and says what was opened.
+    assert "has no search address you have seen" in llm.prompts[-1]
+    assert [s["text"] for s in rec.of("say")] == ["These are search results for TechLand."]

@@ -11,8 +11,12 @@ Anything bigger (sending, buying, deleting) goes through a teammate with an appr
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
+import subprocess
+import time
+from pathlib import Path
 from urllib.parse import urlparse
 
 # Friendly names -> what Windows can start. Settings pages use their ms-settings: URIs.
@@ -84,6 +88,92 @@ def app_target(name: str) -> str | None:
     return APPS.get(key)
 
 
+# ---------------------------------------------------------------------- the apps on this PC
+_INSTALLED: tuple[float, dict[str, tuple[str, str]]] = (0.0, {})
+_INSTALLED_KEEPS_S = 300.0
+_NOT_AN_APP = re.compile(r"(?i)uninstall|readme|release notes|help|manual|website|license|documentation")
+
+
+def _plain(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", name.lower())
+
+
+def _start_apps() -> list[tuple[str, str]]:
+    """What the Start menu lists: (name, what to start). Windows' own list, so it has classic
+    programs and Store apps alike."""
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             "Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=12, creationflags=0x08000000,
+        ).stdout  # fmt: skip
+        found = json.loads(out or "[]")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+    found = [found] if isinstance(found, dict) else found
+    return [
+        (str(a.get("Name") or ""), "shell:AppsFolder\\" + str(a.get("AppID") or ""))
+        for a in found
+        if isinstance(a, dict) and a.get("Name") and a.get("AppID")
+    ]
+
+
+def _desktop_shortcuts() -> list[tuple[str, str]]:
+    """Shortcuts on the desktop, theirs and the shared one (a program can be there only)."""
+    homes = [os.environ.get("USERPROFILE", ""), os.environ.get("OneDrive", ""), os.environ.get("PUBLIC", "")]
+    out = []
+    for home in filter(None, homes):
+        folder = Path(home) / "Desktop"
+        try:
+            out += [(p.stem, str(p)) for p in folder.iterdir() if p.suffix.lower() in (".lnk", ".url", ".appref-ms")]
+        except OSError:
+            continue
+    return out
+
+
+def installed_apps() -> dict[str, tuple[str, str]]:
+    """Every program this PC can start, by its name in plain letters: (its name, its target).
+    Read from Windows at most every five minutes."""
+    global _INSTALLED
+    at, apps = _INSTALLED
+    if apps and time.monotonic() - at < _INSTALLED_KEEPS_S:
+        return apps
+    apps = {}
+    for name, target in [*_desktop_shortcuts(), *_start_apps()]:  # the Start menu's wins
+        if not _NOT_AN_APP.search(name) and _plain(name):
+            apps[_plain(name)] = (name, target)
+    _INSTALLED = (time.monotonic(), apps)
+    return apps
+
+
+def installed_app(name: str) -> tuple[str, str] | None:
+    """The installed program a spoken name means: "gen office" is GenOffice, "vs code" is
+    Visual Studio Code. Its exact name first; else the only program whose name starts with
+    it or holds it. None when nothing fits, or more than one does."""
+    key = _plain(re.sub(r"(?i)^(my|the)\s+|\s+(app|program)$", "", name.strip()))
+    if len(key) < 2:
+        return None
+    apps = installed_apps()
+    if key in apps:
+        return apps[key]
+    # Most of the name, not a word of it: "office" is not Office Language Preferences.
+    most = [(k, v) for k, v in apps.items() if len(key) * 2 >= len(k)]
+    for fits in (
+        [v for k, v in most if k.startswith(key)],
+        [v for k, v in most if key in k and len(key) >= 4],
+        [v for k, v in apps.items() if _initials(v[0]) == key and len(key) >= 2],
+    ):
+        if len({target for _, target in fits}) == 1:
+            return fits[0]
+    return None
+
+
+def _initials(name: str) -> str:
+    """'Visual Studio Code' -> 'vscode' (how people say it), else ''."""
+    words = re.findall(r"[A-Za-z0-9]+", name)
+    return (words[0][0] + words[1][0] + "".join(words[2:])).lower() if len(words) >= 3 else ""
+
+
 async def open_app(name: str) -> str:
     target = app_target(name)
     if target == "spotify:":
@@ -96,8 +186,16 @@ async def open_app(name: str) -> str:
             await asyncio.to_thread(webbrowser.open, "https://open.spotify.com", 2)
             return "Opened Spotify in the browser (the app isn't installed)."
     if target is None:
-        known = ", ".join(sorted({k for k in APPS if " " not in k})[:14])
-        return f"open_app: I can only open apps I know, like {known}."
+        # Not one of the names above: any program in their Start menu or on their desktop.
+        # (Live: "open GenOffice" was answered "GenOffice, coming up" and nothing opened.)
+        found = await asyncio.to_thread(installed_app, name)
+        if found is None:
+            return (
+                f"open_app: there's no program called {name!r} in the Start menu or on the "
+                "desktop of this PC, so nothing was opened. Say so in one short line, and ask "
+                "what it's called there if the name may have been misheard."
+            )
+        name, target = found
     try:
         await asyncio.to_thread(os.startfile, target)  # type: ignore[attr-defined]
     except (OSError, AttributeError) as exc:

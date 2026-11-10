@@ -3234,7 +3234,12 @@ class Brain:
                 self._images = [image]
             return f"look_again: this is the screen now ({ctx.window.title[:80]!r})."
         if name == "quick_action":
-            return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
+            note = await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
+            # Whatever it has to say is that the thing was not done as asked (not opened, not
+            # typed, done another way). Marked as the tool's own "no", so the line that claimed
+            # it is not spoken and the model says what happened instead. Live: "GenOffice,
+            # coming up", three times, while the opener had answered that it couldn't.
+            return f"quick_action: {note}" if note else None
         if name == "paste_table":
             return await self._paste_table(args)
         if name == "start_walkthrough":
@@ -3992,6 +3997,7 @@ CAN_REFUSE = {
     "errand",
     "use_computer",
     "paste_table",
+    "quick_action",
 }
 # "Find coffee near me": opening Maps isn't the answer, so Pyxi looks at what opened and
 # answers from it. "I said open Gmail, not GL" asks nothing: one model call, not two.
