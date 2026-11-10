@@ -3,6 +3,7 @@ import { bridge, keysOf } from "../shared/bridge";
 import { trusted } from "../shared/trusted";
 import { Activity } from "./Activity";
 import { Grants } from "./Grants";
+import { BrowserConnect } from "./BrowserConnect";
 import { Memories } from "./Memories";
 import { PrivateApps } from "./PrivateApps";
 import { Close, Compass, Cube, Feather, FileStack, Grid, Mark, Mic, Minus, Plus, Replay, Send, Spark, Thread } from "../shared/icons";
@@ -512,6 +513,8 @@ export function Settings() {
       <PrivateApps />
       <h4>Always allowed</h4>
       <Grants />
+      <h4>Connect your browser</h4>
+      <BrowserConnect />
       <h4>Shopping</h4>
       <PriceChecks />
       <h4>Connected accounts</h4>

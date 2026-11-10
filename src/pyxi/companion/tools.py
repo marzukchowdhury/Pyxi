@@ -1114,3 +1114,9 @@ from pyxi.companion.specialists import SPECS as SPECIALIST_TOOLS  # noqa: E402
 
 COMPANION_TOOLS += SPECIALIST_TOOLS
 INFO_TOOLS |= SPECIALIST_INFO
+
+# Pyxi in your browser: read_tab and use_tab (companion/tabwork.py). They are not in
+# COMPANION_TOOLS: the brain adds them to a turn only while the extension is connected.
+from pyxi.companion.tabwork import INFO as TAB_INFO  # noqa: E402
+
+INFO_TOOLS |= TAB_INFO

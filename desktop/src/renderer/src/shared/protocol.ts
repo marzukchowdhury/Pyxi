@@ -365,6 +365,13 @@ export interface Grant {
   expires: number;
 }
 
+/** Pyxi in your browser: paired browsers and the sites Pyxi may act on (pyxi/browserlink.py). */
+export interface BrowserState {
+  connected: boolean;
+  browsers: { id: string; browser: string; connected: boolean; paired: number }[];
+  sites: { host: string; granted: number; expires: number }[];
+}
+
 /** One line of the activity log (pyxi/audit.py). */
 export interface AuditEntry {
   id: string;
@@ -433,6 +440,7 @@ export type BrainEvent =
   | { type: "notice"; message: string }
   | { type: "private_apps"; apps: string[]; built_in: string[] }
   | { type: "grants"; grants: Grant[] }
+  | ({ type: "browser"; code?: string; expires_in?: number } & BrowserState)
   | { type: "audit"; entries: AuditEntry[] }
   | { type: "memories"; memories: MemoryItem[] }
   | { type: "beta"; ok: boolean; message: string }
@@ -481,6 +489,10 @@ export type ClientMessage =
   | { type: "file_access_get" }
   | { type: "private_apps_get" }
   | { type: "grants_get" }
+  | { type: "browser_get" }
+  | { type: "browser_pair" }
+  | { type: "browser_forget"; id: string }
+  | { type: "browser_site_revoke"; host: string }
   | { type: "audit_get" }
   | { type: "stop_everything" }
   | { type: "memories_get" }

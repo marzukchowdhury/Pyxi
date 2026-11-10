@@ -11,6 +11,7 @@ __pycache__/
 desktop/node_modules/
 desktop/out/
 desktop/dist/
+extension/dist/
 
 desktop/build/
 desktop/build-secrets/
