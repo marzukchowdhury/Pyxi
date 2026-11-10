@@ -5,8 +5,9 @@
  * taken apart in 3D, an Allow card, and at the end Pyxi itself.
  *
  * Every shape is either drawn with the 2D canvas API and sampled into points (blue pixels become
- * ice, red become gold), or generated straight in 3D. Each point is on its own spring toward its
- * place, so a change of shape is a flight, never a cut. Raw WebGL, no library.
+ * ice, red become gold), or generated straight in 3D. Each point flies at its own pace to its
+ * place, so a change of shape is a flight, never a cut. Raw WebGL, no library, and the flying
+ * itself is done by the graphics card: the page only hands it starts, ends and a few numbers.
  *
  * Which shape is up comes from the page: the element with data-swarm that crosses the middle of
  * the viewport names it (the story section rewrites its own as its steps go by).
@@ -449,16 +450,55 @@ function scene(name, aspect, box) {
   }
 }
 
+// The flight happens here, on the graphics card. Each point knows where it was when the shape last
+// changed (aFrom) and where it belongs now (aTo, in the shape's own frame); the shader eases one
+// into the other, turns the shape, adds the drift, and pushes points away from the cursor and
+// from a click's shockwave. The page itself only sets a handful of numbers per frame.
 const VERT = `
-attribute vec3 aPos;
-attribute vec2 aMeta;   // gold (0..1), brightness
-attribute vec3 aStatic; // size (fraction of the viewport height), phase, 1 if it forms shapes
-uniform float uAspect, uTime, uPx, uGrain;
+attribute vec3 aFrom;
+attribute vec4 aTo;     // xyz in the shape's own frame, w: how much it turns with the shape
+attribute vec4 aLook;   // gold and brightness at the change, gold and brightness to reach
+attribute vec4 aStatic; // size (fraction of the viewport height), phase, 1 if it forms shapes, pace
+uniform float uAspect, uTime, uT, uPx, uGrain, uSpin, uTilt, uRoll, uHasShape, uWander, uLift;
+uniform vec3 uCenter;
 uniform vec2 uRot;
+uniform vec3 uPointer; // x, y, 1 when there is a cursor
+uniform vec3 uBurst;   // x, y, seconds since the click (negative: none)
 varying float vGold;
 varying float vA;
 void main() {
-  vec3 p = aPos;
+  float ph = aStatic.y;
+  // where it belongs: the shape's own frame, turned, tilted, rolled and put in place
+  vec3 h = aTo.xyz;
+  float a = uSpin * aTo.w;
+  float c = cos(a), s = sin(a);
+  vec3 q = vec3(h.x * c + h.z * s, h.y, -h.x * s + h.z * c);
+  c = cos(uTilt); s = sin(uTilt);
+  q = vec3(q.x, q.y * c - q.z * s, q.y * s + q.z * c);
+  c = cos(uRoll); s = sin(uRoll);
+  q = vec3(q.x * c - q.y * s, q.x * s + q.y * c, q.z) + uCenter;
+  h = mix(h, q, aStatic.z * uHasShape);
+  h.xy += vec2(sin(uTime * 0.6 + ph * 40.0), cos(uTime * 0.47 + ph * 61.0)) * mix(0.03, uWander, aStatic.z);
+  // the flight there: eased, each at its own pace, on a curve rather than a straight line
+  float e = clamp(uT / mix(0.8, 2.1, aStatic.w), 0.0, 1.0);
+  e = 1.0 - (1.0 - e) * (1.0 - e) * (1.0 - e);
+  vec3 d = h - aFrom;
+  float arc = 0.22 * sin(e * 3.14159265);
+  vec3 p = aFrom + d * e + vec3(-d.y, d.x, (ph - 0.5) * 1.6 * length(d)) * arc;
+  p.y += uLift * (0.3 + ph);
+  // the swarm parts around the cursor
+  vec2 dp = p.xy - uPointer.xy;
+  float d2 = dot(dp, dp);
+  float push = uPointer.z * max(0.0, 1.0 - d2 / 0.05) * step(-1.2, p.z);
+  p.xy += dp / sqrt(d2 + 0.0004) * push * push * 0.07;
+  // a click: a ring of force that travels outward and fades
+  vec2 db = p.xy - uBurst.xy;
+  float dist = length(db);
+  float gap = (dist - uBurst.z * 1.5) * 6.0;
+  float wave = exp(-gap * gap) * max(0.0, 1.0 - uBurst.z / 1.1) * step(0.0, uBurst.z);
+  p.xy += db / (dist + 0.02) * wave * 0.16;
+  p.z += wave * (ph - 0.3) * 0.5;
+  // the camera
   float cy = cos(uRot.x), sy = sin(uRot.x);
   p = vec3(p.x * cy + p.z * sy, p.y, -p.x * sy + p.z * cy);
   float cx = cos(uRot.y), sx = sin(uRot.y);
@@ -466,10 +506,12 @@ void main() {
   float zc = ${CAM.toFixed(1)} - p.z;
   float f = ${CAM.toFixed(1)} / max(zc, 0.2);
   gl_Position = zc < 0.25 ? vec4(2.0, 2.0, 2.0, 1.0) : vec4(p.x * f / uAspect, p.y * f, 0.0, 1.0);
-  float tw = 0.72 + 0.28 * sin(uTime * 1.9 + aStatic.y * 6.2832);
+  float tw = 0.72 + 0.28 * sin(uTime * 1.9 + ph * 6.2832);
+  // fine grain for detailed shapes: the points that draw them get smaller, so lines stay sharp
   gl_PointSize = max(1.5, aStatic.x * mix(1.0, uGrain, aStatic.z) * f * uPx);
-  vGold = aMeta.x;
-  vA = aMeta.y * tw * clamp(f, 0.35, 1.5);
+  vec2 look = mix(aLook.xy, aLook.zw, clamp(uT / 0.9, 0.0, 1.0));
+  vGold = look.x;
+  vA = look.y * tw * clamp(f, 0.35, 1.5);
 }`;
 const FRAG = `
 precision mediump float;
@@ -483,6 +525,24 @@ void main() {
   vec3 col = mix(vec3(0.62, 0.80, 1.0), vec3(1.0, 0.80, 0.42), vGold);
   gl_FragColor = vec4(col * a, a);
 }`;
+const UNIFORMS = [
+  "uAspect",
+  "uTime",
+  "uT",
+  "uPx",
+  "uGrain",
+  "uSpin",
+  "uTilt",
+  "uRoll",
+  "uHasShape",
+  "uWander",
+  "uLift",
+  "uCenter",
+  "uRot",
+  "uPointer",
+  "uBurst",
+  "uOpacity",
+];
 
 export function initSwarm({ reduced = false } = {}) {
   const canvas = document.querySelector("canvas.swarm");
@@ -517,36 +577,24 @@ export function initSwarm({ reduced = false } = {}) {
   }
   gl.useProgram(prog);
   const U = Object.fromEntries(
-    ["uAspect", "uTime", "uPx", "uRot", "uOpacity", "uGrain"].map((n) => [
-      n,
-      gl.getUniformLocation(prog, n),
-    ]),
+    UNIFORMS.map((n) => [n, gl.getUniformLocation(prog, n)]),
   );
 
-  const pos = new Float32Array(N * 3);
-  const vel = new Float32Array(N * 3);
-  const loc = new Float32Array(N * 3); // where each point belongs, in its shape's own frame
-  const meta = new Float32Array(N * 2); // gold, brightness (eased toward the two below)
-  const goldT = new Float32Array(N);
-  const briT = new Float32Array(N);
-  const spinW = new Float32Array(N);
-  const stat = new Float32Array(N * 3);
-  const phase = new Float32Array(N);
-  const stiff = new Float32Array(N);
-  const wander = new Float32Array(N);
+  const from = new Float32Array(N * 3);
+  const to = new Float32Array(N * 4);
+  const look = new Float32Array(N * 4);
+  const stat = new Float32Array(N * 4);
   for (let i = 0; i < N; i++) {
-    phase[i] = rand();
-    stiff[i] = 0.018 + rand() * 0.05;
     const bokeh = i >= NS && rand() < 0.05; // a few big soft ones, far out of focus
-    stat[i * 3] = bokeh
+    stat[i * 4] = bokeh
       ? 0.022 + rand() * 0.02
       : 0.0042 + Math.pow(rand(), 2.2) * 0.0085;
-    stat[i * 3 + 1] = phase[i];
-    stat[i * 3 + 2] = i < NS ? 1 : 0;
-    wander[i] = i < NS ? 0.006 : 0.03;
+    stat[i * 4 + 1] = rand();
+    stat[i * 4 + 2] = i < NS ? 1 : 0;
+    stat[i * 4 + 3] = rand();
     if (i >= NS) {
-      goldT[i] = rand() < 0.7 ? 1 : 0;
-      briT[i] = bokeh ? 0.1 : 0.25 + rand() * 0.4;
+      look[i * 4 + 2] = rand() < 0.7 ? 1 : 0;
+      look[i * 4 + 3] = bokeh ? 0.1 : 0.25 + rand() * 0.4;
     }
   }
   const buffer = (data, usage, attr, size) => {
@@ -558,17 +606,37 @@ export function initSwarm({ reduced = false } = {}) {
     gl.vertexAttribPointer(l, size, gl.FLOAT, false, 0, 0);
     return b;
   };
-  const posBuf = buffer(pos, gl.DYNAMIC_DRAW, "aPos", 3);
-  const metaBuf = buffer(meta, gl.DYNAMIC_DRAW, "aMeta", 2);
-  buffer(stat, gl.STATIC_DRAW, "aStatic", 3);
+  const fromBuf = buffer(from, gl.DYNAMIC_DRAW, "aFrom", 3);
+  const toBuf = buffer(to, gl.DYNAMIC_DRAW, "aTo", 4);
+  const lookBuf = buffer(look, gl.DYNAMIC_DRAW, "aLook", 4);
+  buffer(stat, gl.STATIC_DRAW, "aStatic", 4);
+  /** Hand the card the new starts and ends. Only when the shape changes, never per frame. */
+  const upload = () => {
+    for (const [buf, data] of [
+      [fromBuf, from],
+      [toBuf, to],
+      [lookBuf, look],
+    ]) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, data);
+    }
+  };
   gl.disable(gl.DEPTH_TEST);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE);
   gl.clearColor(0, 0, 0, 0);
 
+  const clock = () => performance.now() / 1000;
+  const born = clock();
   let aspect = 1;
   let name = "";
   let shape = scene("field", 1);
+  let wander = 0.03; // how much the shape's points drift round their places
+  let changed = born; // when the shape last changed
+  let spin = 0;
+  let opacity = 0;
+  let opacityT = 1;
+  let grain = 1;
   let anchor = null; // the element on the page the shape sits in, if the cue names one
   const boxOf = (el) => {
     const r = el.getBoundingClientRect();
@@ -586,88 +654,137 @@ export function initSwarm({ reduced = false } = {}) {
     shape.cx = b.cx;
     shape.cy = b.cy;
   };
-  let spin = 0;
-  let opacity = 0;
-  let opacityT = 1;
-  let grain = 1;
   const dustTo = (i) => {
-    loc[i * 3] = (rand() * 2 - 1) * aspect * 1.45;
-    loc[i * 3 + 1] = (rand() * 2 - 1) * 1.35;
-    loc[i * 3 + 2] = -3.6 + rand() * 4.8;
+    to[i * 4] = (rand() * 2 - 1) * aspect * 1.45;
+    to[i * 4 + 1] = (rand() * 2 - 1) * 1.35;
+    to[i * 4 + 2] = -3.6 + rand() * 4.8;
+    to[i * 4 + 3] = 0;
   };
-  /** Send the shape's points to their new places. */
-  const assign = (kick) => {
+  /**
+   * Freeze every point where it is right now, as the start of its next flight. This is the
+   * shader's own arithmetic, done once here whenever the shape changes.
+   */
+  const capture = () => {
+    const now = clock();
+    const t = now - born;
+    const T = reduced ? 1e3 : now - changed;
+    const has = !!shape.pts;
+    const ct = Math.cos(shape.tilt);
+    const st = Math.sin(shape.tilt);
+    const cr = Math.cos(shape.roll);
+    const sr = Math.sin(shape.roll);
+    const k = Math.min(1, Math.max(0, T / 0.9));
+    for (let i = 0; i < N; i++) {
+      const j = i * 4;
+      const f = i * 3;
+      let x = to[j];
+      let y = to[j + 1];
+      let z = to[j + 2];
+      const inShape = i < NS;
+      if (inShape && has) {
+        const a = spin * to[j + 3];
+        const c = Math.cos(a);
+        const s = Math.sin(a);
+        const x2 = x * c + z * s;
+        z = -x * s + z * c;
+        x = x2;
+        const y2 = y * ct - z * st;
+        z = y * st + z * ct;
+        y = y2;
+        const x3 = x * cr - y * sr;
+        y = x * sr + y * cr;
+        x = x3 + shape.cx;
+        y += shape.cy;
+        z += shape.cz;
+      }
+      const ph = stat[j + 1];
+      const wa = inShape ? wander : 0.03;
+      x += Math.sin(t * 0.6 + ph * 40) * wa;
+      y += Math.cos(t * 0.47 + ph * 61) * wa;
+      let e = Math.min(1, Math.max(0, T / (0.8 + 1.3 * stat[j + 3])));
+      e = 1 - (1 - e) * (1 - e) * (1 - e);
+      const dx = x - from[f];
+      const dy = y - from[f + 1];
+      const dz = z - from[f + 2];
+      const arc = 0.22 * Math.sin(e * Math.PI);
+      const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      from[f] += dx * e - dy * arc;
+      from[f + 1] += dy * e + dx * arc;
+      from[f + 2] += dz * e + (ph - 0.5) * 1.6 * len * arc;
+      look[j] += (look[j + 2] - look[j]) * k;
+      look[j + 1] += (look[j + 3] - look[j + 1]) * k;
+    }
+  };
+  /** Give the shape's points their new places. */
+  const assign = () => {
     const p = shape.pts;
     const count = p ? p.length / 5 : 0;
+    wander = count ? 0.005 : 0.03;
     for (let i = 0; i < NS; i++) {
+      const j = i * 4;
       if (count) {
         const k = Math.floor(rand() * count) * 5;
-        loc[i * 3] = p[k];
-        loc[i * 3 + 1] = p[k + 1];
-        loc[i * 3 + 2] = p[k + 2] + (rand() - 0.5) * (shape.depth || 0);
-        goldT[i] = p[k + 3];
-        spinW[i] = p[k + 4];
-        briT[i] = shape.bright * (0.7 + rand() * 0.3);
-        wander[i] = 0.005;
+        to[j] = p[k];
+        to[j + 1] = p[k + 1];
+        to[j + 2] = p[k + 2] + (rand() - 0.5) * (shape.depth || 0);
+        to[j + 3] = p[k + 4];
+        look[j + 2] = p[k + 3];
+        look[j + 3] = shape.bright * (0.7 + rand() * 0.3);
       } else {
         dustTo(i);
-        loc[i * 3 + 2] = -3.8 + rand() * 3; // the field sits further back than the dust
-        goldT[i] = rand() < 0.7 ? 1 : 0;
-        spinW[i] = 0;
-        briT[i] = shape.bright * (0.35 + rand() * 0.65);
-        wander[i] = 0.03;
-      }
-      if (kick) {
-        // leave in a swirl, not a straight line
-        const j = i * 3;
-        vel[j] += -pos[j + 1] * 0.012 + (rand() - 0.5) * 0.02;
-        vel[j + 1] += pos[j] * 0.012 + (rand() - 0.5) * 0.02;
-        vel[j + 2] += (rand() - 0.5) * 0.05;
+        to[j + 2] = -3.8 + rand() * 3; // the field sits further back than the dust
+        look[j + 2] = rand() < 0.7 ? 1 : 0;
+        look[j + 3] = shape.bright * (0.35 + rand() * 0.65);
       }
     }
   };
   const set = (next, { force = false } = {}) => {
     if (next === name && !force) return;
+    capture();
     name = next;
     shape = scene(name, aspect, anchor ? boxOf(anchor) : null);
     spin = 0;
-    assign(!reduced && !force);
-    if (reduced) snap();
+    assign();
+    upload();
+    changed = clock();
+    if (reduced) still();
   };
 
-  // ---- pointer, scroll, size
+  // ---- pointer, clicks, scroll, size
   let pointer = null;
   let rx = 0;
   let ry = 0;
   let lift = 0; // a nudge from scrolling
   let lastY = scrollY;
-  if (!reduced && matchMedia("(hover: hover) and (pointer: fine)").matches) {
-    addEventListener(
-      "pointermove",
-      (e) =>
-        (pointer = {
-          x: (e.clientX / innerWidth) * 2 - 1,
-          y: 1 - (e.clientY / innerHeight) * 2,
-        }),
-      { passive: true },
-    );
-    document.documentElement.addEventListener(
-      "pointerleave",
-      () => (pointer = null),
-    );
-  }
-  // a click sends a shockwave through whatever is near it
   let burst = null;
-  if (!reduced)
+  if (!reduced) {
+    if (matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      addEventListener(
+        "pointermove",
+        (e) =>
+          (pointer = {
+            x: (e.clientX / innerWidth) * 2 - 1,
+            y: 1 - (e.clientY / innerHeight) * 2,
+          }),
+        { passive: true },
+      );
+      document.documentElement.addEventListener(
+        "pointerleave",
+        () => (pointer = null),
+      );
+    }
+    // a click sends a shockwave through whatever is near it
     addEventListener(
       "pointerdown",
       (e) =>
         (burst = {
           x: ((e.clientX / innerWidth) * 2 - 1) * aspect,
           y: 1 - (e.clientY / innerHeight) * 2,
+          at: clock(),
         }),
       { passive: true },
     );
+  }
   const cues = [...document.querySelectorAll("[data-swarm]")].map((el) => ({
     el,
     at: el.dataset.swarmAt ? document.querySelector(el.dataset.swarmAt) : null,
@@ -690,19 +807,17 @@ export function initSwarm({ reduced = false } = {}) {
     const moved = at !== anchor;
     anchor = at;
     set(next, { force: moved && next === name });
-    if (reduced && anchor) {
-      follow();
-      snap();
-    }
+    if (reduced) still();
   };
   let queued = 0;
   addEventListener(
     "scroll",
     () => {
-      lift = Math.max(
-        -0.02,
-        Math.min(0.02, lift + (scrollY - lastY) * 0.00005),
-      );
+      if (!reduced)
+        lift = Math.max(
+          -0.06,
+          Math.min(0.06, lift + (scrollY - lastY) * 0.00012),
+        );
       lastY = scrollY;
       queued ||= requestAnimationFrame(() => {
         queued = 0;
@@ -711,8 +826,11 @@ export function initSwarm({ reduced = false } = {}) {
     },
     { passive: true },
   );
+  // ---- how hard the card has to work: full quality first, less if the device can't keep up
+  let quality = 0; // 0 full, 1 lower resolution, 2 and 3 fewer points as well
   const fit = () => {
-    const dpr = Math.min(small ? 1.5 : 1.75, devicePixelRatio || 1);
+    const cap = quality > 0 ? 1 : small ? 1.5 : 1.75;
+    const dpr = Math.min(cap, devicePixelRatio || 1);
     const w = innerWidth;
     const h = innerHeight;
     canvas.width = Math.round(w * dpr);
@@ -721,164 +839,114 @@ export function initSwarm({ reduced = false } = {}) {
     aspect = w / h;
     gl.uniform1f(U.uAspect, aspect);
     gl.uniform1f(U.uPx, canvas.height);
+  };
+  const resized = () => {
+    fit();
+    if (!name) return;
+    name = ""; // rebuild the shape for the new size (this freezes every point where it is first)
+    refresh();
+    if (!name) set("field");
     for (let i = NS; i < N; i++) dustTo(i);
-    if (name) set(name, { force: true });
+    upload();
+    if (reduced) still();
   };
   let resizeTimer = 0;
   addEventListener("resize", () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      fit();
-      if (reduced) snap();
-    }, 150);
+    resizeTimer = setTimeout(resized, 150);
   });
 
-  // ---- the frame
-  /** Where point i belongs right now, written into out[0..2]. */
-  const out = [0, 0, 0];
-  const home = (i, t) => {
-    const j = i * 3;
-    let x = loc[j];
-    let y = loc[j + 1];
-    let z = loc[j + 2];
-    if (i < NS && shape.pts) {
-      const w = spinW[i];
-      if (w) {
-        const a = spin * w;
-        const c = Math.cos(a);
-        const s = Math.sin(a);
-        const x2 = x * c + z * s;
-        z = -x * s + z * c;
-        x = x2;
-      }
-      if (shape.tilt) {
-        const c = Math.cos(shape.tilt);
-        const s = Math.sin(shape.tilt);
-        const y2 = y * c - z * s;
-        z = y * s + z * c;
-        y = y2;
-      }
-      if (shape.roll) {
-        const c = Math.cos(shape.roll);
-        const s = Math.sin(shape.roll);
-        const x2 = x * c - y * s;
-        y = x * s + y * c;
-        x = x2;
-      }
-      x += shape.cx;
-      y += shape.cy;
-      z += shape.cz;
-    }
-    const wa = wander[i];
-    const ph = phase[i];
-    out[0] = x + Math.sin(t * 0.6 + ph * 40) * wa;
-    out[1] = y + Math.cos(t * 0.47 + ph * 61) * wa;
-    out[2] = z;
-  };
-  const draw = (t) => {
-    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, pos);
-    gl.bindBuffer(gl.ARRAY_BUFFER, metaBuf);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, meta);
+  // ---- the frame: a few numbers for the card, then draw
+  const draw = (t, T) => {
     gl.uniform1f(U.uTime, t);
+    gl.uniform1f(U.uT, T);
+    gl.uniform1f(U.uSpin, spin);
+    gl.uniform1f(U.uTilt, shape.tilt);
+    gl.uniform1f(U.uRoll, shape.roll);
+    gl.uniform1f(U.uHasShape, shape.pts ? 1 : 0);
+    gl.uniform1f(U.uWander, wander);
+    gl.uniform1f(U.uLift, lift);
+    gl.uniform3f(U.uCenter, shape.cx, shape.cy, shape.cz);
     gl.uniform2f(U.uRot, ry, rx);
+    gl.uniform3f(
+      U.uPointer,
+      pointer ? pointer.x * aspect : 0,
+      pointer ? pointer.y : 0,
+      pointer ? 1 : 0,
+    );
+    const age = burst ? clock() - burst.at : -1;
+    gl.uniform3f(
+      U.uBurst,
+      burst ? burst.x : 0,
+      burst ? burst.y : 0,
+      age > 1.2 ? -1 : age,
+    );
     gl.uniform1f(U.uOpacity, opacity);
     gl.uniform1f(U.uGrain, grain);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.drawArrays(gl.POINTS, 0, N);
+    const share = quality >= 3 ? 0.35 : quality === 2 ? 0.6 : 1;
+    gl.drawArrays(gl.POINTS, 0, Math.round(NS * share));
+    gl.drawArrays(gl.POINTS, NS, Math.round((N - NS) * share));
   };
-  /** Everything in place at once: the first frame, and every frame with reduced motion. */
-  function snap() {
-    for (let i = 0; i < N; i++) {
-      home(i, 0);
-      pos[i * 3] = out[0];
-      pos[i * 3 + 1] = out[1];
-      pos[i * 3 + 2] = out[2];
-      meta[i * 2] = goldT[i];
-      meta[i * 2 + 1] = briT[i];
-    }
+  /** One frame with everything in place: reduced motion never animates. */
+  function still() {
+    follow();
     opacity = opacityT;
     grain = shape.grain || 1;
-    draw(0);
+    draw(0, 1e3);
   }
   let last = 0;
+  let slow = 0; // a running count of frames that took too long
+  let judged = 0;
   const tick = (ms) => {
     requestAnimationFrame(tick);
-    if (document.hidden) return;
-    const t = ms / 1000;
-    const k = Math.min(2.5, ((ms - last) / 1000) * 60 || 1);
-    follow();
+    if (document.hidden) {
+      last = 0;
+      return;
+    }
+    const dt = last ? ms - last : 16.7;
     last = ms;
+    const k = Math.min(2.5, dt / 16.7);
+    // can this device keep up? Count slow frames over a couple of seconds, and step down if most are
+    if (quality < 3 && dt < 250) {
+      judged++;
+      if (dt > 24) slow++;
+      if (judged >= 120) {
+        if (slow > 60) {
+          quality++;
+          fit();
+        }
+        judged = slow = 0;
+      }
+    }
+    const now = clock();
+    follow();
     spin += shape.spin * (k / 60);
     opacity += (opacityT - opacity) * 0.05 * k;
     grain += ((shape.grain || 1) - grain) * 0.05 * k;
     const tx = pointer ? pointer.x : 0;
     const ty = pointer ? pointer.y : 0;
+    const t = now - born;
     ry += (Math.sin(t * 0.21) * 0.1 + tx * 0.12 - ry) * 0.04 * k;
     rx += (Math.sin(t * 0.16) * 0.03 - ty * 0.06 - rx) * 0.04 * k;
-    const px = tx * aspect;
-    const py = ty;
-    const R2 = 0.05;
-    const damp = Math.pow(0.86, k);
-    const ease = Math.min(1, 0.07 * k);
-    for (let i = 0; i < N; i++) {
-      const j = i * 3;
-      home(i, t);
-      let vx = vel[j] + (out[0] - pos[j]) * stiff[i] * k;
-      let vy =
-        vel[j + 1] +
-        (out[1] - pos[j + 1]) * stiff[i] * k +
-        lift * (0.3 + phase[i]);
-      let vz = vel[j + 2] + (out[2] - pos[j + 2]) * stiff[i] * k;
-      if (pointer) {
-        // the swarm parts around your cursor
-        const dx = pos[j] - px;
-        const dy = pos[j + 1] - py;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < R2 && d2 > 1e-6 && pos[j + 2] > -1.2) {
-          const f = ((1 - d2 / R2) * 0.006 * k) / Math.sqrt(d2);
-          vx += dx * f;
-          vy += dy * f;
-        }
-      }
-      if (burst) {
-        const dx = pos[j] - burst.x;
-        const dy = pos[j + 1] - burst.y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < 0.5) {
-          const f = (0.05 * (1 - d2 / 0.5)) / (Math.sqrt(d2) + 0.08);
-          vx += dx * f;
-          vy += dy * f;
-          vz += (rand() - 0.3) * 0.12 * (1 - d2 / 0.5);
-        }
-      }
-      vx *= damp;
-      vy *= damp;
-      vz *= damp;
-      vel[j] = vx;
-      vel[j + 1] = vy;
-      vel[j + 2] = vz;
-      pos[j] += vx * k;
-      pos[j + 1] += vy * k;
-      pos[j + 2] += vz * k;
-      meta[i * 2] += (goldT[i] - meta[i * 2]) * ease;
-      meta[i * 2 + 1] += (briT[i] - meta[i * 2 + 1]) * ease;
-    }
-    burst = null;
-    lift *= Math.pow(0.8, k);
-    draw(t);
+    lift *= Math.pow(0.9, k);
+    draw(t, now - changed);
   };
 
+  // start scattered wide, then fly in
   fit();
+  for (let i = 0; i < N; i++) {
+    from[i * 3] = (rand() * 2 - 1) * aspect * 2.2;
+    from[i * 3 + 1] = (rand() * 2 - 1) * 2;
+    from[i * 3 + 2] = -4 + rand() * 4;
+    to.set([from[i * 3], from[i * 3 + 1], from[i * 3 + 2], 0], i * 4);
+  }
+  changed = born - 100; // nothing is in flight yet, so the first capture leaves the scatter as it is
   refresh();
   if (!name) set("field");
-  // start scattered wide, then fly in
-  for (let i = 0; i < N; i++) {
-    pos[i * 3] = (rand() * 2 - 1) * aspect * 2.2;
-    pos[i * 3 + 1] = (rand() * 2 - 1) * 2;
-    pos[i * 3 + 2] = -4 + rand() * 4;
-  }
-  if (reduced) snap();
+  for (let i = NS; i < N; i++) dustTo(i);
+  upload();
+  if (reduced) still();
   else requestAnimationFrame(tick);
   // shapes with words in them are redrawn once the font is in
   document.fonts?.ready.then(

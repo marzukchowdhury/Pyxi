@@ -59,6 +59,7 @@ export function initHero3D({ reduced = false } = {}) {
     threshold: 0.05,
   }).observe(hero);
   let last = 0;
+  let lastTilt = "";
   const tick = (time) => {
     requestAnimationFrame(tick);
     if (!visible || document.hidden) return;
@@ -66,8 +67,13 @@ export function initHero3D({ reduced = false } = {}) {
     last = time;
     mx += (tx - mx) * 0.08 * dt;
     my += (ty - my) * 0.08 * dt;
-    stage.style.setProperty("--ry", `${(mx * 10).toFixed(2)}deg`);
-    stage.style.setProperty("--rx", `${(-my * 7).toFixed(2)}deg`);
+    // only touch the page when the tilt really changed: a still mouse costs nothing
+    const tilt = `${(mx * 10).toFixed(2)},${(-my * 7).toFixed(2)}`;
+    if (tilt !== lastTilt) {
+      lastTilt = tilt;
+      stage.style.setProperty("--ry", `${(mx * 10).toFixed(2)}deg`);
+      stage.style.setProperty("--rx", `${(-my * 7).toFixed(2)}deg`);
+    }
     if (!ctx || !w) return;
     ctx.clearRect(0, 0, w, h);
     for (const m of motes) {
