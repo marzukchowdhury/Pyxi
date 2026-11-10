@@ -339,6 +339,17 @@ EVENTS = """<!doctype html><title>Other events</title>
  document.getElementById("so").addEventListener("click", () => { state.textContent = "hover menu used"; });
 </script>"""
 
+# A sign-in form taller than the window: the password field is at the top, a field with no
+# label (only a placeholder) far below it.
+TALL = """<!doctype html><title>Join</title>
+<h1>Join</h1>
+<form id="f">
+ <p><label>Password <input type="password" name="pw"></label></p>
+ <div style="height:2600px"></div>
+ <p><input name="code" placeholder="Member code"></p>
+ <p><label>City <input name="city"></label></p>
+</form>"""
+
 LINKS = """<!doctype html><title>Links</title>
 <h1>Links</h1>
 <p><a href="/plain" target="_blank" rel="noopener">Open the cake form in a new tab</a></p>
@@ -361,6 +372,7 @@ PAGES: dict[str, str] = {
     "/shadow": SHADOW,
     "/rich": RICH,
     "/links": LINKS,
+    "/tall": TALL,
     "/events": EVENTS,
     "/start": "<!doctype html><title>Ready</title><h1>Ready</h1><p>The check starts here.</p>",
 }
@@ -1256,6 +1268,34 @@ class Check:
             if not refused:
                 note += "; it was typed into" if not untouched else "; not refused, but nothing went in"
             self.row("private field", f"{words}: {why}", found=flagged, acted=refused, confirmed=refused and untouched, note=note.strip("; "))
+        # The password field scrolled out of sight: its form's unlabelled field is still left alone.
+        self.b.hand_back()
+        await s.go("/tall")
+        try:
+            page = await self.read()
+            await self.link.call(
+                "scroll", {"tab": self.b.hwnd, "page": page["page"], "host": host_of(page["tab"]["url"]), "direction": "bottom"},
+                browser=self.hint,
+            )  # fmt: skip
+            await until(lambda: s.state()["scrollY"] > 1500, 4)
+            below = await self.read()
+            code = item_of(below, "Member code")
+            flagged = bool(code and code.get("sensitive"))
+            refused = False
+            try:
+                await self.do("type", below, code, text="hunter2")
+            except BrowserError as exc:
+                refused = exc.code == "sensitive"
+            await asyncio.sleep(0.3)
+            untouched = s.state()["fields"].get("code") == ""
+            await self.do("type", below, item_of(below, "City"), text="Dhaka")
+            labelled = await until(lambda: s.state()["fields"].get("city") == "Dhaka", 3)
+            self.row(
+                "private field", "no label, and its form's password field is scrolled past", found=flagged, acted=refused,
+                confirmed=refused and untouched and labelled, note="" if labelled else "the labelled field beside it was not typed into",
+            )  # fmt: skip
+        except (BrowserError, TypeError) as exc:
+            self.row("private field", "no label, and its form's password field is scrolled past", found=False, note=str(exc)[:100])
         # "Show password" swaps the password field for a text field with the same hint.
         self.b.hand_back()
         await s.go("/private")

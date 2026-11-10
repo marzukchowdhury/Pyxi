@@ -69,22 +69,15 @@ from pyxi.browserlink import BrowserError, host_of, site_of
 
 log = logging.getLogger(__name__)
 
-# The browsers this works in, by program name: (what people call it, its engine). Chrome,
-# Edge and Firefox are measured (scripts/screen_tab_check.py). The rest are the same two
-# engines under another name and are let in on that basis, unmeasured.
+# The browsers this works in, by program name: (what people call it, its engine). Only the
+# three it was measured in (scripts/screen_tab_check.py), and in which a private window is
+# known to be told from an ordinary one. Any other browser, the forks on the same engines
+# included, is not a browser as far as this is concerned: it is never read or worked in.
 BROWSERS = {
     "chrome.exe": ("Chrome", "chromium"),
     "msedge.exe": ("Edge", "chromium"),
     "firefox.exe": ("Firefox", "gecko"),
-    "brave.exe": ("Brave", "chromium"),
-    "vivaldi.exe": ("Vivaldi", "chromium"),
-    "opera.exe": ("Opera", "chromium"),
-    "chromium.exe": ("Chromium", "chromium"),
-    "librewolf.exe": ("LibreWolf", "gecko"),
-    "waterfox.exe": ("Waterfox", "gecko"),
-    "zen.exe": ("Zen", "gecko"),
 }
-MEASURED = ("chrome.exe", "msedge.exe", "firefox.exe")
 
 VISIBLE_ONLY = (
     "Without Pyxi's browser extension only the tab that is showing can be reached, not "
@@ -204,6 +197,10 @@ class Snapshot:
     root: El
     scroll: tuple[float, float] | None = None  # (percent of the way down, percent in view)
     cut: bool = False  # the page was too big to read whole
+    # The forms (by their identity; the page's own for fields outside any form) that hold a
+    # password field anywhere in them, also in parts of the page that were not fetched
+    # because they are scrolled past. None: it couldn't be found out, and every form counts.
+    password_scopes: frozenset[tuple[int, ...]] | None = frozenset()
 
 
 class Driver:
@@ -242,7 +239,8 @@ class Driver:
     def do(self, handle: Any, way: str, text: str = "") -> None:
         raise NotImplementedError
 
-    def options(self, handle: Any) -> list[El]:
+    def options(self, handle: Any, page_url: str = "") -> list[El]:
+        """A dropdown's options, never those inside a frame that belongs to another site."""
         return []
 
     def has_children(self, handle: Any) -> bool:
@@ -562,6 +560,13 @@ def outline(
 
     find_passwords(snap.root, snap.root)
 
+    def beside_password(scope: El) -> bool:
+        # From the whole form, not only from the part of the page that was fetched: a
+        # password field that has been scrolled past still makes its neighbours suspect.
+        if snap.password_scopes is None:
+            return True  # it couldn't be found out: every form counts
+        return id(scope) in with_password or scope.rid in snap.password_scopes
+
     lines: list[list[str]] = []
     owner: Any = None
     size = 0
@@ -586,7 +591,7 @@ def outline(
         # Private or not is decided first: what a private field is called never comes from
         # what is in it.
         secret = private_kind(el, was_password(el))
-        if not secret and kind in ("text field", "text area") and id(scope) in with_password:
+        if not secret and kind in ("text field", "text area") and beside_password(scope):
             secret = "unclear" if unclear_beside_password(el, visible) else ""
         inner = _inner_text(el, 90, snap.doc.url)
         item: dict[str, Any] = {"kind": kind, "label": shown_label(el, kind, secret, inner)}
@@ -605,7 +610,7 @@ def outline(
                 item["search"] = True
         elif kind == "dropdown":
             item["value"] = _clean(el.value, 60)
-            options = [_clean(o.name, 40) for o in _options_of(el)][:14]
+            options = [_clean(o.name, 40) for o in _options_of(el, snap.doc.url)][:14]
             if options:
                 item["options"] = options
         elif kind == "dropdown box":
@@ -703,11 +708,15 @@ def _has_size(el: El) -> bool:
     return right - left > 1 and bottom - top > 1
 
 
-def _options_of(el: El) -> list[El]:
+def _options_of(el: El, page_url: str = "") -> list[El]:
+    """The options under a dropdown. With ``page_url``, not those inside a frame that
+    belongs to another site: the fence around such a frame holds for options too."""
     out: list[El] = []
     stack = list(reversed(el.children))
     while stack:
         node = stack.pop()
+        if page_url and foreign_frame(node, page_url):
+            continue
         if node.role == "ListItem":
             out.append(node)
         else:
@@ -769,6 +778,10 @@ class _Read:
     doc: tuple[int, ...]
     url: str
     refs: dict[str, tuple[El, dict[str, Any]]] = field(default_factory=dict)
+
+
+class Unanswered(Exception):
+    """The browser took too long over something, so the answer would be a guess."""
 
 
 class _NeedsAllow(BrowserError):
@@ -833,6 +846,10 @@ class ScreenLink:
         self._may_act: set[str] = set()  # sites they chose "Always allow" for, until Pyxi restarts
         self._for_task: dict[str, set[str]] = {}  # task -> sites they said it may read and work in
         self._task = ""  # the task whose requests are coming in
+        # The task that is running now, as the brain knows it. A new task asks whether it
+        # may act (tabwork's consent) before it has sent a single request here, so "the task
+        # whose requests are coming in" is still the one before: the brain is asked instead.
+        self.current_task: Callable[[], str] | None = None
         self._declined: dict[str, float] = {}
         self.open_wait_s = 20.0  # how long an address handed to the browser gets to show up
         self.enabled = True
@@ -863,7 +880,8 @@ class ScreenLink:
         # allowed here (nor the other way): what the user said yes to there was the
         # extension, working in a site the browser let it into.
         site = same_place(site)
-        return site in self._may_act or site in self._for_task.get(self._task, ())
+        task = self.current_task() if self.current_task is not None else self._task
+        return site in self._may_act or (bool(task) and site in self._for_task.get(task, ()))
 
     def allow_site(self, site: str) -> None:
         self._may_act.add(same_place(site))
@@ -912,9 +930,10 @@ class ScreenLink:
             raise BrowserError("not_connected", "Working in the tab on screen is switched off.")
         if getattr(self, f"_cmd_{name}", None) is None:
             raise BrowserError("failed", "That can't be done without Pyxi's browser extension.")
-        if run:
+        if run and run != self._task:
+            # A yes to working in a site was for one task: it goes when another one starts.
             self._task = run
-            for old in list(self._for_task)[:-8]:
+            for old in [t for t in self._for_task if t != run]:
                 self._for_task.pop(old, None)
         for _ in range(3):
             try:
@@ -1052,6 +1071,8 @@ class ScreenLink:
         old = self._watch.pop(run, None)
         if old is not None:
             old.cancel()
+        if not args.get("on"):
+            self._for_task.pop(run, None)  # the task is over: so is its yes
         if args.get("on"):
             hwnd = self._handle(args.get("tab"), hint)
             self.driver.esc_down()  # an Esc from before the task doesn't count
@@ -1145,7 +1166,10 @@ class ScreenLink:
         end = time.monotonic() + wait_s
         while True:
             # A page whose accessibility has only just been woken has no address yet.
-            doc = self.driver.document(hwnd)
+            try:
+                doc = self.driver.document(hwnd)
+            except Unanswered:
+                doc = None
             if (doc is not None and doc.url) or time.monotonic() > end:
                 break
             time.sleep(0.2)
@@ -1186,8 +1210,10 @@ class ScreenLink:
         window = self._window(hwnd)
         try:
             doc = self.driver.document(hwnd)
-        except Exception:
-            doc = None
+        except Exception as exc:
+            # Not "a window with no page": the browser didn't answer, and tabwork's checks
+            # of the address would have nothing to check.
+            raise self._not_showing(f"the browser didn't say which page is showing ({type(exc).__name__})") from None
         return self._brief(hwnd, doc, window)
 
     def _cmd_tabs(self, args: dict[str, Any], job: _Job, hint: str) -> dict[str, Any]:
@@ -1482,7 +1508,7 @@ class ScreenLink:
         if kind != "dropdown":
             raise BrowserError("failed", "That isn't a plain dropdown. Click it, read the page again, then click the option.")
         opened = False
-        options = self.driver.options(el.handle)
+        options = self.driver.options(el.handle, doc.url)
         if not options and "ExpandCollapse" in el.patterns:
             # Chrome and Edge only list a dropdown's options while it is open.
             opened = True
@@ -1495,7 +1521,7 @@ class ScreenLink:
                 end = time.monotonic() + 2.0
                 while not options and time.monotonic() < end:
                     time.sleep(0.15)
-                    options = self.driver.options(el.handle)
+                    options = self.driver.options(el.handle, doc.url)
                 if options:
                     break
         try:
@@ -1774,6 +1800,8 @@ def fallback(brain: Any) -> ScreenLink | None:
         brain._screen_tab = link
     if link.read_gate is None and getattr(brain, "hub", None) is not None:
         link.read_gate = _read_card(brain)
+    if link.current_task is None:
+        link.current_task = lambda: str(getattr(getattr(brain, "_tab_operator", None), "run_id", "") or "")
     link.keys = bool(getattr(screen, "tab_keys", True))
     return link if link.connected else None
 
@@ -1791,24 +1819,37 @@ def _read_card(brain: Any) -> Callable[[str, str, bool], Awaitable[Any]]:
 
     async def ask(site: str, title: str, for_task: bool) -> Any:
         page = _clean(title, 60).replace(chr(34), chr(39))
+        job = next(
+            (j for j in reversed(list(brain.jobs.jobs.values())) if j.status == "running" and j.agent_name == "Pyxi"),
+            None,
+        )
         if for_task:
+            task = _clean(job.task if job is not None else "", 300).replace(chr(34), chr(39))
             action = f"Let Pyxi read and work in {site} in your browser?"
             reason = (
-                "No browser extension is connected, so Pyxi would work in the page that is showing "
-                f'in your browser ("{page}"): read its text and what is in its fields (never '
-                "passwords or card details), and click and type there for this task, without your "
-                "mouse. Anything that sends, submits, buys, deletes or posts asks you again."
+                (f"Task: {task}\n" if task else "")
+                + f'No browser extension is connected, so Pyxi would work in the page that is showing ("{page}"), '
+                "without your mouse. This allows two things:\n"
+                f"- reading {site} (its text and what is in its fields, never passwords or card details), "
+                "for this task and later ones, until Pyxi restarts;\n"
+                "- clicking and typing there, for this task only.\n"
+                "Anything that sends, submits, buys, deletes or posts asks you again."
             )
         else:
             action = f"Let Pyxi read {site} in your browser?"
             reason = (
                 "No browser extension is connected, so Pyxi would read the page that is showing "
                 f'in your browser ("{page}"): its text, and what is in its fields, never passwords '
-                "or card details. This lasts until Pyxi restarts. It asks again before it clicks or "
-                "types anything there."
+                f"or card details. This allows reading {site} until Pyxi restarts, now and later. It "
+                "asks again before it clicks or types anything there."
             )
         return await brain.hub.request(
-            "confirm", timeout=300, job_id="", agent="Pyxi", action=action, reason=reason
+            "confirm",
+            timeout=300,
+            job_id=job.id if for_task and job is not None else "",
+            agent="Pyxi",
+            action=action,
+            reason=reason,
         )
 
     return ask
@@ -1923,24 +1964,37 @@ _NAME_IS_ENOUGH = {"Button", "Hyperlink", "MenuItem", "TabItem"}
 _BRACKETED_END = re.compile(r"[(（\[［][^()（）\[\]［］]*[)）\]］]$")
 
 
+def _same_words(text: str) -> str:
+    return "".join(c for c in " ".join(text.split()) if c not in "\u200b\u200e\u200f\ufeff")
+
+
 def private_verdict(engine: str, title: str, shell: list[tuple[str, str, str]]) -> bool | None:
     """Is a browser window a private one, from its title and the (class, id, name) of the
-    elements at the top of its shell? None when the shell didn't show what it takes to
-    tell: the caller treats that as private."""
+    elements at the top of its shell? None when what it takes to tell wasn't there: the
+    caller treats that as private."""
     if engine == "gecko":
         if any("private-browsing-indicator" in f"{cls} {aid}" for cls, aid, _ in shell):
+            return True
+        # The indicator can be hidden; the title can't. Firefox ends a window's title with
+        # its own name, and puts words after the name for a private window (in whatever
+        # language). The page's title comes before the name and has no say in what follows.
+        at = title.rfind("Mozilla Firefox")
+        if at < 0:
+            return None  # not a title it knows how to read (another edition): not known
+        if title[at + len("Mozilla Firefox") :].strip():
             return True
         # Only a window whose toolbars were really seen is called not private.
         return False if any(aid == "nav-bar" for _, aid, _ in shell) else None
     views = [name.strip() for cls, _, name in shell if cls == "BrowserRootView"]
     if not views:
         return None
-    ending = _BRACKETED_END.search(views[0])
-    if ending is None:
+    if _BRACKETED_END.search(views[0]) is None:
         return False
-    # A window that is only a page (an installed web app) is named after the page, which
-    # may end in a bracket: then the window's title ends the same way.
-    return not title.strip().endswith(ending.group(0))
+    # The bracketed word is an addition to the window's title. A window whose name simply
+    # is its title (an installed web app showing a page called "Notes (draft)") has none;
+    # a private one has it even when the page's own title ends in a bracket too. (A profile
+    # whose name ends in a bracket reads as an addition as well, and is refused.)
+    return _same_words(views[0]) != _same_words(title)
 
 
 # A browser that a program is driving (Pyxi's own booking browser, a test run): not the
@@ -2265,6 +2319,41 @@ class UiaDriver(Driver):
                 el.children.append(self._el(array.GetElement(i), True, budget))
         return el
 
+    def _password_scopes(self, raw: Any, doc: tuple[int, ...], page_url: str) -> frozenset[tuple[int, ...]] | None:
+        """The forms (or the page, for a field outside any form) that hold a password field,
+        asked of the browser in one search over the whole page: also the parts that are not
+        fetched because they are scrolled past. None if the browser didn't answer."""
+        _, ui, _, one, _ = self._uia()
+        try:
+            found = raw.FindAllBuildCache(4, ui.CreatePropertyCondition(_P_PASSWORD, True), one)  # 4: descendants
+            walker = ui.RawViewWalker
+            scopes: set[tuple[int, ...]] = set()
+            for i in range(found.Length if found else 0):
+                up = found.GetElement(i)
+                scope: tuple[int, ...] | None = doc
+                for _ in range(80):
+                    up = walker.GetParentElementBuildCache(up, one)
+                    if not up:
+                        break
+                    rid = tuple(int(v) for v in (up.GetCachedPropertyValue(_P_RID) or ()))
+                    if rid == doc:
+                        break
+                    kind = int(up.GetCachedPropertyValue(_P_TYPE) or 0)
+                    if kind == _DOCUMENT and up.GetCachedPropertyValue(30043):
+                        address = str(up.GetCachedPropertyValue(_P_VALUE) or "")
+                        if frame_site(address) != site_of(page_url):
+                            scope = None  # in another site's frame: not this page's business
+                            break
+                    if str(up.GetCachedPropertyValue(_P_ARIA) or "") == "form":
+                        scope = rid
+                        break
+                if scope is not None:
+                    scopes.add(scope)
+            return frozenset(scopes)
+        except Exception as exc:
+            log.info("screen tab: couldn't ask where the password fields are: %s", exc)
+            return None
+
     def _documents(self, hwnd: int) -> list[tuple[Any, str, bool, int]]:
         """Every web document in the window, in reading order: (element, address, on screen,
         its area). The browser's own shell is walked only as far as each document (a
@@ -2305,6 +2394,10 @@ class UiaDriver(Driver):
                 if depth < 16:
                     below.append((child, depth + 1))
             stack.extend(reversed(below))
+        if stack:
+            # The look was cut short (the time ran out, or the window is enormous): a page
+            # picked from half a look could be a side panel's, so nothing is picked.
+            raise Unanswered("the browser's window took too long to look through")
         return found
 
     def _find_document(self, hwnd: int) -> Any:
@@ -2331,11 +2424,12 @@ class UiaDriver(Driver):
         first = raw.BuildUpdatedCache(kids)
         root = self._el(first, False)
         root.handle = raw
+        view_top = root.rect[1]
         count = 1
         cut = False
-        stack: list[El] = [root]
+        stack: list[tuple[El, bool]] = [(root, False)]
         while stack:
-            el = stack.pop()
+            el, whole = stack.pop()
             if count >= max_nodes or time.monotonic() > deadline:
                 cut = True
                 break
@@ -2352,9 +2446,14 @@ class UiaDriver(Driver):
                 if count >= max_nodes:
                     cut = True
                     break
-            view_top = root.rect[1]
+            # An element with no name of its own that can be pressed is called by the words
+            # inside it, all of them: it is gone into whole, wherever the page is scrolled
+            # to, so that those words are the same when it is read and when it is acted on.
+            whole = whole or (el.role in _GENERIC and "Invoke" in el.patterns and not el.name.strip())
             stack.extend(
-                c for c in reversed(el.children) if not _leaf(c) and not (from_view and above_view(c, view_top))
+                (c, whole)
+                for c in reversed(el.children)
+                if not _leaf(c) and not (from_view and not whole and above_view(c, view_top))
             )
         return root, cut
 
@@ -2364,7 +2463,8 @@ class UiaDriver(Driver):
             return None
         root, cut = self._tree(raw, max_nodes, time.monotonic() + budget_s, from_view=True)
         doc = Doc(root.rid, root.value.strip(), root.name, root.props.get("busy") == "true", raw)
-        return Snapshot(doc, root, self.scroll_state(doc), cut=cut)
+        scopes = self._password_scopes(raw, root.rid, doc.url)
+        return Snapshot(doc, root, self.scroll_state(doc), cut=cut, password_scopes=scopes)
 
     def _where(self, raw: Any, doc: tuple[int, ...]) -> tuple[str, ...] | None:
         """The frames an element sits in, between it and the document; None if it isn't
@@ -2457,12 +2557,12 @@ class UiaDriver(Driver):
         else:
             raise LookupError(way)
 
-    def options(self, handle: Any) -> list[El]:
+    def options(self, handle: Any, page_url: str = "") -> list[El]:
         _, _, whole, _, _ = self._uia()
         # Chrome and Edge show an open dropdown's options in the control view only.
         for request in (whole, self._local.controls):
             try:
-                found = _options_of(self._el(handle.BuildUpdatedCache(request), True, [400]))
+                found = _options_of(self._el(handle.BuildUpdatedCache(request), True, [400]), page_url)
             except Exception:
                 found = []
             if found:
