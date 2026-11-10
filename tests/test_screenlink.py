@@ -61,7 +61,9 @@ def compose(rid: tuple[int, ...] = (1, 1), url: str = URL) -> El:
         "Group",
         aria="form",
         children=[
+            text("To"),  # the labels, as words on the page
             El("Edit", name="To", aria="textbox", patterns=field, rect=box, rid=(1, 10)),
+            text("Message"),
             El("Edit", name="Message", aria="textbox", props={"multiline": "true"}, patterns=field, rect=box, rid=(1, 11)),
             El("Edit", name="Password", password=True, value="hunter2", patterns=field, rect=box, rid=(1, 12)),
             El("Edit", name="Card number", aria="textbox", patterns=field, rect=box, rid=(1, 13)),
@@ -1225,7 +1227,7 @@ class Raw:
 
 REQUESTS: list[Any] = []
 DOC, EDIT, TEXT, BUTTON, GROUP, TAB, TABITEM, PANE = 50030, 50004, 50020, 50000, 50026, 50018, 50019, 50033
-VALUE, HAS_VALUE, RID, OFFSCREEN, CLASS, HELP, LABELLED, RECT = 30045, 30043, 30000, 30022, 30012, 30013, 30104, 30001
+VALUE, HAS_VALUE, RID, OFFSCREEN, CLASS, HELP, RECT = 30045, 30043, 30000, 30022, 30012, 30013, 30001
 
 
 def uia(monkeypatch, top: Raw | None = None, cursor: Raw | None = None) -> screenlink.UiaDriver:
@@ -1260,7 +1262,7 @@ def test_a_page_whose_title_has_a_private_word_still_has_its_address(monkeypatch
     assert field.value == "" and driver._el(Raw(EDIT, "City", props={VALUE: "Dhaka", HAS_VALUE: True}), False).value == "Dhaka"
     # Where a name came from, for the rule about unlabelled fields beside a password.
     how = lambda props=None, name="Login": driver._el(Raw(EDIT, name, props=props), False).named_by  # noqa: E731
-    assert how({HELP: "Login"}) == "hint" and how({LABELLED: object()}) == "label" and how() == "other" and how(name="") == ""
+    assert how({HELP: "Login"}) == "hint" and how({HELP: "Your sign-in name"}) == "other" and how() == "other" and how(name="") == ""
 
 
 def test_a_big_page_is_read_in_bounded_pieces_and_never_in_one_request(monkeypatch):
@@ -1404,42 +1406,50 @@ def test_a_browser_that_a_program_is_driving_is_never_the_users(monkeypatch):
     assert driver.is_own(100) is True and driver.is_own(200) is False  # Pyxi's booking browser; theirs
 
 
-async def test_an_unlabelled_field_beside_a_password_is_left_to_them():
-    def page_with(*fields: El, password: bool = True) -> El:
-        root = compose()
-        form = El("Group", aria="form", children=list(fields))
+async def test_a_field_with_no_label_on_the_page_beside_a_password_is_left_to_them():
+    def page_with(password: bool = True) -> El:
+        def edit(name: str, rid: int, **more: Any) -> El:
+            return El("Edit", name=name, patterns=P("Value", "LegacyIAccessible"), rect=(0, 0, 9, 9), rid=(2, rid), **more)
+
+        form = El(
+            "Group",
+            aria="form",
+            children=[
+                edit("Login", 1, named_by="hint", help="Login"),  # named only by its placeholder
+                edit("", 2),  # no name at all
+                El("Group", children=[text("Email address: "), edit("Email address", 3)]),  # a label you can see
+                edit("Display name", 4, named_by="other"),  # named in the page's code only (aria-label)
+                edit("Find a member", 5, aria="searchbox", named_by="hint", help="Find a member"),
+            ],
+        )
         if password:
-            form.children.append(El("Edit", name="Password", password=True, patterns=P("Value"), rect=(0, 0, 9, 9), rid=(2, 9)))
-        root.children = [form]
+            form.children.append(edit("Password", 9, password=True))
+        root = compose()
+        root.children = [form, El("Group", children=[text("Nickname"), edit("Nickname", 10)])]  # outside the form
         for el in _all(root):
             el.handle = el
         return root
 
-    def edit(name: str, how: str, rid: int, **more: Any) -> El:
-        return El("Edit", name=name, named_by=how, patterns=P("Value", "LegacyIAccessible"), rect=(0, 0, 9, 9), rid=(2, rid), **more)
-
-    fields = lambda: (  # noqa: E731
-        edit("Login", "hint", 1, help="Login"),  # named only by its placeholder
-        edit("", "", 2),  # no name at all
-        edit("Email address", "label", 3),  # a label on the page
-        edit("Display name", "other", 4),  # named some other way (aria-label)
-        edit("Find a member", "hint", 5, aria="searchbox", help="Find a member"),
-    )
-    link, driver = make()  # Chrome says where a name came from
-    driver.pages[HWND] = page_with(*fields())
-    page = await read(link)
-    flagged = {i["label"]: i.get("sensitive") for i in page["items"]}
-    assert flagged == {"Login": "unclear", "": "unclear", "Email address": None, "Display name": None, "Find a member": None, "Password": "password"}
-    no = await refused(do(link, "type", page, "Login", text="dana"))
-    assert no.code == "sensitive" and "no clear label, beside a password field" in str(no) and driver.did == []
-    assert (await do(link, "type", page, "Email address", text="dana@example.com"))["value"] == "dana@example.com"
-    assert 'text field "Login" (private: theirs to fill, never yours)' in tabwork.render(page)
-    fox, driver2 = make("firefox.exe")  # Firefox doesn't: only a label on the page clears a field
-    driver2.pages[HWND] = page_with(*fields())
-    flagged = {i["label"]: i.get("sensitive") for i in (await read(fox))["items"]}
-    assert flagged["Display name"] == "unclear" and flagged["Email address"] is None
+    for exe in ("chrome.exe", "firefox.exe"):
+        link, driver = make(exe)
+        driver.pages[HWND] = page_with()
+        page = await read(link)
+        flagged = {i["label"]: i.get("sensitive") for i in page["items"]}
+        assert flagged == {
+            "Login": "unclear",
+            "": "unclear",
+            "Email address": None,
+            "Display name": "unclear",
+            "Find a member": None,
+            "Password": "password",
+            "Nickname": None,
+        }, exe
+        no = await refused(do(link, "type", page, "Login", text="dana"))
+        assert no.code == "sensitive" and "no clear label, beside a password field" in str(no) and driver.did == []
+        assert (await do(link, "type", page, "Email address", text="dana@example.com"))["value"] == "dana@example.com"
+        assert 'text field "Login" (private: theirs to fill, never yours)' in tabwork.render(page)
     plain, driver3 = make()  # no password field in the form: nothing is suspect
-    driver3.pages[HWND] = page_with(*fields(), password=False)
+    driver3.pages[HWND] = page_with(password=False)
     assert not any(i.get("sensitive") for i in (await read(plain))["items"])
 
 

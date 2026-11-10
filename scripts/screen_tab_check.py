@@ -389,6 +389,12 @@ class Site:
                 path, _, query = self.path.partition("?")
                 if path == "/slow":
                     time.sleep(3)
+                if path == "/hop":  # sends the browser on to another host name, as a bare domain does to www.
+                    self.send_response(302)
+                    self.send_header("Location", f"http://localhost:{site.port}/plain")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 body = PAGES.get(path, "<!doctype html><title>Blank</title><p>Nothing here.</p>")
                 who = "other" if "who=other" in query else "same"
                 name = path.strip("/") + (f"-{who}" if path == "/inframe" else "")
@@ -484,7 +490,7 @@ class Browser:
         self.extra = extra  # more command line, e.g. to start in a private window
         self.exe = EXES[name]
         self.engine = "gecko" if name == "firefox" else "chromium"
-        self.profile = tmp / f"profile-{name}"
+        self.profile = tmp / f"profile-{name}{'-private' if extra else ''}"
         self.profile.mkdir(parents=True, exist_ok=True)
         self.proc: subprocess.Popen[bytes] | None = None
         self.hwnd = 0
@@ -811,6 +817,10 @@ class Check:
         self.upright()
         return await self.link.call(name, {**seen, **args}, browser=self.hint, timeout=30)
 
+    def wanted(self, group: str, name: str = "") -> bool:
+        words = [w.strip().lower() for w in self.opts.only.split(",") if w.strip()]
+        return not words or any(w in f"{group} {name}".lower() for w in words)
+
     def seen(self) -> str:
         """For a failed read: what the window looked like to the check."""
         state = self.site.state()
@@ -846,7 +856,7 @@ class Check:
         """One measured action: load the page fresh, look for the element in what Pyxi
         reads, act on it, and ask the page whether it happened. ``refuses`` names the
         refusal that is the right outcome (then "confirmed" means the page did not change)."""
-        if self.opts.only and self.opts.only.lower() not in f"{group} {name}".lower():
+        if not self.wanted(group, name):
             return Row(self.b.name, group, name)  # not asked for in this run
         self.b.hand_back()
         try:
@@ -1055,7 +1065,21 @@ class Check:
             lambda st: s.frames.get("frame", {}).get("fields", {}).get("note") == "buy stamps",
         )  # fmt: skip
         await self.case("iframe", "same site: press the frame's button", "/frames", lambda p: item_of(p, "Save in the same frame"), click, frame("inframe-same", "saved:"))
-        await self.case("iframe", "another site's frame: press its button", "/frames", lambda p: item_of(p, "Save in the other frame"), click, frame("inframe-other", "saved:"))
+        if self.wanted("iframe", "another site's frame"):
+            await s.go("/frames")
+            try:
+                page = await self.read()
+                left_out = item_of(page, "Save in the other frame") is None and item_of(page, "Note in the other frame") is None
+                said = f"(a frame from http://localhost:{s.port}" in page["text"] and "Note in the other frame" not in page["text"]
+                own = item_of(page, "Save in the same frame") is not None
+                await asyncio.sleep(0.4)
+                untouched = "saved" not in str(s.frames.get("inframe-other", {}).get("text", {}).get("fstate", ""))
+                self.row(
+                    "iframe", "another site's frame: left out of the page, its text not read", found=own, acted=left_out,
+                    confirmed=left_out and said and untouched, note="" if said else page["text"][-160:],
+                )  # fmt: skip
+            except BrowserError as exc:
+                self.row("iframe", "another site's frame: left out of the page, its text not read", found=False, note=f"{exc.code}: {exc}")
 
         async def dialog(page: dict[str, Any], item: dict[str, Any]) -> None:
             await self.do("click", page, item, settle=True)
@@ -1181,11 +1205,13 @@ class Check:
             ("/private", "Passwort", "field9", "labelled by other text, in German", "password"),
             ("/private", "Kartennummer", "k1", "its label, in German", "card"),
             ("/private", "Choose one", "pw2", "type=password, no label", "password"),
+            # Private only by name=, which can't be seen here: caught as fields with no label
+            # on the page, beside a password field.
             ("/private", "Login", "loginpassword", "only its name= says password", "password"),
             ("/private", "Number", "cardnum", "only its name= says card", "card"),
             ("/private", "Code", "otpcode", "only its name= says one-time code", "password"),
             ("/private", "3 digits", "verification_value", "only its name= says security code", "card"),
-            ("/private", "Nickname", "sneak", "would turn into a password field if the cursor entered it", "password"),
+            ("/private", "Box 1", "b1", "one of four boxes for a card number, no label", "card"),
         ]
         for path, words, name, why, kind in fields:
             self.b.hand_back()
@@ -1235,7 +1261,12 @@ class Check:
             self.row("private field", "after Show password it is still the password", found=flagged, acted=refused, confirmed=refused and untouched)
         except (BrowserError, TypeError) as exc:
             self.row("private field", "after Show password it is still the password", found=False, note=str(exc)[:100])
-        # An ordinary field next to them must still work.
+        # Ordinary, labelled fields next to them must still work. (The second would turn into
+        # a password field if the cursor were put in it; the value is set without doing that.)
+        await self.case(
+            "private field", "Nickname, a labelled field beside password fields, is typed into", "/private", lambda p: item_of(p, "Nickname"),
+            lambda page, item: self.do("type", page, item, text="Dee"), lambda st: st["fields"].get("sneak") == "Dee",
+        )  # fmt: skip
         await self.case(
             "private field", "Business name is NOT private (has 'ssn' inside it)", "/private", lambda p: item_of(p, "Business name"),
             lambda page, item: self.do("type", page, item, text="Corner Bakery"), lambda st: st["fields"].get("businessname") == "Corner Bakery",
@@ -1345,6 +1376,8 @@ class Check:
     async def new_tabs(self) -> None:
         """Things that open another tab. Run last: afterwards the window has more tabs."""
         s = self.site
+        if not (self.wanted("new tab") or self.wanted("open an address")):
+            return
         self.b.hand_back()
         await s.go("/links")
         before = set(s.tabs)
@@ -1372,6 +1405,56 @@ class Check:
         except BrowserError as exc:
             self.row("open an address", "handed to the browser's own program, opens as a new tab", found=True, acted=False, confirmed=False, note=f"{exc.code}: {exc}")
         self.b.hand_back()
+        before = set(s.tabs)
+        try:
+            url = s.url("/hop")
+            out = await self.link.call("open", {"tab": self.b.hwnd, "url": url, "expect_host": host_of(url)}, browser=self.hint, timeout=40)
+            ok = await until(lambda: s.state()["page"] == "plain" and s.state()["tab"] not in before, 10)
+            real = host_of(out["url"]) == f"localhost:{s.port}"
+            self.row(
+                "open an address", "one that sends the browser on to another host: the real page is reported", found=True, acted=True,
+                confirmed=ok and real, note=out["url"],
+            )  # fmt: skip
+        except BrowserError as exc:
+            self.row("open an address", "one that sends the browser on to another host: the real page is reported", found=True, acted=False, confirmed=False, note=f"{exc.code}: {exc}")
+        self.b.hand_back()
+
+
+async def private_window(name: str, tmp: Path, site: Site, driver: OwnWindows, link: screenlink.ScreenLink) -> None:
+    """The same browser, started in a private window (Incognito, InPrivate, Private
+    Browsing): Pyxi must not pick it, read it or open anything from it."""
+    extra = {"firefox": ("-private-window",), "edge": ("--inprivate",)}.get(name, ("--incognito",))
+    b = Browser(name, tmp, extra)
+    b.site = site
+    driver.browsers.append(b)
+    site.tabs.clear()
+    site.active = ""
+    row = Row(name, "private window", "not picked, not read, nothing opened from it")
+    try:
+        b.start(site.url("/form"))
+        loaded = await until(lambda: site.state().get("page") == "form", 30)
+        b.show()
+        hint = f"w{b.hwnd}"
+        picked = link.pick()
+        refusals = []
+        for call, args in (("read", {"tab": b.hwnd}), ("open", {"tab": b.hwnd, "url": site.url("/plain"), "expect_host": host_of(site.url("/plain"))})):
+            try:
+                await link.call(call, args, browser=hint, timeout=30)
+                refusals.append(f"{call} was not refused")
+            except BrowserError as exc:
+                refusals.append("" if "private window" in str(exc) else f"{call}: {exc.code}: {exc}")
+        await asyncio.sleep(0.5)
+        still = site.state().get("page") == "form" and len(site.tabs) == 1
+        row.found, row.acted = loaded, picked == ""
+        row.confirmed = loaded and picked == "" and not any(refusals) and still
+        row.note = "; ".join(r for r in refusals if r) + ("" if picked == "" else f" it was picked ({picked})")
+    except Exception as exc:
+        row.note = str(exc)[:120]
+    finally:
+        b.stop()
+        driver.browsers.remove(b)
+    ROWS.append(row)
+    print(f"  {'ok  ' if row.confirmed else 'FAIL'} {name:8s} private window         {row.case}  {row.note}", flush=True)
 
 
 def _yn(value: bool | None) -> str:
@@ -1563,6 +1646,7 @@ async def real_model(check: Check, opts: argparse.Namespace, tmp: Path) -> None:
             )  # fmt: skip
         except Exception as exc:
             check.row("real model", task[:44], found=True, acted=False, confirmed=False, note=str(exc)[:120])
+    check.link.read_gate = None  # the brain's card for reading was for the brain's own tasks
     print(f"  (real model: {MODEL_CALLS[0]} calls so far, over all browsers)")
 
 
@@ -1692,6 +1776,8 @@ async def main(opts: argparse.Namespace) -> int:
             if opts.public:
                 await public_pass(check)
             b.stop()
+            if check.wanted("private window"):
+                await private_window(b.name, tmp, site, driver, link)
     finally:
         for b in browsers:
             b.stop()

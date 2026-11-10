@@ -164,8 +164,8 @@ class El:
     value: str = ""
     checked: bool | None = None
     focused: bool = False  # the page's cursor is in it
-    # How it got its name: "label" (a label on the page), "hint" (only its placeholder or
-    # tooltip), "other" (some other way, or it can't be told), "" (not said).
+    # How it got its name, where the browser lets it be told: "hint" (only its placeholder
+    # or tooltip: Chrome and Edge say so), "other" (some other way), "" (not said).
     named_by: str = ""
     # Filled in when an element is looked at again before an action: the addresses of the
     # frames it sits in, between it and the page.
@@ -403,15 +403,19 @@ def shown_label(el: El, kind: str, secret: str, inner: str) -> str:
     return hide_numbers(label_of(el, inner))
 
 
-def unclear_beside_password(el: El, strict: bool) -> bool:
-    """A text field with no label of its own, or named only by a hint, in a form (or a page)
-    that has a password field: it may well be the user name's, the code's or the card's
-    (the page's own name= and autocomplete= can't be seen here), so it is left to them.
-    ``strict`` is for Firefox, which doesn't say where a name came from: there every such
-    field that isn't tied to a label on the page counts."""
+def _as_label(text: str) -> str:
+    return re.sub(r"[\s:*]+$", "", " ".join(str(text or "").lower().split()))
+
+
+def unclear_beside_password(el: El, visible: set[str]) -> bool:
+    """A text field in a form (or a page) that has a password field, whose name is not
+    words anyone can see on the page: it has none, or only a placeholder, or a name given
+    in the page's code. It may well be the user name's, the code's or the card's (the
+    page's own name= and autocomplete= can't be seen here), so it is left to them. A field
+    with a label on the page ("Email", "Business name") is not affected."""
     if el.role not in ("Edit", "Spinner") or el.aria == "searchbox":
         return False
-    return not el.name.strip() or el.named_by == "hint" or (strict and el.named_by == "other")
+    return not el.name.strip() or el.named_by == "hint" or _as_label(el.name) not in visible
 
 
 def foreign_frame(el: El, page_url: str) -> str:
@@ -486,7 +490,6 @@ def outline(
     max_chars: int = 4000,
     max_items: int = 90,
     was_password: Callable[[El], bool] = lambda el: False,
-    strict_hints: bool = False,
 ) -> tuple[str, bool, list[tuple[El, dict[str, Any]]], bool]:
     """A page's text and the things on it that can be acted on, in the shape the extension
     gives: (text, the text goes on, [(element, item)], there are more items). A frame that
@@ -495,8 +498,10 @@ def outline(
     some other site put inside it)."""
     from pyxi.companion.tabwork import hide_numbers
 
-    # Which forms (or the page itself, for fields outside any form) hold a password field.
+    # Which forms (or the page itself, for fields outside any form) hold a password field,
+    # and the words that can be seen on the page (what a label is).
     with_password: set[int] = set()
+    visible: set[str] = set()
 
     def find_passwords(el: El, scope: El) -> None:
         if el is not snap.root and foreign_frame(el, snap.doc.url):
@@ -505,6 +510,8 @@ def outline(
             scope = el
         if el.role == "Edit" and (el.password or was_password(el)):
             with_password.add(id(scope))
+        if el.role == "Text" and not el.children and el.name.strip():
+            visible.add(_as_label(el.name))
         for child in el.children:
             find_passwords(child, scope)
 
@@ -535,7 +542,7 @@ def outline(
         # what is in it.
         secret = private_kind(el, was_password(el))
         if not secret and kind in ("text field", "text area") and id(scope) in with_password:
-            secret = "unclear" if unclear_beside_password(el, strict_hints) else ""
+            secret = "unclear" if unclear_beside_password(el, visible) else ""
         item: dict[str, Any] = {"kind": kind, "label": shown_label(el, kind, secret, _inner_text(el))}
         if secret:
             # Listed so Pyxi knows it's there and leaves it to the user; its value is never read.
@@ -1101,7 +1108,6 @@ class ScreenLink:
         max_chars = min(20000, max(200, int(args.get("max_chars") or 4000)))
         max_items = min(200, max(1, int(args.get("max_items") or 90)))
         self._may_read_site(self._doc(hwnd))
-        strict = self._engine(hwnd) == "gecko"
         snap = None
         end = time.monotonic() + 5.0
         while True:
@@ -1130,7 +1136,7 @@ class ScreenLink:
             return bool(key) and key in seen
 
         text, more_text, listed, more_items = outline(
-            snap, max_chars=max_chars, max_items=max_items, was_password=was_password, strict_hints=strict
+            snap, max_chars=max_chars, max_items=max_items, was_password=was_password
         )
         page = self._page_id(hwnd, snap.doc)
         last = self._reads.get(hwnd)
@@ -1730,7 +1736,7 @@ _P_RID, _P_RECT, _P_TYPE, _P_NAME, _P_FOCUS, _P_ENABLED, _P_AID, _P_CLASS, _P_HE
     30000, 30001, 30003, 30005, 30008, 30010, 30011, 30012, 30013,
 )  # fmt: skip
 _P_PASSWORD, _P_OFFSCREEN, _P_VALUE, _P_READONLY, _P_TOGGLE, _P_SELECTED = 30019, 30022, 30045, 30046, 30086, 30079
-_P_ARIA, _P_ARIA_PROPS, _P_LANDMARK, _P_LABELLED = 30101, 30102, 30157, 30104
+_P_ARIA, _P_ARIA_PROPS, _P_LANDMARK = 30101, 30102, 30157
 _P_SCROLL_Y, _P_SCROLL_VIEW, _P_SCROLLABLE = 30055, 30056, 30058
 _HAS = {
     30031: "Invoke", 30043: "Value", 30041: "Toggle", 30036: "SelectionItem",
@@ -1973,7 +1979,7 @@ class UiaDriver(Driver):
                 for prop in (
                     _P_RID, _P_RECT, _P_TYPE, _P_NAME, _P_FOCUS, _P_ENABLED, _P_AID, _P_CLASS, _P_HELP,
                     _P_PASSWORD, _P_OFFSCREEN, _P_VALUE, _P_TOGGLE, _P_SELECTED, _P_ARIA,
-                    _P_ARIA_PROPS, _P_LANDMARK, _P_LABELLED, *_HAS,
+                    _P_ARIA_PROPS, _P_LANDMARK, *_HAS,
                 ):  # fmt: skip
                     request.AddProperty(prop)
                 request.TreeFilter = ui.RawViewCondition  # groups and forms are only in the raw view
@@ -2014,12 +2020,9 @@ class UiaDriver(Driver):
             state = get(_P_TOGGLE)
             checked = state == 1 if state is not None else None
         name, hint = str(get(_P_NAME) or "")[:400], str(get(_P_HELP) or "")[:120]
-        if not name.strip():
-            named_by = ""
-        elif get(_P_LABELLED):
-            named_by = "label"
-        else:
-            named_by = "hint" if hint.strip() and _clean(hint) == _clean(name) else "other"
+        # Chrome and Edge give a placeholder or a tooltip as the hint too: a name that is
+        # only that is no label. (Neither they nor Firefox say which element labels a field.)
+        named_by = "" if not name.strip() else "hint" if hint.strip() and _clean(hint) == _clean(name) else "other"
         el = El(
             role=role,
             name=name,
