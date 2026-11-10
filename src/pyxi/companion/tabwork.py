@@ -55,7 +55,7 @@ from urllib.parse import urlsplit
 
 from otto.llm.base import Message, TextPart, ToolSpec
 
-from pyxi import safety
+from pyxi import safety, screenlink  # screenlink: the tab on screen, with no extension
 from pyxi.browserlink import BrowserError, BrowserLink, host_of, site_of
 from pyxi.companion.actions import safe_url
 from pyxi.companion.operator import RISKY, Outcome, Step
@@ -762,7 +762,7 @@ class TabOperator:
         for _ in range(2):
             try:
                 res = await self.llm.complete(
-                    system=SYSTEM + safety.RULE,
+                    system=SYSTEM + getattr(self.link, "note", "") + safety.RULE,  # screenlink's limits
                     messages=[Message("user", parts)],
                     tools=[ACT, DONE, ASK],
                     max_tokens=2000,
@@ -1097,16 +1097,16 @@ def setup(brain: Brain) -> None:
 
 def tools(brain: Brain) -> list[ToolSpec]:
     """The tab tools, only while a browser is connected (otherwise nothing changes)."""
-    link = getattr(brain, "browser", None)
-    return list(SPECS) if link is not None and link.connected else []
+    link = screenlink.choose(brain)  # the extension, else the tab on screen (pyxi/screenlink.py)
+    return screenlink.specs(link, SPECS) if link is not None else []
 
 
 def prompt(brain: Brain) -> str:
     """The routing lines for the system prompt, only while a browser is connected."""
     from pyxi.companion import prompts
 
-    link = getattr(brain, "browser", None)
-    return prompts.BROWSER_TAB if link is not None and link.connected else ""
+    link = screenlink.choose(brain)  # the extension, else the tab on screen
+    return screenlink.prompt(link, prompts.BROWSER_TAB) if link is not None else ""
 
 
 async def stop(brain: Brain) -> bool:
@@ -1119,6 +1119,7 @@ async def stop(brain: Brain) -> bool:
             brain._tab_operator = None  # its task is about to be cancelled before it starts
     if link is not None and link.connected:
         await link.stop()
+    await screenlink.stop(brain)  # and whatever is being done in the tab on screen
     return op is not None
 
 
@@ -1155,8 +1156,8 @@ def _prefer(brain: Brain) -> str:
 
 
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
-    link: BrowserLink | None = getattr(brain, "browser", None)
-    if link is None or not link.connected:
+    link: Any = screenlink.choose(brain)  # the extension, else the tab on screen, else None
+    if link is None:
         return (
             f"{name}: Pyxi's browser extension isn't connected, so this can't be done in their "
             "tab. Tell them in one short line (Settings has 'Connect your browser'), or use "

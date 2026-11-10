@@ -101,6 +101,19 @@ class ScreenConfig(BaseModel):
         1366, description="Screenshots are downscaled to this width for the model."
     )
     uia_budget_s: float = 1.5
+    tab_fallback: bool = Field(
+        False,
+        description="With no browser extension connected, let read_tab and use_tab work in the "
+        "browser tab that is showing, through Windows accessibility (pyxi/screenlink.py; what "
+        "it can and can't do is in docs/SCREEN-TAB-FALLBACK.md). The extension is always "
+        "preferred when one is connected.",
+    )
+    tab_keys: bool = Field(
+        True,
+        description="In that mode, may Pyxi press keys in the tab (Enter in a field, Escape, the "
+        "arrows)? A key is posted to the browser window that was read, never typed on the "
+        "keyboard; Chrome and Edge only hear it while their window is in front.",
+    )
 
     @field_validator("excluded_windows", mode="before")
     @classmethod
