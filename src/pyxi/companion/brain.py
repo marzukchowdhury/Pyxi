@@ -2169,6 +2169,7 @@ class Brain:
             turn_id = "turn_" + secrets.token_hex(4)
             self._turn_id = turn_id
             started = time.monotonic()
+            self._stages = [("start", started)]
             await self.hub.emit("user", text=shown or user_text, turn_id=turn_id)
             error = None
             cut_off: list[str] = []  # what a turn they talked over had already done, if it had
@@ -2333,6 +2334,11 @@ class Brain:
                 "error": error,
             }
         )
+        took = time.monotonic() - started
+        if took >= 10:
+            # Where a long wait went, kept for support (live: the first answer after every
+            # start took over half a minute, and nothing recorded which part of it).
+            log.warning("slow turn (%.1fs): %s", took, self._where_the_time_went())
 
     # ================================================================== graph
     def _build_graph(self) -> Any:
@@ -2380,6 +2386,7 @@ class Brain:
                 )
                 if image := ctx.model_image(self.settings.screen.model_image_width):
                     self._images = [image]
+            self._mark("looked")
             return {}
 
         async def think(state: TurnState) -> TurnState:
@@ -2538,6 +2545,7 @@ class Brain:
             extra: dict[str, Any] = {}
             if isinstance(self.llm, StreamingChat):
                 extra = {"on_call": speak_early, "on_partial": as_it_streams}
+            self._mark("got ready")
             response = await self.llm.complete(
                 system=system,
                 messages=[Message("user", parts)],
@@ -2547,6 +2555,7 @@ class Brain:
                 max_tokens=9000,  # a detailed 3D model is a long tool call
                 **extra,
             )
+            self._mark("model answered")
             self._usage = self._usage + response.usage
             round_no = state.get("round", 0) + 1
             if self._speech_gen != self._turn_gen:
@@ -3448,6 +3457,19 @@ class Brain:
             self._speak(hit.line or "On it.")
         return True
 
+    def _mark(self, stage: str) -> None:
+        """Note when a stage of the turn ended, for the line a slow turn leaves in the log."""
+        stages = getattr(self, "_stages", None)
+        if stages is not None and len(stages) < 40:
+            stages.append((stage, time.monotonic()))
+
+    def _where_the_time_went(self) -> str:
+        """'looked 5.8s, asked the model 0.1s, model answered 2.2s, spoke 21.0s'."""
+        stages = getattr(self, "_stages", None) or []
+        return ", ".join(
+            f"{name} {at - stages[i][1]:.1f}s" for i, (name, at) in enumerate(stages[1:])
+        )
+
     async def say_line(
         self,
         text: str,
@@ -3460,6 +3482,7 @@ class Brain:
         self._speak(text, agent=agent, voice=voice, record=record, result=result)
         if self._speech:
             await asyncio.gather(self._speech, return_exceptions=True)
+            self._mark("spoke")
         # Said outside a turn: don't stay "speaking" forever. But if they pressed talk while the
         # line was being voiced, they are the one talking now: "listening" is not overwritten.
         if not self._lock.locked() and self.state not in ("listening", "transcribing"):
