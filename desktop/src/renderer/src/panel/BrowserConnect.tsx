@@ -73,7 +73,7 @@ function SetUp({ setup }: { setup: BrowserSetup | null }) {
       )}
       {firefox && setup.addon && <p className="muted">Firefox opens and asks if you want to add it. After that Pyxi shows a code to type into the add-on.</p>}
       {firefox && setup.addon === false && <p className="muted">The Firefox add-on that stays installed isn't published yet. Pyxi can load it for now, until Firefox closes.</p>}
-      {!firefox && <p className="muted">Pyxi opens {setup.browser}'s extensions page, copies the folder's address for you and points at each step: Developer mode, Load unpacked, paste. {setup.notice}</p>}
+      {!firefox && <p className="muted">Pyxi opens a new {setup.browser} window on its extensions page, copies the folder's address for you (what you had copied comes back afterwards) and points at each step: Developer mode, Load unpacked, paste. {setup.notice}</p>}
       {!firefox && setup.checked === false && <p className="muted">These steps were checked in Chrome and Edge. {setup.browser} uses the same page, so they should match.</p>}
       {!!setup.steps?.length && (
         <details>

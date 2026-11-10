@@ -448,7 +448,7 @@ def create_app(
                 brain.screen.set_private_apps(apps)
             await hub.emit("private_apps", apps=apps, built_in=private_apps.BUILT_IN)
         elif kind == "browser_setup":  # Settings, "Set it up for me" / "Add to Firefox"
-            brain._spawn(browsersetup.setup(brain, str(msg.get("browser") or "")))
+            browsersetup.start(brain, str(msg.get("browser") or ""))  # their own press
         elif kind in ("browser_get", "browser_pair", "browser_forget", "browser_site_revoke"):
             # Settings, "Connect your browser": a pairing code, unpair, the sites Pyxi may act on.
             link, extra = brain.browser, {}

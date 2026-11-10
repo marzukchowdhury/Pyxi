@@ -14,16 +14,24 @@ It is not in the Chrome Web Store or on addons.mozilla.org. Pyxi installs it wit
 ## Install it
 
 **The easy way: let Pyxi do it.** With your browser open, go to Pyxi's panel, **Settings**,
-**Connect your browser**, and press the button there. Or just say "connect my browser". Pyxi
-also offers it by itself, once, the first time you ask for something that would be done in
-your own tab ("add this to my cart"). If you say no it doesn't ask again; "connect my browser"
+**Connect your browser**, and press the button there. Or just say "connect my browser": Pyxi
+puts up a card that says what it will do, and starts when you press **Allow**. Pyxi also
+offers it by itself, once, the first time you ask for something that would be done in your
+own tab ("add this to my cart"). If you say no it doesn't ask again; "connect my browser"
 still works.
+
+The setup only ever starts from your own press: the button in Settings, or Allow on Pyxi's
+card. Pyxi's model can bring the card up when you ask, and nothing else. It can't bring it
+up in a request where Pyxi has read a page, an email or a document, or in a routine, so
+text in something Pyxi read can't start it. Only your press takes back an earlier "Don't".
 
 - **Firefox (140 or newer): Add to Firefox.** Pyxi opens the add-on in Firefox, Firefox asks
   whether to add it, and you press **Add**. It stays installed and updates itself. This needs
   the signed add-on to be published with a Pyxi release (see "Signing the Firefox add-on").
   Until it is, Pyxi doesn't show a dead link: it opens `about:debugging` and tells you to
-  load the add-on for now, which lasts until Firefox closes.
+  load the add-on for now, which lasts until Firefox closes. Pyxi looks for the add-on file
+  itself, not only the file that names it, and a look that failed (no connection) is tried
+  again shortly instead of being taken for "not published".
 - **Chrome and Edge: Set it up for me.** Chrome and Edge only install an extension from
   outside their stores as an "unpacked" folder with Developer mode on (anything else needs a
   PC managed by an organization). Pyxi does the fiddly parts: it keeps the extension in a
@@ -31,7 +39,21 @@ still works.
   place whenever Pyxi updates), opens the browser's extensions page, copies the folder's
   address, and points at each thing to click on your screen, waiting for you each time:
   **Developer mode**, **Load unpacked**, then paste into the **Folder** box and press
-  **Select Folder**. Then it shows the pairing code and points at the extension's icon.
+  **Select Folder**. Once the extension is seen on the page, it makes the pairing code and
+  points at the extension's icon. If you close the pointer or walk away before that, it
+  stops there and says nothing more; **I already have the extension: show me a code** in
+  Settings gives you a code whenever you are ready.
+- **How it opens the extensions page.** Chrome and Edge ignore that address when it is handed
+  to them, so Pyxi opens a new window of the browser and types the address into it. It only
+  types into the window it just opened (told apart by a one-time name in its title), only
+  while you are not using the mouse or keyboard, looks at which window is in front before
+  every key, and presses Enter only once it has seen that the address bar holds exactly the
+  address. If any of that is in doubt it types nothing more and points at the address bar
+  for you instead.
+- **Your clipboard.** The folder's address goes on the clipboard for the one paste. When the
+  setup ends, the text you had copied before is put back, unless you have copied something
+  else since. (When Pyxi could only give you the steps in words, the address stays copied:
+  you still need it. Something other than text that was on the clipboard can't be put back.)
 - **Brave, Vivaldi and Opera** get the same steps as Chrome, because they share its
   extensions page. That was not checked in those browsers.
 
@@ -109,6 +131,8 @@ changes, it is how Pyxi's own installer already updates, and it needs no extra d
 website has no address of its own yet. The add-on's manifest carries the updates file's
 address there, so installed copies find new versions by themselves. Every release uploads
 both files again (the same ones, until you sign a new version), so "latest" always has them.
+
+The two files live in the checkout where you signed, so commit them (step 5) and release from a checkout that has them. If the release that is out carries the add-on and the one you are publishing would not, `scripts/release.py` stops before it publishes anything and says what to do (`--without-firefox` publishes without it on purpose). After publishing it checks the add-on at the latest link; the release is public by then, so a fault there is reported loudly, with the version already committed.
 
 A version can be signed only once. After changing the extension's code, raise `"version"`
 in `manifest.json`, then run step 4 again and commit the new files. If a run stops while
@@ -285,7 +309,8 @@ Firefox: that the extensions page can't be opened from the command line but can 
 its address into a new window, that the controls Pyxi points at exist under the names it
 uses, that "Load unpacked" with Pyxi's folder loads the extension, that it survives a restart
 and an in-place update, what happens with Developer mode off, what Edge asks at start, and
-that Firefox treats the add-on's address as an install. Two steps put a window on the screen
+that Firefox treats the add-on's address as an install, that the window Pyxi opens can be
+told from the others and that its address bar can be read. Two steps put a window on the screen
 for a few seconds (one types an address into it); `--unseen` skips them.
 
 ## Known limits
@@ -308,6 +333,9 @@ for a few seconds (one types an address into it); `--unseen` skips them.
   program has your browser's cookies anyway.
 - Chrome and Edge only keep an unpacked extension while Developer mode stays on, and Edge
   asks about it at every start. Publishing to the stores removes that, and is not done.
+- Pyxi's model is given the pairing code, because the pointer that shows you what to type is
+  written by the model. The code works once, for five minutes, and only from a browser
+  extension on this PC.
 - Pyxi opens the extensions page by typing its address into a new browser window. If another
   window comes to the front meanwhile it stops typing, and the pointer starts at the address
   bar instead.

@@ -3,6 +3,7 @@
     python scripts/release.py 0.1.5 "What's new, in a sentence or two."  [--full] [--skip-tests]
         [--build-only]       build and check everything, publish nothing (then install and try it)
         [--publish-built]    publish what --build-only built, without rebuilding
+        [--without-firefox]  publish with no Firefox add-on though the last release had one
     python scripts/release.py --checklist      (the pre-release security checklist, nothing else)
 
 1. Sets the version everywhere (pyproject.toml, src/pyxi/__init__.py, desktop/package.json).
@@ -23,8 +24,13 @@
    manifest points at .../releases/latest/download/pyxi-firefox-updates.json, so publishing
    the release is what puts the update file at its address; "Add to Firefox" in the app opens
    .../releases/latest/download/pyxi-firefox.xpi. They go up with every release, new or not,
-   so that the latest link always has them.
-6. Checks the latest link really gives the new version, then commits the version bump.
+   so that the latest link always has them. extension/signed/ belongs to one checkout, so a
+   release run from a checkout without it would take the add-on off the latest link: when the
+   release that is out now carries the add-on and this one would not, it stops before
+   publishing anything (copy extension/signed/ over, or pass --without-firefox).
+6. Checks the latest link really gives the new version, then commits the version bump. The
+   Firefox add-on at the latest link is checked after that commit: the release is public by
+   then, so a fault there is reported loudly and nothing is left half done.
 
 GitHub access uses the sign-in Git already has on this PC; the token is never printed.
 """
@@ -50,6 +56,10 @@ PACKS = "pyxi-*-pack-*.zip"  # first-use downloads the installer points at (buil
 # types they must be served with: Firefox only offers to install a file sent as an add-on.
 SIGNED = ROOT / "extension" / "signed"
 FIREFOX = {"pyxi-firefox.xpi": "application/x-xpinstall", "pyxi-firefox-updates.json": "application/json"}
+# What the app looks for before it offers "Add to Firefox" (pyxi/companion/browsersetup.py):
+# this add-on's id in the update file, and a link to the add-on at the latest release.
+ADDON_ID = "pyxi-in-your-browser@pyxi.local"
+LATEST = f"https://github.com/{REPO}/releases/latest/download"
 AUTHOR = [
     "-c",
     "user.name=Marzuk Haider Chowdhury",
@@ -185,24 +195,71 @@ def check_app_packages() -> None:
     print(f"app has all {len(needed)} runtime packages")
 
 
+def latest_has_firefox() -> bool | None:
+    """Does the release that is out now carry the Firefox add-on? None when that couldn't be
+    found out."""
+    try:
+        r = httpx.get(
+            f"{LATEST}/pyxi-firefox.xpi", headers={"Range": "bytes=0-0"}, follow_redirects=True, timeout=60
+        )
+    except httpx.HTTPError:
+        return None
+    if r.status_code in (200, 206):
+        return True
+    return False if r.status_code == 404 else None
+
+
 def firefox_assets() -> list[tuple[Path, str]]:
     """The signed Firefox add-on and its update file, as (file, content type), if they have
-    been made. Checked before anything is published: the two must belong together."""
+    been made. Checked before anything is published: the two must belong together, be what
+    the app looks for, and not go missing from a release when the last one had them."""
     xpi, updates = (SIGNED / name for name in FIREFOX)
     if not xpi.exists() and not updates.exists():
-        print("note: no signed Firefox add-on in extension/signed (extension/sign_firefox.py makes it)")
-        return []
+        if "--without-firefox" in sys.argv:
+            print("WARNING: --without-firefox: this release carries no Firefox add-on.")
+            return []
+        had = latest_has_firefox()
+        if had is False:
+            print("note: no signed Firefox add-on in extension/signed (extension/sign_firefox.py makes it)")
+            return []
+        raise SystemExit(
+            (
+                "STOP: the release that is out now carries the Firefox add-on, and this checkout has "
+                "none in extension/signed."
+                if had
+                else "STOP: couldn't find out whether the release that is out now carries the Firefox "
+                "add-on (no connection to GitHub?), and this checkout has none in extension/signed."
+            )
+            + " Publishing without it takes it off the latest link: Add to Firefox goes away in "
+            "Pyxi, and add-ons that are installed find no update file. Copy extension/signed/ "
+            "here from the checkout that has it, or run extension/sign_firefox.py (it picks up "
+            "the version Mozilla already signed). To publish without it on purpose, add "
+            "--without-firefox."
+        )
     if not (xpi.exists() and updates.exists()):
         raise SystemExit(f"STOP: {SIGNED} has only one of {list(FIREFOX)}. Run extension/sign_firefox.py again.")
     try:
-        (addon,) = json.loads(updates.read_text(encoding="utf-8"))["addons"].values()
-        newest = addon["updates"][-1]
+        newest = json.loads(updates.read_text(encoding="utf-8"))["addons"][ADDON_ID]["updates"][-1]
     except (ValueError, KeyError, IndexError, TypeError):
-        raise SystemExit(f"STOP: {updates} isn't an update file. Run extension/sign_firefox.py again.") from None
+        raise SystemExit(
+            f"STOP: {updates} isn't the update file of {ADDON_ID}. Run extension/sign_firefox.py again."
+        ) from None
     if newest.get("update_hash") != "sha256:" + hashlib.sha256(xpi.read_bytes()).hexdigest():
         raise SystemExit(
             "STOP: the signed add-on and its update file don't belong together (the hash differs). "
             "Run extension/sign_firefox.py again."
+        )
+    if newest.get("update_link") != f"{LATEST}/pyxi-firefox.xpi":
+        raise SystemExit(
+            f"STOP: the update file sends Firefox to {newest.get('update_link')!r}, not to "
+            f"{LATEST}/pyxi-firefox.xpi. Pyxi would not offer it and installed add-ons would not "
+            "update. Run extension/sign_firefox.py again."
+        )
+    gecko = json.loads((ROOT / "extension" / "manifest.firefox.json").read_text(encoding="utf-8"))
+    if gecko["browser_specific_settings"]["gecko"]["id"] != ADDON_ID:
+        raise SystemExit(
+            f"STOP: the extension's Firefox id is no longer {ADDON_ID}: the app, this script and "
+            "the signed add-on must all name the same one."
         )
     current = json.loads((ROOT / "extension" / "manifest.json").read_text(encoding="utf-8"))["version"]
     if newest.get("version") != current:
@@ -273,25 +330,48 @@ def publish(v: str, notes: str, extra: list[tuple[Path, str]] | None = None) -> 
 
 def verify_firefox(extra: list[tuple[Path, str]]) -> None:
     """The latest link gives the update file that was just uploaded, and the add-on as an
-    add-on (so that Firefox offers to install it instead of saving it)."""
+    add-on (so that Firefox offers to install it instead of saving it). Raises SystemExit
+    saying what is wrong. Run after the release is public: see ``finish``."""
     if not extra:
         return
-    latest = f"https://github.com/{REPO}/releases/latest/download"
     by_name = {f.name: f for f, _ in extra}
-    updates = httpx.get(f"{latest}/pyxi-firefox-updates.json", follow_redirects=True, timeout=60)
+    updates = httpx.get(f"{LATEST}/pyxi-firefox-updates.json", follow_redirects=True, timeout=60)
     if updates.status_code != 200 or updates.json() != json.loads(
         by_name["pyxi-firefox-updates.json"].read_text(encoding="utf-8")
     ):
-        raise SystemExit("STOP: the latest link doesn't give the Firefox update file that was uploaded.")
+        raise SystemExit("the latest link doesn't give the Firefox update file that was uploaded.")
     xpi = httpx.get(
-        f"{latest}/pyxi-firefox.xpi", headers={"Range": "bytes=0-0"}, follow_redirects=True, timeout=60
+        f"{LATEST}/pyxi-firefox.xpi", headers={"Range": "bytes=0-0"}, follow_redirects=True, timeout=60
     )
+    if xpi.status_code not in (200, 206):
+        raise SystemExit(f"the latest link doesn't give the Firefox add-on ({xpi.status_code}).")
     if "x-xpinstall" not in xpi.headers.get("content-type", ""):
         raise SystemExit(
-            f"STOP: the Firefox add-on is served as {xpi.headers.get('content-type')!r}, so "
+            f"the Firefox add-on is served as {xpi.headers.get('content-type')!r}, so "
             "Firefox would save it instead of installing it."
         )
     print("verified: the Firefox add-on and its update file are at the latest link")
+
+
+def finish(v: str, message: str, firefox: list[tuple[Path, str]]) -> None:
+    """After publishing: commit the version bump, whatever else happens, and only then look at
+    the Firefox add-on at the latest link. The release is public by now, so a fault there
+    can't stop anything any more: it is said loudly, with the commit already made."""
+    sh("git", "add", "pyproject.toml", "src/pyxi/__init__.py", "desktop/package.json")
+    sh("git", *AUTHOR, "commit", "-q", "-m", message)
+    try:
+        verify_firefox(firefox)
+    except (SystemExit, httpx.HTTPError, ValueError) as fault:
+        raise SystemExit(
+            f"\n!!! Pyxi {v} IS OUT: the release is public and the version is committed.\n"
+            f"!!! But its Firefox add-on is not right: {fault}\n"
+            "!!! Until that is fixed, Add to Firefox doesn't show in Pyxi and installed add-ons "
+            "don't update.\n"
+            f"!!! To fix it: on the release page of v{v}, replace pyxi-firefox.xpi and "
+            "pyxi-firefox-updates.json with the ones in extension/signed (the add-on must be "
+            "uploaded as application/x-xpinstall), or publish the next version."
+        ) from None
+    print(f"done: Pyxi {v} is out.")
 
 
 def verify(v: str) -> None:
@@ -363,17 +443,7 @@ def main() -> None:
         return
     publish(v, notes, firefox)
     verify(v)
-    verify_firefox(firefox)
-    sh("git", "add", "pyproject.toml", "src/pyxi/__init__.py", "desktop/package.json")
-    sh(
-        "git",
-        *AUTHOR,
-        "commit",
-        "-q",
-        "-m",
-        f"Pyxi {v}\n\n{args[1] if len(args) > 1 else ''}".strip(),
-    )
-    print(f"done: Pyxi {v} is out.")
+    finish(v, f"Pyxi {v}\n\n{args[1] if len(args) > 1 else ''}".strip(), firefox)
 
 
 if __name__ == "__main__":

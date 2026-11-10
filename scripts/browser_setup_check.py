@@ -6,9 +6,14 @@ profile of Playwright's Chromium and of the installed Edge and Firefox (never a 
   Chromium and Edge
   - the extensions page does not open when its address is given on the command line (the
     browser opens a new tab instead), which is why Pyxi doesn't do it that way;
+  - started on the page Pyxi opens its own window on, the window's title begins with that
+    page's one-time name (how Pyxi tells its window from every other), and the address bar
+    can be read through Windows' accessibility interface (how Pyxi sees that it holds exactly
+    the address before it presses Enter, and that the extensions page really came up);
   - it does open the way Pyxi does it: a new window, and the address typed into it. This
-    step uses a window on the screen and the real keyboard for about two seconds (keys go
-    only while that throwaway window is in front); --unseen skips it;
+    step uses a window on the screen and the real keyboard for about two seconds. Keys go
+    only while that throwaway window is in front and nobody is at the mouse or keyboard, so
+    on a PC that is being used it reports that it could not be tried; --unseen skips it;
   - the page has the two controls the guide points at, under the names it uses: a
     "Developer mode" switch and, once that is on, "Load unpacked";
   - "Load unpacked" opens Windows' folder window, with the "Folder:" box and the "Select
@@ -198,12 +203,57 @@ async def opening(pw: Any, name: str, exe: Path, address: str, tmp: Path, keys: 
         )
     finally:
         stop(proc)
+
+    # The window Pyxi opens: told apart by its title, and its address bar can be read.
+    from pyxi import hands, windows
+
+    which = browsersetup.BROWSERS["msedge.exe" if name == "Edge" else "chrome.exe"]
+    marker = "Pyxi setup check"
+    port = free_port()
+    # As in real use, the browser is already running: Pyxi's window is a second one, opened
+    # by handing the page to the browser again.
+    proc = start(exe, tmp / f"{name.lower()}-own", port, "about:blank")
+    try:
+        browser = await attached(pw, port)
+        await asyncio.sleep(2)
+        before = {h for h, _t, _e in windows.open_windows(True) if hands._pid_of(h) == proc.pid}
+        browsersetup.launch(
+            str(exe),
+            f"--user-data-dir={tmp / (name.lower() + '-own')}",
+            *([] if SHOWN else ["--window-position=-32000,-32000"]),
+            "--new-window",
+            browsersetup._BLANK.format(marker=marker),
+        )
+        await asyncio.sleep(3)
+        now = [(h, t) for h, t, _e in windows.open_windows() if hands._pid_of(h) == proc.pid]
+        mine = [(h, t) for h, t in now if h not in before and t.startswith(marker)]
+        check(
+            tag + "the window Pyxi opens in a running browser is a new one, named after its own page",
+            len(before) == 1 and len(mine) == 1 and len(now) == 2,
+            str([t for _h, t in now]),
+        )
+        if mine:
+            hwnd = mine[0][0]
+            page = next(p for c in browser.contexts for p in c.pages if p.url.startswith("data:"))
+            await page.goto(address)
+            await asyncio.sleep(1.5)
+            began = time.monotonic()
+            bar = await asyncio.to_thread(browsersetup._bar, hwnd)
+            took = time.monotonic() - began
+            check(
+                tag + "its address bar can be read, and holds the extensions page's address once it is open",
+                browsersetup._holds(bar, which.page, exact=False),
+                f"{bar} in {took:.2f}s",
+            )
+            title = next((t for h, t, _e in windows.open_windows() if h == hwnd), "")
+            check(tag + "and its title no longer begins with the one-time name", not title.startswith(marker), title)
+    finally:
+        await close(pw, port, proc)
     if not keys:
         print(f"      skipped ({name}): opening the page the way Pyxi does, with the real keyboard")
         return
     # The way Pyxi does it: a new window, the address typed into it.
-    which = browsersetup.BROWSERS["msedge.exe" if name == "Edge" else "chrome.exe"]
-    for attempt in (1, 2):  # someone using this PC can take the front mid-way: Pyxi then stops typing
+    for attempt in (1, 2, 3):  # someone using this PC stops it: Pyxi doesn't type while they are at it
         port = free_port()
         profile = tmp / f"{name.lower()}-typed-{attempt}"
         typed = await asyncio.to_thread(
@@ -216,14 +266,18 @@ async def opening(pw: Any, name: str, exe: Path, address: str, tmp: Path, keys: 
             "--no-default-browser-check",
             "--window-size=900,700",
         )
-        if typed or attempt == 2:
+        if typed or attempt == 3:
             break
-        print(f"      ({name}: another window took the front while typing, so it stopped; once more)")
+        print(f"      ({name}: it stopped, for the reason logged above; once more)")
         await close_by_port(pw, port)
         await asyncio.sleep(3)
     try:
-        await until(lambda: any(u.startswith(address) for u in page_addresses(port)), 8)
         seen = page_addresses(port)
+        if not typed and not any(u.startswith(address) for u in seen):
+            # Not a pass and not a fault: it refused to type, which is what it must do while
+            # somebody is using the PC. Nothing landed anywhere.
+            print(f"NOT TRIED  {tag}typing the address into a new window: Pyxi held back each time (see the log lines above). Pages: {seen}")
+            return
         check(
             tag + "a new window with the address typed into it does open the extensions page",
             typed and any(u.startswith(address) for u in seen),
