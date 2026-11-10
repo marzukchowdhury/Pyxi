@@ -149,6 +149,23 @@ async def test_the_next_turn_has_the_whole_result(settings):
     assert "https://www.amazon.ca/dp/B0GLADOM22" in prompt  # and the link, for "take me there"
 
 
+def test_work_they_can_see_is_only_said_to_be_done():
+    """Live: every edit to the sheet in front of him was read back ("Ledger's done. Set 21
+    cells on Sheet1; made a pivot table beside the data..."), while the notification showed
+    the same words. "When you're done with the work, just tell that you're done. That's all." """
+    result = "Set 21 cells on Sheet1; made a pivot table beside the data on Sheet1, from E1: sum of Sales by Region."
+    for role in ("documents", "files", "automation"):
+        for on_card in (False, True):
+            line = answers.spoken_line("Ledger", ok=True, title="Ledger finished", summary=result, on_card=on_card, role=role)
+            assert line == "Ledger's done."
+    # What a teammate found out is still told: the answer is the point of asking.
+    found = answers.spoken_line("Scout", ok=True, title="Scout finished", summary="The GLADOM tray table is the best value at $34.99.", on_card=False, role="browser")
+    assert found == "Scout's done. The GLADOM tray table is the best value at $34.99."
+    # And work that failed says why, whoever did it.
+    failed = answers.spoken_line("Ledger", ok=False, title="Ledger couldn't finish", summary="That sheet is view only.", on_card=False, role="documents")
+    assert failed == "Ledger couldn't finish that. That sheet is view only."
+
+
 def test_the_spoken_line_is_short_and_never_reads_out_addresses_or_scouts_own_words():
     line = answers.spoken_line(
         "Scout", ok=True, title="Scout finished", summary=SUMMARY, on_card=True

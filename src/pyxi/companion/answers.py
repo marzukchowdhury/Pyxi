@@ -538,9 +538,20 @@ def for_later(job: Any) -> str:
     return safety.fence(f"{job.agent_name}'s result", out)
 
 
-def spoken_line(agent: str, *, ok: bool, title: str, summary: str, on_card: bool) -> str:
+# Teammates whose work is a change the user can see where they asked for it (a sheet edited,
+# files converted, a folder tidied). When it works, "done" is all there is to say: the founder,
+# live, after hearing each edit read back to him: "It's all the same thing again and again.
+# When you're done with the work, just tell that you're done. That's all."
+DOERS = {"documents", "files", "automation"}
+
+
+def spoken_line(
+    agent: str, *, ok: bool, title: str, summary: str, on_card: bool, role: str = ""
+) -> str:
     """The one short line Pyxi says when background work ends. The details stay on the card."""
     generic = title in (f"{agent} finished", f"{agent} couldn't finish", "")
+    if ok and role in DOERS:
+        return f"{agent}'s done."
     if not ok:
         why = headline(summary, 160)
         lead = (

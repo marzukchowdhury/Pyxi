@@ -3692,7 +3692,12 @@ class Brain:
         # Said with record=False (it is no part of a turn), which skips the scrub: done here.
         line = hide_secrets(
             answers.spoken_line(
-                job.agent_name, ok=ok, title=title, summary=job.summary, on_card=card is not None
+                job.agent_name,
+                ok=ok,
+                title=title,
+                summary=job.summary,
+                on_card=card is not None,
+                role=job.role,
             )
         )
         self._spawn(
