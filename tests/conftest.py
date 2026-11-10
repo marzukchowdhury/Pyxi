@@ -61,5 +61,6 @@ def settings(tmp_path: Path) -> PyxiSettings:
         _env_file=None,
         data_dir=tmp_path / ".pyxi",
         voice={"tts": "client"},
-        screen={"ambient_memory": False},
+        # tab_fallback: off here whatever the default is, so no test reaches for real windows.
+        screen={"ambient_memory": False, "tab_fallback": False},
     )

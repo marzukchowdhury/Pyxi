@@ -1212,7 +1212,7 @@ class Check:
             untouched = value in ("", 0, None)
             if not refused:
                 note += "; it was typed into" if not untouched else "; not refused, but nothing went in"
-            self.row("private field", f"{words}: {why}", found=flagged, acted=refused, confirmed=refused and untouched, focus=foreground() == self.b.hwnd, note=note.strip("; "))
+            self.row("private field", f"{words}: {why}", found=flagged, acted=refused, confirmed=refused and untouched, note=note.strip("; "))
         # "Show password" swaps the password field for a text field with the same hint.
         self.b.hand_back()
         await s.go("/private")
@@ -1638,6 +1638,13 @@ def table(rows: list[Row], browsers: list[Browser], opts: argparse.Namespace) ->
 
 
 async def main(opts: argparse.Namespace) -> int:
+    if opts.rows:  # write the table again from a finished run's rows, without running anything
+        rows = [Row(**r) for r in json.loads(Path(opts.rows).read_text(encoding="utf-8"))]
+        names = list(dict.fromkeys(r.browser for r in rows))
+        text = table(rows, [Browser(n, Path(tempfile.gettempdir()) / "pyxi-screen-tab-table") for n in names], opts)
+        Path(opts.out).write_text(text, encoding="utf-8")
+        print(f"(written to {opts.out})")
+        return 0
     tmp = Path(tempfile.mkdtemp(prefix="pyxi-screen-tab-"))
     site = Site()
     names = [n.strip() for n in opts.browsers.split(",") if n.strip()]
@@ -1703,6 +1710,7 @@ if __name__ == "__main__":
     parser.add_argument("--repeat", type=int, default=3)
     parser.add_argument("--quick", action="store_true", help="skip the covered and minimised window runs")
     parser.add_argument("--only", default="", help="only the cases whose kind or name has these words")
+    parser.add_argument("--rows", default="", help="write the table again from a finished run's rows.json")
     parser.add_argument("--front", action="store_true", help="also press keys with the window in front (takes the keyboard briefly)")
     parser.add_argument("--public", action="store_true", help="also a read-only pass on a few public pages")
     parser.add_argument("--real-model", action="store_true")
