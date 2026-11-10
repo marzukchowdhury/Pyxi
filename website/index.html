@@ -138,11 +138,146 @@
       <!-- ============================================================ what it does -->
       <section class="story" id="story" aria-labelledby="story-title">
         <h2 class="sr-only" id="story-title">What Pyxi does</h2>
-        <div class="story-track" data-swarm="bubble" data-swarm-at="#story-stage">
+        <div class="story-track" data-swarm="chat" data-swarm-at="#story-scenes">
           <div class="story-sticky">
-            <div class="story-stage" id="story-stage" aria-hidden="true"></div>
+            <div class="story-stage" id="story-stage" aria-hidden="true">
+              <!-- Five sharp pictures, one per statement. The fireflies gather along the lines marked
+                   data-fly (swarm.js reads them straight from here), then the picture comes into focus. -->
+              <div class="story-scenes" id="story-scenes">
+                <div class="story-tilt">
+                  <!-- 1. a chat window: a screenshot goes in, paragraphs come out -->
+                  <figure class="scene" data-scene="chat">
+                    <svg viewBox="0 0 640 400">
+                      <rect class="pane" data-fly="ice" data-w="4" x="170" y="28" width="300" height="344" rx="22" />
+                      <line class="rule" data-fly="ice" data-w="3" x1="170" y1="80" x2="470" y2="80" />
+                      <circle class="bar" cx="196" cy="54" r="4.5" /><circle class="bar" cx="214" cy="54" r="4.5" /><circle class="bar" cx="232" cy="54" r="4.5" />
+                      <text class="t dim" x="320" y="59" text-anchor="middle">AI chat</text>
+                      <rect class="ctl" data-fly="ice" data-w="3.5" x="296" y="96" width="154" height="92" rx="14" />
+                      <rect class="thumb" x="308" y="106" width="130" height="56" rx="6" />
+                      <line class="rule" x1="308" y1="118" x2="438" y2="118" />
+                      <rect class="bar" x="316" y="126" width="62" height="5" rx="2.5" /><rect class="bar" x="316" y="137" width="96" height="5" rx="2.5" /><rect class="bar" x="316" y="148" width="44" height="5" rx="2.5" />
+                      <text class="t tiny dim" x="308" y="179">screenshot.png</text>
+                      <rect class="ctl" data-fly="ice" data-w="3.5" x="190" y="200" width="236" height="98" rx="14" />
+                      <rect class="bar" x="204" y="214" width="208" height="5" rx="2.5" /><rect class="bar" x="204" y="228" width="196" height="5" rx="2.5" /><rect class="bar" x="204" y="242" width="210" height="5" rx="2.5" /><rect class="bar" x="204" y="256" width="180" height="5" rx="2.5" /><rect class="bar" x="204" y="270" width="204" height="5" rx="2.5" /><rect class="bar" x="204" y="284" width="120" height="5" rx="2.5" />
+                      <rect class="ctl" data-fly="ice" data-w="3.5" x="190" y="312" width="260" height="42" rx="21" />
+                      <text class="t dim" x="210" y="338">Ask anything</text>
+                      <circle class="send" data-fly="ice" data-w="fill" cx="427" cy="333" r="13" />
+                      <path class="send-arrow" d="M427 339V327M422 332l5-5 5 5" />
+                      <path class="lead" d="M450 134H500" /><circle class="lead-dot" cx="450" cy="134" r="2.5" />
+                      <path class="lead" d="M190 249H140" /><circle class="lead-dot" cx="190" cy="249" r="2.5" />
+                    </svg>
+                    <div class="tags">
+                      <span class="tag r" style="--x: 78.1%; --y: 33.5%">A screenshot goes in</span>
+                      <span class="tag l" style="--x: 21.9%; --y: 62.25%">Paragraphs come out</span>
+                    </div>
+                  </figure>
+
+                  <!-- 2. your monitor, an app on it, and Pyxi on top of the app -->
+                  <figure class="scene" data-scene="screen">
+                    <svg viewBox="0 0 640 400">
+                      <rect class="bezel" data-fly="ice" data-w="5" x="66" y="22" width="508" height="310" rx="20" />
+                      <path class="stand" data-fly="ice" data-w="4" d="M320 332V372M236 374H404" />
+                      <rect class="pane" data-fly="ice" data-w="3" x="118" y="64" width="404" height="228" rx="12" />
+                      <path class="rule" d="M118 96H522M222 96V292" />
+                      <text class="t" x="134" y="85">Report</text>
+                      <rect class="bar" x="138" y="121" width="64" height="6" rx="3" /><rect class="bar" x="138" y="147" width="52" height="6" rx="3" /><rect class="bar" x="138" y="173" width="64" height="6" rx="3" /><rect class="bar" x="138" y="199" width="44" height="6" rx="3" />
+                      <rect class="bar" x="246" y="120" width="150" height="9" rx="4.5" />
+                      <rect class="ctl" x="246" y="148" width="250" height="30" rx="8" />
+                      <rect class="ctl" x="246" y="188" width="250" height="30" rx="8" />
+                      <rect class="btn" x="246" y="236" width="88" height="32" rx="9" />
+                      <text class="t" x="290" y="257" text-anchor="middle">Export</text>
+                      <ellipse class="ice" data-fly="ice" data-w="3" cx="290" cy="252" rx="62" ry="30" />
+                      <path class="cur" d="M326 258v23.8l6.4-5.6 4.2 9.2 3.9-1.7-4.2-9.2h7.9z" />
+                      <circle class="glow" cx="398" cy="250" r="20" />
+                      <circle class="fly" data-fly="gold" data-w="fill" cx="398" cy="250" r="7" />
+                      <path class="thread" d="M391 250H353" />
+                    </svg>
+                    <div class="tags">
+                      <span class="tag c" style="--x: 24%; --y: 5.5%">Your screen</span>
+                      <span class="tag r gold" style="--x: 65.6%; --y: 62.5%">Pyxi</span>
+                    </div>
+                  </figure>
+
+                  <!-- 3. one look at the window: every control by name and place, the password a black bar -->
+                  <figure class="scene" data-scene="read">
+                    <svg viewBox="0 0 640 400">
+                      <rect class="pane" data-fly="ice" data-w="4" x="86" y="30" width="468" height="340" rx="18" />
+                      <line class="rule" x1="86" y1="76" x2="554" y2="76" />
+                      <text class="t" x="108" y="59">Settings</text>
+                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="100" width="124" height="30" rx="6" /><text class="t mono" x="117" y="119">Item "General"</text>
+                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="140" width="124" height="30" rx="6" /><text class="t mono" x="117" y="159">Item "Sync"</text>
+                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="180" width="124" height="30" rx="6" /><text class="t mono" x="117" y="199">Item "Privacy"</text>
+                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="220" width="124" height="30" rx="6" /><text class="t mono" x="117" y="239">Item "About"</text>
+                      <rect class="ice" data-fly="ice" data-w="3" x="258" y="100" width="272" height="44" rx="8" /><text class="t mono" x="270" y="126">Edit "Name"</text><text class="t mono dim" x="518" y="126" text-anchor="end">x 258  y 100</text>
+                      <rect class="ice" data-fly="ice" data-w="3" x="258" y="158" width="272" height="44" rx="8" /><text class="t mono" x="270" y="184">Edit "Email"</text><text class="t mono dim" x="518" y="184" text-anchor="end">x 258  y 158</text>
+                      <rect class="ice" data-fly="ice" data-w="3" x="258" y="218" width="150" height="42" rx="10" /><text class="t mono" x="333" y="243" text-anchor="middle">Button "Export"</text>
+                      <rect class="secret" data-fly="ice" data-w="3" x="258" y="290" width="272" height="40" rx="8" />
+                      <path class="lock" d="M275 308h12v10h-12zM277.500 308v-3.500a3.500 3.500 0 0 1 7 0v3.500" />
+                      <text class="t mono dim" x="296" y="314">hidden</text>
+                      <path class="gold" data-fly="gold" data-w="5" d="M70 50V14H106M534 14H570V50M570 350V386H534M106 386H70V350" />
+                      <circle class="glow" cx="596" cy="32" r="18" />
+                      <circle class="fly" data-fly="gold" data-w="fill" cx="596" cy="32" r="6.500" />
+                      <path class="lead" d="M530 122H574" /><circle class="lead-dot" cx="530" cy="122" r="2.5" />
+                    </svg>
+                    <div class="tags">
+                      <span class="tag c gold" style="--x: 50%; --y: 3.5%">One look, when you ask</span>
+                      <span class="tag r" style="--x: 89.7%; --y: 30.5%">The names and positions of the controls</span>
+                      <span class="tag l" style="--x: 39%; --y: 77.5%">Passwords are blacked out</span>
+                    </div>
+                  </figure>
+
+                  <!-- 4. what Pyxi draws on top: a ring, an arrow, a note in handwriting, a model in 3D -->
+                  <figure class="scene" data-scene="draw">
+                    <svg viewBox="0 0 640 400">
+                      <rect class="pane" data-fly="ice" data-w="4" x="56" y="44" width="372" height="312" rx="16" />
+                      <line class="rule" x1="56" y1="88" x2="428" y2="88" />
+                      <text class="t" x="78" y="72">Sales by month</text>
+                      <line class="rule" x1="84" y1="312" x2="400" y2="312" />
+                      <rect class="col" x="100" y="246" width="36" height="66" rx="4" /><rect class="col" x="154" y="206" width="36" height="106" rx="4" /><rect class="col hi" x="208" y="158" width="36" height="154" rx="4" /><rect class="col" x="262" y="222" width="36" height="90" rx="4" /><rect class="col" x="316" y="190" width="36" height="122" rx="4" />
+                      <path class="ice" data-fly="ice" data-w="3.5" d="M226 130c22-1 37 12 37 27 0 16-16 28-38 28-21 0-36-11-36-27 0-15 15-27 37-28z" />
+                      <path class="ice" data-fly="ice" data-w="3" d="M330 136C306 122 286 128 272 146M272 146l2-13M272 146l13-2" />
+                      <text class="t hand" x="304" y="124">best month</text>
+                      <circle class="glow" cx="286" cy="182" r="18" />
+                      <circle class="fly" data-fly="gold" data-w="fill" cx="286" cy="182" r="6.500" />
+                      <ellipse class="ghost" data-fly="gold" data-w="2.5" cx="534" cy="262" rx="72" ry="17" />
+                      <path class="lead" d="M189 158H44" /><circle class="lead-dot" cx="189" cy="158" r="2.5" />
+                      <path class="lead" d="M400 118H470V86" /><circle class="lead-dot" cx="400" cy="118" r="2.5" />
+                    </svg>
+                    <div class="model" style="--x: 83.4%; --y: 49%"><div class="model-spin"><i></i><i></i><i></i></div></div>
+                    <div class="tags">
+                      <span class="tag l ice" style="--x: 6.9%; --y: 39.5%">Rings and arrows</span>
+                      <span class="tag c ice" style="--x: 79%; --y: 16%">Handwritten notes</span>
+                      <span class="tag c ice" style="--x: 83.4%; --y: 80%">3D scenes</span>
+                    </div>
+                  </figure>
+
+                  <!-- 5. the card Pyxi shows before it clicks for you -->
+                  <figure class="scene" data-scene="allow">
+                    <svg viewBox="0 0 640 400">
+                      <rect class="pane" data-fly="ice" data-w="4" x="120" y="56" width="400" height="288" rx="26" />
+                      <circle class="glow" cx="160" cy="103" r="17" />
+                      <circle class="fly" cx="160" cy="103" r="6.500" />
+                      <text class="t big" x="182" y="110">Pyxi needs your OK</text>
+                      <text class="t mid" x="152" y="152">Send this reply to Sam Rivera</text>
+                      <line class="rule" x1="152" y1="184" x2="488" y2="184" />
+                      <rect class="yes" data-fly="gold" data-w="6" x="150" y="216" width="196" height="72" rx="36" />
+                      <text class="t yes-t" x="248" y="261" text-anchor="middle">Allow</text>
+                      <rect class="ctl" data-fly="ice" data-w="3.5" x="364" y="216" width="126" height="72" rx="36" />
+                      <text class="t no-t" x="427" y="260" text-anchor="middle">Don't</text>
+                      <path class="cur" data-fly="ice" data-w="fill" d="M312 262v37.400l10.100-8.800 6.600 14.500 6.200-2.600-6.600-14.500h12.300z" />
+                      <path class="lead" d="M150 252H100" /><circle class="lead-dot" cx="150" cy="252" r="2.5" />
+                      <path class="lead" d="M490 252H540" /><circle class="lead-dot" cx="490" cy="252" r="2.5" />
+                    </svg>
+                    <div class="tags">
+                      <span class="tag l gold" style="--x: 15.6%; --y: 63%">Nothing is clicked until you press this</span>
+                      <span class="tag r" style="--x: 84.4%; --y: 63%">Say no and nothing happens</span>
+                    </div>
+                  </figure>
+                </div>
+              </div>
+            </div>
             <ol class="story-steps">
-              <li class="story-step" data-shape="bubble" data-say="Most AI lives in a chat box.">
+              <li class="story-step" data-shape="chat" data-say="Most AI lives in a chat box.">
                 <p class="story-n">01 <span>/ 05</span></p>
                 <h3 class="story-line">Most AI lives in a chat box.</h3>
                 <p class="story-sub">You paste a screenshot in and read paragraphs out.</p>
@@ -152,12 +287,12 @@
                 <h3 class="story-line">Pyxi lives on your screen.</h3>
                 <p class="story-sub">It already sees what you see, and it answers on top of it.</p>
               </li>
-              <li class="story-step" data-shape="scan" data-say="I look when you ask. Never before.">
+              <li class="story-step" data-shape="read" data-say="I look when you ask. Never before.">
                 <p class="story-n">03 <span>/ 05</span></p>
                 <h3 class="story-line">It looks when you ask.</h3>
                 <p class="story-sub">One look at the window you're on: the picture, and the names and positions of the controls on it. Nothing in the background unless you turn that on.</p>
               </li>
-              <li class="story-step" data-shape="build" data-say="How is a chip built? Watch.">
+              <li class="story-step" data-shape="draw" data-say="I draw the answer right on your screen.">
                 <p class="story-n">04 <span>/ 05</span></p>
                 <h3 class="story-line">It answers right where you're looking.</h3>
                 <p class="story-sub">Rings, arrows, handwritten notes and 3D scenes, each drawn the moment Pyxi says it. You hear the answer and see it in the same place.</p>

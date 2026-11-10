@@ -1,11 +1,13 @@
 /**
  * The swarm: one WebGL field of fireflies behind the whole home page. Thousands of gold and ice
  * points drift in real depth, part around your cursor, and gather into shapes as you scroll: a
- * galaxy turning round the hero's glass, a chat box, a screen, the controls Pyxi reads, a chip
- * taken apart in 3D, an Allow card, and at the end Pyxi itself.
+ * galaxy turning round the hero's glass, the main lines of each picture in the story, and at the
+ * end Pyxi itself.
  *
- * Every shape is either drawn with the 2D canvas API and sampled into points (blue pixels become
- * ice, red become gold), or generated straight in 3D. Each point flies at its own pace to its
+ * Every shape is either drawn on a 2D canvas and sampled into points (blue pixels become ice, red
+ * become gold), or generated straight in 3D. The story's pictures are not drawn twice: the page
+ * holds each one as a sharp SVG, and the lines marked data-fly in it are the ones the fireflies
+ * trace, so the points always land exactly on the drawing. Each point flies at its own pace to its
  * place, so a change of shape is a flight, never a cut. Raw WebGL, no library, and the flying
  * itself is done by the graphics card: the page only hands it starts, ends and a few numbers.
  *
@@ -21,171 +23,13 @@ const rand = Math.random;
 const gauss = () => (rand() + rand() + rand() + rand() - 2) / 2;
 
 // ------------------------------------------------------------------ shapes, drawn then sampled
-function rr(x, a, b, w, h, r) {
-  x.beginPath();
-  if (x.roundRect) x.roundRect(a, b, w, h, r);
-  else x.rect(a, b, w, h);
-}
 function line(x, a, b, c, d) {
   x.beginPath();
   x.moveTo(a, b);
   x.lineTo(c, d);
   x.stroke();
 }
-function arrow(x, tx, ty, s) {
-  // a mouse pointer with its tip at (tx, ty)
-  x.beginPath();
-  x.moveTo(tx, ty);
-  x.lineTo(tx, ty + 17 * s);
-  x.lineTo(tx + 4.6 * s, ty + 13 * s);
-  x.lineTo(tx + 7.6 * s, ty + 19.6 * s);
-  x.lineTo(tx + 10.4 * s, ty + 18.4 * s);
-  x.lineTo(tx + 7.4 * s, ty + 11.8 * s);
-  x.lineTo(tx + 13 * s, ty + 11.8 * s);
-  x.closePath();
-}
 const DRAW = {
-  // a chat window: where most AI lives
-  bubble(x) {
-    x.strokeStyle = x.fillStyle = ICE;
-    x.lineWidth = 4;
-    rr(x, 170, 28, 300, 344, 24);
-    x.stroke();
-    line(x, 170, 80, 470, 80);
-    [196, 216, 236].forEach((cx) => {
-      x.beginPath();
-      x.arc(cx, 54, 5, 0, 7);
-      x.fill();
-    });
-    x.lineWidth = 3.5;
-    rr(x, 190, 100, 176, 42, 16);
-    x.stroke();
-    rr(x, 262, 156, 188, 60, 16);
-    x.stroke();
-    rr(x, 190, 230, 206, 42, 16);
-    x.stroke();
-    x.lineWidth = 3;
-    line(x, 208, 121, 340, 121);
-    line(x, 282, 176, 430, 176);
-    line(x, 282, 196, 392, 196);
-    line(x, 208, 251, 372, 251);
-    x.lineWidth = 3.5;
-    rr(x, 190, 306, 260, 46, 23);
-    x.stroke();
-    x.beginPath();
-    x.arc(426, 329, 14, 0, 7);
-    x.fill();
-  },
-  // a monitor with a window on it, your cursor, and the firefly beside it
-  screen(x) {
-    x.strokeStyle = x.fillStyle = ICE;
-    x.lineWidth = 5;
-    rr(x, 66, 22, 508, 310, 20);
-    x.stroke();
-    line(x, 320, 332, 320, 372);
-    line(x, 236, 374, 404, 374);
-    x.lineWidth = 3;
-    rr(x, 118, 64, 404, 228, 12);
-    x.stroke();
-    line(x, 118, 96, 522, 96);
-    line(x, 222, 96, 222, 292);
-    [124, 150, 176, 202].forEach((y) => line(x, 138, y, 202, y));
-    x.lineWidth = 8;
-    line(x, 246, 126, 396, 126);
-    x.lineWidth = 3;
-    rr(x, 246, 148, 250, 30, 8);
-    x.stroke();
-    rr(x, 246, 188, 250, 30, 8);
-    x.stroke();
-    rr(x, 246, 236, 88, 32, 9);
-    x.fill();
-    arrow(x, 372, 228, 2.1);
-    x.fill();
-    x.fillStyle = x.strokeStyle = GOLD;
-    x.beginPath();
-    x.ellipse(430, 262, 10, 12, 0, 0, 7);
-    x.fill();
-    x.lineWidth = 2.5;
-    x.beginPath();
-    x.arc(430, 262, 22, 0, 7);
-    x.stroke();
-  },
-  // what Pyxi reads: every control a wireframe, the secret a solid bar, under a gold lens
-  scan(x) {
-    x.strokeStyle = x.fillStyle = ICE;
-    x.lineWidth = 4;
-    rr(x, 86, 30, 468, 340, 18);
-    x.stroke();
-    line(x, 86, 76, 554, 76);
-    x.lineWidth = 3;
-    const box = (a, b, w, h) => {
-      x.strokeRect(a, b, w, h);
-      const t = 9;
-      x.lineWidth = 5;
-      [
-        [a, b, 1, 1],
-        [a + w, b, -1, 1],
-        [a, b + h, 1, -1],
-        [a + w, b + h, -1, -1],
-      ].forEach(([px, py, sx, sy]) => {
-        x.beginPath();
-        x.moveTo(px, py + sy * t);
-        x.lineTo(px, py);
-        x.lineTo(px + sx * t, py);
-        x.stroke();
-      });
-      x.lineWidth = 3;
-    };
-    [102, 142, 182, 222].forEach((y) => box(108, y, 122, 28));
-    box(262, 102, 268, 46);
-    box(262, 162, 268, 46);
-    box(262, 226, 116, 42);
-    x.fillRect(262, 296, 210, 34); // the password field: a black bar
-    x.strokeStyle = GOLD;
-    x.lineWidth = 5;
-    x.beginPath();
-    x.arc(338, 214, 122, 0, 7);
-    x.stroke();
-    x.lineWidth = 3;
-    for (let i = 0; i < 24; i++) {
-      const a = (i / 24) * Math.PI * 2;
-      const r0 = 130;
-      const r1 = i % 6 === 0 ? 146 : 138;
-      line(
-        x,
-        338 + Math.cos(a) * r0,
-        214 + Math.sin(a) * r0,
-        338 + Math.cos(a) * r1,
-        214 + Math.sin(a) * r1,
-      );
-    }
-  },
-  // an Allow card: nothing leaves, and nothing is clicked, until you press it
-  allow(x) {
-    x.strokeStyle = x.fillStyle = ICE;
-    x.lineWidth = 4;
-    rr(x, 84, 40, 472, 320, 30);
-    x.stroke();
-    x.lineWidth = 7;
-    line(x, 126, 96, 392, 96);
-    x.lineWidth = 3.5;
-    line(x, 126, 136, 500, 136);
-    line(x, 126, 164, 430, 164);
-    rr(x, 372, 220, 150, 92, 46);
-    x.stroke();
-    line(x, 412, 266, 482, 266);
-    x.strokeStyle = x.fillStyle = GOLD;
-    x.lineWidth = 7;
-    rr(x, 118, 220, 232, 92, 46);
-    x.stroke();
-    x.textBaseline = "middle";
-    x.textAlign = "center";
-    x.font = `800 54px ${FONT}`;
-    x.fillText("Allow", 234, 268);
-    x.fillStyle = ICE;
-    arrow(x, 318, 290, 3.6);
-    x.fill();
-  },
   // Pyxi itself, seen from above: head and antennae, two open wings, and the lantern of a tail
   firefly(x) {
     x.translate(318, 196);
@@ -247,6 +91,47 @@ const DRAW = {
     }
   },
 };
+/**
+ * One of the page's pictures (an SVG, 640 x 400 units) as a drawing: every element marked
+ * data-fly="ice" or "gold" is traced, data-w wide, or filled when data-w is "fill".
+ */
+function traced(svg) {
+  return (x) => {
+    x.lineCap = x.lineJoin = "round";
+    for (const el of svg.querySelectorAll("[data-fly]")) {
+      const n = (k) => Number(el.getAttribute(k) || 0);
+      const path = new Path2D();
+      switch (el.tagName.toLowerCase()) {
+        case "path":
+          path.addPath(new Path2D(el.getAttribute("d")));
+          break;
+        case "rect":
+          if (path.roundRect)
+            path.roundRect(n("x"), n("y"), n("width"), n("height"), n("rx"));
+          else path.rect(n("x"), n("y"), n("width"), n("height"));
+          break;
+        case "circle":
+          path.arc(n("cx"), n("cy"), n("r"), 0, 7);
+          break;
+        case "ellipse":
+          path.ellipse(n("cx"), n("cy"), n("rx"), n("ry"), 0, 0, 7);
+          break;
+        case "line":
+          path.moveTo(n("x1"), n("y1"));
+          path.lineTo(n("x2"), n("y2"));
+          break;
+        default:
+          continue;
+      }
+      x.strokeStyle = x.fillStyle = el.dataset.fly === "gold" ? GOLD : ICE;
+      if (el.dataset.w === "fill") x.fill(path);
+      else {
+        x.lineWidth = Number(el.dataset.w || 4) * 0.7; // a fine line: the drawing itself is on top
+        x.stroke(path);
+      }
+    }
+  };
+}
 /** Draw a shape on a 640 x 400 canvas and return its pixels as points: [x, y, z, gold, spin]. */
 function sampled(name, height) {
   const W = 640;
@@ -294,66 +179,6 @@ function vortex(radius) {
   }
   return out;
 }
-/** A chip taken apart: four plates lifted off each other, struts between, solder balls below. */
-function build(s) {
-  const out = [];
-  const plates = [
-    { h: 0.5, y: -0.34, grid: 5, gold: 0 },
-    { h: 0.42, y: -0.11, grid: 4, gold: 0 },
-    { h: 0.31, y: 0.12, grid: 3, gold: 0 },
-    { h: 0.2, y: 0.35, grid: 0, gold: 1 },
-  ];
-  const push = (x, y, z, g) => out.push(x * s, y * s, z * s, g, 1);
-  plates.forEach((p, k) => {
-    const n = 900;
-    for (let i = 0; i < n; i++) {
-      // the edge of the plate
-      const t = rand() * 2 - 1;
-      const side = Math.floor(rand() * 4);
-      const [px, pz] =
-        side === 0
-          ? [t, 1]
-          : side === 1
-            ? [t, -1]
-            : side === 2
-              ? [1, t]
-              : [-1, t];
-      push(px * p.h, p.y + (rand() < 0.5 ? 0 : 0.03), pz * p.h, p.gold);
-    }
-    for (let g = 1; g < p.grid; g++)
-      for (let i = 0; i < 90; i++) {
-        const t = (rand() * 2 - 1) * p.h;
-        const o = (g / p.grid) * 2 * p.h - p.h;
-        push(t, p.y, o, 0);
-        push(o, p.y, t, 0);
-      }
-    if (p.gold)
-      for (let i = 0; i < 1500; i++)
-        push((rand() * 2 - 1) * p.h, p.y + 0.03, (rand() * 2 - 1) * p.h, 1); // the die, solid
-    const next = plates[k + 1];
-    if (next)
-      for (const [cx, cz] of [
-        [1, 1],
-        [1, -1],
-        [-1, 1],
-        [-1, -1],
-      ])
-        for (let i = 0; i < 46; i++)
-          if (i % 3)
-            push(cx * next.h, p.y + ((next.y - p.y) * i) / 46, cz * next.h, 0);
-  });
-  for (let a = -4; a <= 4; a++)
-    for (let b = -4; b <= 4; b++)
-      for (let i = 0; i < 9; i++)
-        push(
-          a * 0.11 + gauss() * 0.012,
-          -0.42 + gauss() * 0.012,
-          b * 0.11 + gauss() * 0.012,
-          1,
-        );
-  return out;
-}
-
 /** Any word, spelled in fireflies: mostly gold, with ice glinting through. */
 function word(text) {
   return (x) => {
@@ -420,13 +245,6 @@ function scene(name, aspect, box) {
             spin: 0.16,
             bright: 0.5,
           };
-    case "build":
-      return {
-        ...at,
-        pts: build(Math.min(fitH / 1.42, fitW / 1.7, 1.1)),
-        tilt: 0.5,
-        spin: 0.45,
-      };
     case "firefly":
       return {
         ...at,
@@ -435,18 +253,21 @@ function scene(name, aspect, box) {
         bright: 0.95,
         grain: 0.56,
       };
-    case "bubble":
-    case "screen":
-    case "scan":
-    case "allow":
-      return {
-        ...at,
-        pts: sampled(name, flat(fitH * 0.94)),
-        depth: 0.03,
-        grain: 0.8,
-      };
-    default:
+    default: {
+      // one of the story's pictures: it fills its box exactly, so the points sit on its lines
+      const svg = document.querySelector(
+        `.scene[data-scene="${name}"] svg`,
+      );
+      if (svg)
+        return {
+          ...at,
+          pts: sampled(traced(svg), Math.min(fitH, fitW / 1.6)),
+          depth: 0.012,
+          bright: 0.8,
+          grain: 0.5,
+        };
       return { ...at, pts: null, cx: 0, cy: 0, bright: 0.4 };
+    }
   }
 }
 
@@ -895,6 +716,7 @@ export function initSwarm({ reduced = false } = {}) {
     grain = shape.grain || 1;
     draw(0, 1e3);
   }
+  let onView = null; // told the camera's two angles every frame
   let last = 0;
   let slow = 0; // a running count of frames that took too long
   let judged = 0;
@@ -930,6 +752,7 @@ export function initSwarm({ reduced = false } = {}) {
     ry += (Math.sin(t * 0.21) * 0.1 + tx * 0.12 - ry) * 0.04 * k;
     rx += (Math.sin(t * 0.16) * 0.03 - ty * 0.06 - rx) * 0.04 * k;
     lift *= Math.pow(0.9, k);
+    onView?.(ry, rx);
     draw(t, now - changed);
   };
 
@@ -950,9 +773,7 @@ export function initSwarm({ reduced = false } = {}) {
   else requestAnimationFrame(tick);
   // shapes with words in them are redrawn once the font is in
   document.fonts?.ready.then(
-    () =>
-      (name === "allow" || name.startsWith("text:")) &&
-      set(name, { force: true }),
+    () => name.startsWith("text:") && set(name, { force: true }),
   );
-  return { set, refresh };
+  return { set, refresh, watch: (fn) => (onView = fn) };
 }

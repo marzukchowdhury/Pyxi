@@ -1,11 +1,13 @@
 /**
  * The home page's scroll story, and the small things that ride on scroll:
  *  - the story: a pinned section of five statements. As you scroll, each one's words light up
- *    one by one, and the swarm behind them gathers into what it says (swarm.js);
+ *    one by one, the swarm gathers along the lines of that statement's picture (swarm.js), and
+ *    the picture itself, sharp and labelled, comes into focus over the fireflies;
  *  - scrub: any [data-scrub] heading lights word by word as it rises through the viewport;
  *  - the rail: a thread of light down the left edge that fills as you go, one node per section;
  *  - spell: at the end, type a word and the fireflies spell it.
- * Reduced motion: the statements are a plain list, words are simply lit, the rail still tracks.
+ * Reduced motion: the statements are a plain list, each under its picture, words are simply lit,
+ * and the rail still tracks.
  */
 const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
@@ -59,12 +61,41 @@ function story(reduced, swarm) {
     sub: split(el.querySelector(".story-sub")),
   }));
   const bars = [...track.querySelectorAll(".story-bar i")];
+  const scenes = steps.map((s) =>
+    track.querySelector(`.scene[data-scene="${s.el.dataset.shape}"]`),
+  );
   if (reduced) {
-    // a plain list of the five statements; the swarm stays a quiet field behind them
-    steps.forEach((s) => s.el.classList.add("on"));
+    // a plain list of the five statements, each under its picture; the swarm stays a quiet field
+    track.classList.add("plain");
+    steps.forEach((s, i) => {
+      s.el.classList.add("on");
+      if (scenes[i]) s.el.prepend(scenes[i]);
+    });
     track.dataset.swarm = "field";
     return;
   }
+  // The pictures lean with the swarm's camera, so the drawing and the fireflies on its lines move
+  // as one thing. Same camera: it sits two viewport heights back and turns round the viewport's middle.
+  const sticky = track.querySelector(".story-sticky");
+  const box = track.querySelector(".story-scenes");
+  const tilt = track.querySelector(".story-tilt");
+  let live = false;
+  const aim = () => {
+    if (!box || !tilt) return;
+    const a = sticky.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    const origin = `${(a.left + a.width / 2 - b.left).toFixed(1)}px ${(a.top + a.height / 2 - b.top).toFixed(1)}px`;
+    box.style.perspective = `${innerHeight * 2}px`;
+    box.style.perspectiveOrigin = origin;
+    tilt.style.transformOrigin = origin;
+  };
+  aim();
+  addEventListener("resize", aim);
+  if (tilt)
+    swarm?.watch((ry, rx) => {
+      if (live)
+        tilt.style.transform = `rotateX(${(-rx).toFixed(4)}rad) rotateY(${ry.toFixed(4)}rad)`;
+    });
   let shown = -1;
   let raf = 0;
   const update = () => {
@@ -77,9 +108,11 @@ function story(reduced, swarm) {
     const local = clamp(f - idx);
     const inView = r.top < vh * 0.62 && r.bottom > vh * 0.45;
     const lead = clamp(1 - r.top / (vh * 0.62)); // the first line starts lighting as the section arrives
+    live = r.top < vh && r.bottom > 0;
     steps.forEach((s, i) => {
       const on = inView && i === idx;
       s.el.classList.toggle("on", on);
+      scenes[i]?.classList.toggle("on", on);
       if (!on) return;
       light(s.line, Math.max(i === 0 ? lead * 0.7 : 0, local / 0.36));
       light(s.sub, (local - 0.22) / 0.42);
