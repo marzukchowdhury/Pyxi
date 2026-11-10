@@ -23,7 +23,7 @@ import re
 import socket
 import time
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote_plus, urljoin, urlparse
+from urllib.parse import parse_qsl, quote_plus, unquote_plus, urljoin, urlparse
 
 import httpx
 from otto.llm.base import ToolSpec
@@ -142,6 +142,56 @@ def country() -> str:
     if zone.startswith("Australia/"):
         return "au"
     return "us"
+
+
+# Sites whose search address is common knowledge (or in the tables above): one written out
+# for them is not a guess.
+_SEARCHABLE = set(_SHOP_SEARCH) | {
+    "google", "bing", "duckduckgo", "youtube", "wikipedia", "reddit", "github", "stackoverflow",
+    "x", "twitter", "linkedin", "facebook", "instagram", "pinterest", "spotify", "imdb", "yelp",
+    "tripadvisor", "booking", "expedia", "airbnb", "kayak", "skyscanner", "daraz", "aliexpress",
+    "alibaba", "flipkart", "microsoft", "apple", "netflix", "twitch", "soundcloud", "npmjs", "pypi",
+}  # fmt: skip
+_SEARCH_WORDS = {
+    "q", "query", "search", "s", "k", "keyword", "keywords", "term", "text", "st", "d",
+    "searchterm", "search_query", "_nkw", "w",
+}  # fmt: skip
+_TWO_PART_ENDINGS = {"co", "com", "org", "net", "gov", "ac", "edu"}
+
+
+def _site_key(host: str) -> str:
+    """'www.techlandbd.com' -> 'techlandbd', 'en.wikipedia.org' -> 'wikipedia',
+    'www.amazon.co.uk' -> 'amazon'."""
+    parts = host.lower().removeprefix("www.").split(".")
+    if len(parts) >= 3 and parts[-2] in _TWO_PART_ENDINGS and len(parts[-1]) == 2:
+        parts = parts[:-1]
+    return parts[-2] if len(parts) >= 2 else parts[0]
+
+
+def guessed_search(url: str, seen: str) -> str | None:
+    """A search address the model made up for a site Pyxi knows no search address for, and
+    what to open instead: a web search limited to that site. None when the address is fine:
+    not a search, a site whose search address is known, or an address that is in ``seen``
+    (their words, the screen, what was read).
+
+    Live: on a shop's page, "find it on this website" opened the-shop/search?q=IEM, which
+    that shop doesn't have: "404 Page Not Found"."""
+    parts = urlparse(url)
+    host = parts.netloc.lower().removeprefix("www.")
+    if not host or _site_key(host).replace("-", "") in _SEARCHABLE:
+        return None
+    asked = [v for k, v in parse_qsl(parts.query) if k.lower() in _SEARCH_WORDS and v.strip()]
+    path = [p for p in parts.path.lower().split("/") if p]
+    if not asked and not any("search" in p for p in path):
+        return None
+    here = (host + parts.path).rstrip("/").lower()
+    if here in " ".join(str(seen or "").lower().split()):
+        return None  # that page is really there: it was said, shown or read
+    words = asked[0] if asked else (path[-1] if path and "search" not in path[-1] else "")
+    words = " ".join(unquote_plus(words).replace("-", " ").split())[:120]
+    if not words:
+        return None
+    return f"https://duckduckgo.com/?q={quote_plus(f'{words} site:{host}')}"
 
 
 def shop_search(shop: str, query: str, where: str | None = None) -> CardLink | None:

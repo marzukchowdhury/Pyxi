@@ -710,3 +710,42 @@ async def test_open_it_looks_at_the_page_and_marks_the_pick_like_show_me(setting
     await brain._act("show_answer", dict(PICK))
     await brain.turn("take me to my inbox")
     assert len(other.prompts) == 1
+
+
+# ------------------------------------------------------------------ a search address that was made up
+def test_a_made_up_search_address_becomes_a_search_of_that_site():
+    """Live: on a shop's page the founder asked "can you find it in this website", Pyxi opened
+    the-shop/search?q=IEM, and that shop has no such page: "404 Page Not Found"."""
+    guessed = answers.guessed_search
+    instead = guessed("https://www.techlandbd.com/search?q=IEM", "can you find it in this website")
+    assert instead == "https://duckduckgo.com/?q=IEM+site%3Atechlandbd.com"
+    assert guessed("https://shop.example.co.uk/catalogsearch/result/?q=iem+earphones", "") == (
+        "https://duckduckgo.com/?q=iem+earphones+site%3Ashop.example.co.uk"
+    )
+    assert guessed("https://example.com/search/wired-earphones", "") == "https://duckduckgo.com/?q=wired+earphones+site%3Aexample.com"
+    # Not a guess: a search on a site whose search address is known, a page that isn't a
+    # search, and an address that was said, shown or read.
+    for fine in (
+        "https://www.google.com/search?q=iem",
+        "https://www.amazon.ca/s?k=iem",
+        "https://www.youtube.com/results?search_query=lofi",
+        "https://en.wikipedia.org/w/index.php?search=iem",
+        "https://www.techlandbd.com/accessories/headphone-speaker/earphone",
+        "https://www.techlandbd.com/",
+        "https://docs.google.com/spreadsheets/create",
+    ):
+        assert guessed(fine, "") is None, fine
+    read = "Results:\n- IEM | TechLand BD (https://www.techlandbd.com/search?q=iem&sort=price)"
+    assert guessed("https://www.techlandbd.com/search?q=IEM", read) is None
+
+
+async def test_the_made_up_address_is_never_opened(settings):
+    llm = Scripted(
+        [ToolCall(id="o", name="quick_action", arguments={"action": "open_url", "value": "https://www.techlandbd.com/search?q=IEM"})],
+        [say("These are search results for TechLand.")],
+    )
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("open the IEM earphones on this website")
+    assert [a["value"] for a in rec.of("action")] == ["https://duckduckgo.com/?q=IEM+site%3Atechlandbd.com"]
+    opened = next(c for c in brain._calls if c["tool"] == "quick_action")
+    assert "has no search address you have seen" not in str(opened.get("note", ""))  # it was opened, not refused

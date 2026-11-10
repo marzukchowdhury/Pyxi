@@ -933,6 +933,26 @@ class Brain:
                 return "open_url: that isn't a web address."
             g = self.connectors.google
             url = in_account(url, g._saved_email() if g.connected() else None)
+            # A search address made up for a site whose search Pyxi doesn't know is usually
+            # a dead page: open a web search limited to that site, which always exists.
+            seen = " ".join(
+                [
+                    self._user_text or "",
+                    *(note for _, note in getattr(self, "_turn_reads", [])),
+                    *(line.text for line in (self._ctx.text if self._ctx else [])),
+                    *(e.name or "" for e in (self._ctx.elements if self._ctx else [])),
+                ]
+            )
+            instead = answers.guessed_search(url, seen)
+            if instead is not None:
+                host = url.split("://", 1)[-1].split("/", 1)[0].removeprefix("www.")
+                await self.hub.emit("action", kind="open_url", value=instead)
+                return (
+                    f"open_url: {host} has no search address you have seen, and a made-up one is "
+                    "usually a dead page, so I opened a web search limited to that site "
+                    "instead. Say in one short line that these are search results for that "
+                    "site. Don't open another address for this."
+                )
             opened = getattr(self, "_opened_urls", set())
             if url in opened:  # a looping model once made six new docs for one "new doc"
                 return "open_url: that's already open from this request. Don't open it again; answer or stop."
