@@ -253,6 +253,17 @@ def test_signing_gives_up_politely_when_mozilla_takes_too_long_or_refuses_the_ke
     with pytest.raises(SystemExit) as stop:
         sign_firefox.main(["--out", str(tmp_path / "s")], env=SECRETS, client=httpx.Client(transport=httpx.MockTransport(refuse)), sleep=lambda s: None)
     assert "Mozilla refused the API key (401)" in str(stop.value) and SECRETS["WEB_EXT_API_SECRET"] not in str(stop.value)
+    # Mozilla's answer says which of the two values is wrong: it is passed on, in plain words.
+    assert '"bad signature"' in str(stop.value) and "WEB_EXT_API_SECRET isn't the secret" in str(stop.value)
+
+    def unknown(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"detail": "Unknown JWT iss (issuer)."})
+
+    with pytest.raises(SystemExit) as stop:
+        sign_firefox.main(["--out", str(tmp_path / "s")], env=SECRETS, client=httpx.Client(transport=httpx.MockTransport(unknown)), sleep=lambda s: None)
+    assert "WEB_EXT_API_KEY isn't the issuer" in str(stop.value)
+    for value in SECRETS.values():
+        assert value not in str(stop.value)
 
 
 def test_a_version_mozilla_already_has_is_picked_up_and_not_sent_again(tmp_path, capsys):

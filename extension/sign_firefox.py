@@ -118,6 +118,30 @@ def updates(version: str, xpi: bytes) -> dict[str, Any]:
     }
 
 
+# What Mozilla says when it refuses a key, and which of the two values that points at.
+_WHY = (
+    ("unknown jwt iss", f"it doesn't know this JWT issuer: {KEY_VAR} isn't the issuer it gave you"),
+    ("signature", f"the signature doesn't match: {SECRET_VAR} isn't the secret that goes with this issuer"),
+    ("iat", "the time on the request is off: set this PC's clock"),
+    ("exp", "the time on the request is off: set this PC's clock"),
+)
+
+
+def refused(r: httpx.Response) -> str:
+    """Why Mozilla refused, in its own words (its answer names the fault, never the values)."""
+    try:
+        said = str(r.json().get("detail") or "")[:200]
+    except (ValueError, AttributeError):
+        said = ""
+    hint = next((h for word, h in _WHY if word in said.lower()), "")
+    return (
+        f"STOP: Mozilla refused the API key ({r.status_code})"
+        + (f': "{said}"' if said else "")
+        + (f" That means {hint}." if hint else f". Check {KEY_VAR} and {SECRET_VAR}, and that this PC's clock is right.")
+        + " Copy the value again from addons.mozilla.org (Developer Hub, Manage API Keys), with nothing before or after it."
+    )
+
+
 class Mozilla:
     """The four things asked of addons.mozilla.org: take the package, check it, sign it as a
     version of the add-on, and give the signed file back."""
@@ -146,10 +170,7 @@ class Mozilla:
     def _ask(self, method: str, url: str, **kw: Any) -> httpx.Response:
         r = self._send(method, url, **kw)
         if r.status_code in (401, 403):
-            raise SystemExit(
-                f"STOP: Mozilla refused the API key ({r.status_code}). Check {KEY_VAR} and "
-                f"{SECRET_VAR}, and that this PC's clock is right."
-            )
+            raise SystemExit(refused(r))
         if r.status_code == 409 or (r.status_code == 400 and "already exists" in r.text):
             raise SystemExit(
                 "STOP: Mozilla already has this version. A version is signed once: raise "
@@ -164,10 +185,7 @@ class Mozilla:
         was in their queue, or the signed files were lost. None when it is new to them."""
         r = self._send("GET", AMO + f"addons/addon/{addon_id}/versions/v{version}/")
         if r.status_code == 401:
-            raise SystemExit(
-                f"STOP: Mozilla refused the API key (401). Check {KEY_VAR} and {SECRET_VAR}, "
-                "and that this PC's clock is right."
-            )
+            raise SystemExit(refused(r))
         try:
             return str(r.json()["id"]) if r.status_code == 200 else None
         except (ValueError, KeyError, TypeError):
