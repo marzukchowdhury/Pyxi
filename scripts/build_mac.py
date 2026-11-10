@@ -191,8 +191,10 @@ def build_app(arch: str) -> None:
     npm = shutil.which("npm") or "npm"
     run([npm, "run", "build"], cwd=DESKTOP)
     npx = shutil.which("npx") or "npx"
-    # The zip is what electron-updater installs from, once Mac builds are signed (updates.ts).
-    run([npx, "electron-builder", "--mac", "dmg", "zip", f"--{arch}", "--publish", "never", *builder_flags()], cwd=DESKTOP)
+    # The dmg only. The zip is what electron-updater installs from, and Mac updates are off until
+    # builds are signed (updates.ts); it also took over an hour on GitHub's Intel runner. Add
+    # "zip" back here when updates are switched on.
+    run([npx, "electron-builder", "--mac", "dmg", f"--{arch}", "--publish", "never", *builder_flags()], cwd=DESKTOP)
 
 
 def main() -> None:

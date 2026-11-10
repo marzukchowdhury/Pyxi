@@ -111,7 +111,9 @@ off it. Fn can't be used: the keyboard hook (libuiohook) doesn't report Fn on a 
   as on Windows.
 - **Automatic updates are off** on the Mac build (`MAC_UPDATES = false` in `updates.ts`):
   Squirrel.Mac only installs updates signed by the same Developer ID, and there's no
-  `latest-mac.yml` in the releases yet. The build already makes the zip electron-updater needs.
+  `latest-mac.yml` in the releases yet. The build makes only the dmg for now; the zip
+  electron-updater installs from is one word away in `scripts/build_mac.py` (it took over an
+  hour on GitHub's Intel runner, for nothing while updates are off).
 - **The bundle isn't slimmed** (no zipped stdlib, no separate voice pack) and keeps Playwright's
   own Node. Expect a dmg of several hundred MB.
 - **Esc to stop** is "Esc held down right now" (`CGEventSourceKeyState`): a very quick tap between
@@ -187,7 +189,7 @@ python3 scripts/build_mac.py --arch arm64     # or x64, or both
 That downloads python-build-standalone's CPython 3.12.16 for the architecture (checked against
 its SHA-256), installs `requirements/mac.in`, Otto and Pyxi into `desktop/build/python`, checks
 that the bundle imports the brain and the Apple frameworks, then builds
-`desktop/dist/Pyxi-<version>-<arch>.dmg` (and the zip). `--python-only` stops after the Python,
+`desktop/dist/Pyxi-<version>-<arch>.dmg`. `--python-only` stops after the Python,
 `--skip-python` reuses it.
 
 To make the lock: `pip-compile --generate-hashes requirements/mac.in -o requirements/mac.txt`

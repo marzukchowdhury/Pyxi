@@ -97,8 +97,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Pyxi-mac-${{ matrix.arch }}
-          path: |
-            pyxi/desktop/dist/*.dmg
-            pyxi/desktop/dist/*.zip
+          path: pyxi/desktop/dist/*.dmg  # the zip for updates isn't built yet (scripts/build_mac.py)
           retention-days: 7
           if-no-files-found: error
