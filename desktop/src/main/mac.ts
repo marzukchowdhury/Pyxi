@@ -9,6 +9,8 @@
 
 export type MacPermission = "screen" | "accessibility" | "microphone" | "input";
 
+import { deflateSync } from "node:zlib";
+
 const PRIVACY = "x-apple.systempreferences:com.apple.preference.security?";
 
 /** The System Settings page for each permission (macOS 13 and later still honour these links). */
@@ -121,4 +123,50 @@ export function trayTemplatePixels(size: number): Buffer {
     }
   }
   return buf;
+}
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+function crc32(data: Buffer): number {
+  let c = 0xffffffff;
+  for (const byte of data) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([len, body, crc]);
+}
+
+/**
+ * The menu bar icon as a PNG, size x size pixels: what nativeImage.createFromBuffer reads on
+ * every platform (main's Windows tray fix loads PNGs the same way). The pixels are black, so the
+ * BGRA bitmap and PNG's RGBA order hold the same bytes.
+ */
+export function trayTemplatePng(size: number): Buffer {
+  const px = trayTemplatePixels(size);
+  const rows = Buffer.alloc(size * (size * 4 + 1));
+  for (let y = 0; y < size; y++) {
+    rows[y * (size * 4 + 1)] = 0; // filter: none
+    px.copy(rows, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4);
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // RGBA
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", deflateSync(rows)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
 }

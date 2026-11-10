@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync 
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chordLabel, chordsFrom, pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
-import { MAC_HOTKEYS, MAC_RUNNABLE, macKeyName, needsPermissions, permissionRows, settingsUrl, trayTemplatePixels } from "./mac";
+import { MAC_HOTKEYS, MAC_RUNNABLE, macKeyName, needsPermissions, permissionRows, settingsUrl, trayTemplatePng } from "./mac";
 import { trayTemplate } from "./trayMenu";
 import { checkNow, startUpdates } from "./updates";
 import {
@@ -613,10 +613,12 @@ function startCursorFeed(): void {
 function trayIcon(): Electron.NativeImage {
   if (IS_MAC) {
     // The menu bar wants a template image (black with alpha; macOS tints it for light and dark),
-    // 22 points tall, with a Retina version. Drawn as pixels: SVG isn't a format nativeImage reads.
-    const img = nativeImage.createFromBitmap(trayTemplatePixels(22), { width: 22, height: 22 });
-    img.addRepresentation({ scaleFactor: 2, width: 44, height: 44, buffer: trayTemplatePixels(44) });
+    // 22 points tall, with a Retina version. Drawn in code and packed as PNG: an SVG data URL
+    // comes out as an empty image in Electron (main's Windows tray fix loads PNGs the same way).
+    const img = nativeImage.createFromBuffer(trayTemplatePng(22), { scaleFactor: 1 });
+    img.addRepresentation({ scaleFactor: 2, buffer: trayTemplatePng(44) });
     img.setTemplateImage(true);
+    if (img.isEmpty()) console.warn("[pyxi] menu bar icon came out empty");
     return img;
   }
   // The firefly in small, drawn in code so the repo needs no binary assets.
