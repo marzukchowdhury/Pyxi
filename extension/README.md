@@ -41,8 +41,9 @@ text in something Pyxi read can't start it. Only your press takes back an earlie
   **Developer mode**, **Load unpacked**, then paste into the **Folder** box and press
   **Select Folder**. Once the extension is seen on the page, it makes the pairing code and
   points at the extension's icon. If you close the pointer or walk away before that, it
-  stops there and says nothing more; **I already have the extension: show me a code** in
-  Settings gives you a code whenever you are ready.
+  stops there, with one line to say that the folder's address is still copied and that
+  **I already have the extension: show me a code** in Settings gives you a code whenever
+  you are ready.
 - **How it opens the extensions page.** Chrome and Edge ignore that address when it is handed
   to them, so Pyxi opens a new window of the browser and types the address into it. It only
   types into the window it just opened (told apart by a one-time name in its title), only
@@ -50,10 +51,11 @@ text in something Pyxi read can't start it. Only your press takes back an earlie
   every key, and presses Enter only once it has seen that the address bar holds exactly the
   address. If any of that is in doubt it types nothing more and points at the address bar
   for you instead.
-- **Your clipboard.** The folder's address goes on the clipboard for the one paste. When the
-  setup ends, the text you had copied before is put back, unless you have copied something
-  else since. (When Pyxi could only give you the steps in words, the address stays copied:
-  you still need it. Something other than text that was on the clipboard can't be put back.)
+- **Your clipboard.** The folder's address goes on the clipboard for the one paste. Once the
+  extension is seen on the page (or if you stop the setup), the text you had copied before
+  is put back, unless you have copied something else since. Until then the address stays
+  copied, because you may still need it, and Pyxi says so. Something other than text that
+  was on the clipboard can't be put back.
 - **Brave, Vivaldi and Opera** get the same steps as Chrome, because they share its
   extensions page. That was not checked in those browsers.
 
@@ -132,7 +134,7 @@ website has no address of its own yet. The add-on's manifest carries the updates
 address there, so installed copies find new versions by themselves. Every release uploads
 both files again (the same ones, until you sign a new version), so "latest" always has them.
 
-The two files live in the checkout where you signed, so commit them (step 5) and release from a checkout that has them. If the release that is out carries the add-on and the one you are publishing would not, `scripts/release.py` stops before it publishes anything and says what to do (`--without-firefox` publishes without it on purpose). After publishing it checks the add-on at the latest link; the release is public by then, so a fault there is reported loudly, with the version already committed.
+The two files live in the checkout where you signed, so commit them (step 5) and release from a checkout that has them. If the release that is out carries the add-on and the one you are publishing would not, `scripts/release.py` stops at the very start, before it builds or publishes anything, and says what to do (`--without-firefox` publishes without it on purpose). After publishing it checks the add-on at the latest link; the release is public by then, so a fault there is reported loudly, with the version already committed.
 
 A version can be signed only once. After changing the extension's code, raise `"version"`
 in `manifest.json`, then run step 4 again and commit the new files. If a run stops while

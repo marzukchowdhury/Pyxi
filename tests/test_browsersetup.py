@@ -380,6 +380,36 @@ def test_a_release_that_would_drop_the_add_on_stops_before_publishing(tmp_path, 
     assert release.latest_has_firefox() is None
 
 
+def test_the_add_on_check_comes_before_the_build_and_only_tells_a_build_only_run(tmp_path, monkeypatch, capsys):
+    """Follow-up I: the check runs first, before the version is set or anything is built, and
+    a --build-only run (which publishes nothing) is told, not stopped, also when offline."""
+    import release
+
+    monkeypatch.setattr(release, "SIGNED", tmp_path / "nothing")
+    did: list[str] = []
+    monkeypatch.setattr(release, "set_version", lambda v: did.append("version"))
+    monkeypatch.setattr(release, "sh", lambda *cmd, **kw: did.append("sh"))
+    monkeypatch.setattr(release, "automated_checks", lambda: did.append("tests"))
+    monkeypatch.setattr(release, "latest_has_firefox", lambda: True)
+    monkeypatch.setattr(release.sys, "argv", ["release.py", "9.9.9", "Notes."])
+    with pytest.raises(SystemExit, match="STOP: the release that is out now carries the Firefox add-on"):
+        release.main()
+    assert did == []  # stopped before the version was touched or anything was built
+
+    for had, says in ((True, "the release that is out now carries the Firefox add-on"), (None, "couldn't find out whether")):
+        monkeypatch.setattr(release, "latest_has_firefox", lambda had=had: had)
+        assert release.firefox_assets(build_only=True) == []
+        out = capsys.readouterr().out
+        assert out.startswith("note: ") and says in out and "Publishing this build will stop on that." in out and "--without-firefox" in out
+    with pytest.raises(SystemExit):
+        release.firefox_assets()  # the publishing run still stops
+
+    body = (ROOT / "scripts" / "release.py").read_text(encoding="utf-8")
+    main = body[body.index("def main()") :]
+    assert main.count("firefox_assets(") == 1
+    assert main.index('firefox_assets(build_only="--build-only" in sys.argv)') < main.index("set_version(v)") < main.index("build_installer.py")
+
+
 def test_the_update_file_must_be_what_the_app_looks_for(tmp_path, monkeypatch):
     """Finding 7: the id and the link in the update file are checked against what the app
     requires before it offers Add to Firefox, before anything is published."""
@@ -946,9 +976,89 @@ async def test_pairing_waits_until_the_extension_is_seen_to_be_loaded(settings, 
     await asyncio.wait_for(flow, 10)
     assert len(model.asked) == 1 and len(brain.said) == said
     assert not any(e["type"] == "browser" and e.get("code") for e in cards.events)
-    assert [e["message"] for e in cards.events if e["type"] == "notice"] == [browsersetup.dev_notice(CHROME[0])]
+    # Follow-up B: they may still press Load unpacked and paste. The folder's address stays
+    # copied, and one line says so (and where a code comes from).
+    assert [e["message"] for e in cards.events if e["type"] == "notice"] == [
+        browsersetup.dev_notice(CHROME[0]),
+        "The extension folder's address is still copied, for Load unpacked. When Pyxi in your browser shows on that page, "
+        "press I already have the extension: show me a code, in Pyxi's Settings under Connect your browser.",
+    ]
     assert not brain._browser_setup
-    assert browsersetup.CLIP["text"] == "what I had copied"  # and their clipboard is back
+    assert browsersetup.CLIP["text"] == str(browsersetup.folder("chromium"))
+
+
+async def test_the_address_stays_copied_when_the_wait_runs_out(settings, bundle, monkeypatch, fast):
+    """Follow-up B: the pointer waited its whole time at Developer mode. Same as closing it."""
+    model = Guide(point(3, "Developer mode"))
+    brain = _brain(settings, model)
+    monkeypatch.setattr(browsersetup, "front", lambda key="", open_windows=None: CHROME)
+    monkeypatch.setattr(browsersetup, "show_page", lambda browser, exe, stop=None: True)
+    monkeypatch.setattr(browsersetup, "LOAD_WAIT_S", 0.3)
+    cards = Cards(brain.hub)
+    await asyncio.wait_for(browsersetup.setup(brain, "chrome"), 20)
+    assert browsersetup.CLIP["text"] == str(browsersetup.folder("chromium"))
+    assert [e["message"] for e in cards.events if e["type"] == "notice"][-1].startswith("The extension folder's address is still copied")
+    assert not any(e["type"] == "browser" and e.get("code") for e in cards.events)
+
+
+async def test_a_guide_that_stops_for_going_in_circles_is_not_the_extension_being_loaded(settings, bundle, monkeypatch, fast):
+    """Follow-up A: they cancel the folder window and try again, so the pointer goes Load
+    unpacked, Folder box, Load unpacked, Folder box, and the guide stops itself. That ends it
+    "finished", but nobody saw the extension: no code, no pairing turn."""
+    folder_box = point(1, "Folder box", action="type", text="Ctrl+V, then Select Folder")
+    model = Guide(point(4, "Load unpacked"), folder_box, point(4, "Load unpacked"), folder_box)
+    brain = _brain(settings, model)
+    monkeypatch.setattr(browsersetup, "front", lambda key="", open_windows=None: CHROME)
+    monkeypatch.setattr(browsersetup, "show_page", lambda browser, exe, stop=None: True)
+    cards = Cards(brain.hub)
+    flow = asyncio.ensure_future(browsersetup.setup(brain, "chrome"))
+    await _until(lambda: brain._guide is not None and brain._guide.label == "Load unpacked" and not brain._lock.locked())
+    await brain.guide_clicked("clicked")
+    await _until(lambda: brain._guide is not None and brain._guide.label == "Folder box" and not brain._lock.locked())
+    await brain.guide_clicked("done")  # the folder window was cancelled: back to Load unpacked
+    await _until(lambda: brain._guide is not None and brain._guide.label == "Load unpacked" and not brain._lock.locked())
+    await brain.guide_clicked("clicked")  # ...and the Folder box again: round in a circle
+    await asyncio.wait_for(flow, 10)
+    ends = [e for e in cards.events if e["type"] == "guide" and not e["active"]]
+    assert any(e["finished"] and not e.get("at") for e in ends)  # the guide did stop itself as "finished"
+    assert not any(e["type"] == "browser" and e.get("code") for e in cards.events)  # and still: no code
+    assert not any("Pairing" in e.get("shown", "") or "pair the extension" in a for e in cards.events for a in model.asked)
+    assert browsersetup.CLIP["text"] == str(browsersetup.folder("chromium"))  # the address is still theirs to paste
+    assert not brain._browser_setup
+
+
+async def test_the_clipboard_comes_back_when_the_setup_is_stopped(settings, bundle, monkeypatch, fast):
+    model = Guide(point(3, "Developer mode"))
+    brain = _brain(settings, model)
+    monkeypatch.setattr(browsersetup, "front", lambda key="", open_windows=None: CHROME)
+    monkeypatch.setattr(browsersetup, "show_page", lambda browser, exe, stop=None: True)
+    flow = asyncio.ensure_future(browsersetup.setup(brain, "chrome"))
+    await _until(lambda: brain._guide is not None and brain._guide.label == "Developer mode")
+    assert browsersetup.CLIP["text"] == str(browsersetup.folder("chromium"))
+    flow.cancel()  # Stop everything
+    with pytest.raises(asyncio.CancelledError):
+        await flow
+    assert browsersetup.CLIP["text"] == "what I had copied" and not brain._browser_setup
+
+
+def test_the_clipboard_is_only_put_back_while_it_still_holds_what_pyxi_put_there(settings):
+    """They copied something else during the setup: that is theirs, and it stays."""
+    brain = _brain(settings)
+    path = str(browsersetup.folder("chromium"))
+    brain._setup_clip = ("what I had copied", path)
+    browsersetup.CLIP["text"] = "something I copied meanwhile"
+    browsersetup._give_back(brain)
+    assert browsersetup.CLIP["text"] == "something I copied meanwhile" and brain._setup_clip is None
+    brain._setup_clip = ("what I had copied", path)
+    browsersetup.CLIP["text"] = path
+    browsersetup._give_back(brain)
+    assert browsersetup.CLIP["text"] == "what I had copied"
+    brain._setup_clip = (None, path)  # there was no text before (empty, or a picture): nothing to put back
+    browsersetup.CLIP["text"] = path
+    browsersetup._give_back(brain)
+    assert browsersetup.CLIP["text"] == path
+    browsersetup._give_back(brain)  # nothing held: nothing done
+    assert browsersetup.CLIP["text"] == path
 
 
 async def test_a_pairing_they_walk_away_from_ends_quietly_and_still_works_if_they_come_back(settings, bundle, monkeypatch, fast):
@@ -987,7 +1097,7 @@ class Desk:
     A key that lands anywhere but in the window Pyxi opened is written down in ``wrong``:
     the tests assert on that list, so nothing in show_page can swallow it."""
 
-    def __init__(self, monkeypatch, *, opens: bool = True, deaf: int = 0, idle: bool = True, blank_ok: bool = True) -> None:
+    def __init__(self, monkeypatch, *, opens: bool = True, deaf: int = 0, idle: bool = True, blank_ok: bool = True, fronted: bool = True) -> None:
         from pyxi import hands, windows
 
         # (hwnd, title, exe, minimized)
@@ -1006,6 +1116,8 @@ class Desk:
         self.deaf = deaf  # how many Enters the new window ignores (still starting)
         self.idle = idle
         self.mine = 0  # the window Pyxi opened
+        self.focused: list[int] = []  # windows Pyxi pulled to the front
+        self.on_idle: Any = None  # what happens while Pyxi waits for them to be idle
         desk = self
 
         def launch(exe: str, *args: str) -> None:
@@ -1015,7 +1127,8 @@ class Desk:
                 desk.mine = 21
                 desk.all.insert(0, [21, f"{title} - Google Chrome", exe, False])
                 desk.bars[21] = args[-1]
-                desk.front = 21
+                if fronted:
+                    desk.front = 21
 
         class Keys:
             """Like pyxi.hands.Hands: the input goes out through _send, then there is a pause."""
@@ -1032,6 +1145,8 @@ class Desk:
                 desk.pause()
 
             def wait_idle(self, quiet_s: float, timeout_s: float) -> bool:
+                if desk.on_idle is not None:
+                    desk.on_idle()
                 return desk.idle
 
         def open_windows(minimized: bool = False) -> list[tuple[int, str, str]]:
@@ -1049,7 +1164,7 @@ class Desk:
         monkeypatch.setattr(browsersetup, "_bar", lambda hwnd, budget_s=1.5: [desk.bars[hwnd]] if desk.bars.get(hwnd) else [])
         monkeypatch.setattr(windows, "open_windows", open_windows)
         monkeypatch.setattr(windows, "foreground", lambda: desk.front)
-        monkeypatch.setattr(windows, "focus", lambda hwnd: setattr(desk, "front", hwnd) or True)
+        monkeypatch.setattr(windows, "focus", lambda hwnd: (desk.focused.append(hwnd), setattr(desk, "front", hwnd)) and True)
         monkeypatch.setattr(hands, "Hands", Keys)
 
     # ------------------------------------------------------------ what Windows does with a key
@@ -1214,6 +1329,34 @@ def test_only_the_window_pyxi_opened_is_typed_into(monkeypatch):
     assert desk.wrong == [] and all(where == 21 for where, _ in desk.keys)
 
 
+def test_a_minimized_window_is_never_taken_for_the_new_one(monkeypatch):
+    """The "before" list holds minimized windows too. Even one that carries the very name
+    Pyxi is about to look for (it can't, the name is new each time: belt and braces) is not
+    "new" when it is restored during the wait."""
+    monkeypatch.setattr(browsersetup.secrets, "token_hex", lambda n=None: "abc123")
+    desk = Desk(monkeypatch, opens=False)
+    desk.all.append([14, "Pyxi setup abc123 - Google Chrome", CHROME[1], True])  # minimized, theirs
+    desk.bars[14] = "something of theirs"
+    desk.on_look[3] = lambda: desk.restore(14)
+    assert browsersetup.show_page(CHROME_B, CHROME[1]) is False
+    assert desk.keys == [] and desk.focused == [] and desk.bars[14] == "something of theirs"
+
+
+def test_a_stop_before_the_window_is_brought_forward_leaves_it_where_it_is(monkeypatch):
+    """Follow-up D: Stop during the wait for the window to settle and for the user to be
+    idle. The browser is not pulled to the front afterwards, and nothing is typed."""
+    import threading
+
+    desk = Desk(monkeypatch, fronted=False)  # the new window came up behind what they are doing
+    stop = threading.Event()
+    desk.on_idle = stop.set  # they press Stop while Pyxi waits
+    assert browsersetup.show_page(CHROME_B, CHROME[1], stop=stop) is False
+    assert desk.focused == [] and desk.front == 12 and desk.keys == []
+    # Without a stop, the same window is brought forward and typed into.
+    desk = Desk(monkeypatch, fronted=False)
+    assert browsersetup.show_page(CHROME_B, CHROME[1]) is True and desk.focused == [21] and desk.wrong == []
+
+
 def test_a_stop_reaches_the_typing(monkeypatch):
     """Stop everything cancels the setup: the thread that types is told, and sends no more."""
     import threading
@@ -1246,18 +1389,55 @@ async def test_stopping_the_setup_tells_the_typing_thread(settings, monkeypatch)
     assert seen["stop"].is_set()
 
 
-def test_a_fault_in_the_typing_is_not_hidden(monkeypatch):
-    """show_page only swallows what it expects (Esc, a window of Pyxi's in front): anything
-    else comes out, so a test's own assertion can never be lost in there."""
+def test_a_fault_in_the_typing_is_not_hidden(monkeypatch, caplog):
+    """Follow-up G: a fault show_page didn't expect (a bug, not Esc) doesn't kill the setup:
+    it answers False, so the pointer starts at the address bar. And it isn't lost: it is in
+    the log with its traceback, and kept in ``last_fault`` for a test to look at."""
     from pyxi import hands
 
     desk = Desk(monkeypatch)
-    desk.after[2] = lambda: (_ for _ in ()).throw(AssertionError("a fault"))
-    with pytest.raises(AssertionError):
-        browsersetup.show_page(CHROME_B, CHROME[1])
+    fault = RuntimeError("a fault in the typing")
+    desk.after[2] = lambda: (_ for _ in ()).throw(fault)
+    with caplog.at_level("ERROR", logger="pyxi.companion.browsersetup"):
+        assert browsersetup.show_page(CHROME_B, CHROME[1]) is False
+    assert browsersetup.last_fault is fault
+    assert any(r.exc_info and r.exc_info[1] is fault for r in caplog.records)
+    assert [k for _, k in desk.keys] == WHOLE[:2] and desk.wrong == []  # it stopped there
+    # What it does expect leaves no fault behind.
+    monkeypatch.setattr(browsersetup, "last_fault", None)
     desk = Desk(monkeypatch)
     desk.after[2] = lambda: (_ for _ in ()).throw(hands.Interrupted())  # they pressed Esc
-    assert browsersetup.show_page(CHROME_B, CHROME[1]) is False
+    assert browsersetup.show_page(CHROME_B, CHROME[1]) is False and browsersetup.last_fault is None
+    # The wrong-window record is a list the tests read, so no except clause can hide it.
+    desk = Desk(monkeypatch)
+    desk.after[3] = lambda: setattr(desk, "front", 12)
+    from pyxi import windows
+
+    monkeypatch.setattr(windows, "foreground", lambda: 21)  # as if the front-window check were broken
+    assert browsersetup.show_page(CHROME_B, CHROME[1]) in (True, False)
+    assert desk.wrong, "keys that land elsewhere are always written down"
+
+
+async def test_a_fault_while_opening_the_page_falls_back_to_the_address_bar(settings, bundle, monkeypatch, fast, caplog):
+    """Follow-up G, in the flow: the setup goes on to the by-hand first step instead of
+    ending with "hit a snag"."""
+    model = Guide(point(2, "Address bar", action="type", text="chrome://extensions, then Enter"))
+    brain = _brain(settings, model)
+    monkeypatch.setattr(browsersetup, "front", lambda key="", open_windows=None: CHROME)
+
+    def broken(browser: Any, exe: str, stop: Any = None) -> bool:
+        raise RuntimeError("no such window")
+
+    monkeypatch.setattr(browsersetup, "show_page", broken)
+    monkeypatch.setattr(browsersetup, "LOAD_WAIT_S", 0.3)
+    cards = Cards(brain.hub)
+    flow = asyncio.ensure_future(browsersetup.setup(brain, "chrome"))
+    await _until(lambda: brain._guide is not None and brain._guide.label == "Address bar")
+    assert "its extensions page may not be open yet" in model.asked[0]
+    await asyncio.wait_for(flow, 20)
+    assert not any("hit a snag" in e.get("message", "") for e in cards.events)
+    assert isinstance(browsersetup.last_fault, RuntimeError)
+    assert any("opening the extensions page went wrong" in r.getMessage() for r in caplog.records)
 
 
 async def test_add_to_firefox_opens_the_signed_add_on_in_firefox_then_pairs(settings, bundle, monkeypatch, fast):

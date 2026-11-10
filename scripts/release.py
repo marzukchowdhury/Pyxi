@@ -26,8 +26,9 @@
    .../releases/latest/download/pyxi-firefox.xpi. They go up with every release, new or not,
    so that the latest link always has them. extension/signed/ belongs to one checkout, so a
    release run from a checkout without it would take the add-on off the latest link: when the
-   release that is out now carries the add-on and this one would not, it stops before
-   publishing anything (copy extension/signed/ over, or pass --without-firefox).
+   release that is out now carries the add-on and this one would not, it stops at the very
+   start, before the version is set or anything is built (copy extension/signed/ over, or
+   pass --without-firefox). A --build-only run publishes nothing, so it is told, not stopped.
 6. Checks the latest link really gives the new version, then commits the version bump. The
    Firefox add-on at the latest link is checked after that commit: the release is public by
    then, so a fault there is reported loudly and nothing is left half done.
@@ -209,10 +210,11 @@ def latest_has_firefox() -> bool | None:
     return False if r.status_code == 404 else None
 
 
-def firefox_assets() -> list[tuple[Path, str]]:
+def firefox_assets(build_only: bool = False) -> list[tuple[Path, str]]:
     """The signed Firefox add-on and its update file, as (file, content type), if they have
-    been made. Checked before anything is published: the two must belong together, be what
-    the app looks for, and not go missing from a release when the last one had them."""
+    been made. Checked at the very start, before the build: the two must belong together, be
+    what the app looks for, and not go missing from a release when the last one had them.
+    ``build_only``: nothing is published by this run, so a missing add-on is a note, not a stop."""
     xpi, updates = (SIGNED / name for name in FIREFOX)
     if not xpi.exists() and not updates.exists():
         if "--without-firefox" in sys.argv:
@@ -222,19 +224,24 @@ def firefox_assets() -> list[tuple[Path, str]]:
         if had is False:
             print("note: no signed Firefox add-on in extension/signed (extension/sign_firefox.py makes it)")
             return []
+        what = (
+            "the release that is out now carries the Firefox add-on, and this checkout has "
+            "none in extension/signed."
+            if had
+            else "couldn't find out whether the release that is out now carries the Firefox "
+            "add-on (no connection to GitHub?), and this checkout has none in extension/signed."
+        )
+        fix = (
+            "Copy extension/signed/ here from the checkout that has it, or run "
+            "extension/sign_firefox.py (it picks up the version Mozilla already signed). To "
+            "publish without it on purpose, add --without-firefox."
+        )
+        if build_only:  # nothing goes out now: build, and say what publishing will need
+            print(f"note: {what} Publishing this build will stop on that. {fix}")
+            return []
         raise SystemExit(
-            (
-                "STOP: the release that is out now carries the Firefox add-on, and this checkout has "
-                "none in extension/signed."
-                if had
-                else "STOP: couldn't find out whether the release that is out now carries the Firefox "
-                "add-on (no connection to GitHub?), and this checkout has none in extension/signed."
-            )
-            + " Publishing without it takes it off the latest link: Add to Firefox goes away in "
-            "Pyxi, and add-ons that are installed find no update file. Copy extension/signed/ "
-            "here from the checkout that has it, or run extension/sign_firefox.py (it picks up "
-            "the version Mozilla already signed). To publish without it on purpose, add "
-            "--without-firefox."
+            f"STOP: {what} Publishing without it takes it off the latest link: Add to Firefox "
+            "goes away in Pyxi, and add-ons that are installed find no update file. " + fix
         )
     if not (xpi.exists() and updates.exists()):
         raise SystemExit(f"STOP: {SIGNED} has only one of {list(FIREFOX)}. Run extension/sign_firefox.py again.")
@@ -406,6 +413,10 @@ def main() -> None:
         "publisher: choose More info, then Run anyway. Already have Pyxi? It updates itself: look for "
         '"Restart to update" in the notch.'
     )
+    # First of all, before the version is touched or anything is built: would this release
+    # lose the Firefox add-on, and do the signed files belong together? (--build-only is told,
+    # not stopped: it publishes nothing.)
+    firefox = firefox_assets(build_only="--build-only" in sys.argv)
     set_version(v)
     # --publish-built: publish the build an earlier --build-only run made (and that was installed
     # and tried by hand), without rebuilding it.
@@ -432,7 +443,6 @@ def main() -> None:
         raise SystemExit(f"STOP: the build didn't produce {missing}.")
     if f"version: {v}" not in (DIST / "latest.yml").read_text(encoding="utf-8"):
         raise SystemExit(f"STOP: the build in {DIST} isn't {v}.")
-    firefox = firefox_assets()  # stops here, before anything is published, if they don't match
     check_app_packages()
     check_clean_build()
     sh(sys.executable, "scripts/security_check.py")  # stops on high or critical

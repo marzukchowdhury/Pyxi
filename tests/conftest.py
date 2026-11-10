@@ -65,6 +65,7 @@ def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(browsersetup.HOME_ENV, str(tmp_path / "extension-home"))
     monkeypatch.setattr(browsersetup, "front", lambda key="", open_windows=None: None)
     monkeypatch.setattr(browsersetup, "_addon", None)
+    monkeypatch.setattr(browsersetup, "last_fault", None)
     clip = {"text": "what I had copied"}
     monkeypatch.setattr(browsersetup, "CLIP", clip, raising=False)
     monkeypatch.setattr(browsersetup, "clip_get", lambda: clip["text"])

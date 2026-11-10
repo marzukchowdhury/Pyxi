@@ -66,7 +66,6 @@ UPDATES_URL = (
     "https://github.com/marzukchowdhury/Pyxi/releases/latest/download/pyxi-firefox-updates.json"
 )
 XPI_HOME = "https://github.com/marzukchowdhury/Pyxi/releases/"
-ADDON_CACHE_S = 600.0
 
 LOAD_WAIT_S = 420.0  # how long the "Load unpacked" steps may take before Pyxi stops waiting
 PAIR_WAIT_S = 300.0  # a pairing code lasts five minutes
@@ -147,6 +146,12 @@ _BLANK = "data:text/html,<title>{marker}</title>Pyxi is opening the extensions p
 
 class _Halt(Exception):
     """Stop typing: the reason is for the log."""
+
+
+# The last thing that went wrong in show_page that it didn't expect (a bug, not Esc or a
+# window of Pyxi's in front). It is logged with its traceback and kept here, and the setup
+# carries on by pointing at the address bar instead of dying on it.
+last_fault: BaseException | None = None
 
 
 def _input_tick() -> int:
@@ -250,9 +255,13 @@ def show_page(browser: Browser, exe: str, *more: str, stop: threading.Event | No
         if not keys.wait_idle(QUIET_S, QUIET_WAIT_S):
             return no("they didn't leave the mouse and keyboard alone")
         for _try in range(3):  # Windows doesn't always let a window be brought forward at once
+            if halted():
+                return no("stopped")  # before the window is pulled to the front, not after
             if windows.foreground() == hwnd or windows.focus(hwnd):
                 break
             time.sleep(0.4)
+        if halted():
+            return no("stopped")
         if windows.foreground() != hwnd:
             return no("the new window wouldn't come to the front")
         time.sleep(OWN_INPUT_S)  # bringing it forward was input of Pyxi's own: let it be counted
@@ -300,9 +309,12 @@ def show_page(browser: Browser, exe: str, *more: str, stop: threading.Event | No
     except _Halt as halt:
         return no(str(halt))
     except (hands.Interrupted, hands.OwnWindow, OSError) as exc:
-        # Esc, a window of Pyxi's in front, no keyboard to use. Anything else is a fault and
-        # is not hidden here.
-        return no(type(exc).__name__)
+        return no(type(exc).__name__)  # Esc, a window of Pyxi's in front, no keyboard to use
+    except Exception as exc:  # a fault: said in the log, kept, and the by-hand step takes over
+        global last_fault
+        last_fault = exc
+        log.exception("typing the extensions page's address went wrong")
+        return no(f"a fault ({type(exc).__name__})")
 
 
 # ---------------------------------------------------------------------- the clipboard
@@ -695,7 +707,8 @@ async def _guide(brain: Brain, text: str, shown: str, timeout: float) -> str:
 
     "done": the model saw the goal reached (it called guide with done=true), or the browser
     connected. "left": it pointed, and the guide ended some other way (closed, timed out,
-    a reply with no next step). "": nothing was ever pointed at."""
+    a reply with no next step, stopped for going round in circles). "": nothing was ever
+    pointed at."""
     began = time.time()
     await brain.turn(text, shown=shown, synthetic=True)
     pointed = brain._guide is not None
@@ -714,7 +727,11 @@ async def _guide(brain: Brain, text: str, shown: str, timeout: float) -> str:
         for e in brain.hub.history
         if e.get("type") == "guide" and e.get("active") is False and float(e.get("ts") or 0) >= began
     ]
-    if ended and ended[-1].get("finished"):
+    # The model calling guide with done=true ends the guide "finished" at the spot of the
+    # last step ("at"). The guide also ends "finished" when it stops itself for going round in
+    # circles (they cancelled the folder window and tried again): that one has no spot, and
+    # it says nothing about the extension being there.
+    if ended and ended[-1].get("finished") and ended[-1].get("at"):
         return "done"
     return "left" if pointed or ended else ""
 
@@ -737,8 +754,10 @@ async def _lend_clipboard(brain: Brain, text: str) -> None:
 
 
 def _give_back(brain: Brain) -> None:
-    """The setup is over: the user's own copied text goes back, unless they have copied
-    something else since (then it is theirs to keep)."""
+    """The setup is over (the extension is loaded, or it was stopped or failed): the user's
+    own copied text goes back, but only while the clipboard still holds what Pyxi put there.
+    If they have copied something else since, that is theirs to keep. Not called for while
+    they may still need the address: see ``_chromium``."""
     held, brain._setup_clip = getattr(brain, "_setup_clip", None), None
     if not held:
         return
@@ -801,7 +820,7 @@ async def _setup(brain: Brain, key: str) -> None:
     if loaded == "done":  # the extension is seen to be there: now the code
         await _pair(brain, browser)
     # Otherwise they closed the pointer or went away ("left"), or got the steps in words (""):
-    # no code is made and nothing more is said. Settings has the button for a code.
+    # no code is made. One line has told them where a code comes from (Settings).
 
 
 async def _open_page(brain: Brain, browser: Browser, exe: str) -> bool:
@@ -809,10 +828,15 @@ async def _open_page(brain: Brain, browser: Browser, exe: str) -> bool:
     is told too: it sends no key after that."""
     stop = threading.Event()
     try:
-        return await asyncio.to_thread(show_page, browser, exe, stop=stop)
+        return bool(await asyncio.to_thread(show_page, browser, exe, stop=stop))
     except asyncio.CancelledError:
         stop.set()
         raise
+    except Exception as exc:  # it shouldn't raise; if it does, the by-hand step takes over
+        global last_fault
+        last_fault = exc
+        log.exception("opening the extensions page went wrong")
+        return False
 
 
 async def _chromium(brain: Brain, browser: Browser, exe: str) -> str:
@@ -841,14 +865,22 @@ async def _chromium(brain: Brain, browser: Browser, exe: str) -> str:
         "Setting up the browser extension",
         LOAD_WAIT_S,
     )
-    if not outcome and not brain.browser.connected:
-        brain._setup_clip = None  # they still need the folder's address: it stays copied
+    if outcome != "done" and not brain.browser.connected:
+        # The extension hasn't been seen on the page: they may still press Load unpacked and
+        # paste (they closed the pointer, the wait ran out, the steps came in words). The
+        # folder's address stays on the clipboard for that, and they are told so.
+        brain._setup_clip = None
         await brain.hub.emit(
             "notice",
-            message="I couldn't point at the steps, so here they are: "
-            + " ".join(f"{n}. {s}" for n, s in enumerate(steps(browser)[:3], 1))
-            + " The folder's address is copied. When Pyxi in your browser shows on that page, "
-            + _GET_A_CODE,
+            message=(
+                "I couldn't point at the steps, so here they are: "
+                + " ".join(f"{n}. {s}" for n, s in enumerate(steps(browser)[:3], 1))
+                + " The folder's address is still copied. When Pyxi in your browser shows on "
+                "that page, " + _GET_A_CODE
+            )
+            if not outcome
+            else "The extension folder's address is still copied, for Load unpacked. When "
+            "Pyxi in your browser shows on that page, " + _GET_A_CODE,
         )
     return outcome
 
