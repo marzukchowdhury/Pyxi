@@ -278,11 +278,13 @@ def firefox_assets(build_only: bool = False) -> list[tuple[Path, str]]:
 
 
 def github() -> httpx.Client:
+    # The account is named (the repository's owner): with two GitHub accounts signed in on
+    # this PC and none named, Windows asks "Select an account" every single time.
     cred = sh(
         "git",
         "credential",
         "fill",
-        input="protocol=https\nhost=github.com\n\n",
+        input=f"protocol=https\nhost=github.com\nusername={REPO.split('/')[0]}\n\n",
         capture_output=True,
         text=True,
     ).stdout
