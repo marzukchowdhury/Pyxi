@@ -101,9 +101,22 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
       if (!raf && t && performance.now() < t.until) raf = requestAnimationFrame(tick);
     };
     wake.current();
+    // The line is only ever on screen while its frame loop runs. With no fresh target (a
+    // clear, or the next turn, took it away mid-flight) nothing was left to fade it, and it
+    // stayed drawn across the screen until the next time Pyxi pointed at something: "clear
+    // the drawings" froze it instead of removing it.
+    const hide = () => {
+      if (thread.current) thread.current.style.opacity = "0";
+      if (spark.current) spark.current.style.opacity = "0";
+    };
+    if (!raf) hide();
+    // And at its end whatever the frames did: a window that isn't being painted gets none.
+    const t0 = useOverlay.getState().flyTo;
+    const end = t0 ? window.setTimeout(hide, Math.max(0, t0.until - performance.now()) + 60) : 0;
     return () => {
       cancelAnimationFrame(raf);
       raf = 0;
+      window.clearTimeout(end);
       wake.current = () => undefined;
     };
   }, [target]);
