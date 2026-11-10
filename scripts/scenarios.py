@@ -386,6 +386,10 @@ SIMPLE_SCENARIOS = [
     ("simple new doc", FIREFOX, "Open a new Google Doc and write a short welcome note for my team.", "do"),
     ("simple merge windows", FIREFOX, "Put all the tabs from both Firefox windows into one window.", "do"),
     ("simple zoom", FIREFOX, "Zoom in on this page a bit.", "do"),
+    # Live: done with the mouse, 63 seconds, and it gave up. The browser's own keys take a second.
+    ("simple close tabs", FIREFOX, "Close the last two tabs.", "tabs:close last 2"),
+    ("simple close tab", FIREFOX, "Close this tab.", "tabs:close"),
+    ("simple reopen tab", FIREFOX, "Oops, bring back the tab I just closed.", "tabs:reopen"),
     ("simple how pivot", BLANK_SHEET, "How do I make a pivot table here?", "teach"),
 ]
 SCENARIOS += SIMPLE_SCENARIOS
@@ -565,7 +569,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     real_quick = brain._quick_action
 
     async def fake_quick(action, value):  # never pause their music, change volume or open apps
-        if action in ("media", "volume", "open_app", "insert"):
+        if action in ("media", "volume", "open_app", "insert", "tabs"):  # nor close their tabs
             background.append(f"{action}: {value}")
             return None
         if action == "open_url" and "google.com/maps" in value:
@@ -828,6 +832,13 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("didn't point at it")
     if expect == "volume" and not any(b.startswith("volume") for b in background):
         problems.append("didn't set the volume")
+    if expect.startswith("tabs:"):
+        want = expect.split(":", 1)[1]
+        got = [b.split(": ", 1)[1].lower().replace(" tabs", "").strip() for b in background if b.startswith("tabs: ")]
+        if got != [want]:
+            problems.append(f"tabs by key: wanted {want!r}, got {got}")
+        if "use_computer" in tools:
+            problems.append("used the mouse for tabs")
     if expect == "open_or_web" and not ({"quick_action", "web_search"} & set(tools)):
         problems.append("didn't open or search")
     if expect == "arrange" and (not any(b.startswith("arrange") for b in background) or "use_computer" in tools):

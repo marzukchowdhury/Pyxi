@@ -577,11 +577,23 @@ COMPANION_TOOLS += [
         "the clipboard), or insert (type a drafted message into the text field they're in, e.g. 'write a reply "
         "to this'), media (the music or video that's playing, in any app: value playpause, next, "
         "previous; instant, no mouse), or volume (Windows' volume, instant: a number like 30, a change "
-        "like -15, or lower, a bit lower, higher, low, mute). Only when they asked for it.",
+        "like -15, or lower, a bit lower, higher, low, mute), or tabs (the tabs of the browser in "
+        "front, by its own keys, instant, no mouse: value close (the tab they're on), "
+        "'close last 4' (that many tabs counted from the right end), new, reopen (the tab "
+        "just closed), next, previous). Only when they asked for it.",
         {
             "action": {
                 "type": "string",
-                "enum": ["open_url", "open_app", "copy", "insert", "media", "volume", "screen_playpause"],
+                "enum": [
+                    "open_url",
+                    "open_app",
+                    "copy",
+                    "insert",
+                    "media",
+                    "volume",
+                    "screen_playpause",
+                    "tabs",
+                ],
             },
             "value": {"type": "string", "description": "The URL, app name, or text."},
         },

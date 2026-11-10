@@ -257,3 +257,59 @@ def test_bringing_another_window_forward_never_sends_alt_alone(monkeypatch):
     u = _User32(front=7, iconic=True)
     monkeypatch.setattr(windows, "_user32", lambda: u)
     assert windows.focus(7) is True and u.shown == [7] and u.keys
+
+
+# ---------------------------------------------------------------------- browser tabs by key
+class _Keys:
+    """The keyboard, and the window each key went to."""
+
+    def __init__(self, front: list[int], closes_window_after: int | None = None) -> None:
+        self.front, self.sent, self.closes = front, [], closes_window_after
+
+    def press(self, combo: str) -> None:
+        self.sent.append((combo, self.front[0]))
+        if combo == "ctrl+w" and self.closes is not None:
+            self.closes -= 1
+            if self.closes == 0:
+                self.front[0] = 99  # its last tab: the window is gone, another is in front
+
+
+async def _tabs(settings, monkeypatch, value, *, exe="firefox.exe", closes_window_after=None):
+    from pyxi import hands
+    from test_brain_and_server import make_brain
+
+    front = [3]
+    keys = _Keys(front, closes_window_after)
+    monkeypatch.setattr(windows, "available", lambda: True)
+    monkeypatch.setattr(hands, "available", lambda: True)
+    monkeypatch.setattr(hands, "Hands", lambda: keys)
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(3, "Mail", ""), (7, "YouTube - Mozilla Firefox", "")])
+    monkeypatch.setattr(windows, "exe_of", lambda hwnd: rf"C:\Apps\{exe}" if hwnd == 7 else r"C:\Apps\notepad.exe")
+    monkeypatch.setattr(windows, "focus", lambda hwnd: front.__setitem__(0, hwnd) or True)
+    monkeypatch.setattr(windows, "foreground", lambda: front[0])
+    brain, _ = make_brain(settings)
+    return await brain._quick_action("tabs", value), keys.sent
+
+
+async def test_closing_the_last_four_tabs_is_five_keys_into_the_browser(settings, monkeypatch):
+    """Live: "close the last four tabs" was done with the mouse, took 63 seconds and gave up."""
+    note, sent = await _tabs(settings, monkeypatch, "close last 4")
+    assert note is None
+    assert sent == [("ctrl+9", 7), ("ctrl+w", 7), ("ctrl+w", 7), ("ctrl+w", 7), ("ctrl+w", 7)]
+    for value, keys in (("close", ["ctrl+w"]), ("new", ["ctrl+t"]), ("reopen", ["ctrl+shift+t"]), ("next", ["ctrl+tab"]), ("previous", ["ctrl+shift+tab"])):
+        note, sent = await _tabs(settings, monkeypatch, value)
+        assert note is None and [k for k, _ in sent] == keys
+
+
+async def test_tab_keys_only_ever_go_to_a_browser(settings, monkeypatch):
+    # No browser open: nothing is pressed (ctrl+w in another app closes something else).
+    note, sent = await _tabs(settings, monkeypatch, "close", exe="winword.exe")
+    assert note == "tabs: no browser window is open." and sent == []
+    # The window's last tab takes the window with it: the next ctrl+w is never sent.
+    note, sent = await _tabs(settings, monkeypatch, "close last 4", closes_window_after=2)
+    assert note.startswith("tabs: closed 2 of 4") and [w for _, w in sent] == [7, 7, 7]
+    # Never more than ten at once, and nothing it doesn't know.
+    note, sent = await _tabs(settings, monkeypatch, "close last 400")
+    assert note is None and sum(k == "ctrl+w" for k, _ in sent) == 10
+    note, sent = await _tabs(settings, monkeypatch, "close everything")
+    assert note.startswith("tabs: I can close") and sent == []

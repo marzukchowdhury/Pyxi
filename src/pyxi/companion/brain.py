@@ -899,6 +899,8 @@ class Brain:
             except keys.Interrupted:
                 return "screen_playpause: they moved the mouse just then, so I didn't press play."
             return None
+        if action == "tabs":
+            return await self._tabs(value)
         if action == "volume":
             if not windows.available():
                 return "volume: this only works on Windows."
@@ -955,6 +957,66 @@ class Brain:
             await self.hub.emit("action", kind="insert", value=value)
             return None
         return f"Unknown quick action {action}."
+
+    async def _tabs(self, value: str) -> str | None:
+        """Close, open or switch tabs in the browser in front with the browser's own keys.
+        Live: "close the last four tabs" went to the mouse, took 63 seconds and gave up."""
+        m = re.fullmatch(
+            r"\s*(close|new|reopen|next|previous)(?:\s+(?:the\s+)?last\s+(\d+))?(?:\s+tabs?)?\s*",
+            value.lower(),
+        )
+        if not m or (m.group(2) and m.group(1) != "close"):
+            return (
+                f"tabs: I can close, close last N, new, reopen, next or previous, not {value!r}."
+            )
+        if not (windows.available() and hands.available()):
+            return "tabs: this only works on Windows."
+        what, count = m.group(1), min(int(m.group(2) or 1), 10)
+        if m.group(2) and count < 1:
+            return "tabs: close how many?"
+
+        def browser(hwnd: int | None) -> bool:
+            return bool(hwnd) and Path(windows.exe_of(int(hwnd))).name.lower() in media.BROWSERS
+
+        named = self._named_window(self._user_text or "", None)
+        looked = self._ctx.window.hwnd if self._ctx and self._ctx.window.hwnd else None
+        target = next(
+            (h for h in (named, looked, *(h for h, _, _ in windows.open_windows())) if browser(h)),
+            None,
+        )
+        if target is None:
+            return "tabs: no browser window is open."
+        windows.focus(target)
+        await asyncio.sleep(0.2)
+        keys = {
+            "new": ["ctrl+t"],
+            "reopen": ["ctrl+shift+t"],
+            "next": ["ctrl+tab"],
+            "previous": ["ctrl+shift+tab"],
+            # Counted from the right end: go to the last tab, and close from there.
+            "close": (["ctrl+9"] if m.group(2) else []) + ["ctrl+w"] * count,
+        }[what]
+        typist = hands.Hands()
+        done = 0
+        for key in keys:
+            # Every key goes to that browser window or to nothing: a tab that was the last
+            # one takes its window with it, and ctrl+w in another app closes something else.
+            if windows.foreground() != target:
+                break
+            try:
+                await asyncio.to_thread(typist.press, key)
+            except hands.Interrupted:
+                return "tabs: they moved the mouse just then, so I stopped. " + (
+                    f"{done} closed." if what == "close" and done else "Nothing was changed."
+                )
+            done += key == "ctrl+w"
+            await asyncio.sleep(0.12)
+        if what == "close" and done < count:
+            return (
+                f"tabs: closed {done} of {count}; the window went away or another one came to "
+                "the front, so I stopped there."
+            )
+        return None
 
     def _paste_target(self) -> int | None:
         """The window a paste is meant for: the one the request names ("in Notepad"), else the
