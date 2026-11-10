@@ -1729,6 +1729,32 @@ async def test_a_tab_that_moves_on_while_it_is_read_is_asked_about_or_read_again
     assert no.code == "failed" and "keeps moving" in str(no)
 
 
+async def test_a_look_starts_where_the_page_is_scrolled_to():
+    link, driver = make()
+    para = lambda words, top: El("Group", rect=(0, top, 600, top + 20), children=[El("Text", name=words, aria="description", rect=(0, top, 600, top + 20))])  # noqa: E731
+    driver.root.rect = (0, 100, 800, 700)  # what is showing of the page
+    driver.root.children = [para("Scrolled past already.", 40), para("Showing now.", 300), para("Further down.", 2000)]
+    _wire(driver)
+    page = await read(link)
+    assert page["text"].splitlines() == ["Showing now.", "Further down."]
+
+
+def test_a_big_page_is_not_gone_into_above_where_it_is_scrolled_to(monkeypatch):
+    def section(words: str, top: int) -> Raw:
+        box = (0, top, 600, 400)  # left, top, width, height: as UI Automation gives it
+        return Raw(GROUP, children=tuple(Raw(GROUP, children=(Raw(TEXT, f"{words} {n}"),), props={RECT: box}) for n in range(30)), props={RECT: box})
+
+    page = Raw(
+        DOC, "Long", children=(section("past", -3000), section("past", -900), section("showing", 150), section("below", 900)),
+        props={VALUE: "https://example.com/long", HAS_VALUE: True, RID: (1, 2), RECT: (0, 100, 800, 600)},
+    )  # fmt: skip
+    driver = uia(monkeypatch, Raw(PANE, "Long - Google Chrome", children=(page,)))
+    snap = driver.snapshot(HWND, 6000, 6.0)
+    words = " ".join(el.name for el in _all(snap.root) if el.role == "Text")
+    assert "showing 0" in words and "below 29" in words and "past" not in words
+    assert len(REQUESTS) < 70  # the two sections above were not asked for what is in them
+
+
 # ====================================================================== what people read
 def test_nothing_the_user_reads_has_em_dashes_or_emoji():
     files = [

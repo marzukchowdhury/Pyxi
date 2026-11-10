@@ -652,11 +652,14 @@ def outline(
         if el.role in ("Edit", "Spinner", "ComboBox") or kind == "editable text":
             return listed  # what is in a field is its value, not the page's text
         if el.role == "Text" and not el.children:
-            if el.name.strip():
+            # The text starts where the page is scrolled to, as the extension's does: what
+            # was scrolled past has been read already, and "scroll down for more" must give more.
+            if el.name.strip() and not above_view(el, snap.root.rect[1]):
                 say(el.name, block)
             return listed
         if not el.children and el.name.strip() and el.role in ("Button", "Image", "Hyperlink"):
-            say(el.name, block if el.role == "Hyperlink" else el)  # a link's words run on in its line
+            if not above_view(el, snap.root.rect[1]):
+                say(el.name, block if el.role == "Hyperlink" else el)  # a link's words run on in its line
             return listed
         inline = el.role == "Hyperlink" or (el.role == "Text" and el.aria in _INLINE_ARIA)
         below = False
@@ -683,6 +686,11 @@ def outline(
         everything[:max_items],
         len(everything) > max_items,
     )
+
+
+def above_view(el: El, view_top: int) -> bool:
+    """Is this element wholly above what is showing (scrolled past)?"""
+    return _has_size(el) and el.rect[3] <= view_top - 2
 
 
 def _has_size(el: El) -> bool:
@@ -2306,11 +2314,13 @@ class UiaDriver(Driver):
         el = self._el(raw, False)
         return Doc(el.rid, el.value.strip(), el.name, el.props.get("busy") == "true", raw)
 
-    def _tree(self, raw: Any, max_nodes: int, deadline: float) -> tuple[El, bool]:
+    def _tree(self, raw: Any, max_nodes: int, deadline: float, from_view: bool = False) -> tuple[El, bool]:
         """An element and what is under it, fetched a piece at a time (each element with its
         children), in reading order, until there are ``max_nodes`` or the time is up. One
-        request for a whole page can't be bounded or given up on; these can. Returns the
-        tree and whether it was cut short."""
+        request for a whole page can't be bounded or given up on; these can. With
+        ``from_view`` (a page), what has been scrolled past is not gone into, so that the
+        limit is spent on what is showing and what comes after it. Returns the tree and
+        whether it was cut short."""
         kids = self._uia()[4]
         first = raw.BuildUpdatedCache(kids)
         root = self._el(first, False)
@@ -2336,14 +2346,17 @@ class UiaDriver(Driver):
                 if count >= max_nodes:
                     cut = True
                     break
-            stack.extend(c for c in reversed(el.children) if not _leaf(c))
+            view_top = root.rect[1]
+            stack.extend(
+                c for c in reversed(el.children) if not _leaf(c) and not (from_view and above_view(c, view_top))
+            )
         return root, cut
 
     def snapshot(self, hwnd: int, max_nodes: int, budget_s: float) -> Snapshot | None:
         raw = self._find_document(hwnd)
         if raw is None:
             return None
-        root, cut = self._tree(raw, max_nodes, time.monotonic() + budget_s)
+        root, cut = self._tree(raw, max_nodes, time.monotonic() + budget_s, from_view=True)
         doc = Doc(root.rid, root.value.strip(), root.name, root.props.get("busy") == "true", raw)
         return Snapshot(doc, root, self.scroll_state(doc), cut=cut)
 

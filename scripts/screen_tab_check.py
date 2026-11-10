@@ -941,6 +941,21 @@ class Check:
         except BrowserError as exc:
             self.row("read", "a long page: text past the screen too", found=False, note=f"{exc.code}: {exc}")
 
+        if self.wanted("read", "scrolled"):
+            await s.go("/long")
+            try:
+                page = await self.read()
+                await self.link.call(
+                    "scroll", {"tab": self.b.hwnd, "page": page["page"], "host": host_of(page["tab"]["url"]), "direction": "bottom"},
+                    browser=self.hint,
+                )  # fmt: skip
+                await until(lambda: s.state()["scrollY"] > 300, 4)
+                after = await self.read(max_chars=3000)
+                ok = "The very last line." in after["text"] and "Paragraph 1:" not in after["text"]
+                self.row("read", "after scrolling to the bottom, the look starts from there", found=True, acted=True, confirmed=ok, note="" if ok else after["text"][:120])
+            except BrowserError as exc:
+                self.row("read", "after scrolling to the bottom, the look starts from there", found=False, note=f"{exc.code}: {exc}")
+
         # -- buttons, links, things that are only clickable
         click = lambda page, item: self.do("click", page, item, settle=True)  # noqa: E731
         await self.case("button", "Add Milk (a plain button)", "/list", lambda p: item_of(p, "Add Milk", "button"), click, text("cart", "Cart: Milk"))
@@ -1420,22 +1435,24 @@ class Check:
         self.b.hand_back()
 
 
-async def private_window(name: str, tmp: Path, site: Site, driver: OwnWindows, link: screenlink.ScreenLink) -> None:
+async def private_window(name: str, tmp: Path, site: Site, driver: OwnWindows, link: screenlink.ScreenLink, lang: str = "") -> None:
     """The same browser, started in a private window (Incognito, InPrivate, Private
-    Browsing): Pyxi must not pick it, read it or open anything from it."""
+    Browsing): Pyxi must not pick it, read it or open anything from it. With ``lang``
+    (Chrome and Edge), in that display language: the mark must not depend on it."""
     extra = {"firefox": ("-private-window",), "edge": ("--inprivate",)}.get(name, ("--incognito",))
-    b = Browser(name, tmp, extra)
+    if lang:
+        extra = (*extra, f"--lang={lang}")
+    b = Browser(name, tmp / f"private-{lang or 'en'}", extra)
     b.site = site
     driver.browsers.append(b)
     site.tabs.clear()
     site.active = ""
-    row = Row(name, "private window", "not picked, not read, nothing opened from it")
+    row = Row(name, "private window", "not picked, not read, nothing opened from it" + (f" (display language: {lang})" if lang else ""))
     try:
         b.start(site.url("/form"))
         loaded = await until(lambda: site.state().get("page") == "form", 30)
         b.show()
         hint = f"w{b.hwnd}"
-        picked = link.pick()
         refusals = []
         for call, args in (("read", {"tab": b.hwnd}), ("open", {"tab": b.hwnd, "url": site.url("/plain"), "expect_host": host_of(site.url("/plain"))})):
             try:
@@ -1443,6 +1460,7 @@ async def private_window(name: str, tmp: Path, site: Site, driver: OwnWindows, l
                 refusals.append(f"{call} was not refused")
             except BrowserError as exc:
                 refusals.append("" if "private window" in str(exc) else f"{call}: {exc.code}: {exc}")
+        picked = link.pick()  # once it is known to be private it is not the window to work in
         await asyncio.sleep(0.5)
         still = site.state().get("page") == "form" and len(site.tabs) == 1
         row.found, row.acted = loaded, picked == ""
@@ -1778,6 +1796,8 @@ async def main(opts: argparse.Namespace) -> int:
             b.stop()
             if check.wanted("private window"):
                 await private_window(b.name, tmp, site, driver, link)
+                if b.engine == "chromium":
+                    await private_window(b.name, tmp, site, driver, link, lang="ja")
     finally:
         for b in browsers:
             b.stop()
