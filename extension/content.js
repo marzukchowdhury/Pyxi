@@ -8,8 +8,11 @@
 // What it refuses, here in the page, whatever the brain asks:
 //   - typing into, changing or reading a password field, a card or bank details field, or an
 //     ID number field (SIN, SSN, passport and the like);
-//   - typing anything that looks like a card number;
-//   - choosing files.
+//   - typing anything that looks like a card number, in one piece or in pieces;
+//   - choosing files;
+//   - acting on anything but the page, and the element, that Pyxi read before it decided:
+//     every action names the page (a random id made when this script was put in), the site
+//     and the element's words, and is refused if any of them is no longer true.
 // It never touches the page's cookies or storage, and it runs no code sent from outside: the
 // only things it can do are the ones written in this file.
 (() => {
@@ -33,6 +36,11 @@
       this.code = code;
     }
   }
+
+  // A random name for this document, given out with every read. A page that was replaced, a
+  // page brought back by the Back button, a new script put into the tab: none of them has
+  // the name of the page Pyxi read, so an action meant for that page is refused here.
+  const pageId = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
 
   // ------------------------------------------------------------------ refs
   let counter = 0;
@@ -65,13 +73,39 @@
   }
 
   // ------------------------------------------------------------------ private fields
+  // Whole words in the field's name, id, hints and labels (camelCase and separators split).
   const PASSWORD =
-    /\b(password|passwd|passcode|passphrase|pwd|pin|otp|totp|2fa|mfa)\b|one time (code|password|pin)|verification code|security (answer|question)|secret (key|word|answer)/;
+    /\b(password|passwd|passwort|kennwort|passcode|passphrase|pwd|pin|otp|totp|2fa|mfa|senha)\b|one time (code|password|pin)|verification code|security (answer|question)|secret (key|word|answer)|mot de passe|contrase(n|\u00f1)a/;
   const CARD =
-    /\b(card|cardholder|cardnumber|ccn|ccnum|ccnumber|cvv2?|cvc2?|csc|cvn|iban|swift|bic)\b|\bcc (num|number|no|exp|csc|cvc|cvv|name)|credit card|debit card|security code|expir(y|ation)|\bexp (date|month|year|mm|yy)|routing( number)?|sort code|account (number|no)\b|bank account/;
+    /\b(card|cardholder|cardnumber|ccn|ccnum|ccnumber|cvv2?|cvc2?|csc|cvn|iban|swift|bic|kartennummer|kreditkarte|tarjeta)\b|\bcc (num|number|no|exp|csc|cvc|cvv|name)|credit card|debit card|carte bancaire|security code|expir(y|ation)|\bexp (date|month|year|mm|yy)|routing( number)?|sort code|account (number|no)\b|bank account/;
   const GOV_ID =
     /\b(ssn|sin|nino|tfn|itin|aadhaar|passport|medicare)\b|social (security|insurance)|national (id|identity|insurance)|driv(er'?s?|ing) ?licen[cs]e|licen[cs]e (number|no)\b|tax (id|number|file)|employer identification|health card|pan (number|card)|identity (number|card)|\bid number|personal (id|identity) (number|code)/;
-  const everPassword = new WeakSet(); // "show password" turns one into a text field: still private
+  // The same for names written as one word ("loginpassword", "cardnum", "Kartennummer"):
+  // looked for anywhere in each name, with everything but letters and digits taken out. Only
+  // words long enough not to turn up inside ordinary ones ("ssn" is in "businessname").
+  const PASSWORD_IN =
+    /password|passwd|passwort|kennwort|passcode|passphrase|contrasena|motdepasse|wachtwoord|onetimecode|onetimepass|otpcode|otptoken|verificationcode|verifycode|twofactor|authcode|pincode/;
+  const CARD_IN =
+    /cardnumber|cardnum|cardno|creditcard|debitcard|kartennummer|kreditkarte|numerodetarjeta|numerotarjeta|numerodecarte|cartaodecredito|ccnumber|ccnum|cardcvv|cardcvc|cvvcode|cvccode|securitycode|verificationvalue|cardverification|cardexpir|cardholder|routingnumber|accountnumber|bankaccount/;
+  const ID_IN =
+    /socialsecurity|socialinsurance|passportnumber|passportno|nationalid|nationalinsurance|taxid|taxnumber|steuernummer|driverslicen|drivinglicen|identitynumber|personalausweis|healthcardnumber/;
+  // "Show password" turns a password field into a text field, or swaps in a new one with the
+  // same name: either way it is still the password.
+  const everPassword = new WeakSet();
+  const everPasswordNames = new Set();
+
+  function fieldKey(el) {
+    const name = el.getAttribute("name") || el.id;
+    return name ? `${el.form ? [...document.forms].indexOf(el.form) : -1}|${name}` : "";
+  }
+
+  function squash(text) {
+    return String(text || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "");
+  }
 
   function words(...parts) {
     return parts
@@ -92,18 +126,20 @@
     if (!isField(el)) return "";
     const type = (el.getAttribute("type") || "").toLowerCase();
     if (el.tagName === "INPUT" && type === "file") return "file";
+    const key = fieldKey(el);
     if (el.tagName === "INPUT" && type === "password") {
       everPassword.add(el);
+      if (key) everPasswordNames.add(key);
       return "password";
     }
-    if (everPassword.has(el)) return "password";
+    if (everPassword.has(el) || (key && everPasswordNames.has(key))) return "password";
     if (el.tagName === "INPUT" && /^(checkbox|radio|submit|button|reset|image|range|color)$/.test(type)) {
       return "";
     }
     const auto = (el.getAttribute("autocomplete") || "").toLowerCase();
     if (/current-password|new-password|one-time-code/.test(auto)) return "password";
     if (/\bcc-/.test(auto)) return "card";
-    const hay = words(
+    const names = [
       el.getAttribute("name"),
       el.id,
       el.getAttribute("placeholder"),
@@ -111,10 +147,13 @@
       el.getAttribute("data-testid"),
       el.getAttribute("title"),
       fieldLabel(el),
-    );
-    if (PASSWORD.test(hay)) return "password";
-    if (CARD.test(hay)) return "card";
-    if (GOV_ID.test(hay)) return "id";
+      labelOf(el), // what it is called by, wherever that is written (aria-labelledby too)
+    ];
+    const hay = words(...names);
+    const run = names.map(squash).join("|");
+    if (PASSWORD.test(hay) || PASSWORD_IN.test(run)) return "password";
+    if (CARD.test(hay) || CARD_IN.test(run)) return "card";
+    if (GOV_ID.test(hay) || ID_IN.test(run)) return "id";
     return "";
   }
 
@@ -132,24 +171,48 @@
     }
   }
 
-  function cardNumber(text) {
-    for (const run of String(text || "").match(/(?<!\d)(?:\d[ -]?){13,19}(?!\d)/g) || []) {
-      const digits = run.replace(/\D/g, "");
-      if (digits.length < 13 || digits.length > 19) continue;
-      let total = 0;
-      for (let i = 0; i < digits.length; i++) {
-        let d = Number(digits[digits.length - 1 - i]);
-        if (i % 2) d = d > 4 ? d * 2 - 9 : d * 2;
-        total += d;
-      }
-      if (total % 10 === 0) return true;
+  // 13 to 19 digits, however they're spaced: spaces (ordinary, non-breaking, thin), dots,
+  // dashes, up to three between two digits.
+  const CARD_RUN = /(?<!\d)\d(?:[\s.\-\u00a0\u2009\u202f\u00b7]{0,3}\d){12,18}(?!\d)/g;
+
+  function luhn(digits) {
+    if (digits.length < 13 || digits.length > 19) return false;
+    let total = 0;
+    for (let i = 0; i < digits.length; i++) {
+      let d = Number(digits[digits.length - 1 - i]);
+      if (i % 2) d = d > 4 ? d * 2 - 9 : d * 2;
+      total += d;
     }
+    return total % 10 === 0;
+  }
+
+  function cardNumber(text) {
+    for (const run of String(text || "").match(CARD_RUN) || []) {
+      if (luhn(run.replace(/\D/g, ""))) return true;
+    }
+    return false;
+  }
+
+  // A card number typed in pieces (four boxes of four): the last few all-digit things typed
+  // in this page are kept, and the piece that would complete a card number is refused.
+  const typedDigits = [];
+
+  function completesCard(text) {
+    const digits = String(text).replace(/[\s.\-\u00a0]/g, "");
+    if (!/^\d{1,12}$/.test(digits)) return false;
+    let joined = digits;
+    for (let i = typedDigits.length - 1; i >= 0 && joined.length < 19; i--) {
+      joined = typedDigits[i] + joined;
+      if (luhn(joined)) return true;
+    }
+    typedDigits.push(digits);
+    if (typedDigits.length > 6) typedDigits.shift();
     return false;
   }
 
   function hideNumbers(text) {
     return String(text || "")
-      .replace(/(?<!\d)(?:\d[ -]?){13,19}(?!\d)/g, (m) => (cardNumber(m) ? "[card number hidden]" : m))
+      .replace(CARD_RUN, (m) => (cardNumber(m) ? "[card number hidden]" : m))
       .replace(/(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)/g, "[ID number hidden]");
   }
 
@@ -285,21 +348,19 @@
     return null;
   }
 
+  // A search is only what says it is one itself: a search field, or a form (or region) with
+  // the search role. Not a label with "find" or "address" in it, and not every field of a
+  // form that happens to hold a search box: Enter there may well send something.
+  const SEARCH_REGION = 'form[role="search"], [role="search"], search';
+
   function searchForm(form) {
-    if (!form) return false;
-    if ((form.getAttribute("role") || "").toLowerCase() === "search") return true;
-    if (form.querySelector('input[type="search"], [role="searchbox"]')) return true;
-    return /search|find|filter|lookup/.test(
-      words(form.getAttribute("action"), form.id, form.getAttribute("name"), form.className),
-    );
+    return !!form && !!form.closest(SEARCH_REGION);
   }
 
   function searchy(el) {
     const type = (el.getAttribute("type") || "").toLowerCase();
     const role = (el.getAttribute("role") || "").toLowerCase();
-    if (type === "search" || role === "searchbox") return true;
-    if (el.form && searchForm(el.form)) return true;
-    return /\b(search|find|filter|query)\b/.test(words(el.getAttribute("name"), el.id, labelOf(el)));
+    return type === "search" || role === "searchbox" || !!el.closest(SEARCH_REGION);
   }
 
   function submits(el) {
@@ -510,9 +571,11 @@
 
   function read({ max_chars = 4000, max_items = 90, from_view = true } = {}) {
     forgetGone();
+    watchFrames();
     const text = pageText(Math.min(20000, Math.max(200, max_chars)), from_view);
     const list = collect(Math.min(200, Math.max(1, max_items)));
     return {
+      page: pageId,
       text: text.text,
       more_text: text.more,
       items: list.items,
@@ -601,6 +664,7 @@
   function marker(on, text) {
     working = !!on;
     if (text) markerText = String(text).slice(0, 80);
+    if (on) watchFrames();
     if (!on && !markerHost) return { on: false }; // never shown: nothing to hide
     ui();
     show();
@@ -632,19 +696,65 @@
   }
 
   // Esc in the tab stops Pyxi. Only a real key press counts: the page can't fake one, and
-  // Pyxi's own "press Escape" (made by this script) doesn't stop itself.
-  window.addEventListener(
-    "keydown",
-    (e) => {
-      if (!working || e.key !== "Escape" || !e.isTrusted) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      halt("esc");
-    },
-    true,
-  );
+  // Pyxi's own "press Escape" (made by this script) doesn't stop itself. The key is listened
+  // for in the page and in every frame of the same site, wherever the cursor is.
+  function onEsc(e) {
+    if (!working || e.key !== "Escape" || !e.isTrusted) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    halt("esc");
+  }
+
+  const watched = new WeakSet();
+
+  function watch(win) {
+    try {
+      if (!win || watched.has(win)) return;
+      win.addEventListener("keydown", onEsc, true);
+      watched.add(win);
+    } catch {
+      /* another site's frame */
+    }
+  }
+
+  function watchFrames() {
+    for (const doc of roots()) {
+      if (doc.nodeType === Node.DOCUMENT_NODE) watch(doc.defaultView);
+    }
+  }
+
+  watch(window);
 
   // ------------------------------------------------------------------ acting
+  /** Is this still what Pyxi read before it decided? The page by its name, the site, and the
+   * element by its words: a page can reuse the same node for "Continue" and then "Place
+   * order", and what Pyxi (and the user, on a card) agreed to was the first. */
+  function asRead(args, el, mustHaveRead = true) {
+    if (args.page === undefined) {
+      if (mustHaveRead) throw new Refusal("gone", "Pyxi has to read the page before it acts on it.");
+    } else if (args.page !== pageId) {
+      throw new Refusal("gone", "This isn't the page Pyxi read: it has changed. Read it again.");
+    }
+    if (args.host !== undefined && String(args.host) !== location.host) {
+      throw new Refusal("gone", "This isn't the site Pyxi read. Read the page again.");
+    }
+    if (el && args.label !== undefined && String(args.label) !== describe(el).label) {
+      throw new Refusal("gone", "That element isn't what it was when the page was read. Read it again.");
+    }
+  }
+
+  /** Put the cursor in a field, then look at it once more: some pages turn a field into a
+   * password field only when it is entered. */
+  function enter(el) {
+    el.focus({ preventScroll: true });
+    try {
+      refuseIfPrivate(el);
+    } catch (err) {
+      el.blur();
+      throw err;
+    }
+  }
+
   function usable(el) {
     refuseIfPrivate(el);
     if (el.disabled || el.getAttribute("aria-disabled") === "true") {
@@ -669,8 +779,9 @@
     return false;
   }
 
-  function click({ ref }) {
-    const el = elementOf(ref);
+  function click(args) {
+    const el = elementOf(args.ref);
+    asRead(args, el);
     usable(el);
     const box = bringIntoView(el);
     const x = box.left + box.width / 2;
@@ -706,11 +817,12 @@
     else el.value = value;
   }
 
-  function type({ ref, text = "", enter = false }) {
-    const el = elementOf(ref);
+  function type(args) {
+    const el = elementOf(args.ref);
+    asRead(args, el);
     usable(el);
-    text = String(text);
-    if (cardNumber(text)) {
+    const text = String(args.text ?? "");
+    if (cardNumber(text) || completesCard(text)) {
       throw new Refusal("sensitive", "That looks like a card number. Pyxi never types those.");
     }
     const tag = el.tagName;
@@ -719,7 +831,7 @@
     if ((tag === "INPUT" && TYPEABLE.test(kind)) || tag === "TEXTAREA") {
       if (el.readOnly) throw new Refusal("failed", "That field can't be changed (read only).");
       bringIntoView(el);
-      el.focus({ preventScroll: true });
+      enter(el);
       const max = el.maxLength > 0 ? el.maxLength : Infinity;
       setValue(el, text.slice(0, max));
       el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "insertText", data: text }));
@@ -727,7 +839,7 @@
       value = el.value;
     } else if (el.isContentEditable) {
       bringIntoView(el);
-      el.focus({ preventScroll: true });
+      enter(el);
       const selection = getSelection();
       selection.selectAllChildren(el);
       let done = false;
@@ -745,14 +857,15 @@
       throw new Refusal("failed", "That isn't something text can be typed into. Click it instead.");
     }
     const out = { value: hideNumbers(clean(value, 200)) };
-    if (enter) press({ key: "Enter", ref });
+    if (args.enter) press({ ...args, key: "Enter" });
     return out;
   }
 
-  function select({ ref, option = "" }) {
-    const el = elementOf(ref);
+  function select(args) {
+    const el = elementOf(args.ref);
+    asRead(args, el);
     usable(el);
-    const want = clean(option).toLowerCase();
+    const want = clean(args.option ?? "").toLowerCase();
     if (el.tagName === "SELECT") {
       const options = [...el.options];
       const text = (o) => clean(o.textContent).toLowerCase();
@@ -768,7 +881,7 @@
       }
       if (hit.disabled) throw new Refusal("failed", "That option is switched off on the page.");
       bringIntoView(el);
-      el.focus({ preventScroll: true });
+      enter(el);
       el.value = hit.value;
       hit.selected = true;
       el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -777,7 +890,7 @@
     }
     if (el.tagName === "INPUT" && /^(checkbox|radio)$/i.test(el.type)) {
       const on = !/^(off|no|false|uncheck|unchecked|0)$/.test(want);
-      if (el.checked !== on) click({ ref });
+      if (el.checked !== on) click(args);
       return { checked: el.checked };
     }
     throw new Refusal("failed", "That isn't a plain dropdown. Click it, read the page again, then click the option.");
@@ -839,25 +952,35 @@
     return el || document.body;
   }
 
-  function press({ key, ref }) {
-    const el = ref ? elementOf(ref) : deepActive();
+  function buttonLike(el) {
+    const tag = el.tagName;
+    const role = (el.getAttribute("role") || "").toLowerCase();
+    if (tag === "BUTTON" || tag === "A" || tag === "SUMMARY") return true;
+    if (tag === "INPUT") return /^(button|submit|reset|image|checkbox|radio)$/i.test(el.type);
+    return /^(button|link|menuitem|menuitemcheckbox|menuitemradio|option|tab|switch|checkbox|radio)$/.test(role);
+  }
+
+  function press(args) {
+    const el = args.ref ? elementOf(args.ref) : deepActive();
+    asRead(args, args.ref ? el : null);
     refuseIfPrivate(el);
-    const init = keyOf(key);
-    if (ref && typeof el.focus === "function") el.focus({ preventScroll: true });
-    const went = el.dispatchEvent(new KeyboardEvent("keydown", init));
+    const init = keyOf(args.key);
     const plain = !init.ctrlKey && !init.altKey && !init.metaKey;
+    if (plain && (init.key === "Enter" || init.key === " ") && buttonLike(el)) {
+      // Enter or Space on a button is a click, and a click is asked for as one, so that it
+      // gets the same checks (and the same card) as any other click.
+      throw new Refusal("failed", "Pressing that key there is a click. Click it instead.");
+    }
+    if (args.ref && typeof el.focus === "function") enter(el);
+    const went = el.dispatchEvent(new KeyboardEvent("keydown", init));
     if (went && plain) {
       // What the browser itself would do for a real key, for the keys that matter.
       const tag = el.tagName;
       if (init.key === "Enter") {
-        if (tag === "INPUT" && el.form && !/^(button|submit|reset|checkbox|radio|file)$/i.test(el.type)) {
+        if (tag === "INPUT" && el.form) {
           if (typeof el.form.requestSubmit === "function") el.form.requestSubmit();
           else el.form.submit();
-        } else if (tag === "BUTTON" || tag === "A" || tag === "SUMMARY" || el.getAttribute("role") === "button") {
-          el.click();
         }
-      } else if (init.key === " ") {
-        if (tag === "BUTTON" || (tag === "INPUT" && /^(checkbox|radio|button|submit)$/i.test(el.type))) el.click();
       } else if (init.key === "PageDown" || init.key === "PageUp" || init.key === "Home" || init.key === "End") {
         scroll({ direction: { PageDown: "down", PageUp: "up", Home: "top", End: "bottom" }[init.key] });
       } else if ((init.key === "ArrowDown" || init.key === "ArrowUp") && tag === "SELECT") {
@@ -873,7 +996,9 @@
     return {};
   }
 
-  function scroll({ direction = "down", ref } = {}) {
+  function scroll(args = {}) {
+    const { direction = "down", ref } = args;
+    asRead(args, null, false);
     if (ref) {
       const el = elementOf(ref);
       bringIntoView(el);
@@ -889,7 +1014,14 @@
   }
 
   // ------------------------------------------------------------------ requests
-  const DOES = { read, click, type, select, press, scroll };
+  /** Nothing but the question: is the page in this tab still the one Pyxi read? (Asked
+   * before going back a page.) */
+  function check(args) {
+    asRead(args, null);
+    return {};
+  }
+
+  const DOES = { read, click, type, select, press, scroll, check };
 
   api.runtime.onMessage.addListener((msg, _sender, respond) => {
     if (!msg || msg.to !== "pyxi-content") return undefined;

@@ -71,6 +71,10 @@ def safe_url(value: str) -> str | None:
         else:
             return None
     parsed = urlparse(value)
+    if "\\" in value or "@" in parsed.netloc:
+        # Written so that this code and a browser read different hosts out of it
+        # (a backslash before an @), or with a "user@" in front of the real one.
+        return None
     return value if parsed.scheme in ("http", "https") and parsed.netloc else None
 
 

@@ -2636,6 +2636,8 @@ class Brain:
         if name in TOOL_ALIASES:  # a name the model made up for a real tool
             name, extra = TOOL_ALIASES[name]
             args = {**extra, **args}
+        if name in tabwork.FETCHES and (no := await tabwork.before_fetch(self, name, args)):
+            return no  # an address the model wrote after reading something: they're asked first
         if name == "say":
             text = strip_filler(str(args.get("text", "")))
             self._pending_say = ""

@@ -59,6 +59,13 @@ The popup says **Connected**, and Settings lists the browser. To unpair: **Disco
 Pyxi's Settings, or **Disconnect this browser from Pyxi** in the popup. Either cuts it off at
 once.
 
+The code you type never leaves the browser, and no password or token is ever sent to Pyxi.
+The two sides do a key exchange and each proves, with a check made from the code, that it saw
+the same exchange; Pyxi goes first. On every later connection Pyxi again has to prove it holds
+the key from that pairing before the extension tells it anything or does anything it asks.
+So a program that listens on Pyxi's port while Pyxi isn't running learns an id and a random
+number, and can't drive your tabs or unpair the browser.
+
 Without the desktop app's Settings (a brain started by hand), ask the brain for a code:
 
 ```bash
@@ -101,26 +108,44 @@ Two tools appear in Pyxi while a browser is connected, and nothing changes when 
   there, another tab, an address) asks first, every time, with the address on the card and
   before that site is read. So does anything right after Pyxi read an email, a page or a
   document in the same request.
+- **An address Pyxi wrote itself asks first**, even on a site you allow, unless you said that
+  address: opening an address can do something by itself, and can carry what Pyxi read to
+  that site. The extension is told which site Pyxi checked and won't open an address that
+  the browser would read as leading somewhere else.
+- **After Pyxi has read something, it asks before reading another of your tabs or fetching an
+  address it made up.** Text in a page can say "now read the inbox tab and open this link";
+  the card is what stands in the way.
 - **Sending, submitting, buying, deleting and posting ask first**, on a card that says
   exactly what will happen: the button's own words, the site, and what Pyxi typed. Pressing
-  Enter anywhere but a search box asks too.
+  Enter anywhere but a search box asks too (a field that says it is a search box itself, not
+  one called "Email address"), and Enter or Space on a button counts as clicking it.
+- **Every action is for the page Pyxi read.** Each one names the page, the site and the
+  element's own words, and the script in the page refuses if any of them has changed (the
+  page was replaced, you went back, a "Continue" button became "Place order"). A click, a
+  key or a new address ends a batch, so nothing decided on one page happens on the next.
 - **Passwords, card numbers, security codes and ID numbers are yours.** Pyxi never types into
   those fields, never reads what's in them, and never types a card number anywhere. The
   script in the page refuses by itself, whatever Pyxi asks, and Pyxi refuses again on its
-  side. Card numbers that appear in a page's text are hidden before the text leaves the page.
+  side. Card numbers that appear in a page's text are hidden before the text leaves the page,
+  and a card number typed in pieces (four boxes of four) is stopped at the last piece.
 - **No cookies, no storage, no code from outside.** The extension has no permission for
   cookies, never touches a page's storage, and can only do the fixed list of things written
   in `background.js` and `content.js`. It can't run a script that Pyxi or a page sends it.
-- **It only talks to this PC.** Its content security policy allows one kind of connection:
-  a WebSocket to `127.0.0.1`. It can't reach any server.
+- **It only talks to this PC, and only to the Pyxi it was paired with.** Its content security
+  policy allows one kind of connection: a WebSocket to `127.0.0.1`. It can't reach any
+  server. Whatever answers there must prove it holds the pairing's key, and after that every
+  message both ways is sealed with a key for that one connection.
 - **Page text is data.** What a page says reaches Pyxi's model marked as untrusted page
   content, never as instructions.
 - **Esc in the tab stops Pyxi**, and so do the marker's Stop button, the Stop on the job in
-  Pyxi's tray, and Pyxi's "Stop everything" hotkey.
+  Pyxi's tray, and Pyxi's "Stop everything" hotkey. Esc works with the cursor in a frame of
+  the same site, and closes a card that was waiting for an answer.
 - **Private pages stay private.** Tabs that match Pyxi's private apps list (password
   managers, banking, anything you added in Settings) are never read or touched, and "Pause
   screen sharing" pauses this too.
-- **Everything Pyxi does in a tab is in the Activity tab** of Pyxi's panel.
+- **Everything Pyxi does in a tab is in the Activity tab** of Pyxi's panel, including a
+  click that was sent and never answered (stopped, or the browser went quiet): the entry
+  says it may or may not have happened.
 
 ## Permissions, and why
 
@@ -128,7 +153,7 @@ Two tools appear in Pyxi while a browser is connected, and nothing changes when 
 | --- | --- |
 | `activeTab` | Clicking the Pyxi icon lets it into that one tab, until you leave the site. |
 | `scripting` | To put `content.js` into a tab you've let it into. Only that file, only then. |
-| `storage` | To keep the pairing token and the port, in the extension's own storage. |
+| `storage` | To keep the pairing's key and the port, in the extension's own storage. |
 | `alarms` | To try again twice a minute when Pyxi isn't running. |
 | site access (optional) | Asked for one site at a time, when you press "Always allow on this site", or for every site if you tick that box. Nothing is granted when the extension is installed. |
 | `tabs` (optional) | Only if you tick "See the names of all my open tabs". |
@@ -153,8 +178,9 @@ Pyxi's brain (127.0.0.1:8766)  <-- WebSocket /ws/browser -->  background.js  <--
 
 The brain refuses a connection that isn't from this PC, that isn't from a browser extension
 (a web page can open a socket to 127.0.0.1, but can't fake its Origin), or that hasn't been
-paired. It keeps only a hash of the pairing token, and the token only works from the
-extension that paired.
+paired. Pairing and every later connection are proven both ways (see "Pair it with Pyxi").
+The brain keeps the pairing's key in `browser.json` in its data folder, encrypted for this
+Windows user, and a pairing only works from the extension that made it.
 
 ## Checking it
 
@@ -181,9 +207,14 @@ run with the real model (a few cents).
 - It works in the page itself and in frames from the same site. Frames from another site
   (embedded payment forms, some sign-in boxes) are not read or touched.
 - The private-field check goes by the field's type, its autocomplete hint, its name and its
-  label. A site that labels a card field as something unrelated would get past the name
-  check, though a typed card number is still refused by its digits.
-- A page built to do so can swallow the Esc key or cover the marker. The Stop in Pyxi's tray
-  and the "Stop everything" hotkey don't depend on the page.
+  label (in English and a few other languages, and names written as one word). A site that
+  labels a card field as something unrelated would get past the name check, though a typed
+  card number is still refused by its digits, in one piece or in pieces.
+- A page built to do so can swallow the Esc key or cover the marker, and Esc isn't heard
+  with the cursor in a frame from another site. The Stop in Pyxi's tray and the "Stop
+  everything" hotkey don't depend on the page.
+- The link is safe against another program on the PC pretending to be Pyxi or the extension.
+  It is not hidden from one that can already read your browser's or Pyxi's own files: that
+  program has your browser's cookies anyway.
 - Chrome and Edge only keep an unpacked extension while Developer mode stays on, and may
   remind you about it at start-up. Publishing to the stores removes that, and is not done.

@@ -11,18 +11,35 @@
 //     connection);
 //   - work on a site you haven't let it into (it has no site access when installed: clicking
 //     its icon lets it into that tab, "Always allow on this site" keeps it);
-//   - run code sent by Pyxi or anyone else: the requests below are the whole list.
+//   - run code sent by Pyxi or anyone else: the requests below are the whole list;
+//   - take requests from anything that hasn't proven it is the Pyxi it was paired with.
+//
+// Proving it. Any program can listen on Pyxi's port when Pyxi isn't running, so whatever
+// answers has to prove itself before this script says anything secret or does anything:
+//   - Pairing: the code you type never leaves the browser. Both sides do a key exchange and
+//     each shows, with a check keyed by the code, that it saw the same exchange. Pyxi goes
+//     first. The link key comes out of the exchange and is never sent.
+//   - Every later connection: this script sends its id and a random number; Pyxi must answer
+//     with a check over it, made with the link key; only then does this script answer with
+//     its own and start listening. No token is ever sent.
+//   - After that, every message both ways carries a counter and a check made with a key for
+//     that one connection.
 "use strict";
 
 const api = globalThis.browser || globalThis.chrome;
 const DEFAULT_PORT = 8766;
+const PROTOCOL = 2;
+const CODE_ROUNDS = 150000; // PBKDF2 over the pairing code, the same number as the brain's
 const VERSION = api.runtime.getManifest().version;
+const ORIGIN = self.location.origin; // chrome-extension://<id> or moz-extension://<id>
 
 let socket = null;
+let session = null; // the connection being made or in use: its keys and counters
 let state = "off"; // off | connecting | on | unpaired
 let detail = ""; // why, for the popup
+let unknown = false; // Pyxi said it doesn't know this browser: offer pairing again
 const acting = new Map(); // tabId -> { run, text }: tabs wearing the "Pyxi is working" marker
-const halted = []; // runs the user stopped in the tab: nothing more is done for them
+const halted = []; // runs the user stopped in the tab: nothing more is started for them
 const nudged = new Map(); // tabId -> when the "!" badge went on
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -43,6 +60,36 @@ function browserName() {
   return "Browser";
 }
 
+// ---------------------------------------------------------------------- the sums
+const utf8 = new TextEncoder();
+
+function bytes(...parts) {
+  const chunks = parts.map((p) => (typeof p === "string" ? utf8.encode(p) : new Uint8Array(p)));
+  const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
+}
+
+const b64 = (data) => btoa(String.fromCharCode(...new Uint8Array(data)));
+const unb64 = (text) => Uint8Array.from(atob(String(text)), (c) => c.charCodeAt(0));
+const nonce = () => b64(crypto.getRandomValues(new Uint8Array(16)));
+
+async function mac(key, ...parts) {
+  const k = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, bytes(...parts)));
+}
+
+function same(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
 // ---------------------------------------------------------------------- the link to Pyxi
 function setState(next, why = "") {
   state = next;
@@ -57,23 +104,26 @@ function setState(next, why = "") {
   api.runtime.sendMessage({ to: "pyxi-popup", type: "state" }).catch(() => {}); // if it's open
 }
 
+function hangUp() {
+  const old = socket;
+  socket = null;
+  session = null;
+  try {
+    old?.close();
+  } catch {
+    /* already closed */
+  }
+}
+
 async function connect(code = "") {
   if (!code && socket && socket.readyState <= 1) return; // already open or opening
-  const { token, port } = await api.storage.local.get(["token", "port"]);
-  if (!token && !code) {
+  const { id, key, port } = await api.storage.local.get(["id", "key", "port"]);
+  if (!(id && key) && !code) {
     setState("unpaired");
     return;
   }
-  if (socket) {
-    const old = socket;
-    socket = null;
-    try {
-      old.close();
-    } catch {
-      /* already closed */
-    }
-  }
-  setState("connecting");
+  hangUp();
+  if (code || !unknown) setState("connecting");
   let ws;
   try {
     ws = new WebSocket(`ws://127.0.0.1:${Number(port) || DEFAULT_PORT}/ws/browser`);
@@ -82,15 +132,30 @@ async function connect(code = "") {
     return;
   }
   socket = ws;
-  const hello = { browser: browserName(), version: VERSION };
-  ws.onopen = () => {
-    ws.send(JSON.stringify(code ? { type: "pair", code, ...hello } : { type: "hello", token, ...hello }));
+  const mine = { ws, key: null, sent: 0, seen: 0, inbox: Promise.resolve(), outbox: Promise.resolve() };
+  session = mine;
+  const drop = () => {
+    // Whatever answered didn't prove it is the Pyxi this browser was paired with (or broke
+    // a sealed message): hang up, keep the pairing, do nothing it asked.
+    const mineStill = socket === ws;
+    if (mineStill) hangUp();
+    else ws.close();
+    if (mineStill && (state === "connecting" || state === "on")) {
+      setState("off", "Something on Pyxi's port didn't answer as Pyxi would. Not connected.");
+      clearMarkers();
+    }
   };
-  ws.onmessage = (event) => onMessage(ws, event.data);
+  // One message at a time, in the order they came: the checks are asynchronous.
+  const next = (step) => {
+    mine.inbox = mine.inbox.then(step).catch(drop);
+  };
+  ws.onopen = () => next(() => (code ? beginPairing(mine, code) : beginHello(mine, id, key)));
+  ws.onmessage = (event) => next(() => onMessage(mine, event.data));
   ws.onerror = () => {};
   ws.onclose = () => {
     if (socket !== ws) return;
     socket = null;
+    session = null;
     if (state === "on" || state === "connecting") {
       setState("off", "Pyxi isn't running on this PC right now. It reconnects by itself.");
     }
@@ -98,41 +163,147 @@ async function connect(code = "") {
   };
 }
 
-async function onMessage(ws, raw) {
+async function beginHello(s, id, key) {
+  s.hello = { id, key: unb64(key), ne: nonce() };
+  s.ws.send(JSON.stringify({ type: "hello", v: PROTOCOL, id, nonce: s.hello.ne, browser: browserName(), version: VERSION }));
+}
+
+async function beginPairing(s, code) {
+  const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+  s.pair = {
+    code: String(code).replace(/[^A-Za-z0-9]/g, "").toUpperCase(),
+    ne: nonce(),
+    priv: pair.privateKey,
+    pub: b64(await crypto.subtle.exportKey("raw", pair.publicKey)),
+  };
+  // Neither the code nor anything made from it goes out before Pyxi has proven itself.
+  s.ws.send(JSON.stringify({ type: "pair", v: PROTOCOL, nonce: s.pair.ne, pub: s.pair.pub, browser: browserName(), version: VERSION }));
+}
+
+async function onMessage(s, raw) {
+  if (s.key) {
+    // Proven both ways: from here on only sealed messages count.
+    const body = await unseal(s, raw);
+    if (body === null) throw new Error("a message that wasn't sealed for this connection");
+    await onSealed(s, JSON.parse(body));
+    return;
+  }
   let msg;
   try {
     msg = JSON.parse(raw);
   } catch {
     return;
   }
-  if (msg.type === "welcome") {
-    setState("on");
-  } else if (msg.type === "paired" && msg.token) {
-    await api.storage.local.set({ token: msg.token });
-    setState("on");
-  } else if (msg.type === "refused") {
-    const { token } = await api.storage.local.get("token");
-    if (msg.reason === "unpaired") {
-      await api.storage.local.remove("token");
-      setState("unpaired", "This browser isn't paired with Pyxi any more. Pair it again.");
-    } else if (msg.reason === "wrong_code") {
-      setState(token ? "off" : "unpaired", "That code didn't work or ran out. Ask Pyxi for a new one.");
-    } else {
-      setState(token ? "off" : "unpaired", "Pyxi refused the connection.");
+  if (msg.type === "challenge" && s.hello && !s.answered) {
+    const h = s.hello;
+    const nb = String(msg.nonce);
+    const proof = await mac(h.key, `brain|${h.id}|${ORIGIN}|${h.ne}|${nb}`);
+    if (!same(proof, unb64(msg.proof))) throw new Error("not the Pyxi this browser was paired with");
+    s.answered = true;
+    s.ws.send(JSON.stringify({ type: "auth", proof: b64(await mac(h.key, `ext|${h.id}|${ORIGIN}|${h.ne}|${nb}`)) }));
+    s.key = await mac(h.key, `session|${h.ne}|${nb}`);
+  } else if (msg.type === "pair_challenge" && s.pair && !s.answered) {
+    const p = s.pair;
+    const nb = String(msg.nonce);
+    const pubB = String(msg.pub);
+    const theirs = await crypto.subtle.importKey("raw", unb64(pubB), { name: "ECDH", namedCurve: "P-256" }, false, []);
+    const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: theirs }, p.priv, 256));
+    const seen = new Uint8Array(
+      await crypto.subtle.digest("SHA-256", utf8.encode(`pyxi-pair-v2|${ORIGIN}|${p.ne}|${nb}|${p.pub}|${pubB}`)),
+    );
+    const base = await crypto.subtle.importKey("raw", utf8.encode(p.code), "PBKDF2", false, ["deriveBits"]);
+    const codeKey = new Uint8Array(
+      await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: seen, iterations: CODE_ROUNDS }, base, 256),
+    );
+    if (!same(await mac(codeKey, "brain", seen, shared), unb64(msg.proof))) {
+      wrongCode();
+      s.ws.close();
+      return;
     }
+    s.answered = true;
+    s.ws.send(JSON.stringify({ type: "pair_auth", proof: b64(await mac(codeKey, "ext", seen, shared)) }));
+    p.link = await mac(shared, "pyxi-link-key", seen);
+    s.key = await mac(p.link, `session|${p.ne}|${nb}`);
+  } else if (msg.type === "refused") {
+    // Said by something that hasn't proven itself: it changes what the popup shows and
+    // nothing else. The pairing this browser holds is never dropped on its say-so.
+    const { id, key } = await api.storage.local.get(["id", "key"]);
+    const paired = !!(id && key);
+    if (msg.reason === "wrong_code") {
+      wrongCode(paired);
+    } else if (msg.reason === "unknown") {
+      unknown = true;
+      setState("unpaired", "Pyxi doesn't recognise this browser. Pair it again.");
+    } else if (msg.reason === "old_extension") {
+      setState(paired ? "off" : "unpaired", "This Pyxi and this extension are different versions. Update both.");
+    } else {
+      setState(paired ? "off" : "unpaired", "Pyxi refused the connection.");
+    }
+  }
+  // Anything else from a side that hasn't proven itself is ignored.
+}
+
+function wrongCode(paired = false) {
+  setState(paired && !unknown ? "off" : "unpaired", "That code didn't work or ran out. Ask Pyxi for a new one.");
+}
+
+async function unseal(s, raw) {
+  let frame;
+  try {
+    frame = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const n = Number(frame.s);
+  const body = String(frame.b);
+  if (!Number.isInteger(n) || n <= s.seen) return null; // an old message played again
+  if (!same(await mac(s.key, `B|${n}|${body}`), unb64(frame.m))) return null;
+  s.seen = n;
+  return body;
+}
+
+async function onSealed(s, msg) {
+  if (msg.type === "welcome") {
+    unknown = false;
+    setState("on");
+  } else if (msg.type === "paired" && msg.id && s.pair?.link) {
+    await api.storage.local.set({ id: String(msg.id), key: b64(s.pair.link) });
+    unknown = false;
+    setState("on");
+  } else if (msg.type === "unpaired") {
+    // The real Pyxi (it holds the key) disconnected this browser, in its Settings.
+    await api.storage.local.remove(["id", "key"]);
+    setState("unpaired", "This browser was disconnected from Pyxi. Pair it again to use it.");
+    hangUp();
+    clearMarkers();
   } else if (msg.type === "cmd") {
-    run(ws, msg);
+    run(s, msg); // not awaited: a slow page mustn't hold up a stop
   } else if (msg.type === "stop") {
     clearMarkers();
   }
 }
 
-function tell(message) {
-  if (socket && socket.readyState === 1) socket.send(JSON.stringify(message));
+/** Send one sealed message on a proven connection. */
+function send(s, message) {
+  if (!s || !s.key || s.ws.readyState !== 1) return;
+  const n = ++s.sent;
+  const body = JSON.stringify(message);
+  s.outbox = s.outbox
+    .then(async () => {
+      const check = b64(await mac(s.key, `E|${n}|${body}`));
+      if (s.ws.readyState === 1) s.ws.send(JSON.stringify({ s: n, b: body, m: check }));
+    })
+    .catch(() => {});
 }
 
-// A message every 20 seconds keeps the link (and, in Chrome, this service worker) alive.
-setInterval(() => tell({ type: "ping" }), 20000);
+const tell = (message) => send(state === "on" ? session : null, message);
+
+// A message every 20 seconds keeps the link alive, and the call to the browser keeps this
+// script awake (Chrome and Firefox both put an idle background script to sleep).
+setInterval(() => {
+  tell({ type: "ping" });
+  api.runtime.getPlatformInfo().catch(() => {});
+}, 20000);
 
 // If Pyxi wasn't running, or the browser put this script to sleep, try again twice a minute.
 api.alarms.create("pyxi-link", { periodInMinutes: 0.5 });
@@ -184,10 +355,11 @@ async function getTab(id) {
   }
 }
 
-/** The tab Pyxi means: the one in front, a tab id, or words from a tab's title or address. */
+/** The tab Pyxi means: the one in front, a tab id (a number), or words from a tab's title
+ * or address (text, even when the words are all digits, like "365"). */
 async function resolveTab(which) {
   if (which === undefined || which === null || which === "") return activeTab();
-  if (typeof which === "number" || /^\d+$/.test(String(which))) return getTab(which);
+  if (typeof which === "number") return getTab(which);
   const words = String(which).toLowerCase().split(/\s+/).filter(Boolean);
   const tabs = await api.tabs.query({ windowType: "normal" });
   const hits = tabs.filter((tab) => {
@@ -218,7 +390,10 @@ async function settled(tabId, max = 8000) {
   }
 }
 
-function webAddress(url) {
+/** An address Pyxi asked to open, as the browser will really read it. ``expect`` is the host
+ * Pyxi checked (and showed the user): if the browser reads the address as leading somewhere
+ * else, it isn't opened. */
+function webAddress(url, expect) {
   let parsed;
   try {
     parsed = new URL(String(url));
@@ -227,6 +402,12 @@ function webAddress(url) {
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw problem("failed", "Pyxi only opens http and https addresses.");
+  }
+  if (parsed.username || parsed.password || /[\\\s]/.test(String(url))) {
+    throw problem("failed", "That address is written in a way that hides where it leads.");
+  }
+  if (expect !== undefined && parsed.host !== String(expect)) {
+    throw problem("failed", `That address leads to ${parsed.host}, not to ${expect}.`);
   }
   return parsed.href;
 }
@@ -282,7 +463,7 @@ function unnudge(tabId) {
 /** Ask content.js in the tab to do one thing; put it there first if it isn't yet. */
 async function toContent(tab, cmd, args = {}) {
   const message = { to: "pyxi-content", cmd, args };
-  const acts = cmd !== "read" && cmd !== "marker";
+  const acts = cmd !== "read" && cmd !== "marker" && cmd !== "check";
   const ask = () => api.tabs.sendMessage(tab.id, message, { frameId: 0 });
   let answer = null;
   try {
@@ -294,6 +475,7 @@ async function toContent(tab, cmd, args = {}) {
   }
   if (!answer || answer.code === "retired") {
     // Not in the page yet, or put to rest when the site was removed: (re)enter if allowed.
+    // A script put in now is a new one: it won't act for a page id read from an older one.
     await inject(tab);
     try {
       answer = await ask();
@@ -306,6 +488,11 @@ async function toContent(tab, cmd, args = {}) {
   if (answer.ok) return answer.data || {};
   throw problem(answer.code || "failed", answer.error || "That didn't work.");
 }
+
+/** What Pyxi read before it decided on this action: the page (a random id content.js made
+ * when it was put in), the host, and the element's words. content.js refuses if any of them
+ * is no longer true. */
+const read = ({ page, host, label }) => ({ page, host, label });
 
 async function act(tab, cmd, args, settle) {
   let data;
@@ -378,35 +565,35 @@ const COMMANDS = {
     const data = await toContent(target, "read", { max_chars, max_items, from_view });
     return { ...data, tab: brief(await getTab(target.id)) };
   },
-  async click({ tab, ref, settle }) {
+  async click({ tab, ref, settle, ...seen }) {
     const target = await resolveTab(tab);
-    const out = await act(target, "click", { ref }, settle);
+    const out = await act(target, "click", { ref, ...read(seen) }, settle);
     if (!out.open) return out;
     // A link that opens a new tab: a page can't do that for a click a person didn't make.
     const made = await api.tabs.create({ url: webAddress(out.open), active: true, index: target.index + 1 });
     await settled(made.id, 15000);
     return { opened: brief(await getTab(made.id)) };
   },
-  async type({ tab, ref, text, enter, settle }) {
-    return act(await resolveTab(tab), "type", { ref, text, enter: !!enter }, settle);
+  async type({ tab, ref, text, enter, settle, ...seen }) {
+    return act(await resolveTab(tab), "type", { ref, text, enter: !!enter, ...read(seen) }, settle);
   },
-  async select({ tab, ref, option, settle }) {
-    return act(await resolveTab(tab), "select", { ref, option }, settle);
+  async select({ tab, ref, option, settle, ...seen }) {
+    return act(await resolveTab(tab), "select", { ref, option, ...read(seen) }, settle);
   },
-  async press({ tab, ref, key, settle }) {
-    return act(await resolveTab(tab), "press", { ref, key }, settle);
+  async press({ tab, ref, key, settle, ...seen }) {
+    return act(await resolveTab(tab), "press", { ref, key, ...read(seen) }, settle);
   },
-  async scroll({ tab, ref, direction }) {
-    return act(await resolveTab(tab), "scroll", { ref, direction }, false);
+  async scroll({ tab, ref, direction, ...seen }) {
+    return act(await resolveTab(tab), "scroll", { ref, direction, ...read(seen) }, false);
   },
-  async goto({ tab, url }) {
+  async goto({ tab, url, expect_host }) {
     const target = await resolveTab(tab);
-    await api.tabs.update(target.id, { url: webAddress(url) });
+    await api.tabs.update(target.id, { url: webAddress(url, expect_host) });
     await settled(target.id, 20000);
     return brief(await getTab(target.id));
   },
-  async open({ url }) {
-    const made = await api.tabs.create({ url: webAddress(url), active: true });
+  async open({ url, expect_host }) {
+    const made = await api.tabs.create({ url: webAddress(url, expect_host), active: true });
     await settled(made.id, 20000);
     return brief(await getTab(made.id));
   },
@@ -416,8 +603,9 @@ const COMMANDS = {
     if (api.windows?.update) await api.windows.update(target.windowId, { focused: true }).catch(() => {});
     return brief(await getTab(target.id));
   },
-  async back({ tab }) {
+  async back({ tab, ...seen }) {
     const target = await resolveTab(tab);
+    if (seen.page !== undefined) await toContent(target, "check", read(seen)); // still that page?
     await api.tabs.goBack(target.id);
     await settled(target.id);
     return brief(await getTab(target.id));
@@ -429,16 +617,15 @@ const COMMANDS = {
   },
 };
 
-async function run(ws, msg) {
+async function run(s, msg) {
   let reply;
   try {
-    const stopped = () => msg.run && halted.includes(msg.run);
-    if (stopped()) throw problem("stopped", "You stopped Pyxi in that tab.");
+    // Stopped in the tab: nothing more is started for that task. What had already started
+    // when Esc was pressed is answered truthfully below, so Pyxi's activity log has it.
+    if (msg.run && halted.includes(msg.run)) throw problem("stopped", "You stopped Pyxi in that tab.");
     const does = Object.hasOwn(COMMANDS, msg.name) ? COMMANDS[msg.name] : null;
     if (!does) throw problem("failed", "This version of Pyxi's extension can't do that.");
-    const data = await does(msg.args || {}, msg.run || "");
-    if (stopped()) throw problem("stopped", "You stopped Pyxi in that tab.");
-    reply = { type: "result", id: msg.id, ok: true, data };
+    reply = { type: "result", id: msg.id, ok: true, data: await does(msg.args || {}, msg.run || "") };
   } catch (err) {
     reply = {
       type: "result",
@@ -449,7 +636,7 @@ async function run(ws, msg) {
       host: err.host || "",
     };
   }
-  if (ws.readyState === 1) ws.send(JSON.stringify(reply));
+  send(s, reply);
 }
 
 // ---------------------------------------------------------------------- the page and the popup
@@ -457,20 +644,28 @@ api.runtime.onMessage.addListener((msg, sender, respond) => {
   if (!msg || msg.to !== "pyxi-bg" || sender.id !== api.runtime.id) return undefined;
   const ownPage = !!sender.url && sender.url.startsWith(api.runtime.getURL(""));
   if (msg.type === "stopped" && sender.tab) {
-    // Esc (or the marker's Stop) in a tab Pyxi was working in.
+    // Esc (or the marker's Stop) in a tab Pyxi was working in. If this script was restarted
+    // since the task began it no longer knows which task that was: Pyxi is told all the
+    // same, with no task named, and stops the one it has.
     const wearing = acting.get(sender.tab.id);
     acting.delete(sender.tab.id);
     if (wearing) {
       halted.push(wearing.run);
       if (halted.length > 50) halted.shift();
-      tell({ type: "event", name: "stopped", run: wearing.run, by: msg.by === "button" ? "button" : "esc" });
     }
+    tell({ type: "event", name: "stopped", run: wearing ? wearing.run : "", by: msg.by === "button" ? "button" : "esc" });
     return undefined;
   }
   if (!ownPage) return undefined; // the rest is for the extension's own popup only
   if (msg.type === "status") {
-    api.storage.local.get(["token", "port"]).then(({ token, port }) => {
-      respond({ state, detail, paired: !!token, port: Number(port) || DEFAULT_PORT, browser: browserName() });
+    api.storage.local.get(["id", "key", "port"]).then(({ id, key, port }) => {
+      respond({
+        state,
+        detail,
+        paired: !!(id && key) && !unknown,
+        port: Number(port) || DEFAULT_PORT,
+        browser: browserName(),
+      });
     });
     return true;
   }
@@ -481,15 +676,10 @@ api.runtime.onMessage.addListener((msg, sender, respond) => {
     return true;
   }
   if (msg.type === "forget") {
-    api.storage.local.remove("token").then(() => {
-      const old = socket;
-      socket = null;
-      try {
-        old?.close();
-      } catch {
-        /* already closed */
-      }
+    api.storage.local.remove(["id", "key"]).then(() => {
+      hangUp();
       clearMarkers();
+      unknown = false;
       setState("unpaired");
       respond({ ok: true });
     });

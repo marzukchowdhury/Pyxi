@@ -10,7 +10,13 @@ through the extension's own popup, and proves in the real browser:
   picking an option, the card before a form is submitted, the refusals for password, card and
   ID fields (in the brain and, bypassing the brain, in the page itself), the marker, Esc in
   the tab, "Stop everything", a site the browser hasn't let the extension into, instructions
-  planted in a page, and the activity log.
+  planted in a page, and the activity log;
+  and, from the security review: an impostor listening on Pyxi's port (while pairing, and
+  after) gets nothing and can't drive the browser; Enter, Return and Space on a submit button
+  and Enter in a field that only sounds like search all ask first; an action is refused when
+  the page or the element is no longer what was read (another page, Back, a button whose
+  words changed); fields that are private without saying so the usual way; a card number in
+  pieces; Esc with the cursor in a frame, and after the background script lost track.
 
     python scripts/browser_e2e.py                  # Playwright's Chromium, no window
     python scripts/browser_e2e.py --browser msedge # the installed Edge (its own temp profile)
@@ -103,6 +109,8 @@ LIST = """<!doctype html><title>Groceries</title>
 <p id="hours"></p>
 <p id="found"></p>
 <p><a href="/form">Go to the sign-up form</a></p>
+<p><a href="/slow">Slow page</a></p>
+<iframe src="/frame" title="A note" style="width:320px;height:60px"></iframe>
 <div style="height:3000px"></div>
 <p>The end of the list.</p>
 <script>
@@ -118,6 +126,53 @@ LIST = """<!doctype html><title>Groceries</title>
   });
   document.querySelector("input[name=q]").addEventListener("keydown", (e) => {
     if (e.key === "Enter") document.getElementById("found").textContent = "Searched: " + e.target.value;
+  });
+</script>"""
+
+FRAME = """<!doctype html><title>Frame</title><label>Note to self <input name="note"></label>"""
+
+SIGNUP = """<!doctype html><title>Sign up</title>
+<h1>Create your account</h1>
+<form id="signup">
+  <p><input type="search" name="lookup" placeholder="Look up your company"></p>
+  <p><label>Email address <input name="email"></label></p>
+  <p><label>Find a friend to invite <input name="friend"></label></p>
+  <p><button type="submit">Create my account</button></p>
+</form>
+<p><button type="button" id="step">Continue</button></p>
+<p id="state">Nothing sent</p>
+<script>
+  const state = document.getElementById("state");
+  document.getElementById("signup").addEventListener("submit", (e) => {
+    e.preventDefault();
+    state.textContent = "ACCOUNT CREATED";
+  });
+  const step = document.getElementById("step");
+  step.addEventListener("click", () => {
+    if (step.textContent === "Continue") step.textContent = "Place order";
+    else state.textContent = "ORDER PLACED";
+  });
+</script>"""
+
+PRIVATE = """<!doctype html><title>Your details</title>
+<h1>Your details</h1>
+<p><label>Business name <input name="businessname"></label></p>
+<p><input name="loginpassword" placeholder="Login"></p>
+<p><input name="cardnum" placeholder="Number"></p>
+<p><span id="lbl">Passwort</span> <input id="field9" aria-labelledby="lbl"></p>
+<p><label>Kartennummer <input name="k1"></label></p>
+<p><input name="otpcode" placeholder="Code"></p>
+<p><input name="verification_value" placeholder="3 digits"></p>
+<p><label>Nickname <input name="sneak" onfocus="this.type='password'"></label></p>
+<p><input type="password" name="pw2" placeholder="Choose one"> <button type="button" id="show">Show</button></p>
+<p><input name="b1" placeholder="Box 1" maxlength="4"> <input name="b2" placeholder="Box 2" maxlength="4">
+   <input name="b3" placeholder="Box 3" maxlength="4"> <input name="b4" placeholder="Box 4" maxlength="4"></p>
+<script>
+  document.getElementById("show").addEventListener("click", () => {
+    const fresh = document.createElement("input");
+    fresh.name = "pw2";
+    fresh.placeholder = "Choose one";
+    document.querySelector("[name=pw2]").replaceWith(fresh);
   });
 </script>"""
 
@@ -139,16 +194,24 @@ class Pages:
 
     def __init__(self) -> None:
         self.stolen: list[str] = []
+        self.hits: list[str] = []
         pages = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
                 path = self.path.split("?")[0]
+                pages.hits.append(path)
                 if path == "/steal":
                     pages.stolen.append(self.path)
+                if path == "/slow":
+                    time.sleep(3)  # a page that takes its time, to press Esc during
                 body = {
                     "/form": FORM,
                     "/list": LIST,
+                    "/frame": FRAME,
+                    "/signup": SIGNUP,
+                    "/private": PRIVATE,
+                    "/365": "<!doctype html><title>365 Report</title><p>Quarterly numbers.</p>",
                     "/trap": TRAP.replace("__ATTACK__", ATTACK.format(port=pages.port)),
                 }.get(path, "<!doctype html><title>Blank</title><p>Nothing here.</p>")
                 data = body.encode("utf-8")
@@ -225,6 +288,85 @@ class Cards:
 
     def clear(self) -> None:
         self.events.clear()
+
+
+class Impostor:
+    """Something else listening where Pyxi would be: it keeps what the extension sends it and
+    answers every message with ``replies``, whatever they are."""
+
+    def __init__(self) -> None:
+        self.got: list[str] = []
+        self.replies: list[dict[str, Any]] = []
+        self.port = 0
+
+    async def start(self) -> Impostor:
+        from websockets.asyncio.server import serve
+
+        self.server = await serve(self._handle, "127.0.0.1", 0)
+        self.port = self.server.sockets[0].getsockname()[1]
+        return self
+
+    async def _handle(self, ws: Any) -> None:
+        try:
+            async for raw in ws:
+                self.got.append(str(raw))
+                for msg in self.replies:
+                    await ws.send(json.dumps(msg))
+        except Exception:
+            pass
+
+
+async def refusal(call: Any) -> str:
+    """How the extension answered a request sent straight to it: "done", or the refusal's code."""
+    try:
+        await call
+        return "done"
+    except BrowserError as exc:
+        return exc.code
+
+
+async def private_field_checks(link: Any, value: Any, tag: str = "") -> None:
+    """On the /private page, straight to the page script (the brain's own checks bypassed):
+    fields that are private without saying so in the usual way."""
+    listing = await link.call("read", {"max_items": 80})
+    page_id = listing["page"]
+    by = {i["label"]: i for i in listing["items"]}
+    marked = {label: i.get("sensitive", "") for label, i in by.items()}
+    check(
+        tag + "names in one word, other languages and labels from elsewhere mark a field private",
+        all(marked.get(k) for k in ("Login", "Number", "Passwort", "Kartennummer", "Code", "3 digits"))
+        and marked.get("Business name") == "",
+        str(marked),
+    )
+
+    def typing(label: str, text: str) -> Any:
+        return refusal(link.call("type", {"ref": by[label]["ref"], "text": text, "page": page_id}))
+
+    check(
+        tag + "a field that turns into a password field when entered is not typed into",
+        await typing("Nickname", "hunter2") == "sensitive" and await value("sneak") == "",
+    )
+    await link.call("click", {"ref": by["Show"]["ref"], "page": page_id})
+    again = await link.call("read", {"max_items": 80})
+    shown = next(i for i in again["items"] if i["label"] == "Choose one")
+    check(
+        tag + "a text field swapped in for a password field ('Show') is still private",
+        shown.get("sensitive") == "password"
+        and await refusal(link.call("type", {"ref": shown["ref"], "text": "hunter2", "page": again["page"]})) == "sensitive",
+        str(shown),
+    )
+    pieces = [await typing(f"Box {n}", "1111" if n > 1 else "4111") for n in (1, 2, 3, 4)]
+    check(
+        tag + "a card number typed in four pieces is stopped at the last piece",
+        pieces == ["done", "done", "done", "sensitive"] and await value("b4") == "" and await value("b3") == "1111",
+        str(pieces),
+    )
+    spaced = [await typing("Business name", t) for t in ("4111  1111  1111  1111", "4111.1111.1111.1111", "4111\u00a01111\u00a01111\u00a01111")]
+    check(
+        tag + "a card number with odd spacing is still refused",
+        spaced == ["sensitive"] * 3 and await value("businessname") == "",
+        str(spaced),
+    )
 
 
 def always(card: dict[str, Any]) -> Any:
@@ -503,25 +645,46 @@ async def firefox_checks(e: Any, opts: argparse.Namespace) -> None:
         by_label = {i["label"]: i for i in listing["items"]}
         refused = {}
         for label, typed in (("Password", "hunter2"), ("Card number", "4111111111111111"), ("Social insurance number", "046454286"), ("Full name", "4111 1111 1111 1111")):
-            try:
-                await link.call("type", {"ref": by_label[label]["ref"], "text": typed})
-                refused[label] = "typed"
-            except BrowserError as exc:
-                refused[label] = exc.code
+            refused[label] = await refusal(
+                link.call("type", {"ref": by_label[label]["ref"], "text": typed, "page": listing["page"]})
+            )
         check(
             "FIREFOX: the page script refuses password, card and ID fields, and card numbers",
             set(refused.values()) == {"sensitive"} and await value("pw") == "" and await value("ccnum") == "" and await value("fullname") == "Dana Li",
             str(refused),
         )
 
+        # An action is for the page that was read: with another page in the tab, it's refused.
+        await m.goto(pages.url("/private"))
+        await private_field_checks(link, value, "FIREFOX: ")
+        fresh = await link.call("read", {"max_items": 60})
+        stale = await refusal(
+            link.call("type", {"ref": fresh["items"][0]["ref"], "text": "x", "page": listing["page"]})
+        )
+        check("FIREFOX: an action meant for a page that is no longer in the tab is refused", stale == "gone", stale)
+
+        await m.goto(pages.url("/signup"))
+        cards.clear()
+        cards.answer = False
+        model.load(act(lambda p: {"do": "type", "ref": ref(p, '"Email address"'), "text": "dana@example.com", "enter": True}))
+        await run_task(brain, "Look at this page.")
+        model.load(act(lambda p: {"do": "press", "ref": ref(p, '"Create my account"'), "text": "Return"}))
+        await run_task(brain, "Look at this page.")
+        check(
+            "FIREFOX: Enter in an 'Email address' field and Return on the submit button both ask first",
+            [c["action"] for c in cards.cards()]
+            == [f'Type "dana@example.com" into "Email address" on {site} and press Enter', f'Click "Create my account" on {site}']
+            and await inner("#state") == "Nothing sent",
+            str(cards.cards()),
+        )
+        cards.answer = True
+
         await m.goto(pages.url("/list"))
         cards.clear()
         model.load(
-            act(
-                lambda p: {"do": "click", "ref": ref(p, '"Add Milk"')},
-                lambda p: {"do": "click", "ref": ref(p, "Show opening hours")},
-                lambda p: {"do": "type", "ref": ref(p, "Search groceries"), "text": "oat milk", "enter": True},
-            ),
+            act(lambda p: {"do": "click", "ref": ref(p, '"Add Milk"')}),
+            act(lambda p: {"do": "click", "ref": ref(p, "Show opening hours")}),
+            act(lambda p: {"do": "type", "ref": ref(p, "Search groceries"), "text": "oat milk", "enter": True}),
             ("done", {"ok": True, "summary": "Milk is in your cart."}),
         )
         await run_task(brain, "Add milk, show the hours, search for oat milk.")
@@ -599,7 +762,7 @@ async def main(opts: argparse.Namespace) -> int:
 
     tmp = Path(tempfile.mkdtemp(prefix="pyxi-browser-e2e-"))
     pages = Pages()
-    site = f"127.0.0.1:{pages.port}"
+    site = f"http://127.0.0.1:{pages.port}"  # as cards name it: a page that isn't https says so
     port = free_port()
     settings = PyxiSettings(
         _env_file=None,
@@ -686,8 +849,35 @@ async def main(opts: argparse.Namespace) -> int:
             await popup.goto(f"chrome-extension://{ext_id}/popup.html")
             await popup.wait_for_selector("#pair:not([hidden])", timeout=10000)
             check("a fresh extension says it isn't paired", "Not paired" in await popup.inner_text("#status"))
+            await popup.click("summary")  # Advanced: the port to connect to
+
+            # Something else is listening where Pyxi should be, while they type a pairing code.
+            impostor = await Impostor().start()
+            steal = {"type": "cmd", "id": "c1", "name": "open", "args": {"url": pages.url("/steal?by=impostor")}}
+            impostor.replies = [
+                {"type": "paired", "id": "br_evil", "token": "t"},
+                {"type": "welcome"},
+                steal,
+                {"type": "pair_challenge", "nonce": "AAAAAAAAAAAAAAAAAAAAAA==", "pub": "AAAA", "proof": "AAAA"},
+            ]
+            await popup.fill("#port", str(impostor.port))
+            await popup.fill("#code", "QZQZ-QZQZ")
+            await popup.click("#pair-form button")
+            await until(lambda: impostor.got, 10)
+            await asyncio.sleep(1.5)
+            kept = await worker.evaluate("chrome.storage.local.get(['id', 'key', 'token']).then((s) => Object.keys(s))")
+            check(
+                "pairing against an impostor: the code never leaves the browser",
+                len(impostor.got) == 1 and "QZQZ" not in "".join(impostor.got).upper(),
+                str(impostor.got)[:300],
+            )
+            check(
+                "and the impostor can't declare the browser paired, or make it do anything",
+                kept == [] and not pages.stolen and "Connected" not in await popup.inner_text("#status"),
+                f"{kept} {pages.stolen}",
+            )
+
             link.new_code()
-            await popup.click("summary")  # Advanced: the brain's port (a spare one, in this check)
             await popup.fill("#port", str(port))
             await popup.fill("#code", "AAAA-AAAA")
             await popup.click("#pair-form button")
@@ -700,13 +890,43 @@ async def main(opts: argparse.Namespace) -> int:
             check("the right code pairs it, and the brain sees the browser", ok, str(link.public()))
             await popup.locator("#status", has_text="Connected").wait_for(timeout=10000)
             check("the popup says Connected", True)
-            saved = json.loads((settings.data_dir / "browser.json").read_text(encoding="utf-8"))
-            token = await worker.evaluate("chrome.storage.local.get('token').then((s) => s.token)")
+            saved = (settings.data_dir / "browser.json").read_text(encoding="utf-8")
+            key = await worker.evaluate("chrome.storage.local.get('key').then((s) => s.key)")
             check(
-                "the brain keeps only a hash of the pairing token",
-                token and token not in json.dumps(saved) and len(saved["browsers"]) == 1,
+                "the pairing's key is not in the brain's file in the clear",
+                key and key not in saved and len(json.loads(saved)["browsers"]) == 1,
             )
             await popup.close()
+
+            # The same impostor, now that the browser is paired: Pyxi isn't running, something
+            # else took its port, and the extension comes back to it.
+            impostor.got.clear()
+            impostor.replies = [
+                {"type": "welcome"},
+                steal,
+                {"type": "unpaired"},
+                {"type": "refused", "reason": "unpaired"},
+                {"type": "challenge", "nonce": "AAAAAAAAAAAAAAAAAAAAAA==", "proof": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+            ]
+            move = "(port) => chrome.storage.local.set({ port }).then(() => { hangUp(); return connect(); })"
+            await worker.evaluate(move, impostor.port)
+            await until(lambda: impostor.got, 10)
+            await asyncio.sleep(1.5)
+            first = json.loads(impostor.got[0]) if impostor.got else {}
+            check(
+                "an impostor on Pyxi's port is told an id and a random number, never the key",
+                set(first) == {"type", "v", "id", "nonce", "browser", "version"} and key not in "".join(impostor.got),
+                str(impostor.got)[:300],
+            )
+            still = await worker.evaluate("chrome.storage.local.get(['id', 'key']).then((s) => Object.keys(s).sort())")
+            check(
+                "it can't drive the browser, can't unpair it, and gets no answer to its challenge",
+                not pages.stolen and len(impostor.got) == 1 and still == ["id", "key"] and await worker.evaluate("state") != "on",
+                f"{pages.stolen} {len(impostor.got)} {still}",
+            )
+            await worker.evaluate(move, port)
+            check("and the real Pyxi is recognised again afterwards", await until(lambda: link.connected, 10))
+            impostor.server.close()
             check("the tab tools are offered to the model once connected", {t.name for t in tabwork.tools(brain)} == {"read_tab", "use_tab"})
 
             # ---------------------------------------------------------- reading
@@ -834,22 +1054,17 @@ async def main(opts: argparse.Namespace) -> int:
             listing = await link.call("read", {"max_items": 60})
             by_label = {i["label"]: i for i in listing["items"]}
             refused = {}
+            seen = {"page": listing["page"]}
             for label, value in (("Password", "hunter2"), ("Card number", "4111111111111111"), ("Social insurance number", "046454286")):
-                try:
-                    await link.call("type", {"ref": by_label[label]["ref"], "text": value})
-                    refused[label] = "typed"
-                except BrowserError as exc:
-                    refused[label] = exc.code
-            try:
-                await link.call("type", {"ref": by_label["Full name"]["ref"], "text": "4111 1111 1111 1111"})
-                refused["card number text"] = "typed"
-            except BrowserError as exc:
-                refused["card number text"] = exc.code
-            try:
-                await link.call("click", {"ref": by_label["Photo"]["ref"]})
-                refused["file"] = "clicked"
-            except BrowserError as exc:
-                refused["file"] = exc.code
+                refused[label] = await refusal(link.call("type", {"ref": by_label[label]["ref"], "text": value, **seen}))
+            refused["card number text"] = await refusal(
+                link.call("type", {"ref": by_label["Full name"]["ref"], "text": "4111 1111 1111 1111", **seen})
+            )
+            refused["file"] = await refusal(link.call("click", {"ref": by_label["Photo"]["ref"], **seen}))
+            check(
+                "the page script won't act at all without being told which page was read",
+                await refusal(link.call("type", {"ref": by_label["Full name"]["ref"], "text": "x"})) == "gone",
+            )
             check(
                 "the page script itself refuses, when the brain's own check is bypassed",
                 set(refused.values()) == {"sensitive"} and await form.input_value("input[name=pw]") == "",
@@ -863,12 +1078,10 @@ async def main(opts: argparse.Namespace) -> int:
             await shop.bring_to_front()
             cards.clear()
             model.load(
-                act(
-                    lambda p: {"do": "click", "ref": ref(p, '"Add Milk"')},
-                    lambda p: {"do": "click", "ref": ref(p, '"Add Eggs"')},
-                    lambda p: {"do": "click", "ref": ref(p, "Show opening hours")},
-                    lambda p: {"do": "type", "ref": ref(p, "Search groceries"), "text": "oat milk", "enter": True},
-                ),
+                act(lambda p: {"do": "click", "ref": ref(p, '"Add Milk"')}),
+                act(lambda p: {"do": "click", "ref": ref(p, '"Add Eggs"')}),
+                act(lambda p: {"do": "click", "ref": ref(p, "Show opening hours")}),
+                act(lambda p: {"do": "type", "ref": ref(p, "Search groceries"), "text": "oat milk", "enter": True}),
                 ("done", {"ok": True, "summary": "Milk and eggs are in your cart."}),
             )
             await run_task(brain, "Add milk and eggs to the cart, show the opening hours and search for oat milk.")
@@ -917,6 +1130,137 @@ async def main(opts: argparse.Namespace) -> int:
                 f"{showing} {gone} {job.status} {message}",
             )
 
+            # ---------------------------------------------------------- Enter, Space and "search"
+            signup = await ctx.new_page()
+            await signup.goto(pages.url("/signup"))
+            await signup.bring_to_front()
+            text = await tabwork.handle(brain, "read_tab", {})
+            check(
+                "a form that merely holds a search box still has a submit button, and its fields aren't search boxes",
+                bool(re.search(r'button "Create my account".*submits the form', text)),
+                text,
+            )
+            cards.clear()
+            cards.answer = False
+            create = '"Create my account"'
+            for hijacked in (
+                lambda p: {"do": "type", "ref": ref(p, '"Email address"'), "text": "dana@example.com", "enter": True},
+                lambda p: {"do": "press", "ref": ref(p, '"Find a friend to invite"'), "text": "Enter+"},
+                lambda p: {"do": "press", "ref": ref(p, create), "text": "Space"},
+                lambda p: {"do": "press", "ref": ref(p, create), "text": "Return"},
+                lambda p: {"do": "click", "ref": ref(p, create)},
+            ):
+                model.load(act(hijacked))
+                await run_task(brain, "Look at this page.")
+            click_card = f'Click "Create my account" on {site}'
+            check(
+                "Enter in fields that only sound like search, and Space or Return on the submit button, all ask first",
+                [c["action"] for c in cards.cards()]
+                == [
+                    f'Type "dana@example.com" into "Email address" on {site} and press Enter',
+                    f'Press Enter in "Find a friend to invite" on {site}',
+                    click_card,
+                    click_card,
+                    click_card,
+                ]
+                and await signup.inner_text("#state") == "Nothing sent",
+                str([c["action"] for c in cards.cards()]) + await signup.inner_text("#state"),
+            )
+            listing = await link.call("read", {"max_items": 60})
+            by_label = {i["label"]: i for i in listing["items"]}
+            seen = {"page": listing["page"]}
+            pressed = [
+                await refusal(link.call("press", {"ref": by_label["Create my account"]["ref"], "key": key, **seen}))
+                for key in ("Enter", "Space", "return")
+            ]
+            check(
+                "the page script won't press Enter or Space on a button at all: it has to come as a click",
+                pressed == ["failed"] * 3 and await signup.inner_text("#state") == "Nothing sent",
+                str(pressed),
+            )
+
+            # ---------------------------------------------------------- tied to the page that was read
+            cards.clear()
+            cards.answer = True
+            both = act(
+                lambda p: {"do": "click", "ref": ref(p, '"Continue"')},
+                lambda p: {"do": "click", "ref": ref(p, '"Continue"')},
+            )
+            model.load(both, ("done", {"ok": True, "summary": "Continued."}))
+            await run_task(brain, "Press Continue.")
+            check(
+                "two clicks in one batch: the second isn't done on the button that became 'Place order'",
+                await signup.inner_text("#step") == "Place order" and await signup.inner_text("#state") == "Nothing sent",
+                await signup.inner_text("#state"),
+            )
+            old_click = {"ref": by_label["Continue"]["ref"], "label": "Continue", **seen}
+            check(
+                "the page script refuses an element whose words changed since the page was read",
+                await refusal(link.call("click", old_click)) == "gone" and await signup.inner_text("#state") == "Nothing sent",
+            )
+            await signup.goto(pages.url("/list"))
+            there = await link.call("read", {"max_items": 60})
+            milk = next(i for i in there["items"] if i["label"] == "Add Milk")
+            check(
+                "an action carrying the name of a page that is no longer in the tab is refused",
+                await refusal(link.call("click", {"ref": milk["ref"], **seen})) == "gone"
+                and await signup.inner_text("#cart") == "Cart: (empty)",
+            )
+            await signup.go_back()  # the earlier page comes back, with its old script and refs
+            await signup.wait_for_selector("#step")
+            check(
+                "after Back, an action for the page that was just read doesn't land on the page that came back",
+                await refusal(link.call("click", {"ref": by_label["Continue"]["ref"], "page": there["page"]})) == "gone"
+                and await signup.inner_text("#state") in ("Nothing sent",),
+                await signup.inner_text("#state"),
+            )
+
+            # ---------------------------------------------------------- private fields that don't say so
+            details = await ctx.new_page()
+            await details.goto(pages.url("/private"))
+            await details.bring_to_front()
+            await private_field_checks(link, lambda name: details.input_value(f"[name={name}]"))
+
+            # ---------------------------------------------------------- a tab named in digits
+            report = await ctx.new_page()
+            await report.goto(pages.url("/365"))
+            await shop.bring_to_front()
+            text = await tabwork.handle(brain, "read_tab", {"tab": "365"})
+            check("a tab named only in digits is found by its name", text.startswith("Tab: 365 Report"), text[:200])
+            await report.close()
+
+            # ---------------------------------------------------------- Esc in a frame, and after a restart
+            await shop.bring_to_front()
+            model.load(wait, wait, wait, wait, wait, wait)
+            await tabwork.handle(brain, "use_tab", {"task": "Wait around on this page."})
+            await until(lambda: brain._tab_operator is not None and brain._tab_operator._marked is not None, 10)
+            await asyncio.sleep(0.4)
+            await worker.evaluate("acting.clear()")  # as if the browser had restarted the background script
+            await shop.frame_locator("iframe").locator("input").click()  # the cursor is inside the frame
+            await shop.keyboard.press("Escape")
+            stopped = await until(lambda: brain._tab_operator is None, 6)
+            await asyncio.sleep(0.3)
+            job = list(brain.jobs.jobs.values())[-1]
+            check(
+                "Esc stops Pyxi with the cursor in a frame, and when the background script has lost track of the task",
+                stopped and job.summary == "Stopped, as you asked." and not await marker_showing(shop),
+                f"{stopped} {job.summary}",
+            )
+
+            # ---------------------------------------------------------- Esc while a click is under way
+            model.load(act(lambda p: {"do": "click", "ref": ref(p, '"Slow page"')}), wait, wait)
+            await tabwork.handle(brain, "use_tab", {"task": "Open the slow page."})
+            await until(lambda: "/slow" in pages.hits, 10)  # the click went out: the site got the request
+            await shop.keyboard.press("Escape")
+            stopped = await until(lambda: brain._tab_operator is None, 6)
+            await asyncio.sleep(0.3)
+            entries = [e["what"] for e in brain.audit.recent(20) if e["agent"] == tabwork.AGENT]
+            check(
+                "a click that was under way when Esc was pressed is in the activity log",
+                stopped and any(e.startswith(f'Clicked "Slow page" on {site}') for e in entries),
+                str(entries[:3]),
+            )
+
             # ---------------------------------------------------------- planted instructions
             trap = await ctx.new_page()
             await trap.goto(pages.url("/trap"))
@@ -937,7 +1281,6 @@ async def main(opts: argparse.Namespace) -> int:
             )
             cards.clear()
             cards.answer = lambda card: "steal" not in card.get("reason", "") and "evil" not in card["action"]
-            link.revoke_site("localhost:" + str(pages.port))
             model.load(
                 act({"do": "goto", "url": f"http://localhost:{pages.port}/steal?data=dana@example.com"}),
             )
