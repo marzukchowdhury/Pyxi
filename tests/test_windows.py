@@ -209,3 +209,51 @@ def test_a_song_on_a_screen_is_not_a_song_search():
     assert play_request("Can you play the song on my middle screen?") is None
     assert play_request("Just click play on the middle screen.") is None
     assert play_request("play Blinding Lights by The Weeknd") == ("Blinding Lights by The Weeknd", "youtube_music")
+
+
+# ---------------------------------------------------------------------- bringing a window forward
+class _User32:
+    """Windows, as far as focus() uses it."""
+
+    def __init__(self, front: int, iconic: bool = False) -> None:
+        self.front, self.iconic, self.keys, self.shown = front, iconic, [], []
+
+    def GetForegroundWindow(self) -> int:
+        return self.front
+
+    def IsIconic(self, hwnd: int) -> bool:
+        return self.iconic
+
+    def ShowWindow(self, hwnd: int, how: int) -> None:
+        self.shown.append(hwnd)
+        self.iconic = False
+
+    def keybd_event(self, key: int, scan: int, flags: int, extra: int) -> None:
+        self.keys.append((key, "up" if flags & 2 else "down"))
+
+    def SetForegroundWindow(self, hwnd: int) -> bool:
+        self.front = hwnd
+        return True
+
+
+def test_a_window_already_in_front_gets_no_key_at_all(monkeypatch):
+    """Live: a table was pasted three times into the spreadsheet in front of the founder and
+    never arrived. Before each paste the window was "brought to the front" with an Alt tap,
+    though it was in front already; a lone Alt moves the keyboard to the app's menu bar, and
+    the paste went there."""
+    u = _User32(front=7)
+    monkeypatch.setattr(windows, "_user32", lambda: u)
+    assert windows.focus(7) is True
+    assert u.keys == [] and u.shown == []
+
+
+def test_bringing_another_window_forward_never_sends_alt_alone(monkeypatch):
+    u = _User32(front=3)
+    monkeypatch.setattr(windows, "_user32", lambda: u)
+    assert windows.focus(7) is True and u.front == 7
+    # Alt is held around a key that means nothing, so the app in front opens no menu.
+    assert u.keys == [(0x12, "down"), (0xE8, "down"), (0xE8, "up"), (0x12, "up")]
+    # A minimized window is restored first, even when Windows still names it the front one.
+    u = _User32(front=7, iconic=True)
+    monkeypatch.setattr(windows, "_user32", lambda: u)
+    assert windows.focus(7) is True and u.shown == [7] and u.keys

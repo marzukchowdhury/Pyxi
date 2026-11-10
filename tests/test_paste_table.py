@@ -17,9 +17,11 @@ from pyxi.companion import filework, prompts
 from pyxi.companion.paste import (
     MAX_MESSAGE,
     PasteError,
+    check_words,
     clip_message,
     looks_like_a_sheet,
     plain_cells,
+    seen,
     table_clip,
 )
 from test_brain_and_server import make_brain
@@ -192,3 +194,111 @@ async def test_formulas_from_a_page_are_pasted_as_text_and_their_own_stay_live(
     await brain.turn("put some sample sales data with a total in this sheet")
     assert json.loads(rec.of("action")[0]["value"])["text"].endswith("Total\t=SUM(B2:B3)")
     assert len(llm.prompts) == 1
+
+
+# ------------------------------------------------------------------ did it arrive
+class _Sheet:
+    """A screen that shows one window: what can be read in it, look by look."""
+
+    def __init__(self, brain, looks: list[list[str]]) -> None:
+        from PIL import Image
+
+        from pyxi.screen.ocr import TextLine
+
+        self.looks, self.taken, self.paused = list(looks), 0, False
+        self._line, self._shot = TextLine, Image.new("RGB", (8, 8))
+        self._base = brain.screen.ctx
+
+    async def capture(self, pixels: bool = True, follow_mouse: bool = True, hwnd: int | None = None):
+        import dataclasses
+
+        words = self.looks[min(self.taken, len(self.looks) - 1)]
+        self.taken += 1
+        return dataclasses.replace(
+            self._base, screenshot=self._shot, text=[self._line(w, (0, 0, 10, 10)) for w in words]
+        )
+
+    def is_excluded(self, window):
+        return None
+
+
+def _on_a_sheet(settings, monkeypatch, looks, llm_calls):
+    from pyxi import windows
+
+    monkeypatch.setattr(windows, "available", lambda: True)
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(4, "Untitled Spreadsheet.xlsx", "genoffice.exe")])
+    monkeypatch.setattr(windows, "focus", lambda hwnd: True)
+    monkeypatch.setattr(windows, "foreground", lambda: 4)
+    llm = Scripted(*llm_calls)
+    brain, rec = make_brain(settings, llm=llm)
+    brain._named_window = lambda text, ctx: 4 if ctx is None else None  # type: ignore[method-assign]
+    brain.screen = _Sheet(brain, looks)
+    return brain, rec, llm
+
+
+def test_the_cells_to_look_for_are_plain_words_and_numbers():
+    text = table_clip(ROWS, bordered=False)["text"]
+    assert check_words(text) == ["region", "sales", "west", "1200", "eastnorth", "800", "total"]  # no formula
+    assert check_words(table_clip([[""] * 3] * 3, bordered=False)["text"]) == []  # nothing to tell it by
+    assert seen(["Region | Sales", "W e s t   1200"], ["region", "west", "total"]) == {"region", "west"}
+
+
+async def test_a_paste_that_never_arrived_is_not_called_done(settings, monkeypatch, fast_paste):
+    """Live: "Can you create a pivot table over here?", into a spreadsheet app in front of the
+    founder. Three pastes, an empty sheet, and "Done." each time, until he asked what was
+    wrong. Pyxi looks at the window after pasting now."""
+    empty = ["Untitled Spreadsheet.xlsx", "A", "B", "C"]
+    brain, rec, llm = _on_a_sheet(
+        settings,
+        monkeypatch,
+        [empty],  # however often it looks, the sheet stays empty
+        [
+            [("say", {"text": "Done."}), ("paste_table", {"rows": ROWS})],
+            [("say", {"text": "That didn't land. It's copied: click the first cell and press ctrl+v."})],
+        ],
+    )
+    await brain.turn("create a sample sales table here")
+    kinds = [a["kind"] for a in rec.of("action")]
+    assert kinds == ["insert_table", "copy"]  # sent, and when it didn't arrive, left copied for them
+    assert rec.of("action")[1]["value"].startswith("Region\tSales")
+    paste = next(c for c in brain._calls if c["tool"] == "paste_table")
+    assert paste["outcome"] == "refused" and "did NOT go in" in paste["note"]
+    assert "Done." not in [s["text"] for s in rec.of("say")]  # the claim is never spoken
+    assert "did NOT go in" in llm.prompts[-1] and "copied" in llm.prompts[-1]
+
+
+async def test_a_paste_that_arrived_is_done_and_one_that_cant_be_checked_is_trusted(settings, monkeypatch, fast_paste):
+    empty = ["Untitled Spreadsheet.xlsx", "A", "B", "C"]
+    full = [*empty, "Region", "Sales", "West", "1200"]
+    # The cells show up at the second look after pasting: an app can take a moment to draw.
+    brain, rec, _ = _on_a_sheet(
+        settings, monkeypatch, [empty, empty, full], [[("paste_table", {"rows": ROWS}), ("say", {"text": "It's in."})]]
+    )
+    await brain.turn("create a sample sales table here")
+    assert [a["kind"] for a in rec.of("action")] == ["insert_table"]
+    assert "outcome" not in next(c for c in brain._calls if c["tool"] == "paste_table")
+    assert [s["text"] for s in rec.of("say")] == ["It's in."]
+    # The same table already on screen (pasted there before): nothing new to see, so it is trusted.
+    brain, rec, _ = _on_a_sheet(
+        settings, monkeypatch, [["Region", "Sales", "West", "1200", "East & North", "800", "Total"]],
+        [[("paste_table", {"rows": ROWS}), ("say", {"text": "It's in."})]],
+    )
+    await brain.turn("put that table in again")
+    assert [a["kind"] for a in rec.of("action")] == ["insert_table"]
+    # A window whose text can't be read at all (a private one, a look that fails): trusted too.
+    brain, rec, _ = _on_a_sheet(settings, monkeypatch, [[]], [[("paste_table", {"rows": ROWS}), ("say", {"text": "It's in."})]])
+    await brain.turn("create a sample sales table here")
+    assert [a["kind"] for a in rec.of("action")] == ["insert_table"]
+
+
+@pytest.fixture
+def fast_paste(monkeypatch):
+    """The waits between looks, without the waiting."""
+    import asyncio
+
+    real = asyncio.sleep
+
+    async def nap(seconds: float, *a, **k):
+        await real(0)
+
+    monkeypatch.setattr("pyxi.companion.brain.asyncio.sleep", nap)

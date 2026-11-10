@@ -980,6 +980,7 @@ class Brain:
         was a Google connection that couldn't reach the file.)"""
         from pyxi.companion.paste import (
             PasteError,
+            check_words,
             clip_message,
             looks_like_a_sheet,
             plain_cells,
@@ -1017,8 +1018,51 @@ class Brain:
                 "copied instead. Tell them to click where it should go and press ctrl+v."
                 + (f" {changed}" if changed else "")
             )
+        words = check_words(clip["text"])
+        before = await self._cells_on_screen(target, words) if words else None
         await self.hub.emit("action", kind="insert_table", value=message)
+        if before is not None and not await self._pasted(target, words, before):
+            # It was sent and nothing arrived (live: three times into a spreadsheet, "Done"
+            # each time). The cells stay copied, so one click and ctrl+v by them finishes it.
+            await asyncio.sleep(0.4)  # after the app has put their own clipboard back
+            await self.hub.emit("action", kind="copy", value=clip["text"])
+            return (
+                "paste_table: the table did NOT go in. I looked at that window after pasting "
+                "and none of its cells are there, so the cursor isn't in a cell or a text box. "
+                "Don't say it's done or that you're doing it. Say in one short line that it "
+                "didn't land and that the table is copied: they click the cell where it should "
+                "start and press ctrl+v. Don't call paste_table again until they have clicked."
+            )
         return f"The table is pasted. {changed}" if changed else None
+
+    async def _cells_on_screen(self, target: int | None, words: list[str]) -> set[str] | None:
+        """Which of a table's cells can be read in the window it is meant for. None when that
+        can't be looked at (no window known, a private one, sharing paused, no text read), and
+        then the paste is taken on trust as before."""
+        from pyxi.companion.paste import seen
+
+        if not target:
+            return None
+        try:
+            ctx = await self._capture(follow_mouse=False, hwnd=target)
+        except Exception:  # a look that fails must not cost them the paste
+            log.debug("couldn't look at the window for a paste", exc_info=True)
+            return None
+        if ctx.excluded or ctx.screenshot is None or not ctx.text:
+            return None
+        return seen(ctx.text, words)
+
+    async def _pasted(self, target: int | None, words: list[str], before: set[str]) -> bool:
+        """Did the table arrive: are cells of it on screen now that were not there before?
+        Looked at up to three times, since an app can take a moment to draw them."""
+        if len(before) == len(words):
+            return True  # every cell was on screen already (pasted there before): can't tell
+        for wait in (0.6, 0.8, 1.2):
+            await asyncio.sleep(wait)
+            now = await self._cells_on_screen(target, words)
+            if now is None or now - before:
+                return True
+        return False
 
     async def _capture(self, follow_mouse: bool = True, hwnd: int | None = None) -> ScreenContext:
         """Take Pyxi's screenshot. If the overlay is visible to captures (so a Discord stream can

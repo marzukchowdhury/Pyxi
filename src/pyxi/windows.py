@@ -122,13 +122,27 @@ def snap(hwnd: int, where: str) -> None:
     place(hwnd, *rects[where])
 
 
+_NO_KEY = 0xE8  # unassigned in Windows; the usual key for masking a lone Alt
+
+
 def focus(hwnd: int) -> bool:
     """Bring a window to the front so typing goes to it. Windows only lets the app the user
-    last used do this, so a harmless Alt tap first marks this process as "in use"."""
+    last used do this, so an Alt tap first marks this process as "in use".
+
+    A window that is already in front is left exactly as it is. The Alt tap used to be sent
+    then too, and a lone Alt in most apps moves the keyboard to the menu bar: the paste that
+    followed went there and vanished (live: a table pasted three times into the spreadsheet
+    in front of the founder, nothing in the sheet, and "Done" each time). When the tap is
+    needed, a key that means nothing is pressed inside it, so no menu opens in the app that
+    is in front at that moment either."""
     u = _user32()
+    if int(u.GetForegroundWindow() or 0) == int(hwnd) and not u.IsIconic(hwnd):
+        return True
     if u.IsIconic(hwnd):
         u.ShowWindow(hwnd, SW_RESTORE)
     u.keybd_event(0x12, 0, 0, 0)  # Alt down
+    u.keybd_event(_NO_KEY, 0, 0, 0)  # a key no app listens for: Alt+that is not "Alt alone"
+    u.keybd_event(_NO_KEY, 0, 2, 0)
     u.keybd_event(0x12, 0, 2, 0)  # Alt up
     ok = bool(u.SetForegroundWindow(hwnd))
     for _ in range(10):  # the switch takes a moment, with no window in front meanwhile

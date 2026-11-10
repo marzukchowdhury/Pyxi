@@ -66,6 +66,32 @@ def plain_cells(rows: Any) -> tuple[Any, int]:
     return out, changed
 
 
+def _plain(s: str) -> str:
+    return re.sub(r"[\W_]+", "", str(s).casefold())
+
+
+def check_words(text: str, limit: int = 8) -> list[str]:
+    """Cells to look for on screen after a paste, to know that it arrived: the first few that
+    are plain words or numbers of three characters or more, each once. Formulas are left out
+    (a sheet shows their result, not their text). Empty when the table has nothing to tell
+    it by (an empty table of some size)."""
+    out: list[str] = []
+    for cell in re.split(r"[\t\r\n]+", text or ""):
+        word = _plain(cell)
+        if len(word) >= 3 and not cell.lstrip().startswith(("=", "+", "@")) and word not in out:
+            out.append(word)
+            if len(out) == limit:
+                break
+    return out
+
+
+def seen(lines: Any, words: list[str]) -> set[str]:
+    """Which of those cells are in the text read off the screen (lines with a .text)."""
+    hay = [_plain(getattr(line, "text", line)) for line in lines or []]
+    whole = "".join(hay)
+    return {w for w in words if any(w in h for h in hay) or w in whole}
+
+
 def clip_message(clip: dict[str, str]) -> str:
     """The clip as the one message the app takes. Characters go as they are (escaped, a large
     table in Chinese or Japanese was six times its size and over the app's limit). The app
