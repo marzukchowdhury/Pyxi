@@ -576,26 +576,22 @@ def _options_of(el: El) -> list[El]:
 
 
 # ---------------------------------------------------------------------- how each thing is done
-# The ways to do each thing, in the order they are tried, per engine. Measured
-# (scripts/screen_tab_check.py): in Firefox the UI Automation patterns bring its window to
-# the front and the older default action doesn't, so that one goes first there.
+# The ways to do each thing, in the order they are tried. Measured in Chrome, Edge and
+# Firefox (scripts/screen_tab_check.py, "takes the keyboard?"): UI Automation's own patterns
+# (Invoke, Toggle, Value...) often bring the browser window to the front, taking the keyboard
+# from whatever the person is doing; the older "default action" and "set value" did so only
+# when a dropdown had to be opened. So the older way goes first, and the pattern is what is
+# tried when an element doesn't take it.
+_ORDER: dict[str, tuple[str, ...]] = {
+    "press": ("legacy", "invoke"),
+    "toggle": ("legacy", "toggle"),
+    "choose": ("legacy", "select"),
+    "open": ("legacy", "expand"),
+    "type": ("legacy_value", "value"),
+}
 WAYS: dict[str, dict[str, tuple[str, ...]]] = {
-    "chromium": {
-        "press": ("invoke", "legacy"),
-        "toggle": ("toggle", "legacy", "invoke"),
-        "choose": ("select", "invoke", "legacy"),
-        "open": ("expand", "legacy"),
-        "type": ("value", "legacy_value"),
-        "focus": ("focus", "legacy_focus"),
-    },
-    "gecko": {
-        "press": ("legacy", "invoke"),
-        "toggle": ("legacy", "toggle"),
-        "choose": ("legacy", "select"),
-        "open": ("legacy", "expand"),
-        "type": ("legacy_value", "value"),
-        "focus": ("legacy_focus", "focus"),
-    },
+    "chromium": {**_ORDER, "focus": ("focus", "legacy_focus")},
+    "gecko": {**_ORDER, "focus": ("legacy_focus", "focus")},
 }
 _NEEDS = {
     "invoke": "Invoke",

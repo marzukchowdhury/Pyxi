@@ -694,8 +694,52 @@ class OwnWindows(screenlink.UiaDriver):
         super().open(hwnd, url)
 
 
-PATTERNS_FIRST = dict(screenlink.WAYS["chromium"])
-LEGACY_FIRST = dict(screenlink.WAYS["gecko"])
+# The other order of the ways to act, for the runs that compare the two.
+PATTERNS_FIRST = {
+    "press": ("invoke", "legacy"),
+    "toggle": ("toggle", "legacy", "invoke"),
+    "choose": ("select", "invoke", "legacy"),
+    "open": ("expand", "legacy"),
+    "type": ("value", "legacy_value"),
+}
+MODEL_CALLS = [0]  # real-model calls made so far, over all browsers
+
+
+class Cover:
+    """A plain window of this script's own, put over a browser window to cover it: an
+    honest "covered by another window" that doesn't depend on what else is on screen."""
+
+    def __init__(self) -> None:
+        self.hwnd = 0
+        self.ready = threading.Event()
+        threading.Thread(target=self._run, daemon=True).start()
+        self.ready.wait(5)
+
+    def _run(self) -> None:
+        u = ctypes.WinDLL("user32")
+        u.CreateWindowExW.restype = wt.HWND
+        u.CreateWindowExW.argtypes = [
+            wt.DWORD, wt.LPCWSTR, wt.LPCWSTR, wt.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            wt.HWND, wt.HMENU, wt.HINSTANCE, wt.LPVOID,
+        ]  # fmt: skip
+        # WS_EX_TOPMOST | WS_EX_NOACTIVATE, a popup with a border: opaque, never takes the keyboard.
+        self.hwnd = int(u.CreateWindowExW(0x00000008 | 0x08000000, "STATIC", "Pyxi check: cover", 0x80800000, 0, 0, 10, 10, None, None, None, None) or 0)
+        self.ready.set()
+        msg = wt.MSG()
+        while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            u.TranslateMessage(ctypes.byref(msg))
+            u.DispatchMessageW(ctypes.byref(msg))
+
+    def over(self, hwnd: int) -> None:
+        rect = wt.RECT()
+        user32.GetWindowRect(wt.HWND(hwnd), ctypes.byref(rect))
+        user32.SetWindowPos(
+            self.hwnd, wt.HWND(-1), rect.left - 20, rect.top - 20, rect.right - rect.left + 40, rect.bottom - rect.top + 40,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        )  # fmt: skip
+
+    def away(self) -> None:
+        user32.ShowWindow(self.hwnd, 0)
 
 # ---------------------------------------------------------------------- measuring
 @dataclass
@@ -1206,7 +1250,8 @@ class Check:
         s = self.site
         group = f"takes the keyboard? ({'older default action first' if legacy_first else 'UI Automation patterns first'})"
         saved = screenlink.WAYS[self.b.engine]
-        screenlink.WAYS[self.b.engine] = PATTERNS_FIRST if not legacy_first else LEGACY_FIRST
+        if not legacy_first:
+            screenlink.WAYS[self.b.engine] = {**saved, **PATTERNS_FIRST}
         todo = [
             ("reading the page", "/form", None, None),
             ("pressing a button", "/list", "Add Milk", lambda p, i: self.do("click", p, i)),
@@ -1240,9 +1285,15 @@ class Check:
         window showing, covered by other windows, and minimised."""
         s = self.site
         self.steady = False
+        cover = Cover()
+
+        def covered() -> None:
+            self.b.place(False)
+            cover.over(self.b.hwnd)
+
         for label, arrange in (
             ("showing, not in front", lambda: self.b.place(True)),
-            ("covered by other windows", lambda: self.b.place(False)),
+            ("covered by another window", covered),
             ("minimised", lambda: user32.ShowWindow(self.b.hwnd, 7)),  # SW_SHOWMINNOACTIVE
         ):
             self.b.hand_back()
@@ -1262,11 +1313,12 @@ class Check:
             if page is not None:
                 await self.case(group, "press a button", None, lambda p: item_of(p, "Add Milk"), lambda p, i: self.do("click", p, i), lambda st: "Milk" in st["text"].get("cart", ""), page=page, wait=5)
                 await self.case(group, "type in a field", None, lambda p: item_of(p, "Search groceries"), lambda p, i: self.do("type", p, i, text="eggs"), lambda st: st["fields"].get("q") == "eggs", page=page, wait=5)
+            cover.away()
             self.b.restore()
             await asyncio.sleep(1.0)
         # Read while showing, then act once the window is covered or minimised.
         for label, arrange in (
-            ("read while showing, then covered", lambda: self.b.place(False)),
+            ("read while showing, then covered", covered),
             ("read while showing, then minimised", lambda: user32.ShowWindow(self.b.hwnd, 7)),
         ):
             self.b.hand_back()
@@ -1279,8 +1331,11 @@ class Check:
                 continue
             arrange()
             await asyncio.sleep(2.5)
+            says = f"the page says it is {'hidden' if s.state().get('hidden') else 'visible'}"
+            self.row(f"window {label}", "(what the page says of itself)", note=says)
             await self.case(f"window {label}", "press a button", None, lambda p: item_of(p, "Add Milk"), lambda p, i: self.do("click", p, i), lambda st: "Milk" in st["text"].get("cart", ""), page=page, wait=5)
             await self.case(f"window {label}", "type in a field", None, lambda p: item_of(p, "Search groceries"), lambda p, i: self.do("type", p, i, text="eggs"), lambda st: st["fields"].get("q") == "eggs", page=page, wait=5)
+            cover.away()
             self.b.restore()
             await asyncio.sleep(1.0)
         self.steady = True
@@ -1363,7 +1418,22 @@ async def public_pass(check: Check) -> None:
             "public page", "Wikipedia: read the main page", found=True, acted=True, confirmed="Wikipedia" in page["text"] and len(page["items"]) > 20,
             ms=page["_ms"], note=f"{len(page['text'])} characters, {len(page['items'])} elements{', more' if page['more_items'] else ''}",
         )  # fmt: skip
-        box = next((i for i in page["items"] if i["kind"] in ("search box", "text field", "dropdown box") and "search" in i["label"].lower()), None)
+        def search_box(p: dict[str, Any]) -> dict[str, Any] | None:
+            kinds = ("search box", "text field", "dropdown box")
+            return next((i for i in p["items"] if i["kind"] in kinds and "search" in i["label"].lower()), None)
+
+        box = search_box(page)
+        if box is None:
+            # In a narrow window the box is behind a "Search" button.
+            opener = next((i for i in page["items"] if i["label"].strip().lower() == "search" and i["kind"] in ("button", "link")), None)
+            if opener is not None:
+                try:
+                    await check.do("click", page, opener, settle=True)
+                    await asyncio.sleep(1.0)
+                    page = await check.read()
+                    box = search_box(page)
+                except BrowserError:
+                    box = None
         if box is None:
             check.row("public page", "Wikipedia: find the search box", found=False, note=str([i["label"] for i in page["items"] if "earch" in i["label"]])[:200])
         else:
@@ -1451,14 +1521,11 @@ async def real_model(check: Check, opts: argparse.Namespace, tmp: Path) -> None:
     brain._screen_tab = check.link  # the link that can only see this check's own windows
     cards = e2e.Cards(brain.hub)  # answers Allow, and keeps every card
     llm = make_llm(real, model=real.model_hands) if real.model_hands else make_llm(real)
-    calls = 0
-
     class Counted:
         async def complete(self, **kw: Any) -> Any:
-            nonlocal calls
-            if calls >= opts.model_calls:
+            if MODEL_CALLS[0] >= opts.model_calls:
                 raise RuntimeError("the check's model budget is used up")
-            calls += 1
+            MODEL_CALLS[0] += 1
             return await llm.complete(**kw)
 
     brain._tab_llm = Counted()
@@ -1473,24 +1540,28 @@ async def real_model(check: Check, opts: argparse.Namespace, tmp: Path) -> None:
         ),
         ("/dropdown", "On this page choose Bangladesh as the country.", lambda st: st["text"].get("picked") == "Picked: Bangladesh"),
     ]  # fmt: skip
+    # The budget is for all the browsers: the first gets the tasks named by --model-tasks
+    # (by number), the others the form only.
+    first = check.b.name == opts.browsers.split(",")[0].strip()
+    tasks = [tasks[int(n) - 1] for n in opts.model_tasks.split(",")] if first else tasks[1:2]
     for path, task, done in tasks:
-        if calls >= opts.model_calls:
+        if MODEL_CALLS[0] >= opts.model_calls:
             break
         check.b.hand_back()
         await s.go(path)
         cards.clear()
-        before = calls
+        before = MODEL_CALLS[0]
         try:
             job = await e2e.run_task(brain, task)
             ok = bool(done(s.state()))
             asked = [c["action"] for c in cards.cards()]
             check.row(
                 "real model", task[:44], found=True, acted=job.status == "done", confirmed=ok, focus=foreground() == check.b.hwnd,
-                note=f"{calls - before} model calls, ${job.cost_usd:.4f}; said: {job.summary[:60]!r}; cards: {len(asked)}",
+                note=f"{MODEL_CALLS[0] - before} model calls, ${job.cost_usd:.4f}; said: {job.summary[:60]!r}; cards: {len(asked)}",
             )  # fmt: skip
         except Exception as exc:
             check.row("real model", task[:44], found=True, acted=False, confirmed=False, note=str(exc)[:120])
-    print(f"  (real model: {calls} calls in all)")
+    print(f"  (real model: {MODEL_CALLS[0]} calls so far, over all browsers)")
 
 
 # ---------------------------------------------------------------------- the table
@@ -1636,6 +1707,7 @@ if __name__ == "__main__":
     parser.add_argument("--public", action="store_true", help="also a read-only pass on a few public pages")
     parser.add_argument("--real-model", action="store_true")
     parser.add_argument("--model-calls", type=int, default=20, help="most real-model calls in all")
+    parser.add_argument("--model-tasks", default="1,2,3", help="which of the three tasks the first browser gets")
     parser.add_argument("--env-dir", default="", help="folder whose .env holds the model key, for --real-model")
     parser.add_argument("--out", default=str(ROOT / "docs" / "SCREEN-TAB-CHECK.md"))
     sys.exit(asyncio.run(main(parser.parse_args())))

@@ -422,11 +422,10 @@ async def test_the_browsers_own_pages_are_not_read():
 
 
 # ====================================================================== acting, without the mouse
-@pytest.mark.parametrize(
-    "exe, pressed, ticked, typed",
-    [("chrome.exe", "invoke", "toggle", "value"), ("firefox.exe", "legacy", "legacy", "legacy_value")],
-)
-async def test_it_presses_ticks_and_types_with_the_elements_own_actions(exe, pressed, ticked, typed):
+@pytest.mark.parametrize("exe", ["chrome.exe", "msedge.exe", "firefox.exe"])
+async def test_it_presses_ticks_and_types_with_the_elements_own_actions(exe):
+    # The older default action first (measured: it leaves the browser window where it is).
+    pressed, ticked, typed = "legacy", "legacy", "legacy_value"
     link, driver = make(exe)
     page = await read(link)
     out = await do(link, "click", page, "Go", settle=True)
@@ -451,13 +450,13 @@ async def test_it_presses_ticks_and_types_with_the_elements_own_actions(exe, pre
 async def test_when_one_way_is_not_taken_the_next_is_tried_and_the_field_is_read_back():
     link, driver = make()
     page = await read(link)
-    driver.refuse = {"invoke"}
+    driver.refuse = {"legacy"}
     await do(link, "click", page, "Go")
-    assert driver.did == [("legacy", "Go", "")]
+    assert driver.did == [("invoke", "Go", "")]
     driver.did.clear()
-    driver.deaf = {"value"}  # accepted, and the field doesn't change
+    driver.deaf = {"legacy_value"}  # accepted, and the field doesn't change
     out = await do(link, "type", page, "To", text="dana@example.com")
-    assert [d[0] for d in driver.did] == ["value", "legacy_value"] and out["value"] == "dana@example.com"
+    assert [d[0] for d in driver.did] == ["legacy_value", "value"] and out["value"] == "dana@example.com"
     driver.deaf = {"value", "legacy_value"}  # a page that takes no set value at all
     out = await do(link, "type", page, "Message", text="Hello")
     assert out["value"] == ""  # reported as it is: tabwork tells the model it didn't go in
@@ -534,7 +533,7 @@ async def test_a_dropdown_is_set_by_choosing_its_option(lazy):
     out = await do(link, "select", page, "Priority", option="hi")
     assert out["value"] == "High" and named(driver.root, "Priority").value == "High"
     ways = [d[0] for d in driver.did]
-    assert ways == (["expand", "select", "collapse"] if lazy else ["select"])
+    assert ways == (["expand", "legacy", "collapse"] if lazy else ["legacy"])
     no = await refused(do(link, "select", page, "Priority", option="Urgent"))
     assert "The options are: Normal, High, Low" in str(no)
     assert "isn't a plain dropdown" in str(await refused(do(link, "select", page, "Go", option="x")))
@@ -891,7 +890,7 @@ async def test_use_tab_works_through_it_with_every_card_and_the_log(settings, qu
     assert job.status == "done" and job.summary == "Sent."
     assert cards.asked == [f"Let Pyxi click and type on {SITE} in your browser?", f'Click "Send" on {SITE}']
     assert "This submits the form on the page." in cards.card()["reason"]
-    assert driver.acted() == [("value", "To", "dana@example.com"), ("invoke", "Send", "")]
+    assert driver.acted() == [("legacy_value", "To", "dana@example.com"), ("legacy", "Send", "")]
     assert logged(brain) == [f'Clicked "Send" on {SITE}', f'Typed "dana@example.com" into "To" on {SITE}']
     assert "No browser extension is connected" in brain._tab_llm.systems[0]  # the model knows the limits
     assert "theirs to fill" in brain._tab_llm.seen[1]  # and why the password wasn't typed
