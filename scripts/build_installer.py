@@ -506,6 +506,23 @@ def run(cmd: list[str], check: bool = True) -> None:
     subprocess.run(cmd, check=check, cwd=ROOT)
 
 
+def ship_browser_extension(out: Path | None = None) -> Path:
+    """Both builds of the browser extension, for the installer to carry
+    (resources/browser-extension, see "extraResources" in desktop/package.json): chrome/ is
+    what Chrome and Edge load unpacked, firefox/ is for a temporary install while no signed
+    add-on is published. Pyxi copies them to a folder whose path never changes
+    (pyxi/companion/browsersetup.py)."""
+    sys.path.insert(0, str(ROOT / "extension"))
+    try:
+        from build import build
+    finally:
+        sys.path.remove(str(ROOT / "extension"))
+    out = out or DESKTOP / "build" / "browser-extension"
+    for target in ("chrome", "firefox"):
+        build(target, out / target)
+    return out
+
+
 def main() -> None:
     version = json.loads((DESKTOP / "package.json").read_text(encoding="utf-8"))["version"]
     adopt_old_bundle()
@@ -518,6 +535,7 @@ def main() -> None:
         slim(version)
         check_bundle()
     ship_google_client()
+    ship_browser_extension()
     npm = shutil.which("npm") or "npm"
     subprocess.run([npm, "run", "build"], check=True, cwd=DESKTOP, shell=sys.platform == "win32")
     subprocess.run([npm, "run", "dist"], check=True, cwd=DESKTOP, shell=sys.platform == "win32")

@@ -104,6 +104,11 @@ off it. Fn can't be used: the keyboard hook (libuiohook) doesn't report Fn on a 
   never presses play blind there (it could pause the song).
 - **Pyxi's own music player window** (the minimised Edge on Windows) doesn't exist on a Mac.
 - **LibreOffice** isn't installed on demand; Pixel uses one the user installed.
+- **Pyxi in your browser** (the extension) is set up by hand on a Mac: Settings, under Connect
+  your browser, shows the steps and the folder (`~/Library/Application Support/Pyxi/
+  browser-extension`). "Set it up for me" says the same steps in words instead of typing into
+  the browser, and Pyxi doesn't offer the setup unasked. Once connected, tab work is the same
+  as on Windows.
 - **Automatic updates are off** on the Mac build (`MAC_UPDATES = false` in `updates.ts`):
   Squirrel.Mac only installs updates signed by the same Developer ID, and there's no
   `latest-mac.yml` in the releases yet. The build already makes the zip electron-updater needs.
@@ -188,9 +193,11 @@ that the bundle imports the brain and the Apple frameworks, then builds
 To make the lock: `pip-compile --generate-hashes requirements/mac.in -o requirements/mac.txt`
 (on a Mac, once per architecture if they differ).
 
-GitHub Actions: `.github/workflows/mac-build.yml` (run by hand, or on a `v*` tag) builds both
-architectures on `macos-latest`, runs the Mac tests and the desktop tests, smoke-tests the bundled
-brain, and keeps the dmgs as artifacts for a week. It has never run: it's committed, not pushed.
+GitHub Actions: `.github/workflows/mac-build.yml` (run by hand, on a push to `claude/mac-port`,
+or on a `v*` tag) builds Apple silicon on `macos-latest` and Intel natively on `macos-15-intel`,
+runs the Mac tests and the desktop tests, smoke-tests the bundled brain, and keeps the dmgs as
+artifacts for a week. Apple silicon runners are sometimes short: a job nobody picks up is
+cancelled after a while, and running it again later is the fix.
 
 Developing on a Mac without building: `pip install -e . -r requirements/mac.in`, then
 `npm run dev` in `desktop/` (the brain starts from `.venv/bin/python`).

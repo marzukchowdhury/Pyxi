@@ -7,4 +7,4 @@ import os as _os
 # Must be set before NumPy is first imported.
 _os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
-__version__ = "0.1.9"
+__version__ = "0.1.11"

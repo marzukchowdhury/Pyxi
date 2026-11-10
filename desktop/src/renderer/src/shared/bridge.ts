@@ -48,7 +48,7 @@ export interface Bridge {
   /** Mouse clicks anywhere on the desktop, in physical screen px (only used for guides). */
   onGlobalClick(fn: (p: { x: number; y: number }) => void): () => void;
   /** Quick actions from the brain: open a URL, copy text, or paste a draft into the focused field. */
-  runAction(kind: "open_url" | "copy" | "insert", value: string): void;
+  runAction(kind: "open_url" | "copy" | "insert" | "insert_table", value: string): void;
   /** Open a file Pyxi made, or show it in Explorer (only files in Pyxi's own folders). */
   openFile(path: string): void;
   showInFolder(path: string): void;

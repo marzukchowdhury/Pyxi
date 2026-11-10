@@ -5,6 +5,10 @@ import { marked } from "marked";
 
 const root = import.meta.dirname;
 const config = JSON.parse(readFileSync(resolve(root, "site.config.json"), "utf8"));
+// The Mac line has three states, and the templates can't nest an if, so these are worked out here:
+// a Mac download when there's one, else the waitlist when there's one, else "next on the roadmap".
+config.macWaitlistOnly = !config.macDownloadUrl && config.macWaitlistUrl ? "yes" : "";
+config.macNotYet = !config.macDownloadUrl && !config.macWaitlistUrl ? "yes" : "";
 
 /**
  * The privacy and terms pages are docs/PRIVACY.md and docs/TERMS.md, rendered at build time so

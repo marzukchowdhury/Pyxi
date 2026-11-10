@@ -167,7 +167,9 @@ const D2R = Math.PI / 180;
 
 export function initTeam() {
   if (!document.body.classList.contains("page-team")) return;
-  const forceMotion = new URLSearchParams(location.search).has("motion");
+  const forceMotion =
+    new URLSearchParams(location.search).has("motion") ||
+    document.documentElement.classList.contains("force-motion");
   const reduced =
     !forceMotion && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const fine = matchMedia("(hover: hover) and (pointer: fine)").matches;

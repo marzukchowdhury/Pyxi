@@ -1,0 +1,844 @@
+/* The swarm behind the home page, the pinned story it acts out, the rail, and the spell box. */
+.swarm {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- the story */
+.story {
+  position: relative;
+}
+.story-track {
+  position: relative;
+  height: 620vh;
+}
+.story-sticky {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  justify-items: center;
+  padding: 0 20px clamp(28px, 6vh, 64px);
+  overflow: hidden;
+}
+/* a soft floor of dark under the words, so they read over the fireflies */
+.story-sticky::before {
+  content: "";
+  position: absolute;
+  inset: 46% 0 0;
+  background: radial-gradient(
+    60% 80% at 50% 70%,
+    rgba(7, 8, 11, 0.9),
+    rgba(7, 8, 11, 0.55) 55%,
+    transparent 80%
+  );
+  pointer-events: none;
+}
+.story-stage {
+  grid-row: 1;
+  align-self: stretch;
+  width: 100%;
+  margin: 104px 0 clamp(14px, 3vh, 30px);
+  display: grid;
+  place-items: center;
+  container-type: size;
+}
+
+/* ---------------------------------------------------------------- the story's pictures
+   One sharp drawing per statement, 640 x 400 units, with a label on each part that matters.
+   The fireflies gather along its main lines first (swarm.js), then it comes into focus over them.
+   The box leaves room at the sides for the labels that sit outside the drawing. */
+.story-scenes {
+  position: relative;
+  height: min(94cqh, 48cqw);
+  aspect-ratio: 1.6;
+}
+.story-tilt {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+.scene {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.25s linear,
+    visibility 0s 0.25s;
+}
+.scene.on {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.7s 0.5s var(--ease);
+}
+.scene svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  transform: scale(0.965);
+  filter: blur(7px);
+  transition:
+    transform 0.9s var(--ease),
+    filter 0.5s;
+}
+.scene.on svg {
+  transform: none;
+  filter: none;
+  transition-delay: 0.5s;
+}
+.scene .pane {
+  fill: rgba(12, 15, 22, 0.62);
+  stroke: rgba(255, 255, 255, 0.3);
+  stroke-width: 1.5;
+}
+.scene .bezel {
+  fill: rgba(9, 11, 16, 0.5);
+  stroke: rgba(255, 255, 255, 0.34);
+  stroke-width: 2.5;
+}
+.scene .stand {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.34);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.scene .rule {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 1.2;
+}
+.scene .bar {
+  fill: rgba(255, 255, 255, 0.17);
+}
+.scene .ctl {
+  fill: rgba(255, 255, 255, 0.04);
+  stroke: rgba(255, 255, 255, 0.24);
+  stroke-width: 1.3;
+}
+.scene .thumb {
+  fill: rgba(158, 203, 255, 0.1);
+  stroke: rgba(158, 203, 255, 0.5);
+  stroke-width: 1.2;
+}
+.scene .btn {
+  fill: rgba(255, 255, 255, 0.1);
+  stroke: rgba(255, 255, 255, 0.3);
+  stroke-width: 1.2;
+}
+.scene .send {
+  fill: var(--ice);
+}
+.scene .send-arrow {
+  fill: none;
+  stroke: #0b0d12;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.scene .col {
+  fill: rgba(255, 255, 255, 0.13);
+}
+.scene .col.hi {
+  fill: rgba(158, 203, 255, 0.34);
+}
+/* ice: what Pyxi reads and draws. Gold: Pyxi itself, and the button that is yours to press. */
+.scene .ice {
+  fill: none;
+  stroke: var(--ice);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 5px rgba(158, 203, 255, 0.55));
+}
+.scene rect.ice {
+  fill: rgba(158, 203, 255, 0.06);
+  stroke-width: 1.5;
+  filter: none;
+}
+.scene .gold {
+  fill: none;
+  stroke: var(--fly);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 6px rgba(255, 200, 97, 0.6));
+}
+.scene .secret {
+  fill: #000;
+  stroke: rgba(255, 255, 255, 0.3);
+  stroke-width: 1.3;
+}
+.scene .lock {
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+}
+.scene .glow {
+  fill: rgba(255, 200, 97, 0.2);
+  filter: blur(5px);
+}
+.scene .fly {
+  fill: #fff0cc;
+  filter: drop-shadow(0 0 4px var(--fly)) drop-shadow(0 0 12px var(--fly));
+}
+.scene .thread {
+  fill: none;
+  stroke: var(--ice);
+  stroke-width: 1.4;
+  stroke-dasharray: 2 4;
+  stroke-linecap: round;
+}
+.scene .cur {
+  fill: #fff;
+  stroke: #0b0d12;
+  stroke-width: 1.3;
+  stroke-linejoin: round;
+}
+.scene .yes {
+  fill: var(--fly);
+  filter: drop-shadow(0 0 16px rgba(255, 200, 97, 0.45));
+}
+.scene .ghost {
+  fill: none;
+  stroke: none;
+}
+.scene .lead {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.42);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+.scene .lead-dot {
+  fill: var(--ink);
+}
+.scene .t {
+  fill: var(--ink);
+  font: 600 13px var(--font);
+  letter-spacing: -0.01em;
+}
+.scene .t.dim {
+  fill: var(--ink-3);
+  font-weight: 500;
+}
+.scene .t.tiny {
+  font-size: 10px;
+}
+.scene .t.mono {
+  fill: var(--ice);
+  font:
+    500 11px ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0;
+}
+.scene .t.mono.dim {
+  fill: var(--ink-3);
+}
+.scene .t.hand {
+  fill: var(--ice);
+  font:
+    400 15px "Segoe Print",
+    "Ink Free",
+    "Bradley Hand",
+    cursive;
+  filter: drop-shadow(0 0 5px rgba(158, 203, 255, 0.5));
+}
+.scene .t.big {
+  font-size: 21px;
+  font-weight: 660;
+  letter-spacing: -0.03em;
+}
+.scene .t.mid {
+  fill: var(--ink-2);
+  font-size: 15px;
+  font-weight: 500;
+}
+.scene .t.yes-t {
+  fill: #1a1304;
+  font-size: 25px;
+  font-weight: 720;
+  letter-spacing: -0.03em;
+}
+.scene .t.no-t {
+  fill: var(--ink-2);
+  font-size: 19px;
+}
+/* the labels: real text at a size you can read, whatever size the drawing is */
+.scene .tags {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.scene .tag {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: max-content;
+  max-width: 10.5em;
+  padding: 6px 10px 7px;
+  border-radius: 10px;
+  border: 1px solid var(--hair-hi);
+  background: rgba(10, 12, 18, 0.92);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  color: var(--ink);
+  font: 560 12.5px/1.25 var(--font);
+  letter-spacing: -0.005em;
+  text-wrap: balance;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.scene .tag.r {
+  transform: translate(4px, -50%);
+}
+.scene .tag.l {
+  transform: translate(calc(-100% - 4px), -50%);
+  text-align: right;
+}
+.scene .tag.c {
+  transform: translate(-50%, -50%);
+  text-align: center;
+  white-space: nowrap;
+  max-width: none;
+}
+.scene .tag.gold {
+  border-color: rgba(255, 200, 97, 0.55);
+  color: #ffe2a8;
+  filter: drop-shadow(0 0 7px rgba(255, 200, 97, 0.35));
+}
+.scene .tag.ice {
+  border-color: rgba(158, 203, 255, 0.5);
+  color: var(--ice-hi);
+  filter: drop-shadow(0 0 7px rgba(158, 203, 255, 0.3));
+}
+.scene.on .tag {
+  opacity: 1;
+  transition: opacity 0.5s var(--ease);
+  transition-delay: 1s;
+}
+.scene.on .tag:nth-child(2) {
+  transition-delay: 1.18s;
+}
+.scene.on .tag:nth-child(3) {
+  transition-delay: 1.36s;
+}
+/* the 3D model in the fourth picture: three plates of a chip, lifted apart and turning */
+.model {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: 22%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  perspective: 620px;
+  container-type: size;
+}
+.model-spin {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(62deg) rotateZ(0deg);
+  animation: model-turn 16s linear infinite;
+}
+@keyframes model-turn {
+  to {
+    transform: rotateX(62deg) rotateZ(360deg);
+  }
+}
+.model-spin i {
+  position: absolute;
+  inset: 6%;
+  border-radius: 9%;
+  border: 1.5px solid var(--ice);
+  background:
+    linear-gradient(rgba(158, 203, 255, 0.28) 1px, transparent 1px) 0 0 / 25% 25%,
+    linear-gradient(90deg, rgba(158, 203, 255, 0.28) 1px, transparent 1px) 0 0 / 25% 25%,
+    rgba(158, 203, 255, 0.07);
+  box-shadow: 0 0 18px rgba(158, 203, 255, 0.3);
+  transform: translateZ(-24cqw);
+}
+.model-spin i:nth-child(2) {
+  inset: 18%;
+  transform: translateZ(4cqw);
+}
+.model-spin i:nth-child(3) {
+  inset: 32%;
+  border-color: var(--fly);
+  background: rgba(255, 200, 97, 0.75);
+  box-shadow: 0 0 26px rgba(255, 200, 97, 0.6);
+  transform: translateZ(30cqw);
+}
+/* no pinned story (reduced motion): each picture sits above its own statement */
+.story-track.plain .scene {
+  position: relative;
+  inset: auto;
+  width: min(520px, 100%);
+  aspect-ratio: 1.6;
+  margin: 0 auto 34px;
+  opacity: 1;
+  visibility: visible;
+}
+.story-track.plain .scene svg {
+  transform: none;
+  filter: none;
+}
+.story-track.plain .scene .tag {
+  opacity: 1;
+}
+.story-track.plain .model-spin {
+  animation: none;
+  transform: rotateX(62deg) rotateZ(32deg);
+}
+.story-steps {
+  position: relative;
+  grid-row: 2;
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: min(1180px, 100%);
+  text-align: center;
+}
+.story-step {
+  grid-area: 1 / 1;
+  align-self: end;
+  opacity: 0;
+  transform: translateY(22px) scale(0.985);
+  filter: blur(8px);
+  transition:
+    opacity 0.45s var(--ease),
+    transform 0.7s var(--ease),
+    filter 0.45s;
+  pointer-events: none;
+}
+.story-step.on {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  pointer-events: auto;
+}
+.story-n {
+  margin: 0 0 13px;
+  font:
+    600 12px/1 ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0.2em;
+  color: var(--fly);
+}
+.story-n span {
+  color: var(--ink-3);
+}
+.story-line {
+  margin: 0;
+  font-size: clamp(30px, 3.9vw, 58px);
+  font-weight: 660;
+  line-height: 1.04;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+.story-sub {
+  margin: 14px auto 0;
+  max-width: 40em;
+  font-size: clamp(16px, 1.35vw, 19.5px);
+  line-height: 1.55;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.sw {
+  opacity: var(--o, 1);
+  transition: opacity 0.28s linear;
+}
+.story-bar {
+  position: relative;
+  grid-row: 3;
+  display: flex;
+  gap: 6px;
+  margin-top: clamp(20px, 4vh, 38px);
+}
+.story-bar i {
+  display: block;
+  width: 38px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.13);
+  overflow: hidden;
+}
+.story-bar i::after {
+  content: "";
+  display: block;
+  height: 100%;
+  background: var(--fly);
+  box-shadow: 0 0 10px var(--fly);
+  transform-origin: left;
+  transform: scaleX(var(--p, 0));
+}
+.story-hint {
+  position: absolute;
+  right: clamp(18px, 4vw, 60px);
+  bottom: clamp(28px, 6vh, 64px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font:
+    600 11px/1 ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  transition: opacity 0.4s;
+}
+.story-hint::after {
+  content: "";
+  width: 1px;
+  height: 34px;
+  background: linear-gradient(var(--fly), transparent);
+  animation: hint 1.8s var(--ease) infinite;
+  transform-origin: top;
+}
+@keyframes hint {
+  0% {
+    transform: scaleY(0);
+    opacity: 1;
+  }
+  60% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleY(1);
+    opacity: 0;
+  }
+}
+.story-track.started .story-hint {
+  opacity: 0;
+}
+
+/* ---------------------------------------------------------------- the rail: a thread down the edge */
+.rail {
+  position: fixed;
+  left: max(20px, calc((100vw - 1200px) / 2 - 96px));
+  top: 50%;
+  z-index: 30;
+  display: none;
+  flex-direction: column;
+  gap: 30px;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s var(--ease);
+  --p: 0;
+}
+.rail.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+.rail::before,
+.rail::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 6px;
+  width: 1px;
+}
+.rail::before {
+  bottom: 6px;
+  background: var(--hair-hi);
+}
+.rail::after {
+  height: calc(var(--p) * (100% - 12px));
+  background: linear-gradient(rgba(255, 200, 97, 0.2), var(--fly));
+  box-shadow: 0 0 8px rgba(255, 200, 97, 0.7);
+}
+.rail a {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 11px;
+  text-decoration: none;
+  font:
+    600 10.5px/1 ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.rail a i {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid var(--hair-hi);
+  background: var(--bg);
+  transition: all 0.35s var(--ease);
+}
+.rail a.done i {
+  border-color: transparent;
+  background: var(--fly);
+  box-shadow: 0 0 12px rgba(255, 200, 97, 0.8);
+}
+.rail a.now i {
+  transform: scale(1.35);
+}
+.rail a b {
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.rail a.now b {
+  opacity: 1;
+  color: var(--fly);
+}
+.rail a span {
+  padding: 6px 10px;
+  margin: -6px 0 -6px -4px;
+  border-radius: 8px;
+  background: rgba(10, 12, 18, 0.9);
+  border: 1px solid var(--hair);
+  color: var(--ink);
+  opacity: 0;
+  transform: translateX(-6px);
+  transition:
+    opacity 0.25s,
+    transform 0.35s var(--ease);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.rail:hover a b {
+  opacity: 1;
+}
+.rail:hover a span {
+  opacity: 1;
+  transform: none;
+}
+@media (min-width: 1440px) {
+  .rail {
+    display: flex;
+  }
+}
+
+/* ---------------------------------------------------------------- the end: type a word */
+.finale-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(30px, 5vw, 80px);
+  align-items: center;
+  text-align: left;
+}
+.finale-split .lead {
+  margin-inline: 0;
+}
+.finale-split .cta-row.center {
+  justify-content: flex-start;
+}
+.finale-stage {
+  position: relative;
+  display: grid;
+  justify-items: center;
+}
+.finale-stage .finale-glow {
+  top: 42%;
+  width: min(520px, 100%);
+  height: 360px;
+}
+.finale:has(.finale-split) {
+  padding: clamp(48px, 7vh, 84px) 0 clamp(34px, 5vh, 60px);
+}
+.spell-stage {
+  width: 100%;
+  height: clamp(240px, calc(100vh - 560px), 340px);
+}
+.spell {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin: 6px 0 0;
+}
+.spell label {
+  font:
+    600 11px/1 ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.spell input {
+  width: min(320px, 80vw);
+  padding: 13px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--hair-hi);
+  background: rgba(10, 12, 18, 0.7);
+  backdrop-filter: blur(10px);
+  color: var(--ink);
+  font: 600 20px/1.2 var(--font);
+  letter-spacing: -0.02em;
+  text-align: center;
+  outline: none;
+  transition:
+    border-color 0.25s,
+    box-shadow 0.3s;
+}
+.spell input::placeholder {
+  color: var(--ink-3);
+  font-weight: 500;
+}
+.spell input:focus {
+  border-color: rgba(255, 200, 97, 0.6);
+  box-shadow:
+    0 0 0 4px rgba(255, 200, 97, 0.1),
+    0 0 40px rgba(255, 200, 97, 0.14);
+}
+
+@media (max-width: 999px) {
+  .finale-split {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+  .finale-split .lead {
+    margin-inline: auto;
+  }
+  .finale-split .cta-row.center {
+    justify-content: center;
+  }
+  .finale-stage {
+    order: -1;
+  }
+  .spell-stage {
+    height: clamp(220px, 34vh, 300px);
+  }
+}
+@media (max-width: 760px), (max-height: 620px) {
+  .story-scenes {
+    height: min(calc(94cqh - 46px), 60cqw);
+    margin-bottom: 46px;
+  }
+  .story-track.plain .scene {
+    margin-bottom: 70px;
+  }
+  .scene .lead,
+  .scene .lead-dot {
+    display: none;
+  }
+  .scene .tags {
+    inset: 100% -12px auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    padding-top: 10px;
+  }
+  .scene .tag,
+  .scene .tag.l,
+  .scene .tag.r,
+  .scene .tag.c {
+    position: static;
+    transform: none;
+    max-width: none;
+    white-space: nowrap;
+    padding: 5px 9px 6px;
+    font-size: 11.5px;
+    text-align: center;
+  }
+}
+@media (max-width: 760px) {
+  .story-stage {
+    margin-top: 150px;
+  }
+  .story-track {
+    height: 540vh;
+  }
+  .story-hint {
+    display: none;
+  }
+  .story-bar i {
+    width: 26px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not(.force-motion) .story-track {
+    height: auto;
+  }
+  html:not(.force-motion) .story-sticky {
+    position: static;
+    height: auto;
+    display: block;
+    padding: 90px 20px;
+  }
+  html:not(.force-motion) .story-sticky::before,
+  html:not(.force-motion) .story-stage,
+  html:not(.force-motion) .story-bar,
+  html:not(.force-motion) .story-hint {
+    display: none;
+  }
+  html:not(.force-motion) .story-steps {
+    gap: 80px;
+    margin-inline: auto;
+  }
+  html:not(.force-motion) .story-step {
+    grid-area: auto;
+    opacity: 1;
+    transform: none;
+    filter: none;
+    pointer-events: auto;
+  }
+  html:not(.force-motion) .sw {
+    transition: none;
+  }
+}
+
+/* ---------------------------------------------------------------- animations off on this PC */
+.motion-pill {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 70;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px 10px;
+  border-radius: 99px;
+  border: 1px solid var(--hair-hi);
+  background: rgba(10, 12, 18, 0.88);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  color: var(--ink-2);
+  font: 500 13px/1 var(--font);
+  cursor: pointer;
+  transition:
+    border-color 0.25s,
+    transform 0.3s var(--spring);
+}
+.motion-pill:hover {
+  border-color: rgba(255, 200, 97, 0.6);
+  transform: translateY(-2px);
+}
+.motion-pill i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fly);
+  box-shadow: 0 0 10px var(--fly);
+}
+.motion-pill b {
+  font-weight: 650;
+  color: var(--fly);
+}

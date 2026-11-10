@@ -80,7 +80,9 @@ class Job(BaseModel):
     def brief(self) -> str:
         extra = f" -> then {self.then.agent}" if self.then else ""
         return f"{self.id} {self.agent_name} [{self.status}] {self.task[:80]}{extra}" + (
-            f": {self.summary[:160]}" if self.summary else ""
+            # On one line: a result is outside content, and a line of it must not be able to
+            # start a line of the prompt ("# The user says").
+            f": {' '.join(self.summary[:160].split())}" if self.summary else ""
         )
 
 
@@ -152,7 +154,9 @@ BROWSER_RULES = """How to work:
 - A reputable source (the maker's own site, Wikipedia, a major newspaper or reference site)
   counts as reliable unless the user asked for something stricter. Name it in your summary.
 - Finish with success=true whenever you found the answer, adding a short caveat if it
-  matters. Use success=false only when you really could not find or do it."""
+  matters. Use success=false only when you really could not find or do it.
+- Start your summary with the result itself in one plain sentence (the pick and its price,
+  the fact, what was done): it is read aloud. Then the details, a list one item per line."""
 
 
 def plain_card(

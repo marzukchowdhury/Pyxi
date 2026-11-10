@@ -161,6 +161,18 @@ def ship_google_client() -> None:
         print("google: no desktop/build-secrets/google_client.json; testers would need their own")
 
 
+def ship_browser_extension() -> None:
+    """As on Windows: both builds of the extension (resources/browser-extension, desktop/
+    package.json extraResources). A Mac loads it by hand, from the steps in Settings."""
+    sys.path.insert(0, str(ROOT / "extension"))
+    try:
+        from build import build
+    finally:
+        sys.path.remove(str(ROOT / "extension"))
+    for target in ("chrome", "firefox"):
+        build(target, DESKTOP / "build" / "browser-extension" / target)
+
+
 def builder_flags(env: dict[str, str] | None = None) -> list[str]:
     """electron-builder overrides from the signing environment (see the module docstring)."""
     env = dict(os.environ) if env is None else env
@@ -199,6 +211,7 @@ def main() -> None:
             trim()
             check_bundle(a)
         ship_google_client()
+        ship_browser_extension()
         if "--python-only" in args:
             continue
         build_app(a)

@@ -412,7 +412,7 @@ async def test_the_tool_starts_in_the_background_and_reads_the_address_bar(setti
     brain, _, spawned = fake_brain(settings)
     monkeypatch.setattr(pricecheck, "browser_url", lambda hwnd=None: AMAZON)
     note = await pricecheck.handle(brain, "check_prices", {"name": "Sony WH-1000XM5"})
-    assert note.startswith("Started") and "one short line" in note
+    assert note.startswith("Started") and "a few words" in note
     assert len(spawned) == 1
     spawned[0].close()
     assert "say which product" in await pricecheck.handle(brain, "check_prices", {})

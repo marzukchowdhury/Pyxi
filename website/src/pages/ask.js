@@ -10,7 +10,9 @@ import "./ask.css";
 if (document.body.classList.contains("page-ask")) start();
 
 function start() {
-  const forceMotion = new URLSearchParams(location.search).has("motion");
+  const forceMotion =
+    new URLSearchParams(location.search).has("motion") ||
+    document.documentElement.classList.contains("force-motion");
   const reduced =
     !forceMotion && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const canvas = document.getElementById("galaxy");

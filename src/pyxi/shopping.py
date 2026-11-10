@@ -427,19 +427,20 @@ def _offer_from_ld(node: dict, url: str) -> Offer | None:
     )
 
 
+# Never [^>]: on a page with many "<meta" and no ">" that is quadratic (64 KB took 41 seconds).
+_META_TAG = re.compile(r"<meta[^<>]+>", re.I)
+_META_CONTENT = re.compile(r"""content=["']([^"']*)["']""", re.I)
+
+
 def _meta(page: str, *names: str) -> str:
+    """The content of the first <meta> tag carrying one of these names (property, name or
+    itemprop), names tried in order. Each tag is found once, then looked at by itself."""
+    tags = _META_TAG.findall(page)
     for n in names:
-        m = re.search(
-            rf'<meta[^>]+(?:property|name|itemprop)=["\']{re.escape(n)}["\'][^>]*content=["\']([^"\']*)["\']',
-            page,
-            re.I,
-        ) or re.search(
-            rf'<meta[^>]+content=["\']([^"\']*)["\'][^>]*(?:property|name|itemprop)=["\']{re.escape(n)}["\']',
-            page,
-            re.I,
-        )
-        if m and m.group(1).strip():
-            return htmlmod.unescape(m.group(1)).strip()
+        named = re.compile(rf"""(?:property|name|itemprop)=["']{re.escape(n)}["']""", re.I)
+        for tag in tags:
+            if named.search(tag) and (m := _META_CONTENT.search(tag)) and m.group(1).strip():
+                return htmlmod.unescape(m.group(1)).strip()
     return ""
 
 

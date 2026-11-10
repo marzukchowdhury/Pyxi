@@ -103,3 +103,19 @@ def test_a_drag_pulls_first_and_waits_over_the_drop_spot(h, monkeypatch):
     up = flags.index(hands.MOUSEEVENTF_LEFTUP)
     moves = [f for f in flags[down + 1 : up] if f & hands.MOUSEEVENTF_MOVE]
     assert down < up and len(moves) >= 6  # a pull of three, then three over the drop spot
+
+
+def test_looking_up_a_window_leaves_the_shared_user32_alone():
+    """hands.window_at set argument types on ctypes.windll.user32, which every module in the
+    process shares. uiautomation calls the same GetAncestor with a c_int, so after the first
+    click its call threw and Pyxi could no longer read the screen's text."""
+    import ctypes
+
+    import uiautomation as auto
+
+    shared = ctypes.windll.user32
+    before = shared.GetAncestor.argtypes
+    hands.window_at(10, 10)
+    assert shared.GetAncestor.argtypes == before
+    desktop = shared.GetDesktopWindow()
+    auto.GetAncestor(desktop, 2)  # threw "argument 2: TypeError: 'c_long' object..."

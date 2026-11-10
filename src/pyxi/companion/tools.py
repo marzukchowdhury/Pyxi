@@ -432,8 +432,11 @@ COMPANION_TOOLS: list[ToolSpec] = [
     ),
     _tool(
         "delegate",
-        "Hand a task to a teammate who works in the background. Browser agents (like Scout) drive a real browser; "
-        "writers (like Quill) draft text; explainers (like Sketch) build 3D scenes. Chain a handoff with then_agent/"
+        "Hand a task to a teammate who works in the background. Browser agents (like Scout) drive a real browser, "
+        "for work that needs a site worked step by step (a form, a sign-in, a cart, a booking, many pages compared "
+        "in depth); that takes a minute or more, so never for 'find me / what's a good / the cheapest / the best X', "
+        "which web_search answers in seconds. "
+        "Writers (like Quill) draft text; explainers (like Sketch) build 3D scenes. Chain a handoff with then_agent/"
         "then_task, e.g. Scout researches then Quill drafts. Give complete, specific instructions. For files use "
         "convert_files (Pixel) and edit_document (Ledger) instead: they're faster and exact.",
         {
@@ -469,11 +472,16 @@ COMPANION_TOOLS: list[ToolSpec] = [
     ),
     _tool(
         "web_search",
-        "Search the web (about a second). Use it for anything that changes or that you're not sure of: "
+        "Search the web (the answer is a few seconds away). Use it for anything that changes or that you're not sure of: "
         "news, prices, scores, results, release dates, who runs what, whether a claim or quote is "
-        "real, facts about a specific person, product or place. Searches the web and the news together, and "
-        "news comes with its outlet and age. In the reply where you search, say at most a few words ('Checking "
-        "the news.'), never the answer; answer once the results are back, naming the sources. One search is "
+        "real, facts about a specific person, product or place. It is also how you answer 'find me / what's a "
+        "good / the cheapest / the best X' (a product, an app, a service): search, then say your pick with its "
+        "price and source and put it on a card with show_answer, in the same turn, instead of sending a teammate "
+        "to click through a shop. Searches the web and the news together, and "
+        "news comes with its outlet and age. In the reply where you search, say one short starting line, never "
+        "the answer: for a quick fact (the news, a score, a date, whether a claim is real) a few words "
+        "('Checking the news.'); for a pick or a comparison ('find me', 'the best', 'the cheapest'), the "
+        "criterion you're using or what you're comparing. Answer once the results are back, naming the sources. One search is "
         "usually enough; two at most. Never say you're searching unless you call this tool.",
         {
             "query": {"type": "string", "description": "What you'd type into a search box."},
@@ -530,7 +538,7 @@ COMPANION_TOOLS += [
         "errand",
         "Do something in the background with the user's connected accounts: set up a meeting or "
         "invite, write or reply to an email, create a doc, post to Discord or LinkedIn. You say one short "
-        "line first ('On it, I'll let you know.') and the user gets a notification in the notch when it's "
+        "line first that names the job ('Writing to Sam about Friday.') and they're told when it's "
         "done. Write the task completely and exactly: every name, email address, date and time as the "
         "user said them. If something essential is missing (like when the meeting is), ask the user "
         "first instead.",
@@ -578,6 +586,27 @@ COMPANION_TOOLS += [
             "value": {"type": "string", "description": "The URL, app name, or text."},
         },
         ["action", "value"],
+    ),
+    _tool(
+        "paste_table",
+        "Paste a whole table into whatever is open in front of them, at their cursor or selected cell, in "
+        "one step (under a second, no mouse): a grid in any spreadsheet, a real table in any document, in "
+        "any app, any browser tab and whatever account they're signed in to (Excel or Word on the web, "
+        "Google Sheets or Docs, Excel, Word, Notion, Airtable, an email). Use it to put data, a sample "
+        "table, a list of rows or an empty table into the file they're looking at whenever Ledger can't "
+        "reach that file: it's Excel or Word in a browser tab, another app or site, or edit_document said "
+        "it can't open it. It only fills cells: a cell that starts with = is a formula in a spreadsheet, "
+        "but a pivot, a chart or formatting needs edit_document. It lands where their cursor is, so if "
+        "nothing is selected yet say 'click the cell where it should start' first. Say one short line.",
+        {
+            "rows": {
+                "type": "array",
+                "items": {"type": "array", "items": {"type": ["string", "number", "boolean", "null"]}},
+                "description": "The table, row by row, the header row first: [[\"Region\", \"Sales\"], "
+                "[\"West\", 1200]]. Empty strings make an empty table of that size.",
+            },
+        },
+        ["rows"],
     ),
     _tool(
         "book",
@@ -987,12 +1016,18 @@ COMPANION_TOOLS += [
     _tool(
         "edit_document",
         "Ledger edits spreadsheets, documents and decks in the background, straight in the file, with no "
-        "Office license and no app window: Excel (formulas, a totals row, a pivot-style summary, "
-        "formatting, a table or chart), Word (headings, bullets, paragraphs, tables, replace text), "
-        "PowerPoint (slides, titles, bullets, notes), and Google Sheets and Docs (totals, a real pivot "
-        "table, headings, bullets) through Google. A local file is saved as a copy beside the original; "
-        "Google files are edited in place. For fixing the grammar of a document, delegate to Quill "
-        "instead. Say one short line that names the job; they get a notification.",
+        "Office license and no app window. It does what a person would do by hand in Excel, Word and "
+        "PowerPoint files and in Google Sheets, Docs and Slides: cells, formulas, totals, pivots, "
+        "charts (add, move, resize, retitle, delete), sorting, filters, freezing rows, conditional "
+        "colours, dropdowns, column widths, merging, tabs; headings, paragraphs, bullets, fonts and "
+        "colours, spacing, tables (add one, fill or change its cells, add or delete rows and columns, "
+        "shade it), pictures, page margins and orientation, headers and footers; slides, layouts, "
+        "text boxes, shapes, pictures, tables and charts on a slide, moving and resizing things, "
+        "backgrounds, speaker notes. Changing something already there (the table in this doc, the "
+        "chart on this sheet) is this tool too: say which one in the task. A local file is saved as "
+        "a copy beside the original; Google files are edited in place. For fixing the grammar of a "
+        "document, delegate to Quill instead. Say one short line that names the job; they get a "
+        "notification.",
         {
             "task": {
                 "type": "string",
@@ -1007,9 +1042,10 @@ COMPANION_TOOLS += [
             "google": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Google Sheets or Docs: the link (from the address bar), words "
-                "from the file's name ('sales sheet'), or 'new sheet: <title>' / 'new doc: <title>' "
-                "to make a new one.",
+                "description": "Google Sheets, Docs or Slides: the link (from the address bar), "
+                "words from the file's name ('sales sheet'), 'this sheet' / 'this doc' / 'this "
+                "deck' for the one open on screen, or 'new sheet: <title>' / 'new doc: <title>' / "
+                "'new slides: <title>' to make a new one.",
             },
         },
         ["task"],
@@ -1067,9 +1103,20 @@ from pyxi.companion.pricecheck import TOOL as CHECK_PRICES  # noqa: E402
 
 COMPANION_TOOLS.append(CHECK_PRICES)
 
+# The answer to a "find me / what's a good / cheapest X", on a card (companion/answers.py).
+from pyxi.companion.answers import TOOL as SHOW_ANSWER  # noqa: E402
+
+COMPANION_TOOLS.append(SHOW_ANSWER)
+
 # Specialist teammates: Atlas (travel), Penny (money), Scribe (meetings), Sage (study), Patch (code), Ditto (watch me once), Trace (memory) (companion/specialists.py).
 from pyxi.companion.specialists import INFO as SPECIALIST_INFO  # noqa: E402
 from pyxi.companion.specialists import SPECS as SPECIALIST_TOOLS  # noqa: E402
 
 COMPANION_TOOLS += SPECIALIST_TOOLS
 INFO_TOOLS |= SPECIALIST_INFO
+
+# Pyxi in your browser: read_tab and use_tab (companion/tabwork.py). They are not in
+# COMPANION_TOOLS: the brain adds them to a turn only while the extension is connected.
+from pyxi.companion.tabwork import INFO as TAB_INFO  # noqa: E402
+
+INFO_TOOLS |= TAB_INFO

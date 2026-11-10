@@ -37,6 +37,6 @@ def test_checklist_flag_only_prints(monkeypatch, capsys):
 def test_the_key_scan_and_audit_run_before_publishing():
     src = (ROOT / "scripts" / "release.py").read_text(encoding="utf-8")
     body = src[src.index("def main()") :]
-    steps = ("automated_checks()", "check_clean_build()", "security_check.py", "manual_checklist()", "publish(v, notes)")
+    steps = ("automated_checks()", "check_clean_build()", "security_check.py", "manual_checklist()", "publish(v, notes, firefox)")
     order = [body.rindex(s) for s in steps]  # the last mention: the release run itself
     assert order == sorted(order)

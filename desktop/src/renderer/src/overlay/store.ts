@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { AudioQueue, RemoteVoice, type Voice } from "../shared/audio";
 import { bridge, currentDisplay, onThisDisplay, toLocal } from "../shared/bridge";
-import type { Annotation, BrainEvent, BrainState, Job, NoteCard, ObjectScene, Pin, SceneSpec, Sketchboard, TimelineMoment, Walkthrough } from "../shared/protocol";
+import type { Annotation, AnswerCard, BrainEvent, BrainState, Job, NoteCard, ObjectScene, Pin, SceneSpec, Sketchboard, TimelineMoment, Walkthrough } from "../shared/protocol";
 import { startChime } from "../shared/chime";
 import { brain } from "../shared/socket";
 
@@ -42,6 +42,13 @@ if (!isPrimary) {
     addAnnotations(e.annotations);
     reveal(e.notes);
   });
+}
+
+// Answer cards they closed (or that faded). The picture for a card arrives seconds after the
+// card, as the same card sent again: it must not bring back one that was closed.
+const closedAnswers = new Set<string>();
+function answerClosed(card: AnswerCard | null): void {
+  if (card) closedAnswers.add(card.id);
 }
 
 export interface LiveAnnotation extends Annotation {
@@ -109,6 +116,8 @@ interface OverlayState {
   captions: boolean;
   /** The note card on screen; `revealed` holds the point numbers written so far. */
   notes: { card: NoteCard; revealed: number[]; markers: boolean; at: number } | null;
+  /** The answer card (a pick, or a teammate's result). Not tied to a window: it stays when the page changes. */
+  answerCard: AnswerCard | null;
   guide: { step: number; total: number | null; goal: string; label: string; action: string } | null;
   /** What Pyxi's hands are doing right now ("Clicking Save"), while she has the mouse. */
   driving: string | null;
@@ -118,6 +127,7 @@ interface OverlayState {
   toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null }[];
   dismissToast(id: string): void;
   closeNotes(): void;
+  closeAnswer(): void;
   setStep(step: number): void;
   setPlaying(p: boolean): void;
   closeScene(): void;
@@ -159,12 +169,17 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   seeing: "",
   captions: true,
   notes: null,
+  answerCard: null,
   guide: null,
   driving: null,
   cheer: null,
   toasts: [],
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.job_id !== id) }),
   closeNotes: () => set({ notes: null }),
+  closeAnswer: () => {
+    answerClosed(get().answerCard);
+    set({ answerCard: null });
+  },
   setStep: (step) => {
     const s = get().scene;
     if (!s) return;
@@ -207,7 +222,8 @@ export const useOverlay = create<OverlayState>((set, get) => ({
     voice.stop();
     brain.send({ type: "interrupt" });
     if (get().guide) brain.send({ type: "guide_cancel" });
-    set({ annotations: [], scene: null, palace: null, object: null, sketch: null, notes: null, guide: null, walkthrough: null, caption: null, flyTo: null, pins: [] });
+    answerClosed(get().answerCard);
+    set({ annotations: [], scene: null, palace: null, object: null, sketch: null, notes: null, answerCard: null, guide: null, walkthrough: null, caption: null, flyTo: null, pins: [] });
   },
 }));
 
@@ -487,6 +503,10 @@ brain.on((e: BrainEvent) => {
       if (mine) useOverlay.setState({ notes: { card: e.card, revealed: early, markers: early.length > 0, at: performance.now() } });
       break;
     }
+    case "answer":
+      // On the main screen, and it survives "clear": opening the shop is what its button is for.
+      if (isPrimary && !closedAnswers.has(e.card.id)) useOverlay.setState({ answerCard: e.card });
+      break;
     case "guide":
       useOverlay.setState({
         guide: e.active ? { step: e.step ?? 1, total: e.total ?? null, goal: e.goal ?? "", label: e.label ?? "", action: e.action ?? "click" } : null,

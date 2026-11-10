@@ -4,6 +4,9 @@
   "downloadUrl": "https://github.com/marzukchowdhury/Pyxi/releases/latest/download/Pyxi-Setup.exe",
   "downloadFile": "Pyxi-Setup.exe",
   "downloadSize": "305 MB",
+  "macDownloadUrl": "",
+  "macIntelDownloadUrl": "",
+  "macDownloadSize": "",
   "macWaitlistUrl": "",
   "contactEmail": ""
 }

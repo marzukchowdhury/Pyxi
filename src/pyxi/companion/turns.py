@@ -51,6 +51,13 @@ class TurnStore:
                 Path(image).unlink(missing_ok=True)
         return len(old)
 
+    def carried(self, turn_id: str) -> None:
+        """Mark a turn whose words were carried into the turn after it, which is the one that
+        answers them. The row stays (with what it spent and saw), so a look at the history
+        still shows that they were talked over and when."""
+        with self._conn() as c:
+            c.execute("UPDATE turns SET error = ? WHERE id = ?", ("carried into the next turn", turn_id))
+
     def save_image(self, turn_id: str, jpeg: bytes) -> str:
         path = self.turns_dir / f"{turn_id}.jpg"
         path.write_bytes(jpeg)

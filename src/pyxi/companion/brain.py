@@ -43,7 +43,8 @@ from pyxi import booking, hands, media, safety, tidy, weather, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
 from pyxi import alarms
-from pyxi.companion import filework, instant, paperwork, pricecheck, prompts, specialists
+from pyxi.companion import answers, filework, instant, paperwork, pricecheck, prompts, specialists
+from pyxi.companion import tabwork  # Pyxi in your browser (the extension)
 from pyxi.companion.actions import app_target, in_account, open_app, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
@@ -65,6 +66,7 @@ from pyxi.companion.notes import (
     card_size,
     picture_rect,
     place_stage,
+    result_card,
     target_rect,
 )
 from pyxi.companion.operator import Operator, Outcome
@@ -205,6 +207,7 @@ class Brain:
         self._user_text = ""  # the user's own words this turn (errands check addresses against it)
         self._visual_turn = False  # a 3D model or scene was shown this turn
         self._talking_until = 0.0  # monotonic time the queued speech finishes playing
+        self._dictating_until = 0.0  # they are holding the dictation keys (lapses by itself)
         self._round_say = ""  # this round's spoken reply
         self._say_in_board = False
         self._visual_retry = False
@@ -215,7 +218,15 @@ class Brain:
         self._turn_id = ""
         self._synthetic = False
         self._pending_say = ""
+        self._promise_nudged = False
+        self._refused = False
+        self._unsaid_pick: Any = None
         self._cut_short = False
+        # What a turn they talked over left behind (its words, and what it had done), for the
+        # turn their new words start: nothing they said is dropped.
+        self._dropped: dict[str, Any] | None = None
+        self._words_gen = -1  # the speech gen at which they last pressed talk
+        self._stopped_turn = ""  # the turn the stop button ended: its words are not carried on
         self._placed = Placed()  # what's on screen now (cards, stages), so new things keep clear
         self.overlay_in_capture = (
             False  # the desktop app says whether screen shares see the overlay
@@ -226,6 +237,7 @@ class Brain:
         self.connectors = Connectors(settings.data_dir, Path.home() / "Documents" / "Pyxi")
         self.routines = RoutineStore(settings.data_dir / "routines.json")
         self.mailwatch = MailWatchStore(settings.data_dir / "mailwatch.json")
+        tabwork.setup(self)  # Pyxi in your browser: self.browser, the extension's bridge
 
     # ================================================================== entry points
     async def set_state(self, state: State) -> None:
@@ -235,6 +247,7 @@ class Brain:
     def begin_listening(self) -> None:
         """Push-to-talk pressed: capture the screen *now*, while the user starts speaking."""
         self.interrupt()
+        self._words_gen = self._speech_gen  # more words are coming: a running turn is talked over
         self._prefetch = asyncio.create_task(self._capture())
         self._spawn(self.set_state("listening"))
         self.warm_voice(listening=True)
@@ -397,6 +410,12 @@ class Brain:
         await self._notify("", ok=True, title=f"{what}, {alarms.spoken_time(now)}", body=line)
         self._speak(line, record=False)
 
+    def dictating(self, on: bool) -> None:
+        """They are holding the dictation keys (or let go without saying anything): a background
+        line waits, as it does for push-to-talk, but nothing is interrupted and no turn starts.
+        It lapses by itself, so a lost "let go" can't keep Pyxi quiet for good."""
+        self._dictating_until = time.monotonic() + _DICTATION_S if on else 0.0
+
     async def dictate(self, audio: bytes) -> str:
         """Hold Ctrl + Windows and talk: the words are typed where the cursor is, in whatever app
         has focus. Speech-to-text only (on this PC), no model, no screen: it works while Pyxi is
@@ -404,6 +423,7 @@ class Brain:
         from pyxi import dictation
 
         await self.set_state("transcribing")
+        self._dictating_until = 0.0  # let go: "transcribing" holds the floor from here
         try:
             studio = self.studio
             heard, took, _ = await self.stt.transcribe(
@@ -642,8 +662,12 @@ class Brain:
             len(out.steps),
             cost,
         )
-        # One short line out loud; the whole story is in the tray and the notification.
-        await self.say_line(split_sentences(out.summary)[0][:140] if out.summary else "Done.")
+        # One short line out loud; the whole story is in the tray and the notification. It is
+        # what came of the job, so it is said even when it reads like the line that started it
+        # ("The brightness is at 40 percent now." after "Setting the brightness to 40 percent.").
+        await self.say_line(
+            split_sentences(out.summary)[0][:140] if out.summary else "Done.", result=True
+        )
 
     def _screens_note(self) -> str:
         """With two or three monitors, what's on each, so 'my left screen' means something and
@@ -925,18 +949,76 @@ class Brain:
             # one Pyxi was looking at. The paste goes to whatever has the focus, so that window
             # is brought to the front first (live, a packing list "in Notepad" went into the
             # calculator, which had the focus).
-            target = self._named_window(self._user_text or "", None) or (
-                self._ctx.window.hwnd if self._ctx and self._ctx.window.hwnd else None
-            )
-            if target and windows.available():
-                windows.focus(target)
-                await asyncio.sleep(0.2)
-                if windows.foreground() != target:
-                    await self.hub.emit("action", kind="copy", value=value)
-                    return "insert: Windows wouldn't bring that window to the front, so it was copied instead. Tell them to paste it (ctrl+v)."
+            if not await self._front_for_paste():
+                await self.hub.emit("action", kind="copy", value=value)
+                return "insert: Windows wouldn't bring that window to the front, so it was copied instead. Tell them to paste it (ctrl+v)."
             await self.hub.emit("action", kind="insert", value=value)
             return None
         return f"Unknown quick action {action}."
+
+    def _paste_target(self) -> int | None:
+        """The window a paste is meant for: the one the request names ("in Notepad"), else the
+        one Pyxi was looking at."""
+        return self._named_window(self._user_text or "", None) or (
+            self._ctx.window.hwnd if self._ctx and self._ctx.window.hwnd else None
+        )
+
+    async def _front_for_paste(self) -> bool:
+        """Bring that window to the front, since a paste goes to whatever has the focus.
+        False when Windows won't hand the focus over."""
+        target = self._paste_target()
+        if target and windows.available():
+            windows.focus(target)
+            await asyncio.sleep(0.2)
+            return windows.foreground() == target
+        return True
+
+    async def _paste_table(self, args: dict[str, Any]) -> str | None:
+        """A whole table into whatever is open in front of them, at the cursor or selected
+        cell, in one paste: any app, any browser tab, any account. (Seen in a competitor's demo:
+        a sample table landed in Excel on the web in under a second, where Pyxi's only route
+        was a Google connection that couldn't reach the file.)"""
+        from pyxi.companion.paste import (
+            PasteError,
+            clip_message,
+            looks_like_a_sheet,
+            plain_cells,
+            table_clip,
+        )
+
+        target = self._paste_target()
+        title = ""
+        if target and windows.available():
+            title = next((t for h, t, _ in windows.open_windows() if h == target), "")
+        if not title and self._ctx:
+            title = self._ctx.window.title or ""
+        rows, changed = args.get("rows"), ""
+        read = sorted({label for label, _ in getattr(self, "_turn_reads", [])})
+        if read:
+            # This turn read a page, mail or a file, so the cells may be its words, not theirs:
+            # nothing from there is pasted as a live formula.
+            rows, inert = plain_cells(rows)
+            if inert:
+                changed = (
+                    f"{inert} cell{'s' if inert != 1 else ''} that began like a formula (=, +, - "
+                    "or @) went in as plain text, with an apostrophe in front, because this "
+                    f"turn took in outside content ({', '.join(read)}) and a formula from there "
+                    "is never run. Tell them so in one short line."
+                )
+        try:
+            clip = table_clip(rows, bordered=not looks_like_a_sheet(title))
+            message = clip_message(clip)
+        except PasteError as exc:
+            return f"paste_table: {exc}"
+        if not await self._front_for_paste():
+            await self.hub.emit("action", kind="copy", value=clip["text"])
+            return (
+                "paste_table: Windows wouldn't bring that window to the front, so the table was "
+                "copied instead. Tell them to click where it should go and press ctrl+v."
+                + (f" {changed}" if changed else "")
+            )
+        await self.hub.emit("action", kind="insert_table", value=message)
+        return f"The table is pasted. {changed}" if changed else None
 
     async def _capture(self, follow_mouse: bool = True, hwnd: int | None = None) -> ScreenContext:
         """Take Pyxi's screenshot. If the overlay is visible to captures (so a Discord stream can
@@ -1170,6 +1252,7 @@ class Brain:
             tools = [t for t in tools if t.name not in THREE_D_TOOLS]
         if self._builder_on():
             tools = [BUILD_BRIEF if t.name == "build_3d_model" else t for t in tools]
+        tools += tabwork.tools(self)  # read_tab and use_tab, only while a browser is connected
         return tools
 
     def _builder_llm(self) -> LLMProvider:
@@ -1341,6 +1424,7 @@ class Brain:
             log.exception("errand failed")
             await self.jobs.settle(job, ok=False, summary=str(exc)[:200])
             await self._notify(job.id, ok=False, title="Couldn't finish that", body=str(exc)[:200])
+            self._spawn(self._say_when_free("I couldn't finish that. The notification says why."))
             return
         self.turns.add_spend("errand", result.cost_usd)
         await self.jobs.settle(
@@ -1360,6 +1444,7 @@ class Brain:
         await self._notify(
             job.id, ok=result.ok, title=result.title, body=result.summary, link=result.link
         )
+        self._announce(job, ok=result.ok, title=result.title, body=result.summary, own_card=True)
 
     # ------------------------------------------------------------------ money in their mail
     async def _scan(self, what: str, query: str, n: int) -> tuple[Any, list[dict[str, Any]]]:
@@ -1729,6 +1814,7 @@ class Brain:
     async def stop_everything(self) -> str:
         """The "Stop everything" hotkey and tray item: every teammate job, the hands, Scout's
         browser, open cards (answered "no") and anything queued to go out, all at once."""
+        in_tab = await tabwork.stop(self)  # before its job is cancelled: the tab is told too
         jobs = await self.jobs.stop_all()
         hands_on = self._operator is not None
         if hands_on:
@@ -1741,10 +1827,14 @@ class Brain:
                 queued += 1
         self._prefetch = None
         self.interrupt()
+        # Stopped, not talked over: the request that was running is not picked up again.
+        self._stopped_turn, self._dropped = (self._turn_id if self._lock.locked() else ""), None
         await self.set_state("idle")
         parts = [f"{jobs} teammate job{'s' if jobs != 1 else ''}"] if jobs else []
         if hands_on:
             parts.append("the mouse and keyboard")
+        if in_tab:
+            parts.append("the work in your browser tab")
         if queued:
             parts.append(f"{queued} waiting action{'s' if queued != 1 else ''}")
         message = "Stopped everything" + (
@@ -1760,12 +1850,99 @@ class Brain:
             self._operator.cancelled = True  # talking to Pyxi stops her hands too
         self._spawn(self.hub.emit("stop_audio"))
 
+    def _done_so_far(self) -> list[str]:
+        """What this turn's tool calls started or did, a few words each (not speech, not lookups)."""
+        lookups = INFO_TOOLS | {t.spec.name for t in self.connectors.tools() if t.info}
+        done = []
+        for c in self._calls:
+            if c["tool"] == "say" or c["tool"] in lookups or c.get("outcome"):
+                continue  # words, a lookup, or a tool that said no or broke: nothing was done
+            args = ", ".join(f"{k}: {str(v)[:80]}" for k, v in (c.get("arguments") or {}).items())
+            done.append(f"{c['tool']} ({args})" if args else str(c["tool"]))
+        return done[:6]
+
+    def _not_done(self) -> list[str]:
+        """What this turn's tools refused or failed at, in their own words (lookups aside: a
+        search that found nothing left nothing undone)."""
+        lookups = INFO_TOOLS | {t.spec.name for t in self.connectors.tools() if t.info}
+        return [
+            str(c.get("note") or c["tool"])
+            for c in self._calls
+            if c.get("outcome") and c["tool"] not in lookups
+        ][:4]
+
+    def _promise_nudge(self, round_no: int) -> str | None:
+        """The turn is about to end. If Pyxi said it would do something that no tool call this
+        turn carried out ("Heading to Display to lower the brightness.", and only Settings
+        opened), the note that sends the model back to do it or say plainly that it can't.
+        Once a turn at most, and never past the round limit, so it cannot loop."""
+        if self._promise_nudged or round_no >= self.settings.budget.max_tool_rounds:
+            return None
+        found = undone_promise(self._said, self._calls, self._user_text or "")
+        if found is None:
+            return None
+        self._promise_nudged = True
+        line, opened = found
+        return (
+            f'You told them: "{line}" Nothing in this turn has done that yet'
+            + (" (opening it is not doing it)" if opened else "")
+            + ". Do it now with the right tool (use_computer for clicks and settings inside an "
+            "app), or tell them plainly, in one short line, that you can't and why. Don't repeat "
+            "what you have already said."
+            # "Writing one now." and then the haiku itself: the words were the job.
+            + ("" if opened else " If what you said was itself the whole job, add nothing.")
+        )
+
+    def _pick_up(self, user_text: str, behind: str) -> tuple[str, list[str]]:
+        """They kept talking, or paused mid-sentence and the request arrived in two parts: the
+        turn that had started on the first part was cut off. If it had done nothing yet, its
+        words go in front of the new ones, so both are answered as one request (and its own row
+        in the turn log is marked as carried: this turn is the one that answers it). If it had already acted,
+        the words stay where they are and this turn is told what was done. Returns the words
+        to answer and any notes for the model."""
+        left, self._dropped = self._dropped, None
+        if left is None or instant.is_stop(user_text):  # "stop" is never "do that, and stop"
+            return user_text, []
+        if (
+            not (left["by_words"] or left["turn_id"] == behind)  # cut off by Escape, not words
+            or time.monotonic() - left["at"] > _CARRY_S
+        ):
+            if not left["done"]:  # asked and never answered: the conversation still says so
+                self.history = [*self.history[-11:], (left["text"], left.get("said") or "")]
+            return user_text, []
+        # A tool that said no or broke did nothing: it is passed on as that, never as done.
+        failed = (
+            [
+                "Before they spoke again, this did not go through (it is NOT done): "
+                + "; ".join(left["refused"])
+            ]
+            if left.get("refused")
+            else []
+        )
+        if left["done"]:
+            return user_text, [
+                f'Your last turn was cut off because they spoke again. They had asked: "{left["text"]}". '
+                f"Already started or done before the cut: {'; '.join(left['done'])}. Their new "
+                "words may carry on from that request: finish what is left of it too, and never "
+                "redo what is already done.",
+                *failed,
+            ]
+        log.info("turn %s was talked over: its words go with the next turn", left["turn_id"])
+        self.turns.carried(left["turn_id"])
+        if left.get("said"):  # it had begun to answer: the turn that carries on knows what was said
+            failed.append(
+                f'Before they went on, you had already said aloud: "{left["said"][-400:]}". Carry '
+                "on from there: don't say it again, reworded or not."
+            )
+        return f"{left['text']} {user_text}", failed
+
     async def turn(
         self, user_text: str, *, shown: str | None = None, synthetic: bool = False
     ) -> None:
         """``synthetic``: a routine or a guide step, not words the user actually said (so an
         address in it never counts as the user naming that person)."""
         self.warm_voice()  # the voice loads while the model thinks, if it was let go
+        behind = self._turn_id if self._lock.locked() else ""  # sent while that turn still ran
         async with self._lock:
             self._ctx, self._images, self._usage, self._said, self._calls = (
                 None,
@@ -1786,6 +1963,9 @@ class Brain:
             if not synthetic:
                 self._guide_fresh = True  # a new request: a guide in it counts from step 1
             self._pending_say = ""  # an answer held back during a lookup round
+            self._promise_nudged = False  # "you said you'd do it, so do it": once a turn at most
+            self._refused = False  # a tool that can refuse did, this turn
+            self._unsaid_pick = None  # an answer card shown this round, until its pick is said
             self._cut_short = False  # a round was dropped because they spoke again
             self._screens_text: str | None = None  # every screen and what's on it, once a turn
             self._shown_screen: str | None = None  # the screen look_again looked at, if it did
@@ -1805,10 +1985,13 @@ class Brain:
             started = time.monotonic()
             await self.hub.emit("user", text=shown or user_text, turn_id=turn_id)
             error = None
+            cut_off: list[str] = []  # what a turn they talked over had already done, if it had
             if not synthetic:
                 from pyxi import wakename
 
                 user_text = wakename.normalize(user_text)  # typed or heard: "Your pixxit..." -> "Pyxi, ..."
+                user_text, cut_off = self._pick_up(user_text, behind)
+                self._user_text = user_text
             try:
                 hit = None if synthetic else instant.match(user_text)
                 asked = None if synthetic or hit else weather.simple_question(user_text)
@@ -1866,11 +2049,27 @@ class Brain:
                             "user_text": user_text,
                             "turn_id": turn_id,
                             "round": 0,
-                            "notes": [],
+                            "notes": cut_off,
                             "needs_more": False,
                             "stop": None,
                         }
                     )
+            except asyncio.CancelledError:
+                # "Stop everything" cancels the turn itself. It still goes in the history, with
+                # what it did and cost: a stopped turn used to vanish, its spend with it.
+                self.history = [*self.history[-11:], (user_text, " ".join(self._said))]
+                self._record_turn(turn_id, user_text, started, "stopped")
+                self._spawn(
+                    self.hub.emit(
+                        "turn_done",
+                        turn_id=turn_id,
+                        cost_usd=round(self._usage.cost_usd, 5),
+                        tokens=self._usage.total_tokens,
+                        spent_today=round(self.turns.spent_today(), 4),
+                        daily_budget=self.settings.budget.daily_cost_usd,
+                    )
+                )
+                raise
             except Exception as exc:
                 log.exception("turn failed")
                 error = f"{type(exc).__name__}: {exc}"
@@ -1885,30 +2084,30 @@ class Brain:
                 # They spoke again (or pressed talk) before the answer came: the answer was
                 # dropped on purpose, so a silent or half-answered turn isn't a bug then.
                 error = "interrupted"
-            self.history = [*self.history[-11:], (user_text, said)]
-            ctx = self._ctx
-            image_path = None
-            if ctx and self._images:
-                image_path = self.turns.save_image(turn_id, self._images[0])
-            self.turns.record(
-                {
-                    "id": turn_id,
-                    "ts": time.time(),
-                    "user_text": user_text,
-                    "app": ctx.window.app if ctx else None,
-                    "window": ctx.window.title if ctx else None,
-                    "screen_text": ctx.render(60) if ctx else None,
-                    "image_path": image_path,
-                    "tool_calls": self._calls,
+            heard: str | None = said  # what the conversation keeps as Pyxi's answer
+            if error == "interrupted" and not synthetic and self._stopped_turn != turn_id:
+                # Talked over, not stopped: the turn their new words start gets these words too
+                # (or, if this one had already acted, is told what it did). See _pick_up.
+                done = self._done_so_far()
+                self._dropped = {
+                    "turn_id": turn_id,
+                    "text": user_text,
+                    "done": done,
+                    "refused": self._not_done(),
                     "said": said,
-                    "rounds": len({c["round"] for c in self._calls}),
-                    "input_tokens": self._usage.input_tokens + self._usage.cache_read_tokens,
-                    "output_tokens": self._usage.output_tokens,
-                    "cost_usd": self._usage.cost_usd,
-                    "latency_ms": int((time.monotonic() - started) * 1000),
-                    "error": error,
+                    "by_words": self._words_gen == self._speech_gen,
+                    "at": time.monotonic(),
                 }
-            )
+                # A half nobody answered is not left in the conversation: it is carried forward.
+                heard = (
+                    f"{said} (Cut off here: they spoke again before you finished. Already "
+                    f"started or done: {'; '.join(done)}.)".strip()
+                    if done
+                    else None
+                )
+            if heard is not None:
+                self.history = [*self.history[-11:], (user_text, heard)]
+            self._record_turn(turn_id, user_text, started, error)
             if self._speech:
                 await asyncio.gather(self._speech, return_exceptions=True)
             await self.hub.emit(
@@ -1920,6 +2119,34 @@ class Brain:
                 daily_budget=self.settings.budget.daily_cost_usd,
             )
             await self.set_state("idle")
+
+    def _record_turn(
+        self, turn_id: str, user_text: str, started: float, error: str | None
+    ) -> None:
+        """The turn, into the history: what was asked, seen, done, said and spent."""
+        ctx = self._ctx
+        image_path = None
+        if ctx and self._images:
+            image_path = self.turns.save_image(turn_id, self._images[0])
+        self.turns.record(
+            {
+                "id": turn_id,
+                "ts": time.time(),
+                "user_text": user_text,
+                "app": ctx.window.app if ctx else None,
+                "window": ctx.window.title if ctx else None,
+                "screen_text": ctx.render(60) if ctx else None,
+                "image_path": image_path,
+                "tool_calls": self._calls,
+                "said": " ".join(self._said),
+                "rounds": len({c["round"] for c in self._calls}),
+                "input_tokens": self._usage.input_tokens + self._usage.cache_read_tokens,
+                "output_tokens": self._usage.output_tokens,
+                "cost_usd": self._usage.cost_usd,
+                "latency_ms": int((time.monotonic() - started) * 1000),
+                "error": error,
+            }
+        )
 
     # ================================================================== graph
     def _build_graph(self) -> Any:
@@ -1977,12 +2204,18 @@ class Brain:
                     "I've used up today's budget, so I'm taking a breather. You can raise it in settings."
                 )
                 return {"stop": "daily budget", "needs_more": False}
+            if self._speech_gen != self._turn_gen:
+                # They spoke again before this round began: no model call for an answer that
+                # would be dropped. The turn their new words start takes it from here.
+                self._cut_short = True
+                return {"stop": "interrupted", "needs_more": False}
             await self.set_state("thinking")
             self._say_in_board = False  # a board only takes over the reply of its own round
             pyxi = self.registry.get("pyxi")
             system = prompts.system_prompt(
                 pyxi.persona if pyxi else "", self.registry.roster_text()
             )
+            system += tabwork.prompt(self)  # only while a browser is connected
             now_t = time.time()
             jobs = "\n".join(
                 j.brief()
@@ -2004,7 +2237,14 @@ class Brain:
                 jobs=jobs,
                 memories=memories,
                 notes=state.get("notes", []),
-                on_screen=object_summary(self._object) if self._object else "",
+                on_screen="\n".join(
+                    x
+                    for x in (
+                        object_summary(self._object) if self._object else "",
+                        answers.on_screen(self),
+                    )
+                    if x
+                ),
                 now=await self._now(),
                 language=self._reply_language(),
                 budget_line=f"spent today ${self.turns.spent_today():.3f} of ${budget.daily_cost_usd:.2f}; this turn ${self._usage.cost_usd:.3f} of ${budget.max_cost_usd:.2f}",
@@ -2020,14 +2260,29 @@ class Brain:
             scene_preview = {"shown": False}
 
             held = {"say": None}  # a later round's reply, waiting to go just before its card
+            claim = {"say": None}  # a line that says work is under way, until we see what follows
 
-            async def speak_early(call: ToolCall) -> None:
+            def unsaid_part(call: ToolCall) -> str:
+                """A `say` without the first sentence(s) already spoken as they arrived."""
+                text = str(call.arguments.get("text", ""))
+                if head["text"] and text.startswith(head["text"]):
+                    return text[len(head["text"]) :].strip()
+                return text
+
+            async def speak_early(call: ToolCall, wait: bool = True) -> None:
                 # Streamed: start talking the moment the spoken line is complete, while the cue
                 # card and drawings are still arriving.
                 if call.name == "say" and not first_round:
                     held["say"] = call  # may be lookup chatter; only said if a card follows
                     return
                 if call.name == "say" and not early and self._speech_gen == self._turn_gen:
+                    if wait and claims_work(unsaid_part(call)):
+                        # "Putting the table in now.": true only once the tool has agreed. If the
+                        # next call is one that can refuse, the line waits for its answer. So does
+                        # a claim that follows a first sentence already being spoken ("Got it, five
+                        # by five. Putting it in now.").
+                        claim["say"] = call
+                        return
                     early.add(call.id)
                     self._calls.append(
                         {
@@ -2036,22 +2291,22 @@ class Brain:
                             "arguments": call.arguments,
                         }
                     )
-                    text = str(call.arguments.get("text", ""))
-                    if head["text"] and text.startswith(head["text"]):
-                        text = text[
-                            len(head["text"]) :
-                        ].strip()  # the rest, after the first sentence
+                    text = unsaid_part(call)  # the rest, after the first sentence
                     if text:
                         await self._act("say", {"text": text})
 
             async def as_it_streams(i: int, name: str, raw: str) -> None:
                 if self._speech_gen != self._turn_gen:
                     return
+                if claim["say"] is not None and name != "say":
+                    waiting, claim["say"] = claim["say"], None
+                    if name not in CAN_REFUSE:
+                        await speak_early(waiting, wait=False)  # nothing here says no: say it now
                 if name == "say" and first_round and not early and not head["text"]:
                     # The first sentence goes to the voice as soon as it's written.
                     got = partial_string(raw, "text")
                     first = first_chunk(got[0]) if got and not got[1] else ""
-                    if first:
+                    if first and not claims_work(first):
                         head["text"] = first
                         self._noted |= {
                             int(m.group(2))
@@ -2093,6 +2348,7 @@ class Brain:
                         )
 
             first_round = state.get("round", 0) == 0
+            said_from = len(self._said)  # anything past this was said in this round
             extra: dict[str, Any] = {}
             if isinstance(self.llm, StreamingChat):
                 extra = {"on_call": speak_early, "on_partial": as_it_streams}
@@ -2125,6 +2381,12 @@ class Brain:
                     }
                 if text:
                     self._speak(text)
+                if nudge := self._promise_nudge(round_no):
+                    return {
+                        "round": round_no,
+                        "needs_more": True,
+                        "notes": [*state.get("notes", []), nudge],
+                    }
                 return {"round": round_no, "needs_more": False}
             notes: list[str] = []
             needs_more = False
@@ -2149,7 +2411,20 @@ class Brain:
                 or any(t.info and t.spec.name == c.name for t in connector_tools)
                 for c in calls
             )
+            # A line said with a tool that can refuse waits for that tool's answer: "Putting a
+            # table into your doc now." is never said and then taken back in the next sentence.
+            gate = max((i for i, c in enumerate(calls) if c.name in CAN_REFUSE), default=-1)
+            waits = [c for c in calls[: max(gate, 0)] if c.name == "say" and c.id not in early]
+            if waits:
+                rest = [c for c in calls[: gate + 1] if all(c is not w for w in waits)]
+                calls = [*rest, *waits, *calls[gate + 1 :]]
+            unsaid = False  # the tool refused, or said its own line: this round's line is dropped
             for call in calls:
+                if self._speech_gen != self._turn_gen:
+                    # They spoke again mid-round: the rest of it is not done behind their back.
+                    # What was done so far is passed to the turn their new words start.
+                    self._cut_short = True
+                    return {"round": round_no, "stop": "interrupted", "needs_more": False}
                 if call.id in early:
                     continue  # already said, while the rest was still streaming in
                 if call.name == "say" and looks_up and self._said:
@@ -2159,16 +2434,23 @@ class Brain:
                     continue
                 if call.name == "say" and retrying and self._said:
                     continue  # a retried drawing mustn't make Pyxi say its reply twice
-                self._calls.append(
-                    {"round": round_no, "tool": call.name, "arguments": call.arguments}
-                )
+                if call.name == "say" and said_before(
+                    str(call.arguments.get("text", "")), self._said
+                ):
+                    continue  # the same thing again, in the same or other words: said once
+                if call.name == "say" and unsaid:
+                    continue  # it would claim the job is under way; the model speaks next, knowing
+                entry = {"round": round_no, "tool": call.name, "arguments": call.arguments}
+                self._calls.append(entry)
                 if call.arguments.get("__unparseable__"):
                     # Cut off by the length limit or garbled in transit: ask for it again.
+                    entry["outcome"] = "failed"  # it never ran
                     notes.append(
                         f"TOOL_INVALID: your {call.name} call was cut off or malformed. "
                         f"Call {call.name} again, shorter."
                     )
                     needs_more = self._visual_retry = True
+                    unsaid = unsaid or call.name in CAN_REFUSE  # it never ran: nothing to claim yet
                     continue
                 is_info = any(t.info and t.spec.name == call.name for t in connector_tools)
                 lookup = is_info or call.name in INFO_TOOLS
@@ -2188,11 +2470,30 @@ class Brain:
                     self._repeats += 1
                     needs_more = needs_more or self._repeats <= 1
                     continue
+                spoken = len(self._said)
+                args = dict(call.arguments)
+                if call.name == "say":
+                    args["text"] = unsaid_part(call)  # its start may be spoken already (a held claim)
                 try:
-                    note = await self._act(call.name, dict(call.arguments))
+                    note = await self._act(call.name, args)
                 except Exception as exc:
                     log.exception("tool %s failed", call.name)
                     note = f"{call.name} failed: {exc}"
+                if note and note.startswith((f"{call.name}:", f"{call.name} failed:")):
+                    # It said no, or broke. Kept on the call, so a turn that picks this one up
+                    # is never told the job was "already started or done" (_done_so_far).
+                    failed = note.startswith(f"{call.name} failed:")
+                    entry["outcome"], entry["note"] = ("failed" if failed else "refused"), note[:200]
+                if call.name in CAN_REFUSE:
+                    if note and note.startswith(f"{call.name} failed:"):
+                        needs_more = True  # it broke: the model says so, instead of the claim
+                    self._refused = bool(
+                        note and note.startswith((f"{call.name}:", f"{call.name} failed:"))
+                    )
+                    # It said no, or it said its own line (which is then the true one).
+                    unsaid = unsaid or self._refused or len(self._said) > spoken
+                    if call.name == "paste_table" and note and not self._refused:
+                        needs_more = True  # it went in changed (formulas made plain): they hear so
                 if note and call.name in safety.UNTRUSTED_TOOLS:
                     if call.name in safety.SOURCE_LABEL:
                         self._turn_reads.append((safety.SOURCE_LABEL[call.name], note))
@@ -2217,6 +2518,7 @@ class Brain:
                 if note and note.startswith(f"{call.name}:") and call.name not in QUIET_NOTES:
                     needs_more = True
             self._narrate_card()
+            answers.say_pick(self, said_from)  # a card shown with nothing said: the pick is said
             if needs_more and self._said:
                 notes.append(
                     "ALREADY_SAID (out loud, this turn): \"" + " ".join(self._said)[-400:] + "\". "
@@ -2227,12 +2529,20 @@ class Brain:
                 c.name == "quick_action" and c.arguments.get("action") in ("open_url", "open_app")
                 for c in calls
             )
+            pick_opened = answers.opened_note(self, calls) if opened else ""
             if (
                 opened
                 and all(c.name in ("say", "quick_action") for c in calls)
                 and not needs_more
-                and not _JUST_OPEN.match(self._user_text or "")
-                and _WANTS_ANSWER.search(self._user_text or "")
+                # The card's own link ("open it", "take me there") is always looked at: the model
+                # was told to mark the pick on that page, whatever words asked for it.
+                and (
+                    pick_opened
+                    or (
+                        not _JUST_OPEN.match(self._user_text or "")
+                        and _WANTS_ANSWER.search(self._user_text or "")
+                    )
+                )
                 and round_no < self.settings.budget.max_tool_rounds
             ):
                 # "Find coffee near me": opening Maps isn't the answer. Look at what opened and
@@ -2240,7 +2550,8 @@ class Brain:
                 await self._act("look_again", {"seconds": 3})
                 needs_more = True
                 notes.append(
-                    "It's open on their screen now (you're looking at it). Answer their question "
+                    pick_opened
+                    or "It's open on their screen now (you're looking at it). Answer their question "
                     "from it: mark the best options with explain_on_screen and say your pick. "
                     "Don't open it again."
                 )
@@ -2261,6 +2572,10 @@ class Brain:
                     "You told them you'd check, so check now: call web_search (or delegate for "
                     "deep research), then answer. Don't say again that you're checking."
                 )
+            if not needs_more and (nudge := self._promise_nudge(round_no)):
+                # "Heading to Display to lower the brightness." and then only Settings opened.
+                needs_more = True
+                notes.append(nudge)
             return {
                 "round": round_no,
                 "notes": [*state.get("notes", []), *notes],
@@ -2291,6 +2606,10 @@ class Brain:
                     self._speak(f"Here's the gist. {points}")
                 elif self._visual_turn:
                     pass  # the drawing or model narrates itself; a canned line would only interrupt
+                elif self._refused:
+                    # The tool said no, its line was held back, and the model said nothing
+                    # after: never "On it." for a job that did not start.
+                    self._speak("I couldn't do that just now.")
                 elif any(c.get("tool") in _BACKGROUND_TOOLS for c in self._calls):
                     self._speak("On it.")  # started, not finished: "Done." then a failure misleads
                 elif any(
@@ -2317,6 +2636,8 @@ class Brain:
         if name in TOOL_ALIASES:  # a name the model made up for a real tool
             name, extra = TOOL_ALIASES[name]
             args = {**extra, **args}
+        if name in tabwork.FETCHES and (no := await tabwork.before_fetch(self, name, args)):
+            return no  # an address the model wrote after reading something: they're asked first
         if name == "say":
             text = strip_filler(str(args.get("text", "")))
             self._pending_say = ""
@@ -2788,6 +3109,8 @@ class Brain:
             return f"look_again: this is the screen now ({ctx.window.title[:80]!r})."
         if name == "quick_action":
             return await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
+        if name == "paste_table":
+            return await self._paste_table(args)
         if name == "start_walkthrough":
             await self.start_walkthrough(args.get("job_id"))
             return None
@@ -2841,22 +3164,34 @@ class Brain:
             return await filework.handle(self, name, args)
         if name in PAPER_TOOLS:  # forms, flight check-in, showing a bill: companion/paperwork.py
             return await paperwork.handle(self, name, args)
+        if name in tabwork.TOOLS:  # their own browser tabs: companion/tabwork.py
+            return await tabwork.handle(self, name, args)
         if name in pricecheck.TOOLS:  # cheaper elsewhere: companion/pricecheck.py
             return await pricecheck.handle(self, name, args)
+        if name in answers.TOOLS:  # the answer, on a card: companion/answers.py
+            return await answers.handle(self, name, args)
         # Phrased as a problem note, so the model hears it and tries a real tool.
         return f"{name}: there's no tool by that name. Use one of the tools you have."
 
     # ================================================================== speech
     def _speak(
-        self, text: str, *, agent: str = "Pyxi", voice: str | None = None, record: bool = True
+        self,
+        text: str,
+        *,
+        agent: str = "Pyxi",
+        voice: str | None = None,
+        record: bool = True,
+        result: bool = False,
     ) -> None:
         """Queue speech behind anything already being said. ``record=False`` for background
-        lines (a finished build, an error) that aren't part of the current turn."""
+        lines (a finished build, an error) that aren't part of the current turn. ``result``:
+        what came of a job, which is never dropped as a repeat of the line that started it."""
         if record and agent == "Pyxi":
             text = trim_chatter(text, said_before=bool(self._said))
             text = strip_filler(text)  # "There you go, I have done this."
             text = hide_secrets(text)
-            text = drop_repeats(text, self._said)
+            if not result:
+                text = drop_repeats(text, self._said)
             text = vary_ack(text, self._recent_acks)
         if not text.strip():
             return
@@ -2923,13 +3258,21 @@ class Brain:
         return True
 
     async def say_line(
-        self, text: str, *, agent: str = "Pyxi", voice: str | None = None, record: bool = True
+        self,
+        text: str,
+        *,
+        agent: str = "Pyxi",
+        voice: str | None = None,
+        record: bool = True,
+        result: bool = False,
     ) -> None:
-        self._speak(text, agent=agent, voice=voice, record=record)
+        self._speak(text, agent=agent, voice=voice, record=record, result=result)
         if self._speech:
             await asyncio.gather(self._speech, return_exceptions=True)
-        if not self._lock.locked():
-            await self.set_state("idle")  # said outside a turn: don't stay "speaking" forever
+        # Said outside a turn: don't stay "speaking" forever. But if they pressed talk while the
+        # line was being voiced, they are the one talking now: "listening" is not overwritten.
+        if not self._lock.locked() and self.state not in ("listening", "transcribing"):
+            await self.set_state("idle")
 
     async def _stream_speech(
         self, text: str, *, agent: str, voice: str | None, gen: int, ctx: ScreenContext | None
@@ -3218,8 +3561,9 @@ class Brain:
         )
         if job.then and job.status == "done":
             return  # the next teammate takes it from here
-        # Background work is quiet: no voice, just a notification with the result and the files.
-        # (You asked Pyxi to go off and do it; it shouldn't start talking over you when it's done.)
+        # Background work never talks over you, but it is never missed either: a notification
+        # with the result and the files, one short spoken line once nobody is talking, and the
+        # whole result on a card when the notification can't hold it (_announce).
         data = job.data if isinstance(job.data, dict) else {}
         if (note := paperwork.notice(job, data)) is not None:  # a check-in or a filled form
             await self.hub.emit(
@@ -3234,10 +3578,17 @@ class Brain:
             self.history = [
                 *self.history[-11:],
                 (
-                    f"(job {job.id} finished: {job.summary[:600]})",
-                    f"(notified the user: {note['title']}. {note['body']})",
+                    f"(job {job.id} finished: {answers.for_later(job)})",
+                    "(notified the user: " + " ".join(f"{note['title']}. {note['body']}".split()) + ")",
                 ),
             ]
+            self._announce(
+                job,
+                ok=bool(note.get("ok", True)),
+                title=str(note["title"]),
+                body=str(note["body"]),
+                own_card=True,
+            )
             return
         fixed = data.get("fixed") or []
         files = [str(f) for f in (fixed or job.outputs)]
@@ -3304,16 +3655,91 @@ class Brain:
                 else None
             ),
         )
-        # The model still gets the full result (file paths included) for "send it back".
+        # The model still gets the full result (file paths included) for "send it back", and
+        # every item of a long one for "what did Scout find?".
         self.history = [
             *self.history[-11:],
             (
-                f"(job {job.id} finished: {job.summary[:600]})",
-                f"(notified the user: {title}. {body})",
+                f"(job {job.id} finished: {answers.for_later(job)})",
+                "(notified the user: " + " ".join(f"{title}. {body}".split()) + ")",
             ),
         ]
+        own_card = booked or bool(files) or (job.role in specialists.ROLES and bool(data.get("title")))
+        self._announce(job, ok=job.status == "done", title=title, body=body, own_card=own_card)
         if job.role in specialists.ROLES:  # reminders, check-ins, the next monthly summary
             await specialists.after_job(self, job)
+
+    def _announce(self, job: Job, *, ok: bool, title: str, body: str, own_card: bool) -> None:
+        """A finished or failed job is told once: the whole result on a card whenever the
+        notification had to cut it (a list of nine stays nine), and one short spoken line,
+        held until neither Pyxi nor the user is talking. A job they stopped themselves needs
+        neither."""
+        told = getattr(self, "_told_jobs", None)
+        if told is None:
+            told = self._told_jobs = set()
+        if job.id in told or job.status == "stopped":
+            return
+        told.add(job.id)
+        whole = " ".join((job.summary or "").split())
+        cut = bool(whole) and whole != " ".join(body.split())
+        card = None
+        if cut and not own_card:
+            generic = title in (f"{job.agent_name} finished", f"{job.agent_name} couldn't finish")
+            card = result_card(
+                job.agent_name, job.summary, ok=ok, title="" if generic else title
+            )
+            self._spawn(answers.show(self, card))
+        # Said with record=False (it is no part of a turn), which skips the scrub: done here.
+        line = hide_secrets(
+            answers.spoken_line(
+                job.agent_name, ok=ok, title=title, summary=job.summary, on_card=card is not None
+            )
+        )
+        self._spawn(
+            self._say_when_free(
+                line,
+                about=job.agent_name,
+                since=self._turn_id,
+                result=f"{title} {body} {job.summary}",
+            )
+        )
+
+    def _talking(self) -> bool:
+        """Is anyone mid-sentence: a turn under way, the user speaking, or Pyxi's voice still
+        playing?"""
+        return (
+            self._lock.locked()
+            or self.state in ("listening", "transcribing")
+            or time.monotonic() < self._dictating_until
+            or (self._speech is not None and not self._speech.done())
+            or time.monotonic() < self._talking_until
+        )
+
+    async def _say_when_free(
+        self, line: str, about: str = "", since: str = "", result: str = ""
+    ) -> None:
+        """Say a background line once the floor is free. If they press talk while it is being
+        voiced it is dropped unheard, so it waits its turn again (three tries, then the card
+        and the notification have to do). If they asked in the meantime and that answer
+        already gave this job's result ("Scout's back: the GLADOM is the best value."), it has
+        been told; the teammate's name alone ("Scout's on the flights.", a new job) is not
+        that. ``since``: the turn that was the latest one when the work ended. ``result``:
+        the job's own words (its title, notification and summary)."""
+        for _ in range(3):
+            for _ in range(2400):  # ten minutes at most
+                if not self._talking():
+                    break
+                await asyncio.sleep(0.25)
+            if (
+                about
+                and self._turn_id != since
+                and told_already(" ".join(self._said), about, result)
+            ):
+                return
+            gen = self._speech_gen
+            await self.say_line(line, record=False)
+            if gen == self._speech_gen:
+                return
 
     # ================================================================== misc
     def _spawn(self, coro: Any) -> None:
@@ -3395,6 +3821,10 @@ _MULTI_SCREEN_NOTE = (
 )
 
 
+# Words from a turn they talked over are carried into their next turn only this soon after.
+_CARRY_S = 90.0
+# The longest a dictation is held (the app stops recording at a minute), with some room.
+_DICTATION_S = 90.0
 _BACKGROUND_TOOLS = {
     "edit_document",
     "convert_files",
@@ -3402,9 +3832,21 @@ _BACKGROUND_TOOLS = {
     "errand",
     "book",
     "use_computer",
+    "use_tab",
     "tidy_folder",
     "build_3d_model",
     "explain_in_3d",
+}
+# Tools that can say no (a file that isn't there, an account that isn't connected, a card they
+# decline): a line said with one waits for its answer, and is dropped if the answer is no.
+CAN_REFUSE = {
+    "edit_document",
+    "convert_files",
+    "delegate",
+    "book",
+    "errand",
+    "use_computer",
+    "paste_table",
 }
 # "Find coffee near me": opening Maps isn't the answer, so Pyxi looks at what opened and
 # answers from it. "I said open Gmail, not GL" asks nothing: one model call, not two.
@@ -3585,7 +4027,9 @@ def drop_repeats(text: str, earlier: list[str]) -> str:
     the next round ("New doc, opening a blank one." then "Got you, opening a new blank doc."), or
     leaks a tool's name ("[say] Ledger can't..."). A sentence is dropped when it mostly repeats one
     sentence already said, or when everything it says (its words that carry meaning) was already
-    said this turn."""
+    said this turn. A short line goes too when it is one already said word for word ("Opening
+    Settings." twice), or the start line again in other words ("Putting the 5 by 5 table in
+    now." then "The table's going in now."); what came of it ("The table is in.") always stays."""
     text = _TOOL_TAG.sub("", text)
     seen = [set(_WORD.findall(s.lower())) for e in earlier for s in split_sentences(e)]
     said_words: set[str] = set().union(*(_content(s) for e in earlier for s in split_sentences(e)))
@@ -3600,7 +4044,15 @@ def drop_repeats(text: str, earlier: list[str]) -> str:
             and len(content) >= 2
             # all of it said already, or (in a longer sentence) three quarters of it
             and len(content - said_words) <= (len(content) // 4 if len(content) >= 4 else 0)
-        )
+        ) or (
+            # still only "it's under way", about the one thing already named
+            len(content) == 1
+            and content <= said_words
+            and bool(_UNDERWAY.search(sentence))
+            and not _SETTLED.search(sentence)
+        ) or (bool(words) and words in seen)  # the same line, word for word, however short
+        if again and words not in seen and _reports(sentence, content - said_words, said_words):
+            again = False  # what came of it: "Lowered the brightness..." after "Lowering the..."
         if again:
             marks = " ".join(m.group(0) for m in MARKER.finditer(sentence))
             if marks:
@@ -3610,6 +4062,176 @@ def drop_repeats(text: str, earlier: list[str]) -> str:
         seen.append(words)
         said_words |= content
     return " ".join(kept)
+
+
+# A line that only says the work is under way: "Putting it in now.", "The table's going in.",
+# "Ledger is drawing the pivot.", "A new doc, coming up.", "I'll add it."
+_UNDERWAY = re.compile(
+    r"^\W*[a-z]{2,}ing\b"
+    r"|(?:\b(?:is|are|am)|'s|'re|'m)\s+(?:(?:now|just|already|still)\s+)?"
+    r"(?!(?:no|some|any|every)thing\b)[a-z]{2,}ing\b"
+    r"|\b(?:coming (?:right )?up|on (?:its|the|their) way|i'?ll|i will|let me)\b",
+    re.IGNORECASE,
+)
+# ...unless it reports how things turned out, which is news.
+_SETTLED = re.compile(
+    r"\b(?:done|finished|ready|not|no|never|cannot|failed|sorry|but|instead|because|since)\b|n't\b",
+    re.IGNORECASE,
+)
+
+
+# "Sent" is what came of "sending": the finished forms that don't follow the pattern.
+_DID = {
+    "sent": "sending", "made": "making", "built": "building", "wrote": "writing",
+    "written": "writing", "found": "finding", "took": "taking", "taken": "taking",
+    "ran": "running", "drew": "drawing", "drawn": "drawing", "got": "getting",
+    "done": "doing", "did": "doing", "paid": "paying", "gone": "going", "went": "going",
+    "began": "beginning", "chose": "choosing", "chosen": "choosing", "kept": "keeping",
+    "left": "leaving", "brought": "bringing", "bought": "buying", "shut": "shutting",
+}  # fmt: skip
+
+
+def _doing(word: str) -> set[str]:
+    """The "-ing" words this one could be the finished or plain form of: lowered and lower
+    give lowering, set gives setting, changed gives changing, sent gives sending."""
+    stems = {word}
+    if word.endswith("ed"):
+        stems |= {word[:-2], word[:-1]}  # lowered -> lower, changed -> change
+        if len(word) > 4 and word[-3] == word[-4]:
+            stems.add(word[:-3])  # dropped -> drop
+    out = {_DID[word]} if word in _DID else set()
+    for stem in stems:
+        if len(stem) >= 2:
+            out |= {f"{stem}ing", f"{stem}{stem[-1]}ing"}
+            if stem.endswith("e"):
+                out.add(f"{stem[:-1]}ing")
+    return out
+
+
+def _reports(sentence: str, new: set[str], said: set[str]) -> bool:
+    """Does this sentence say what came of a job whose start was already said? Its one piece
+    of news is then the verb: "lowered" where "lowering" was said, "set" where "setting" was."""
+    if _UNDERWAY.search(sentence) and not _SETTLED.search(sentence):
+        return False  # still only on its way
+    return any(not w.endswith("ing") and _doing(w) & said for w in new)
+
+
+def told_already(said: str, agent: str, result: str) -> bool:
+    """Has a turn's answer already told a finished job? It has to name the teammate and carry
+    something of that job's own result. The name alone can be about new work ("Scout's on
+    the flights."), which must not swallow the announcement of the job that just ended."""
+    if agent.lower() not in said.lower():
+        return False
+    name = _content(agent)
+    words = _content(result) - name
+    return len((_content(said) - name) & words) >= min(2, len(words))
+
+
+# Other ways a line says a job has started: "...now.", "back in a minute", "Scout's on the flights."
+_STARTED = re.compile(
+    r"\b(?:now|right away|in a (?:sec|second|moment|minute)|back (?:in|with|soon)|off to|on it)\b"
+    r"|(?:\bis|'s) on (?:it|the|your|that|those)\b",
+    re.IGNORECASE,
+)
+
+
+def claims_work(text: str) -> bool:
+    """Does this line say a job has started or is about to ("Putting the table in now.",
+    "Scout's on the flights.", "A new doc, coming up.")? Said with a tool that can refuse, such
+    a line waits for the tool's answer. A plain answer ("Real. Only the B version hovers.")
+    does not, and starts being spoken as it arrives."""
+    return any(_UNDERWAY.search(s) or _STARTED.search(s) for s in split_sentences(text))
+
+
+def _verb_forms(verbs: str, *, doing_only: bool = False) -> str:
+    """'lower set change' as a regex: lower, lowers, lowering, set, sets, setting, change..."""
+    forms = []
+    for v in verbs.split():
+        stem = v[:-1] if v.endswith("e") else v
+        doing = f"{stem}{stem[-1]}?ing"
+        forms.append(doing if doing_only else f"{v}s?|{doing}")
+    return "|".join(forms)
+
+
+# Getting somewhere, which opening an app or a page really does...
+_GO_VERBS = "open launch start pull bring head go navigate switch"
+# ...and doing something there, which it does not.
+_DO_VERBS = (
+    "set change turn lower raise dim brighten increase decrease reduce mute unmute put add "
+    "insert create make build draft write send email reply book schedule cancel delete remove "
+    "move rename copy paste type click press scroll close save download upload convert merge "
+    "split fill play pause install update fix run arrange snap drop select enable disable "
+    "toggle adjust tidy clean organize organise resize crop rotate share post format print "
+    "sign attach forward archive unsubscribe order"
+)
+# "I'll lower the brightness.", "Let me add that row.", "Lowering the brightness now."
+_WILL_DO = re.compile(
+    r"^\W*(?:(?:okay|ok|alright|right|sure|got it|on it)[,.!]?\s+)?(?:"
+    r"(?:i'?ll|i will|i'?m going to|i am going to|let me|i'?m|i am)\s+"
+    r"(?:(?:just|now|quickly|go ahead and|going ahead and)\s+)?"
+    # ways of talking, not jobs: "I'll put it this way", "let me start with the catch"
+    r"(?!put it\b|make (?:sure|it (?:quick|short|simple|easy|clear))\b|go(?:ing)? (?:with|out on)\b|"
+    r"start (?:with|by|off)\b|add (?:that|one thing)\b|save you\b|fill you in\b|run you\b|"
+    r"drop the\b|play along\b|turn to\b)"
+    rf"(?:{_verb_forms(_GO_VERBS + ' ' + _DO_VERBS)})\b"
+    r"|(?!putting it\b|making (?:sure|it)\b|turning to\b|running (?:the|through)\b|playing it\b)"
+    rf"(?:{_verb_forms('open launch pull bring head navigate switch ' + _DO_VERBS, doing_only=True)})\b)",
+    re.IGNORECASE,
+)
+# "...to lower the brightness", "...and turning it down": more than getting there.
+_THEN_DO = re.compile(
+    r"\b(?:to|and|then|so i can)\s+(?:(?:i'?ll|then|just)\s+)?"
+    rf"(?:{_verb_forms(_DO_VERBS)})\b",
+    re.IGNORECASE,
+)
+_ASKED_TO_DO = re.compile(rf"\b(?:{_verb_forms(_GO_VERBS + ' ' + _DO_VERBS)})\b", re.IGNORECASE)
+# "How do I change it?", "What's going on?": a question to answer, not a job to do.
+_ASKS_A_QUESTION = re.compile(
+    r"^\W*(?:hey,? )?(?:pyxi,? )?(?:how|what|why|who|when|where|which|is|are|was|does|do|did|should)\b",
+    re.IGNORECASE,
+)
+# An offer, a question or a "can't" is not a promise.
+_NO_PROMISE = re.compile(
+    r"\?\s*$|\b(?:if you|want me to|shall i|should i|would you like|do you want|once you|when "
+    r"you|after you|you can|you could|you'll need|you need to|cannot|unable|not able|say the "
+    r"word|let me know|tell me)\b|n't\b",
+    re.IGNORECASE,
+)
+
+
+def undone_promise(
+    said: list[str], calls: list[dict[str, Any]], user_text: str
+) -> tuple[str, bool] | None:
+    """The line in which Pyxi said it would do something that no tool call this turn carried
+    out, and whether something was at least opened. Two shapes only, to stay sure of it:
+    nothing was done at all (the request was for an action, and the line says "I'll..." or
+    "Lowering..."), or the only thing done was opening an app or a page while the line promised
+    more than getting there ("Heading to Display to lower the brightness."). Any other tool
+    call (a teammate, an errand, a drawing, the mouse) counts as carrying it out."""
+    did = [c for c in calls if c.get("tool") != "say" and c.get("tool") not in INFO_TOOLS]
+    opened = bool(did)
+    if any(
+        c.get("tool") != "quick_action"
+        or (c.get("arguments") or {}).get("action") not in ("open_url", "open_app")
+        for c in did
+    ):
+        return None
+    if opened and _JUST_OPEN.match(user_text):
+        return None  # opening it was the whole request
+    if not opened and (not _ASKED_TO_DO.search(user_text) or _ASKS_A_QUESTION.match(user_text)):
+        return None  # a chat, not a job: "I'll be honest" promises nothing
+    for line in (s for text in said for s in split_sentences(text)):
+        if _NO_PROMISE.search(line):
+            continue
+        if (_THEN_DO if opened else _WILL_DO).search(line):
+            return line, opened
+    return None
+
+
+def said_before(text: str, earlier: list[str]) -> bool:
+    """Is all of this `say` something already said this turn, in the same or other words? Then
+    the whole call goes. A line with a pointer or note marker never counts: its mark still draws."""
+    return bool(earlier and text.strip()) and not drop_repeats(strip_filler(text), earlier).strip()
 
 
 def vary_ack(text: str, recent: list[str], pick: Any = random.choice) -> str:

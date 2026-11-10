@@ -38,8 +38,8 @@ TOOL = ToolSpec(
     "(no window, no mouse): it reads the store page for the exact model and barcode, checks other "
     "stores, and pins a tag by the price ('$24 less at Best Buy', with the link and when it was "
     "checked). Only exact matches count. Use it for 'is this cheaper anywhere?', 'can I get this "
-    "for less?', 'best price for this?'. Say one short line ('Checking other stores.') and nothing "
-    "more; the tag gives the answer.",
+    "for less?', 'best price for this?'. Say a few words ('Checking other stores.') and nothing "
+    "more, never a price: the tag gives the answer.",
     {
         "type": "object",
         "properties": {
@@ -392,7 +392,7 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         _state(brain)["seen"][url.split("#")[0]] = time.time()
     brain._spawn(run_check(brain, args, url))
     return (
-        "Started: Scout is checking other stores in the background. Say one short line "
+        "Started: Scout is checking other stores in the background. Say a few words "
         "('Checking other stores.') and nothing more; the tag by the price gives the answer."
     )
 

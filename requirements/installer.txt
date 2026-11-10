@@ -438,6 +438,7 @@ cryptography==50.0.2 \
     --hash=sha256:fdd28f912fccfec1846a94e2e1e8f9b0012f557f0c46fe4f3eb0d7a87afcf90b
     # via
     #   -c (the last full build)
+    #   -r requirements/installer.in
     #   google-auth
 ctranslate2==4.8.5 \
     --hash=sha256:0413ce473dcc9ff6c69ea9320b06e5192a81992e89e4e3b54241f914594f78f5 \

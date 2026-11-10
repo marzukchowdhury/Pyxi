@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse, JSONResponse
 
 from pyxi import __version__, booking, brainkey, cloud, files_access
-from pyxi.companion import pricecheck
+from pyxi.companion import browsersetup, pricecheck
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
 from pyxi.hub import Hub
@@ -370,6 +370,19 @@ def create_app(
         finally:
             hub.disconnect(cid)
 
+    # Pyxi in your browser (pyxi/browserlink.py): the extension's own socket. The launch key
+    # isn't asked for here, since an extension can't know it. Instead the connection must come
+    # from this PC, from a browser extension, and from one that was paired with a code.
+    @app.websocket("/ws/browser")
+    async def ws_browser(socket: WebSocket) -> None:
+        await brain.browser.serve(socket)
+
+    @app.post("/api/browser/pair")
+    async def browser_pair() -> dict[str, Any]:
+        """A pairing code for the extension, for local tools (needs the launch key). The
+        desktop app asks over its socket instead ("browser_pair")."""
+        return brain.browser.new_code()
+
     async def _e2e_card() -> None:
         """End-to-end tests only (demo mode with PYXI_E2E=1): a harmless Allow card, so a test can
         answer it in the real overlay. The answer is broadcast back."""
@@ -434,6 +447,20 @@ def create_app(
             if hasattr(brain.screen, "set_private_apps"):
                 brain.screen.set_private_apps(apps)
             await hub.emit("private_apps", apps=apps, built_in=private_apps.BUILT_IN)
+        elif kind == "browser_setup":  # Settings, "Set it up for me" / "Add to Firefox"
+            browsersetup.start(brain, str(msg.get("browser") or ""))  # their own press
+        elif kind in ("browser_get", "browser_pair", "browser_forget", "browser_site_revoke"):
+            # Settings, "Connect your browser": a pairing code, unpair, the sites Pyxi may act on.
+            link, extra = brain.browser, {}
+            if kind == "browser_get":
+                brain._spawn(browsersetup.look_up_addon(brain))  # is there an add-on to link to?
+            if kind == "browser_pair":
+                extra = link.new_code()
+            elif kind == "browser_forget":
+                link.forget(str(msg.get("id") or ""))
+            elif kind == "browser_site_revoke":
+                link.revoke_site(str(msg.get("host") or ""))
+            await hub.emit("browser", **link.public(), **browsersetup.public(brain), **extra)
         elif kind == "file_access_get":
             await hub.emit("file_access", **files_access.load(settings.data_dir).public())
         elif kind == "file_access_save":
@@ -461,6 +488,9 @@ def create_app(
             brain._spawn(_beta_leave())
         elif kind == "audio" and msg.get("data"):
             brain._spawn(brain.hear(base64.b64decode(msg["data"])))
+        elif kind == "dictating" or (kind == "dictate" and not msg.get("data")):
+            # The dictation keys went down, or came up with nothing to type.
+            brain.dictating(kind == "dictating" and bool(msg.get("on")))
         elif kind == "dictate" and msg.get("data"):
             brain._spawn(brain.dictate(base64.b64decode(msg["data"])))
         elif kind == "ptt_cancel":

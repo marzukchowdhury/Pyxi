@@ -57,3 +57,32 @@ async def test_dictating_types_into_the_app_and_never_asks_the_model(settings) -
     inserts = [{k: v for k, v in e.items() if k != "ts"} for e in events if e["type"] == "action"]
     assert inserts == [{"type": "action", "kind": "insert", "value": typed}]
     assert not [e for e in events if e["type"] == "user"]  # not a question for Pyxi
+
+
+def test_the_app_tells_the_brain_while_the_dictation_keys_are_down(settings) -> None:
+    """Dictation sent the brain nothing until the words came, so a job that ended meanwhile
+    was announced over it."""
+    from fastapi.testclient import TestClient
+
+    from pyxi.server import create_app
+
+    brain = Brain(settings, Hub(), llm=DemoLLM(), screen=FakeScreen())
+    app = create_app(settings, demo=True, brain=brain, key="k")
+
+    def synced(ws) -> None:  # an answer to a later message: the ones before it were handled
+        ws.send_text(json.dumps({"type": "grants_get"}))
+        while json.loads(ws.receive_text())["type"] != "grants":
+            pass
+
+    with TestClient(app) as client, client.websocket_connect("/ws?key=k") as ws:
+        assert not brain._talking()
+        ws.send_text(json.dumps({"type": "dictating", "on": True}))
+        synced(ws)
+        assert brain._talking() and brain.state == "idle"  # held, with nothing interrupted
+        ws.send_text(json.dumps({"type": "dictating", "on": False}))  # cancelled
+        synced(ws)
+        assert not brain._talking()
+        ws.send_text(json.dumps({"type": "dictating", "on": True}))
+        ws.send_text(json.dumps({"type": "dictate", "data": "", "mime": "audio/webm"}))
+        synced(ws)
+        assert not brain._talking()  # let go at once: nothing was recorded, nothing to wait for

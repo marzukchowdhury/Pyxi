@@ -57,7 +57,7 @@
             <div class="faq-list">
               <details class="qa reveal" id="q-windows" data-popular="8" data-related="q-install q-offline">
                 <summary><h3>Which computers does it run on?</h3></summary>
-                <div class="qa-body"><p>Windows 10 and Windows 11. Pyxi reads the screen with Windows UI Automation, so Windows comes first. A Mac version is next on the roadmap<!--if:macWaitlistUrl-->, and you can <a href="{{macWaitlistUrl}}">join the Mac waitlist</a><!--end-->.</p></div>
+                <div class="qa-body"><!--if:macDownloadUrl--><p>Windows 10 and Windows 11, and Macs on macOS 12 or later. The Mac version is a newer beta: <a href="{{macDownloadUrl}}">download it here</a>, and the <a href="/download#mac">install guide</a> shows how to open it the first time.</p><!--end--><!--if:macWaitlistOnly--><p>Windows 10 and Windows 11. Pyxi reads the screen with Windows UI Automation, so Windows comes first. A Mac version is next on the roadmap, and you can <a href="{{macWaitlistUrl}}">join the Mac waitlist</a>.</p><!--end--><!--if:macNotYet--><p>Windows 10 and Windows 11. Pyxi reads the screen with Windows UI Automation, so Windows comes first. A Mac version is next on the roadmap.</p><!--end--></div>
               </details>
               <details class="qa reveal" id="q-install" data-related="q-smartscreen q-join">
                 <summary><h3>How do I install it?</h3></summary>

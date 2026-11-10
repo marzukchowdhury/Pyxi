@@ -14,6 +14,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chordLabel, chordsFrom, pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
 import { MAC_HOTKEYS, MAC_RUNNABLE, macKeyName, needsPermissions, permissionRows, settingsUrl, trayTemplatePng } from "./mac";
+import { tableClip } from "./tableClip";
+import { TRAY_PNG_16, TRAY_PNG_32, TRAY_PNG_64 } from "./trayImage";
 import { trayTemplate } from "./trayMenu";
 import { checkNow, startUpdates } from "./updates";
 import {
@@ -21,6 +23,7 @@ import {
   BrowserWindow,
   webContents,
   clipboard,
+  ClipboardItem,
   Notification,
   type Display,
   globalShortcut,
@@ -613,17 +616,21 @@ function startCursorFeed(): void {
 function trayIcon(): Electron.NativeImage {
   if (IS_MAC) {
     // The menu bar wants a template image (black with alpha; macOS tints it for light and dark),
-    // 22 points tall, with a Retina version. Drawn in code and packed as PNG: an SVG data URL
-    // comes out as an empty image in Electron (main's Windows tray fix loads PNGs the same way).
+    // 22 points tall, with a Retina version. Drawn in code and packed as PNG, like the Windows
+    // icon below (an SVG data URL comes out as an empty image in Electron).
     const img = nativeImage.createFromBuffer(trayTemplatePng(22), { scaleFactor: 1 });
     img.addRepresentation({ scaleFactor: 2, buffer: trayTemplatePng(44) });
     img.setTemplateImage(true);
     if (img.isEmpty()) console.warn("[pyxi] menu bar icon came out empty");
     return img;
   }
-  // The firefly in small, drawn in code so the repo needs no binary assets.
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="-16 -16 32 32"><defs><radialGradient id="g"><stop offset="0" stop-color="#ffe08a" stop-opacity=".9"/><stop offset=".55" stop-color="#ffc861" stop-opacity=".35"/><stop offset="1" stop-color="#ffc861" stop-opacity="0"/></radialGradient></defs><circle r="15" fill="url(#g)"/><ellipse cx="-4.5" cy="-6" rx="5" ry="2.8" transform="rotate(-32 -4.5 -6)" fill="#fffaeb" fill-opacity=".55"/><ellipse cx="4.5" cy="-6" rx="5" ry="2.8" transform="rotate(32 4.5 -6)" fill="#fffaeb" fill-opacity=".55"/><circle r="6" fill="#fff3cf"/></svg>`;
-  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
+  // The app icon as PNG at three sizes, so Windows picks a sharp one at any display scale.
+  // (An SVG data URL comes out as an empty image in Electron: the tray icon was invisible.)
+  const img = nativeImage.createFromBuffer(Buffer.from(TRAY_PNG_16, "base64"), { scaleFactor: 1 });
+  img.addRepresentation({ scaleFactor: 2, buffer: Buffer.from(TRAY_PNG_32, "base64") });
+  img.addRepresentation({ scaleFactor: 4, buffer: Buffer.from(TRAY_PNG_64, "base64") });
+  if (img.isEmpty()) console.warn("[pyxi] tray icon came out empty");
+  return img;
 }
 
 // No page can open new windows, navigate an app window away, or embed a webview. Links a page
@@ -776,7 +783,11 @@ ipcMain.on("action", async (_e, kind: string, value: string) => {
   if (typeof value !== "string" || !value) return;
   if (kind === "open_url") openExternalSafe(value);
   else if (kind === "copy") clipboard.writeText(value);
-  else if (kind === "insert") {
+  else if (kind === "insert" || kind === "insert_table") {
+    // A table goes on the clipboard twice (cells as text, and as an HTML table), so a
+    // spreadsheet takes a grid and a document a real table.
+    const clip = kind === "insert_table" ? tableClip(value) : { text: value, html: "" };
+    if (!clip) return;
     const focused = BrowserWindow.getFocusedWindow();
     if (focused) {
       // Typing went to Pyxi's own window (the notch text box); hand focus back first.
@@ -784,7 +795,8 @@ ipcMain.on("action", async (_e, kind: string, value: string) => {
       await new Promise((r) => setTimeout(r, 180));
     }
     const previous = await Promise.resolve(clipboard.readText()); // async in newer Electron
-    clipboard.writeText(value);
+    if (clip.html) await clipboard.write([new ClipboardItem({ "text/plain": clip.text, "text/html": clip.html })]);
+    else await clipboard.writeText(clip.text);
     await new Promise((r) => setTimeout(r, 60));
     pasteText();
     setTimeout(() => clipboard.writeText(previous), 900);

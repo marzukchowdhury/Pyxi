@@ -55,6 +55,23 @@ class Recorder:
         return [e for e in self.events if e["type"] == kind]
 
 
+@pytest.fixture(autouse=True)
+def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test looks at the windows that are really open, writes the browser extension into
+    the folder a real browser loads it from, or reads or changes the real clipboard
+    (pyxi/companion/browsersetup.py). The pretend clipboard is ``browsersetup.CLIP``."""
+    from pyxi.companion import browsersetup
+
+    monkeypatch.setenv(browsersetup.HOME_ENV, str(tmp_path / "extension-home"))
+    monkeypatch.setattr(browsersetup, "front", lambda key="", open_windows=None: None)
+    monkeypatch.setattr(browsersetup, "_addon", None)
+    monkeypatch.setattr(browsersetup, "last_fault", None)
+    clip = {"text": "what I had copied"}
+    monkeypatch.setattr(browsersetup, "CLIP", clip, raising=False)
+    monkeypatch.setattr(browsersetup, "clip_get", lambda: clip["text"])
+    monkeypatch.setattr(browsersetup, "clip_set", lambda text: clip.__setitem__("text", text) or True)
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> PyxiSettings:
     return PyxiSettings(

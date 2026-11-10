@@ -21,13 +21,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pyxi.agents.ledger_common import LedgerError, cell_rc
+from pyxi.agents.ledger_common import rgb as _rgb
+from pyxi.agents.ledger_google import DocExtras, GoogleSlides, SheetExtras
+from pyxi.agents.ledger_office import DeckExtras, WordExtras, WorkbookExtras
 from pyxi.agents.pixel import out_dir_for, unique_path
 
+__all__ = ["GoogleDoc", "GoogleSheet", "GoogleSlides", "LedgerError", "run_ledger"]
+
 LOCAL_EXTS = {".xlsx", ".xlsm", ".docx", ".pptx"}
-
-
-class LedgerError(ValueError):
-    """A bad edit or a file Ledger can't work on, said plainly."""
 
 
 # ============================================================================ Excel
@@ -111,7 +113,7 @@ def _dated(ws, cell) -> None:
         cell.number_format = fmt or "yyyy-mm-dd"
 
 
-class Workbook:
+class Workbook(WorkbookExtras):
     """An .xlsx opened twice: once for formulas (what we edit) and once for the values Excel last
     calculated (what the outline and summaries quote)."""
 
@@ -172,6 +174,7 @@ class Workbook:
                     cells.append(f"{get_column_letter(c)}{r}={shown}"[:80])
                 if cells:
                     out.append("  " + " | ".join(cells))
+            out.extend(self.chart_lines(ws))
         return "\n".join(out)
 
     # ---------------------------------------------------------------- edits
@@ -367,29 +370,6 @@ class Workbook:
         best = ", ".join(f"{k} {_shown(result(k))}" for k in top)
         return f"Made a pivot on sheet {name}: {agg} of {v_name} by {g_name}, {len(keys)} groups (top: {best})"
 
-    def op_format(self, op: dict[str, Any]) -> str:
-        from openpyxl.styles import Font, PatternFill
-
-        ws = self.sheet(op.get("sheet"))
-        rng = str(op.get("range") or "")
-        if not rng:
-            raise LedgerError("format needs a range like 'A1:D1'.")
-        cells = ws[rng]
-        rows = cells if isinstance(cells, tuple) else ((cells,),)
-        rows = tuple(r if isinstance(r, tuple) else (r,) for r in rows)
-        n = 0
-        for row in rows:
-            for c in row:
-                if op.get("bold") is not None:
-                    c.font = Font(bold=bool(op["bold"]), italic=c.font.italic, color=c.font.color)
-                if op.get("number_format"):
-                    c.number_format = str(op["number_format"])
-                if op.get("fill"):
-                    color = str(op["fill"]).lstrip("#")
-                    c.fill = PatternFill("solid", start_color=color, end_color=color)
-                n += 1
-        return f"Formatted {n} cell{'s' if n != 1 else ''} on {ws.title}"
-
     def op_make_table(self, op: dict[str, Any]) -> str:
         from openpyxl.utils import get_column_letter
         from openpyxl.worksheet.table import Table, TableStyleInfo
@@ -415,7 +395,7 @@ class Workbook:
         return f"Made {ref} on {ws.title} a table"
 
     def op_chart(self, op: dict[str, Any]) -> str:
-        from openpyxl.chart import BarChart, LineChart, PieChart, Reference
+        from openpyxl.chart import AreaChart, BarChart, LineChart, PieChart, Reference
         from openpyxl.utils import get_column_letter
 
         ws = self.sheet(op.get("sheet"))
@@ -427,11 +407,15 @@ class Workbook:
         if vc is None:
             raise LedgerError("chart needs values: the column to plot.")
         kind = str(op.get("type") or "bar").lower()
-        chart = {"line": LineChart, "pie": PieChart}.get(kind, BarChart)()
+        chart = {"line": LineChart, "pie": PieChart, "area": AreaChart}.get(kind, BarChart)()
+        if kind == "horizontal bar":
+            chart.type = "bar"
         chart.title = str(op.get("title") or ws.cell(head, vc).value or "Chart")
         chart.add_data(Reference(ws, min_col=vc, min_row=head, max_row=last), titles_from_data=True)
         chart.set_categories(Reference(ws, min_col=lc, min_row=head + 1, max_row=last))
-        ws.add_chart(chart, f"{get_column_letter(ws.max_column + 2)}{head}")
+        at = str(op.get("at") or f"{get_column_letter(ws.max_column + 2)}{head}").upper()
+        cell_rc(at)
+        ws.add_chart(chart, at)
         return f"Added a {kind} chart of {ws.cell(head, vc).value or 'the values'} on {ws.title}"
 
     def op_add_sheet(self, op: dict[str, Any]) -> str:
@@ -485,34 +469,12 @@ def _look(op: dict[str, Any]) -> str:
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
-def _rgb(color: Any) -> tuple[float, float, float] | None:
-    """'#1A73E8', 'red', 'blue' -> 0-1 floats."""
-    names = {
-        "red": "#D93025",
-        "blue": "#1A73E8",
-        "green": "#188038",
-        "orange": "#E8710A",
-        "purple": "#8E24AA",
-        "black": "#000000",
-        "gray": "#5F6368",
-        "grey": "#5F6368",
-        "yellow": "#FBBC04",
-        "white": "#FFFFFF",
-    }
-    c = names.get(str(color or "").strip().lower(), str(color or "").strip())
-    m = re.fullmatch(r"#?([0-9a-fA-F]{6})", c)
-    if not m:
-        return None
-    h = m.group(1)
-    return tuple(int(h[i : i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
-
-
 # ============================================================================ Word
 def _move_after(new_el, anchor_el) -> None:
     anchor_el.addnext(new_el)
 
 
-class WordDoc:
+class WordDoc(WordExtras):
     kind = "docx"
 
     def __init__(self, path: Path) -> None:
@@ -538,9 +500,7 @@ class WordDoc:
                 out.append("  ...")
                 break
             out.append(line[:400])
-        for t, table in enumerate(self.doc.tables[:5]):
-            first = " | ".join(c.text for c in table.rows[0].cells) if table.rows else ""
-            out.append(f"Table {t}: {len(table.rows)} rows; first row: {first[:200]}")
+        out.extend(self.table_lines())
         return "\n".join(out)
 
     def _anchor(self, op: dict[str, Any]):
@@ -779,7 +739,7 @@ class WordDoc:
 
 
 # ============================================================================ PowerPoint
-class Deck:
+class Deck(DeckExtras):
     kind = "pptx"
 
     def __init__(self, path: Path) -> None:
@@ -789,16 +749,16 @@ class Deck:
         self.prs = Presentation(str(path))
 
     def describe(self) -> str:
-        out = [f"PowerPoint {self.path.name}: {len(self.prs.slides)} slides."]
+        w, h = self._page()
+        out = [
+            f"PowerPoint {self.path.name}: {len(self.prs.slides)} slides, each {w:.2f} x {h:.2f} "
+            "inches. Positions (x, y) and sizes are inches from a slide's top left."
+        ]
         for i, slide in enumerate(self.prs.slides, 1):
-            texts = []
-            for s, shape in enumerate(slide.shapes):
-                if shape.has_text_frame and shape.text_frame.text.strip():
-                    kind = "title" if shape == slide.shapes.title else f"shape {s}"
-                    texts.append(f"{kind}: {shape.text_frame.text.strip()[:200]!r}")
-            out.append(
-                f"Slide {i} ({slide.slide_layout.name}): " + ("; ".join(texts) or "(no text)")
-            )
+            out.append(f"Slide {i} ({slide.slide_layout.name}):")
+            out.extend(self.shape_lines(slide) or ["  (nothing on it)"])
+            if slide.has_notes_slide and slide.notes_slide.notes_text_frame.text.strip():
+                out.append(f"  notes: {slide.notes_slide.notes_text_frame.text.strip()[:200]!r}")
         return "\n".join(out)
 
     def _slide(self, op: dict[str, Any]):
@@ -840,7 +800,7 @@ class Deck:
 
         layouts = self.prs.slide_layouts
         bullets = [str(b) for b in op.get("bullets") or []]
-        layout = (
+        layout = self._named_layout(op) or (
             layouts[1]
             if bullets and len(layouts) > 1
             else layouts[min(5, len(layouts) - 1)]
@@ -987,7 +947,7 @@ def _open_old(path: Path) -> Workbook | WordDoc | Deck:
 
 
 # ============================================================================ Google
-class GoogleSheet:
+class GoogleSheet(SheetExtras):
     """A Google Sheet, edited through the Sheets API (values with USER_ENTERED, so formulas work)."""
 
     kind = "gsheet"
@@ -1033,6 +993,7 @@ class GoogleSheet:
         out = [f"Google Sheet '{self.title}'. Tabs: {', '.join(self.grids)}."]
         for title, rows in self.grids.items():
             out.append(f"\nTab {title!r}: {len(rows)} rows.")
+            out.extend(self.chart_lines(title))
             idx = list(range(len(rows)))
             if len(idx) > max_rows:
                 idx = [*idx[: max_rows - 6], -1, *idx[-5:]]
@@ -1070,6 +1031,16 @@ class GoogleSheet:
         raise LedgerError(f"There's no column called {s!r}.")
 
     async def apply(self, op: dict[str, Any]) -> str:
+        """One edit. The wider set lives in ledger_google.SheetExtras (``x_<name>``); what
+        Ledger started with is below. The outline is read again after each, so the next edit
+        in the same batch (a chart, then moving it) sees what's there now."""
+        fn = getattr(self, f"x_{op.get('op')}", None)
+        out = await fn(op) if fn else await self._first_edits(op)
+        if fn or op.get("op") == "chart":
+            await self.load()
+        return out
+
+    async def _first_edits(self, op: dict[str, Any]) -> str:
         from openpyxl.utils import get_column_letter
 
         name = op.get("op")
@@ -1248,7 +1219,12 @@ class GoogleSheet:
                 spec = {
                     "title": chart_title,
                     "basicChart": {
-                        "chartType": "LINE" if kind == "line" else "COLUMN",
+                        "chartType": {
+                            "line": "LINE",
+                            "area": "AREA",
+                            "scatter": "SCATTER",
+                            "horizontal bar": "BAR",
+                        }.get(kind, "COLUMN"),
                         "legendPosition": "NO_LEGEND",
                         "headerCount": 1,
                         "domains": [{"domain": col(dc)}],
@@ -1258,6 +1234,9 @@ class GoogleSheet:
             # Right of everything shown there (the data and a pivot's cells), so nothing is covered.
             free = max([len(r) for r in shown] + [len(r) for r in rows]) + 1
             anchor = {"sheetId": sheet_id, "rowIndex": head, "columnIndex": free}
+            if op.get("at"):  # where they asked for it
+                at_row, at_col = cell_rc(op["at"])
+                anchor = {"sheetId": sheet_id, "rowIndex": at_row - 1, "columnIndex": at_col - 1}
             await self.google.sheets_batch(
                 self.id,
                 [
@@ -1272,32 +1251,6 @@ class GoogleSheet:
                 ],
             )
             return f"Added a {kind} chart of {value_name} by {label_name} on {title}"
-        if name == "format":
-            title, sheet_id, _ = self._tab(op.get("sheet"))
-            grid = _a1_grid(str(op.get("range") or "A1"), sheet_id)
-            fmt: dict[str, Any] = {}
-            fields = []
-            if op.get("bold") is not None:
-                fmt["textFormat"] = {"bold": bool(op["bold"])}
-                fields.append("userEnteredFormat.textFormat.bold")
-            if op.get("number_format"):
-                fmt["numberFormat"] = {"type": "NUMBER", "pattern": str(op["number_format"])}
-                fields.append("userEnteredFormat.numberFormat")
-            if not fields:
-                raise LedgerError("format needs bold or number_format.")
-            await self.google.sheets_batch(
-                self.id,
-                [
-                    {
-                        "repeatCell": {
-                            "range": grid,
-                            "cell": {"userEnteredFormat": fmt},
-                            "fields": ",".join(fields),
-                        }
-                    }
-                ],
-            )
-            return f"Formatted {op.get('range')} on {title}"
         if name == "add_sheet":
             title = str(op.get("name") or "Sheet")
             sheets = self.meta.get("sheets", [])
@@ -1351,20 +1304,7 @@ def _num(v: Any) -> float | None:
     return None
 
 
-def _a1_grid(a1: str, sheet_id: int) -> dict[str, Any]:
-    from openpyxl.utils.cell import range_boundaries
-
-    c1, r1, c2, r2 = range_boundaries(a1.upper())
-    return {
-        "sheetId": sheet_id,
-        "startRowIndex": r1 - 1,
-        "endRowIndex": r2,
-        "startColumnIndex": c1 - 1,
-        "endColumnIndex": c2,
-    }
-
-
-class GoogleDoc:
+class GoogleDoc(DocExtras):
     kind = "gdoc"
 
     def __init__(self, google: Any, doc_id: str) -> None:
@@ -1392,22 +1332,13 @@ class GoogleDoc:
 
     def describe(self, max_chars: int = 9000) -> str:
         out = [f"Google Doc '{self.title}'."]
-        size, i = 0, 0
+        size, i, t_no = 0, 0, 0
         for b in self.doc.get("body", {}).get("content", []):
             if "table" in b:  # where a table sits, between the numbered paragraphs
-                t = b["table"]
-                rows = t.get("tableRows", [])
-                first = [
-                    "".join(
-                        e.get("textRun", {}).get("content", "")
-                        for c in cell.get("content", [])
-                        for e in c.get("paragraph", {}).get("elements", [])
-                    ).strip()
-                    for cell in (rows[0].get("tableCells", []) if rows else [])
-                ]
-                filled = " | ".join(first) if any(first) else "empty"
-                line = f"    (a table here: {t.get('rows', len(rows))} rows x {t.get('columns', len(first))} columns; first row: {filled})"
-            elif "paragraph" in b:
+                t_no += 1
+                out.extend(self.table_lines(t_no, b))
+                continue
+            if "paragraph" in b:
                 p = b["paragraph"]
                 style = p.get("paragraphStyle", {}).get("namedStyleType", "")
                 text = "".join(
@@ -1422,6 +1353,12 @@ class GoogleDoc:
                 out.append("  ...")
                 break
             out.append(line[:400])
+        starts = [int(b.get("startIndex", 1)) for b in self._blocks()]
+        if 0 < len(starts) <= 120:  # for a raw edit, which speaks in indexes
+            out.append(
+                "Start index of each paragraph (only raw edits need these): "
+                + " ".join(f"[{n}]={at}" for n, at in enumerate(starts))
+            )
         return "\n".join(out)
 
     @staticmethod
@@ -1491,6 +1428,12 @@ class GoogleDoc:
         await self.load()  # indexes moved
 
     async def apply(self, op: dict[str, Any]) -> str:
+        """One edit. The wider set lives in ledger_google.DocExtras (``x_<name>``); what Ledger
+        started with is below."""
+        fn = getattr(self, f"x_{op.get('op')}", None)
+        return await fn(op) if fn else await self._first_edits(op)
+
+    async def _first_edits(self, op: dict[str, Any]) -> str:
         name = op.get("op")
         if name == "add_heading":
             level = max(1, min(int(op.get("level") or 1), 6))
@@ -1689,63 +1632,177 @@ class GoogleDoc:
         find = str(op.get("find") or "")
         if not find:
             raise LedgerError("format_text needs find (the words) or i (a paragraph number).")
-        out = []
-        for b in blocks:
-            elements = b["paragraph"].get("elements", [])
-            if not elements:
-                continue
-            text = "".join(e.get("textRun", {}).get("content", "") for e in elements)
-            base = int(elements[0].get("startIndex", b["startIndex"]))
-            hay, needle = (text, find) if find in text else (text.lower(), find.lower())
-            at = hay.find(needle)
-            while at >= 0:
-                out.append((base + at, base + at + len(find)))
-                at = hay.find(needle, at + len(find))
-        return out
+        return self._find(find)  # tables too
 
 
 # ============================================================================ the job
-EDITS = """Edits you can use (each is a JSON object with "file": <file number> and "op"):
-Excel (.xlsx) and Google Sheets:
-- {"op": "totals_row", "sheet"?: name, "columns"?: ["B", "Amount"], "function"?: "SUM"|"AVERAGE"|"COUNT"|"MAX"|"MIN", "label"?: "Total"}  (finds the number columns and the last row itself)
-- {"op": "pivot", "sheet"?: name, "group_by": column header or letter, "value"?: column, "agg": "sum"|"count"|"average", "target"?: "Pivot"}  (Google Sheets: beside the data, where they can see it; give "target" only when they asked for a new tab. Excel: on a new sheet)
-- {"op": "chart", "sheet"?: name, "labels": column, "values": column, "type": "bar"|"line"|"pie", "title"?: ".."}  (placed beside the data; repeated labels are summed)
+_SHEET_EDITS = """Spreadsheets (Excel .xlsx and Google Sheets). "sheet" names a tab and can be left out for the first one; a "range" can name its tab too ('Summary'!A1:B4). Columns are a header name or a letter. Prefer the high-level edits (totals_row, pivot) over hand-written cells, and write formulas, not hard-coded results, so the file stays live:
 - {"op": "set_cells", "sheet"?: name, "cells": {"B5": 120, "C5": "=B5*1.13"}}
 - {"op": "append_row", "sheet"?: name, "values": [..]}
-- {"op": "format", "sheet"?: name, "range": "A1:D1", "bold"?: true, "number_format"?: "$#,##0.00", "fill"?: "#FFF2CC"}
+- {"op": "totals_row", "sheet"?: name, "columns"?: ["B", "Amount"], "function"?: "SUM"|"AVERAGE"|"COUNT"|"MAX"|"MIN", "label"?: "Total"}  (finds the number columns and the last row itself)
+- {"op": "pivot", "sheet"?: name, "group_by": column, "value"?: column, "agg": "sum"|"count"|"average", "target"?: "Pivot"}  (Google Sheets: beside the data, where they can see it; give "target" only when they asked for a new tab. Excel: on a new sheet)
+- {"op": "chart", "sheet"?: name, "labels": column, "values": column, "type": "bar"|"horizontal bar"|"line"|"area"|"pie", "title"?: "..", "at"?: "H2"}  (beside the data unless "at" says where; repeated labels are summed)
+- {"op": "move_chart", "chart"?: its id or title from the outline, "to": "H2", "width"?: pixels, "height"?: pixels}  (no "chart": the newest one. A chart that's already there is moved, never added again)
+- {"op": "delete_chart", "chart"?: ..}
+- {"op": "edit_chart", "chart"?: .., "title"?: "..", "type"?: "bar"|"line"|"area"}
+- {"op": "format", "range": "A1:D1", "bold"?: true, "italic"?: true, "underline"?: true, "strikethrough"?: true, "size"?: 12, "font"?: "Arial", "color"?: "#1A73E8"|"red", "fill"?: "#FFF2CC"|"yellow", "number_format"?: "$#,##0.00", "align"?: "left"|"center"|"right", "valign"?: "top"|"middle"|"bottom", "wrap"?: true, "border"?: "all"|"outer"}
+- {"op": "conditional_format", "range": "C2:C50", "when": "greater than"|"less than"|"between"|"equals"|"not equal"|"contains"|"starts with"|"ends with"|"empty"|"not empty"|"formula"|"color scale", "value"?: 100, "value2"?: 200, "fill"?: "light red", "color"?: "red", "bold"?: true}
+- {"op": "sort", "by": column, "descending"?: true, "then_by"?: column, "range"?: "A2:D20"}  (the rows under the header unless a range is given)
+- {"op": "filter", "range"?: "A1:D20", "off"?: true}  (filter buttons on the header row)
+- {"op": "freeze", "rows"?: 1, "columns"?: 0}
+- {"op": "insert_rows", "at": 5, "count"?: 1}  and  {"op": "insert_columns", "at": "C", "count"?: 1}  (blank ones starting there; formulas follow the cells that move)
+- {"op": "delete_rows", "from": 5, "to"?: 7}  and  {"op": "delete_columns", "from": "C", "to"?: "D"}
+- {"op": "resize", "columns"?: "A:D", "width"?: pixels, "rows"?: "1:5", "height"?: pixels}  (no width or height: fit what's in them)
+- {"op": "merge", "range": "A1:D1", "unmerge"?: true}
+- {"op": "dropdown", "range": "E2:E50", "options": ["Yes", "No"]}
+- {"op": "clear", "range": "A2:D9", "what"?: "values"|"formats"|"all"}
+- {"op": "find_replace", "find": "..", "replace": "..", "sheet"?: name, "match_case"?: true, "whole_cell"?: true}
+- {"op": "copy", "from": "A1:C5", "to": "E1", "cut"?: true, "values_only"?: true}  ("cut" moves it)
+- {"op": "note", "cell": "B2", "text": ".."}
+- {"op": "remove_duplicates", "columns"?: [..]}  and  {"op": "trim"}  (strips stray spaces)
 - {"op": "add_sheet", "name": "Summary", "rows"?: [[..], [..]]}  (only when they ask for a new tab; sample or new data for an empty sheet is set_cells on it from A1)
-Excel only:
+- {"op": "rename_sheet", "sheet": name, "name": ".."}, {"op": "delete_sheet", "sheet": name}, {"op": "duplicate_sheet", "sheet": name, "name"?: ".."}, {"op": "hide_sheet", "sheet": name, "show"?: true}"""
+
+_EXCEL_ONLY = """Excel only:
 - {"op": "add_column", "sheet"?: name, "header": "Total", "formula": "=B{r}*C{r}"}  ({r} is each data row)
-- {"op": "make_table", "sheet"?: name}
-Word (.docx) and Google Docs ("after" is a paragraph number from the outline; leave it out for the end; "after": "start" puts it at the very top; text placed after an empty line fills that line):
+- {"op": "make_table", "sheet"?: name}"""
+
+_GSHEET_ONLY = """Google Sheets only:
+- {"op": "checkbox", "range": "A2:A20"}, {"op": "banding"}  (alternating row colours), {"op": "rename", "title": ".."}  (the file's name)
+- {"op": "raw", "requests": [..], "did": "<what it did, in a few plain words>"}  (anything else Sheets can do: Google Sheets API batchUpdate requests, such as addProtectedRange, addNamedRange, textToColumns, updateSheetProperties, addSlicer. Write a range as "A1:D5" and a sheetId as the tab's name; they're converted. Only when no edit above fits)"""
+
+_DOC_EDITS = """Documents (Word .docx and Google Docs). "after" is a paragraph number from the outline; leave it out for the end; "after": "start" puts it at the very top; text placed after an empty line fills that line. Tables are numbered from 1 and their cells are named like a spreadsheet's (A1 is the top left):
 - {"op": "add_heading", "text": "..", "level": 1, "after"?: 3}
 - {"op": "add_paragraph", "text": "..", "after"?: 3}
 - {"op": "add_bullets", "items": [".."], "numbered"?: false, "after"?: 3}
-- {"op": "replace_text", "find": "..", "replace": ".."}
-- {"op": "add_table", "rows": [["Header", ".."], ["..", ".."]], "after"?: 3}  (or "n_rows" and "n_cols" for an empty table of that size)
-- {"op": "set_style", "i": 4, "style": "Heading 2"|"Title"|"Subtitle"|"Normal"}
+- {"op": "set_text", "i": 4, "text": ".."}  (rewrites one paragraph)
+- {"op": "insert_text", "text": "..", "after_text": "words already there"}  (or "before_text")
+- {"op": "replace_text", "find": "..", "replace": ".."}  and  {"op": "delete_text", "find": ".."}
 - {"op": "delete_paragraph", "i": 4}
+- {"op": "set_style", "i": 4, "style": "Heading 2"|"Title"|"Subtitle"|"Normal"}
 - {"op": "format_text", "find"?: "exact words" | "i"?: 4, "bold"?: true, "italic"?: true, "underline"?: true, "strikethrough"?: true, "size"?: 14, "color"?: "#1A73E8"|"red", "highlight"?: "yellow", "font"?: "Arial", "link"?: "https://.."}  (find formats every place the words appear; i a whole paragraph)
 - {"op": "align", "i": 4, "align": "left"|"center"|"right"|"justify"}
+- {"op": "spacing", "i"?: 4, "from"?: 2, "to"?: 5, "line"?: 1.5, "before"?: 6, "after"?: 6, "indent"?: 0.5, "first_line"?: 0.5}  (no paragraph given: the whole document; before and after are points, indents inches)
+- {"op": "make_bullets", "from": 3, "to": 6, "numbered"?: true}  and  {"op": "remove_bullets", "from": 3, "to": 6}  (lines already there)
 - {"op": "page_break", "after"?: 3}
-PowerPoint (.pptx) (slides are numbered from 1):
-- {"op": "add_slide", "title": "..", "bullets"?: [".."], "after"?: 2, "notes"?: ".."}
+- {"op": "add_table", "rows": [["Header", ".."], ["..", ".."]], "after"?: 3}  (or "n_rows" and "n_cols" for an empty table of that size)
+- {"op": "set_table_cells", "table"?: 1, "cells": {"A1": "Saturday", "B1": "Sunday"}}  (or "row": 1, "values": [..] for one row, or "rows": [[..], [..]] with "start"?: "A1" for a block. This fills a table that's already there, and it grows if it needs more rows)
+- {"op": "add_table_row", "table"?: 1, "after"?: 2, "count"?: 1, "values"?: [..]}  (no "after": at the bottom; 0: at the top)
+- {"op": "add_table_column", "table"?: 1, "after"?: "B", "values"?: [..]}
+- {"op": "delete_table_row", "table"?: 1, "row": 3}, {"op": "delete_table_column", "table"?: 1, "column": "B"}, {"op": "delete_table", "table"?: 1}
+- {"op": "format_table", "table"?: 1, "range"?: "A1:E1", "fill"?: "light gray", "bold"?: true, "italic"?: true, "color"?: "red", "size"?: 11, "font"?: "Arial", "align"?: "center"}  (no range: the whole table)
+- {"op": "merge_cells", "table"?: 1, "range": "A1:B1"}
+- {"op": "add_image", "url": "https://..", "after"?: 3, "width"?: inches}  (Word: "path", a picture file on this PC, in place of "url")
+- {"op": "page_setup", "margin"?: 1.0, "margins"?: {"top": 1, "bottom": 1, "left": 1.25, "right": 1.25}, "orientation"?: "landscape"|"portrait", "size"?: "letter"|"a4"|"legal"}  (inches)
+- {"op": "header", "text": "..", "align"?: "center"}  and  {"op": "footer", "text": ".."}"""
+
+_GDOC_ONLY = """Google Docs only:
+- {"op": "make_bullets", "from": 3, "to": 6, "checklist": true}, {"op": "footnote", "after_text": "words already there", "text": ".."}, {"op": "rename", "title": ".."}  (the file's name)
+- format_table also takes "border_color", "border_width" (points) and "column_width" (inches)
+- {"op": "raw", "requests": [..], "did": "<what it did, in a few plain words>"}  (anything else Docs can do: Google Docs API batchUpdate requests, such as updateSectionStyle for columns or createNamedRange. They speak in indexes: the outline's last line has each paragraph's start. Requests run in order and each sees the indexes the one before left, so work from the end of the document backwards. Only when no edit above fits)"""
+
+_DECK_EDITS = """Slide decks (PowerPoint .pptx and Google Slides). Slides are numbered from 1. Everything on a slide has an id in the outline. x, y, w and h are inches from the slide's top left; leave them out and a new thing is centred. PowerPoint needs "slide" along with an "id":
+- {"op": "add_slide", "title"?: "..", "bullets"?: [".."], "subtitle"?: "..", "layout"?: "title"|"title and body"|"section"|"two columns"|"title only"|"blank", "after"?: 2, "notes"?: ".."}  ("after": 0 puts it first; no "after": last)
 - {"op": "set_title", "slide": 2, "text": ".."}
+- {"op": "set_text", "slide": 2, "which"?: "title"|"subtitle"|"body", "id"?: .., "text"?: "..", "bullets"?: [".."]}  (what the box says, replacing what was there)
 - {"op": "add_bullets", "slide": 2, "items": [".."], "replace"?: false}
+- {"op": "add_text_box", "slide": 2, "text": "..", "x"?: 1, "y"?: 1, "w"?: 4, "h"?: 1, "size"?: 18, "bold"?: true, "color"?: "red", "align"?: "center"}
+- {"op": "add_shape", "slide": 2, "shape": "rectangle"|"rounded rectangle"|"ellipse"|"triangle"|"diamond"|"arrow"|"star"|"heart"|"cloud", "fill"?: "blue", "text"?: "..", "x"?: 1, "y"?: 1, "w"?: 2, "h"?: 2}
+- {"op": "add_image", "slide": 2, "url": "https://..", "x"?: 1, "y"?: 1, "w"?: 4, "h"?: 3}  (PowerPoint: "path", a picture file on this PC, in place of "url")
+- {"op": "add_table", "slide": 2, "rows": [["Header", ".."], ["..", ".."]], "x"?: 1, "y"?: 2}  (or "n_rows" and "n_cols")
+- {"op": "set_table_cells", "slide": 2, "id"?: .., "cells": {"A1": ".."}}  (a table that's already there)
+- {"op": "format_text", "slide"?: 2, "id"?: .., "which"?: "title", "find"?: "exact words", "bold"?: true, "italic"?: true, "underline"?: true, "size"?: 24, "color"?: "#1A73E8", "font"?: "Arial", "link"?: "https://..", "align"?: "center"}  (find: those words wherever they are; otherwise the whole box)
+- {"op": "move", "slide": 2, "id": .., "x"?: 1, "y"?: 1, "w"?: 4, "h"?: 3, "center"?: true}  (moves or resizes; "which" works in place of "id")
+- {"op": "delete", "slide": 2, "id": ..}  (one thing on a slide)
 - {"op": "replace_text", "find": "..", "replace": ".."}
-- {"op": "delete_slide", "slide": 3}
+- {"op": "delete_slide", "slide": 3}, {"op": "duplicate_slide", "slide": 3}, {"op": "move_slide", "slide": 3, "to": 1}
+- {"op": "background", "slide"?: 2, "color": "#0B1F3A"}  (no slide: every slide)
 - {"op": "set_notes", "slide": 2, "text": ".."}"""
 
-SYSTEM = (
+_PPTX_ONLY = """PowerPoint only:
+- {"op": "add_chart", "slide": 2, "type": "bar"|"horizontal bar"|"line"|"pie"|"area", "categories": ["Q1", "Q2"], "series": {"Sales": [10, 20]}, "title"?: "..", "x"?: 1, "y"?: 1.5, "w"?: 8, "h"?: 4}"""
+
+_GSLIDES_ONLY = """Google Slides only:
+- {"op": "background", "slide"?: 2, "image": "https://.."}, {"op": "rename", "title": ".."}  (the file's name)
+- {"op": "raw", "requests": [..], "did": "<what it did, in a few plain words>"}  (anything else Slides can do: Google Slides API batchUpdate requests using the ids from the outline, such as createSheetsChart, createLine, createVideo, updateShapeProperties, groupObjects, updatePageElementsZOrder. Only when no edit above fits)"""
+
+_MENUS = (
+    ({"xlsx", "gsheet"}, _SHEET_EDITS),
+    ({"xlsx"}, _EXCEL_ONLY),
+    ({"gsheet"}, _GSHEET_ONLY),
+    ({"docx", "gdoc"}, _DOC_EDITS),
+    ({"gdoc"}, _GDOC_ONLY),
+    ({"pptx", "gslides"}, _DECK_EDITS),
+    ({"pptx"}, _PPTX_ONLY),
+    ({"gslides"}, _GSLIDES_ONLY),
+)
+_ALL_KINDS = {"xlsx", "gsheet", "docx", "gdoc", "pptx", "gslides"}
+
+
+def edits_for(kinds: set[str]) -> str:
+    """The edit menu for these kinds of file only: a Doc job isn't sent the spreadsheet edits."""
+    return (
+        'Edits you can use (each is a JSON object with "file": <file number> and "op"):\n'
+        + "\n".join(menu for wanted, menu in _MENUS if wanted & kinds)
+    )
+
+
+EDITS = edits_for(_ALL_KINDS)
+
+_SYSTEM = (
     "You are {name}, the documents specialist on the user's team. {persona} You edit spreadsheets, documents "
-    "and decks by returning precise edits; a program applies them exactly. Read the outline carefully: use the "
-    "real sheet names, column headers, cell addresses and paragraph numbers you see. Prefer the high-level edits "
-    "(totals_row, pivot) over hand-written cells. Write formulas, not hard-coded results, so the file stays live. "
-    "Use as few edits as the task needs, never invent data, and no em dashes in any text you write.\n\n"
-    + EDITS
-    + '\n\nReturn JSON only: {"edits": [..], "summary": "<one short sentence for the user>"}. If the task can\'t be '
+    "and decks by returning precise edits; a program applies them exactly, in order. You can do whatever a "
+    "person could do in these files by hand. Read the outline carefully: use the real sheet names, column "
+    "headers, cell addresses, paragraph numbers, table numbers and ids you see. Change what's already there "
+    "in place (fill the table that exists, move the chart that exists) and never add a second one. Use as "
+    "few edits as the task needs, never invent data, and no em dashes in any text you write.\n\n"
+)
+_ANSWER = (
+    '\n\nReturn JSON only: {"edits": [..], "summary": "<one short sentence for the user>"}. If the task can\'t be '
     'done on these files, return {"edits": [], "summary": "<why, in one sentence>"}.'
 )
+
+
+def system_for(kinds: set[str]) -> str:
+    return _SYSTEM + edits_for(kinds or _ALL_KINDS) + _ANSWER
+
+
+SYSTEM = system_for(_ALL_KINDS)
+
+_URL = re.compile(r"https?://[^\s\"'<>\\)]+", re.I)
+_LOADS = re.compile(r"(?i)\b(IMAGE|IMPORT[A-Z]*|WEBSERVICE)\s*\(")
+
+
+def fetched_from(edit: dict[str, Any], allowed: str) -> str:
+    """A web address this edit would make Google load that the user never mentioned, or "".
+
+    A picture placed by address (or an IMAGE or IMPORT formula) is fetched by Google the moment
+    it lands, so words planted in a document could have Ledger send that document's contents
+    out in the address. Ledger loads only from sites named in the task itself."""
+    op = str(edit.get("op") or "")
+    texts: list[str] = []
+    if op == "raw":
+        texts.append(json.dumps(edit.get("requests") or []))
+    elif op in ("add_image", "background"):
+        texts += [str(edit.get(k) or "") for k in ("url", "image")]
+
+    def formulas(node: Any) -> None:
+        if isinstance(node, dict):
+            for v in node.values():
+                formulas(v)
+        elif isinstance(node, list):
+            for v in node:
+                formulas(v)
+        elif isinstance(node, str) and node.startswith("=") and _LOADS.search(node):
+            texts.append(node)
+
+    formulas(edit)
+    for text in texts:
+        for url in _URL.findall(text):
+            host = re.sub(r"^https?://(www\.)?", "", url, flags=re.I).split("/")[0].split(":")[0].lower()
+            if host and host not in allowed:
+                return host
+    return ""
 
 
 @dataclass
@@ -1809,8 +1866,9 @@ async def run_ledger(
     prompt = f"Task: {task}\n\n{outline}"
     if context:
         prompt = f"Context from your teammates:\n{context[:4000]}\n\n{prompt}"
-    system = SYSTEM.replace("{name}", name).replace("{persona}", persona)
+    system = system_for({t.kind for t in targets}).replace("{name}", name).replace("{persona}", persona)
     result = LedgerResult()
+    allowed = f"{task}\n{context}".lower()  # the only web addresses an edit may load from
     changed: set[int] = set()
     tried = False
     pending = prompt
@@ -1837,6 +1895,10 @@ async def run_ledger(
             if progress:
                 await progress(f"{e.get('op', 'edit').replace('_', ' ')}")
             try:
+                if stray := fetched_from(e, allowed):
+                    raise LedgerError(
+                        f"I only load things from web addresses you gave me, and {stray} isn't one."
+                    )
                 result.changes.append(await _apply(target, e))
                 changed.add(index)
             except LedgerError as exc:

@@ -1,6 +1,6 @@
 {
   "name": "pyxi-desktop",
-  "version": "0.1.9",
+  "version": "0.1.11",
   "private": true,
   "description": "Pyxi desktop shell: transparent overlay, 3D explanation layer and control panel.",
   "main": "out/main/index.js",
@@ -61,6 +61,13 @@
       {
         "from": "build/python",
         "to": "python",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "build/browser-extension",
+        "to": "browser-extension",
         "filter": [
           "**/*"
         ]

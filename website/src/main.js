@@ -5,20 +5,33 @@ import "./demos.css";
 import "./motion.css";
 import "./sections.css";
 import "./doors.css";
+import "./story.css";
 import "@fontsource-variable/fraunces/wght.css";
 import { initDemos } from "./demos.js";
 import { initMotion } from "./motion.js";
 import { initCatalog } from "./catalog.js";
 import { Firefly } from "./firefly.js";
 import { initHero3D } from "./hero3d.js";
+import { initSwarm } from "./swarm.js";
+import { initStory } from "./story.js";
+import { initBuild3D } from "./build3d.js";
+import "./build3d.css";
 
 document.documentElement.classList.add("js");
 // Reduced motion keeps Pyxi calm: no typing, trail or sway, but it still answers and points.
 // ?motion=1 shows the full motion anyway (handy for demos on a PC with animations turned off).
-const forceMotion = new URLSearchParams(location.search).has("motion");
+// A visitor whose PC has animations off can also choose to play them here (the pill below); that
+// choice is remembered on this device.
+let chose = false;
+try {
+  chose = localStorage.getItem("pyxi-motion") === "1";
+} catch {
+  /* storage blocked: the choice just won't be remembered */
+}
+const prefersReduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const forceMotion = new URLSearchParams(location.search).has("motion") || chose;
 if (forceMotion) document.documentElement.classList.add("force-motion");
-const reduced =
-  !forceMotion && matchMedia("(prefers-reduced-motion: reduce)").matches;
+const reduced = !forceMotion && prefersReduced;
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -240,3 +253,35 @@ initMotion({ reduced });
 
 // ------------------------------------------------------------------ ask anything, the team, a day
 initCatalog({ reduced });
+
+// ------------------------------------------------------------------ the swarm and its story
+const swarm = initSwarm({ reduced });
+window.pyxi.swarm = swarm;
+initStory({ reduced, swarm });
+
+// ------------------------------------------------------------------ explained in 3D, live
+initBuild3D({ reduced });
+
+// ------------------------------------------------------------------ animations off on this PC?
+// Then say so, and offer to play them anyway. One click, remembered, and one click to undo.
+if (prefersReduced) {
+  const pill = document.createElement("button");
+  pill.type = "button";
+  pill.className = "motion-pill";
+  pill.innerHTML = reduced
+    ? "<i></i>Animations are off on this PC <b>Play them</b>"
+    : "<i></i>Animations on <b>Turn off</b>";
+  pill.addEventListener("click", () => {
+    try {
+      if (reduced) localStorage.setItem("pyxi-motion", "1");
+      else localStorage.removeItem("pyxi-motion");
+    } catch {
+      /* nothing to remember with */
+    }
+    const url = new URL(location.href);
+    url.searchParams.delete("motion");
+    if (reduced && !chose) url.searchParams.set("motion", "1"); // works even if storage is blocked
+    location.replace(url);
+  });
+  document.body.append(pill);
+}

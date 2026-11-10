@@ -49,6 +49,31 @@ export interface NoteCard {
   style?: "card" | "picture";
 }
 
+/** A named link on an answer card: a source ("RTINGS") or its one button ("Check on Amazon"). */
+export interface CardLink {
+  name: string;
+  url: string;
+}
+
+/**
+ * An answer card (src/pyxi/companion/notes.py AnswerCard): a pick with its price, up to three
+ * facts, its sources and one button; or a teammate's finished result, every line of it.
+ */
+export interface AnswerCard {
+  id: string;
+  kind: "answer" | "result";
+  title: string;
+  figure: string | null;
+  note: string | null;
+  facts: string[];
+  sources: CardLink[];
+  button: CardLink | null;
+  /** A data: address made by the brain from a real picture of the pick, when one was found. */
+  image: string | null;
+  agent: string | null;
+  ok: boolean;
+}
+
 export type Shape =
   | "box" | "sphere" | "cylinder" | "cone" | "torus" | "capsule" | "card" | "chip" | "screen"
   | "server" | "user" | "database" | "cloud";
@@ -340,6 +365,25 @@ export interface Grant {
   expires: number;
 }
 
+/** Pyxi in your browser: paired browsers and the sites Pyxi may act on (pyxi/browserlink.py). */
+export interface BrowserState {
+  connected: boolean;
+  browsers: { id: string; browser: string; connected: boolean; paired: number }[];
+  sites: { host: string; granted: number; expires: number }[];
+}
+
+/** Which browser Pyxi would put its extension into, and how (pyxi/companion/browsersetup.py). */
+export interface BrowserSetup {
+  browser: string; // "Chrome", "Edge", "Firefox"... or "" when none is open
+  key: string;
+  kind: "chromium" | "firefox" | "";
+  checked?: boolean; // the guided steps were checked in this browser
+  addon?: boolean | null; // Firefox: a signed add-on is published (null: not known yet)
+  notice?: string; // the line about the browser's developer mode notice
+  steps?: string[]; // the same thing by hand
+  running: boolean;
+}
+
 /** One line of the activity log (pyxi/audit.py). */
 export interface AuditEntry {
   id: string;
@@ -369,7 +413,8 @@ export type BrainEvent =
   | { type: "transcript"; text: string; seconds: number }
   | { type: "say"; agent: string; index: number; total: number; text: string; audio: string | null; duration_s: number; annotations: Annotation[]; notes?: number[] }
   | { type: "notes"; card: NoteCard }
-  | { type: "action"; kind: "open_url" | "copy" | "insert"; value: string }
+  | { type: "answer"; card: AnswerCard }
+  | { type: "action"; kind: "open_url" | "copy" | "insert" | "insert_table"; value: string }
   | { type: "alarm"; title: string; label: string; at: string }
   | { type: "job_ready"; job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null }
   | { type: "guide"; active: boolean; step?: number; total?: number | null; goal?: string; label?: string; action?: string; finished?: boolean; at?: [number, number] | null }
@@ -407,6 +452,7 @@ export type BrainEvent =
   | { type: "notice"; message: string }
   | { type: "private_apps"; apps: string[]; built_in: string[] }
   | { type: "grants"; grants: Grant[] }
+  | ({ type: "browser"; code?: string; expires_in?: number; setup?: BrowserSetup } & BrowserState)
   | { type: "audit"; entries: AuditEntry[] }
   | { type: "memories"; memories: MemoryItem[] }
   | { type: "beta"; ok: boolean; message: string }
@@ -455,6 +501,11 @@ export type ClientMessage =
   | { type: "file_access_get" }
   | { type: "private_apps_get" }
   | { type: "grants_get" }
+  | { type: "browser_get" }
+  | { type: "browser_pair" }
+  | { type: "browser_setup"; browser: string }
+  | { type: "browser_forget"; id: string }
+  | { type: "browser_site_revoke"; host: string }
   | { type: "audit_get" }
   | { type: "stop_everything" }
   | { type: "memories_get" }
@@ -471,6 +522,7 @@ export type ClientMessage =
   | { type: "ptt_cancel" }
   | { type: "audio"; data: string; mime: string }
   | { type: "dictate"; data: string; mime: string }
+  | { type: "dictating"; on: boolean }
   | { type: "interrupt" }
   | { type: "answer"; request_id: string; value: unknown }
   | { type: "job_control"; job_id: string; action: string; text?: string }

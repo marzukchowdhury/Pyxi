@@ -7,7 +7,9 @@
 import "./features.css";
 
 if (document.body.classList.contains("page-features")) {
-  const forceMotion = new URLSearchParams(location.search).has("motion");
+  const forceMotion =
+    new URLSearchParams(location.search).has("motion") ||
+    document.documentElement.classList.contains("force-motion");
   const reduced =
     !forceMotion && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const wall = document.getElementById("wall");
