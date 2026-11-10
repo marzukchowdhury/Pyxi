@@ -55,7 +55,7 @@ from urllib.parse import urlsplit
 
 from otto.llm.base import Message, TextPart, ToolSpec
 
-from pyxi import safety
+from pyxi import safety, screenlink  # screenlink: the tab on screen, with no extension
 from pyxi.browserlink import BrowserError, BrowserLink, host_of, site_of
 from pyxi.companion import browsersetup  # getting the extension installed
 from pyxi.companion.actions import safe_url
@@ -581,10 +581,11 @@ class TabOperator:
 
     def _same_site(self, site: str) -> bool:
         """Is the task still on the site it started on? A page that moved from http to https
-        on the same host is the same site, made safer."""
+        on the same host is the same site, made safer; and a site and its exact "www." form
+        (example.com, www.example.com) are one place, as a bare address is sent on to it."""
         if site == self.home:
             return True
-        if self.home == f"http://{site}":
+        if self.home == f"http://{site}" or screenlink.same_place(site) == screenlink.same_place(self.home):
             if self.home in self._allowed:
                 self._allowed.add(site)
             self.home = site
@@ -763,7 +764,7 @@ class TabOperator:
         for _ in range(2):
             try:
                 res = await self.llm.complete(
-                    system=SYSTEM + safety.RULE,
+                    system=SYSTEM + getattr(self.link, "note", "") + safety.RULE,  # screenlink's limits
                     messages=[Message("user", parts)],
                     tools=[ACT, DONE, ASK],
                     max_tokens=2000,
@@ -996,10 +997,15 @@ class TabOperator:
                 return line, f"failed: the browser hasn't let Pyxi into {exc.host or 'that site'} yet"
             return line, f"failed: {_plain(str(exc))}"
         self._last = result
+        unpressed = name == "type" and result.get("enter") is False  # the text is in, the key was refused
+        if unpressed:
+            line = line.removesuffix(" and pressed Enter") + ", but Enter could not be pressed"
         await self.report(line, "status" if quiet else "clicked")
         note = ""
         if name == "type" and "value" in result and _as_shown(result["value"]) != _as_shown(args.get("text")):
             note = f"the field now shows \"{_quoted(result['value'])}\", not what you typed"
+        if unpressed:
+            note = (note + " Enter was not pressed: click the page's own button instead.").strip()
         if name == "scroll" and result.get("moved") is False:
             note = "the page didn't scroll: that's the end"
         if result.get("covered"):
@@ -1098,17 +1104,22 @@ def setup(brain: Brain) -> None:
 
 
 def tools(brain: Brain) -> list[ToolSpec]:
-    """The tab tools while a browser is connected; while none is, the one tool that sets the
-    extension up when they ask for it."""
-    link = getattr(brain, "browser", None)
-    if link is None:
-        return []
-    if link.connected:
-        return list(SPECS)
+    """The tab tools while a browser is connected (or, with the fallback switched on, for
+    the tab on screen); and while no extension is connected, the one tool that sets it up
+    when they ask for it."""
+    extension = getattr(brain, "browser", None)
+    link = screenlink.choose(brain)  # the extension, else the tab on screen (pyxi/screenlink.py)
+    specs = screenlink.specs(link, SPECS) if link is not None else []
     # Only in a turn whose own words are about the browser. Offered in every turn, one more
     # tool was enough to change what the model did with requests that have nothing to do
     # with it (live: "What's this about?" lost its cue card four times in five).
-    return [browsersetup.CONNECT] if _ABOUT_BROWSER.search(getattr(brain, "_user_text", "") or "") else []
+    if (
+        extension is not None
+        and not extension.connected
+        and _ABOUT_BROWSER.search(getattr(brain, "_user_text", "") or "")
+    ):
+        specs.append(browsersetup.CONNECT)
+    return specs
 
 
 _ABOUT_BROWSER = re.compile(
@@ -1121,8 +1132,8 @@ def prompt(brain: Brain) -> str:
     """The routing lines for the system prompt, only while a browser is connected."""
     from pyxi.companion import prompts
 
-    link = getattr(brain, "browser", None)
-    return prompts.BROWSER_TAB if link is not None and link.connected else ""
+    link = screenlink.choose(brain)  # the extension, else the tab on screen
+    return screenlink.prompt(link, prompts.BROWSER_TAB) if link is not None else ""
 
 
 async def stop(brain: Brain) -> bool:
@@ -1135,6 +1146,7 @@ async def stop(brain: Brain) -> bool:
             brain._tab_operator = None  # its task is about to be cancelled before it starts
     if link is not None and link.connected:
         await link.stop()
+    await screenlink.stop(brain)  # and whatever is being done in the tab on screen
     return op is not None
 
 
@@ -1171,10 +1183,10 @@ def _prefer(brain: Brain) -> str:
 
 
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
-    link: BrowserLink | None = getattr(brain, "browser", None)
-    if name == "connect_browser" and link is not None:
+    if name == "connect_browser" and getattr(brain, "browser", None) is not None:
         return await browsersetup.connect(brain, args)
-    if link is None or not link.connected:
+    link: Any = screenlink.choose(brain)  # the extension, else the tab on screen, else None
+    if link is None:
         return (
             f"{name}: Pyxi's browser extension isn't connected, so this can't be done in their "
             "tab. Tell them in one short line (Settings has 'Connect your browser'), or use "
@@ -1373,7 +1385,7 @@ async def _work(
             "Pyxi works inside that tab, signed in as you, without your mouse. Press Esc in "
             "the tab to stop it. Anything that sends, submits, buys, deletes or posts asks "
             "you again."
-            + (' "Always allow on this site" lasts 30 days.' if keep else ""),
+            + (f' "Always allow on this site" {getattr(link, "always_lasts", "lasts 30 days")}.' if keep else ""),
             **({"always": "Always allow on this site"} if keep else {}),
         )
         if ok == "always" and keep:
