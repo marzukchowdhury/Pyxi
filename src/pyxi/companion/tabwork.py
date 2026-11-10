@@ -1356,7 +1356,7 @@ async def _work(
             "Pyxi works inside that tab, signed in as you, without your mouse. Press Esc in "
             "the tab to stop it. Anything that sends, submits, buys, deletes or posts asks "
             "you again."
-            + (' "Always allow on this site" lasts 30 days.' if keep else ""),
+            + (f' "Always allow on this site" {getattr(link, "always_lasts", "lasts 30 days")}.' if keep else ""),
             **({"always": "Always allow on this site"} if keep else {}),
         )
         if ok == "always" and keep:

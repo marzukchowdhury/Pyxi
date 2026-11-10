@@ -182,7 +182,9 @@ class Window:
     title: str
     exe: str  # "chrome.exe"
     minimised: bool = False
-    private: bool = False  # an Incognito, InPrivate or Private Browsing window
+    # An Incognito, InPrivate or Private Browsing window. None: not known yet (it takes a
+    # look at the browser's own toolbar, which is only done on the worker).
+    private: bool | None = False
 
 
 @dataclass
@@ -246,9 +248,13 @@ class Driver:
     def has_children(self, handle: Any) -> bool:
         return False
 
-    def inner_text(self, handle: Any) -> str:
-        """The words inside an element now (for one that has no name of its own)."""
-        return ""
+    def subtree(self, handle: Any) -> El | None:
+        """An element with what is inside it now (for one that has no name of its own)."""
+        return None
+
+    def is_private(self, hwnd: int) -> bool | None:
+        """Is this a private window? None when it can't be told, which is treated as yes."""
+        return None
 
     def focused(self, doc: tuple[int, ...]) -> El | None:
         """The element that has the keyboard, if it is inside that document; else None."""
@@ -371,11 +377,15 @@ _GENERIC = {"Group", "Pane", "Image", "Custom", "DataItem", "ListItem", "HeaderI
 _CLICK_PATTERNS = ("Invoke", "Toggle", "SelectionItem", "ExpandCollapse")
 
 
-def _inner_text(el: El, limit: int = 90) -> str:
+def _inner_text(el: El, limit: int = 90, page_url: str = "") -> str:
+    """The words inside an element. With ``page_url``, never the words of a frame that
+    belongs to another site: what a label says must not come from there."""
     out: list[str] = []
     stack = list(reversed(el.children))
     while stack and sum(len(o) for o in out) < limit:
         node = stack.pop()
+        if page_url and foreign_frame(node, page_url):
+            continue
         if node.role == "Text" and not node.children and node.name.strip():
             out.append(node.name)
         stack.extend(reversed(node.children))
@@ -418,12 +428,38 @@ def unclear_beside_password(el: El, visible: set[str]) -> bool:
     return not el.name.strip() or el.named_by == "hint" or _as_label(el.name) not in visible
 
 
+UNPLACED = "an address Pyxi can't place"
+
+
+def frame_site(address: str) -> str:
+    """The site a frame's address belongs to, or "" when that can't be told (no address,
+    about:blank, about:srcdoc, data:). A blob: address belongs to the site named in it."""
+    address = (address or "").strip()
+    if address[:5].lower() == "blob:":
+        address = address[5:]
+    return site_of(address)
+
+
 def foreign_frame(el: El, page_url: str) -> str:
-    """The site of a frame that belongs to another site than the page, or ""."""
-    if el.role != "Document":
+    """For the document of a frame that is not the page's own: whose it is. "" for anything
+    else. A frame is the page's own only when its site is known and is the page's site;
+    one whose address says nothing is treated as somebody else's."""
+    if el.role != "Document" or "Value" not in el.patterns:
+        return ""  # not a frame's document (Chrome wraps each in an element that has no address)
+    site = frame_site(el.value)
+    if site and site == site_of(page_url):
         return ""
-    site = site_of(el.value or "")
-    return site if site and site != site_of(page_url) else ""
+    return site or UNPLACED
+
+
+def in_foreign_frame(frames: tuple[str, ...], page_url: str) -> str:
+    """The same question for an element looked at again before an action, from the
+    addresses of the frames it sits in."""
+    for address in frames:
+        site = frame_site(address)
+        if not site or site != site_of(page_url):
+            return site or UNPLACED
+    return ""
 
 
 def kind_of(el: El) -> str:
@@ -512,6 +548,10 @@ def outline(
             with_password.add(id(scope))
         if el.role == "Text" and not el.children and el.name.strip():
             visible.add(_as_label(el.name))
+        elif el.children and el is not snap.root:
+            # A label written in pieces ("Your" + a bold "email", "Company" + "(optional)")
+            # is the words of the element that holds the pieces.
+            visible.add(_as_label(_inner_text(el, 160, snap.doc.url)))
         for child in el.children:
             find_passwords(child, scope)
 
@@ -543,7 +583,8 @@ def outline(
         secret = private_kind(el, was_password(el))
         if not secret and kind in ("text field", "text area") and id(scope) in with_password:
             secret = "unclear" if unclear_beside_password(el, visible) else ""
-        item: dict[str, Any] = {"kind": kind, "label": shown_label(el, kind, secret, _inner_text(el))}
+        inner = _inner_text(el, 90, snap.doc.url)
+        item: dict[str, Any] = {"kind": kind, "label": shown_label(el, kind, secret, inner)}
         if secret:
             # Listed so Pyxi knows it's there and leaves it to the user; its value is never read.
             item["sensitive"] = secret
@@ -566,7 +607,7 @@ def outline(
             if el.value:
                 item["value"] = hide_numbers(_clean(el.value, 120))
         elif kind == "editable text":
-            text = _inner_text(el, 120)
+            text = _inner_text(el, 120, snap.doc.url)
             if text:
                 item["value"] = hide_numbers(text)
         elif el.checked is not None:
@@ -764,18 +805,21 @@ class ScreenLink:
         *,
         keys: bool = True,
         settle_s: float = 8.0,
-        read_gate: Callable[[str, str], Awaitable[Any]] | None = None,
+        read_gate: Callable[[str, str, bool], Awaitable[Any]] | None = None,
     ) -> None:
         self.driver = driver
         self.base = base
         self.keys = keys
-        # Asked before a site is read for the first time: (site, the tab's title) -> may
-        # Pyxi read it? With the extension the user chooses the sites in the browser; here
-        # this is that choice. None (tests, the measuring script on its own pages) reads
-        # without asking.
+        # Asked before a site is read for the first time: (site, the tab's title, whether
+        # this is a task that will also click and type there) -> True, False, or None when
+        # nobody answered. With the extension the user chooses the sites in the browser;
+        # here this is that choice, and for a task the one yes covers working there too.
+        # None (tests, the measuring script on its own pages) reads without asking.
         self.read_gate = read_gate
-        self._may_read: set[str] = set()  # sites they let Pyxi read, until Pyxi is closed
-        self._always: set[str] = set()  # sites they chose "Always allow" for, until Pyxi is closed
+        self._may_read: set[str] = set()  # sites they let Pyxi read, until Pyxi restarts
+        self._may_act: set[str] = set()  # sites they chose "Always allow" for, until Pyxi restarts
+        self._for_task: dict[str, set[str]] = {}  # task -> sites they said it may read and work in
+        self._task = ""  # the task whose requests are coming in
         self._declined: dict[str, float] = {}
         self.open_wait_s = 20.0  # how long an address handed to the browser gets to show up
         self.enabled = True
@@ -797,15 +841,20 @@ class ScreenLink:
     def connected(self) -> bool:
         return self.enabled and self.driver.available()
 
+    # What tabwork's own card says of "Always allow on this site" when this link is the
+    # one in use: nothing here is kept on disk or listed in Settings.
+    always_lasts = "lasts until Pyxi restarts"
+
     def site_allowed(self, site: str) -> bool:
-        # Its own list, kept in memory until Pyxi is closed. A site allowed under the
-        # extension is not thereby allowed here (nor the other way): what the user said yes
-        # to there was the extension, working in a site the browser let it into.
-        return site in self._always
+        # Its own lists, kept in memory. A site allowed under the extension is not thereby
+        # allowed here (nor the other way): what the user said yes to there was the
+        # extension, working in a site the browser let it into.
+        site = same_place(site)
+        return site in self._may_act or site in self._for_task.get(self._task, ())
 
     def allow_site(self, site: str) -> None:
-        self._always.add(site)
-        self._may_read.add(site)
+        self._may_act.add(same_place(site))
+        self._may_read.add(same_place(site))
 
     def public(self) -> dict[str, Any]:
         return self.base.public() if self.base is not None else {"connected": False, "browsers": [], "sites": []}
@@ -817,15 +866,16 @@ class ScreenLink:
         """The browser window to work in (as "w<handle>"): the one in front if it is a
         browser, else the one under the mouse, else the browser window nearest the top (of
         the browser named by ``prefer``, when there is one). "" when there is none."""
-        windows = [
-            w for w in self.driver.windows() if not w.minimised and not w.private and not self.driver.is_own(w.hwnd)
-        ]
-        if not windows:
-            return ""
+        windows = [w for w in self.driver.windows() if not w.minimised and not self.driver.is_own(w.hwnd)]
         by_handle = {w.hwnd: w for w in windows}
         for hwnd in (self.driver.foreground(), self.driver.under_mouse()):
             if hwnd in by_handle:
+                # Even a private window: it is the one they are in, so it is the one that
+                # is answered for (with a plain no), not some other window behind it.
                 return f"w{hwnd}"
+        windows = [w for w in windows if w.private is not True]
+        if not windows:
+            return ""
         want = prefer.lower()
         for w in windows:
             name = BROWSERS[w.exe][0].lower()
@@ -849,26 +899,43 @@ class ScreenLink:
             raise BrowserError("not_connected", "Working in the tab on screen is switched off.")
         if getattr(self, f"_cmd_{name}", None) is None:
             raise BrowserError("failed", "That can't be done without Pyxi's browser extension.")
+        if run:
+            self._task = run
+            for old in list(self._for_task)[:-8]:
+                self._for_task.pop(old, None)
         for _ in range(3):
             try:
                 return await self._once(name, dict(args or {}), run, timeout, prefer, browser)
             except _NeedsAllow as need:
                 # The card is shown from here, outside the request's own time limit.
-                if not await self._ask_to_read(need):
+                answer = await self._ask_to_read(need, run)
+                if answer is None:
+                    raise BrowserError(
+                        "failed",
+                        f"They haven't answered whether Pyxi may read {need.site}, so it wasn't read. "
+                        "Ask them again if they still want it.",
+                    ) from None
+                if not answer:
                     raise BrowserError(
                         "failed",
                         f"They said no to Pyxi reading {need.site}. Don't ask again: answer from what you have.",
                     ) from None
         raise BrowserError("failed", "That tab keeps moving to other sites, so it wasn't read.")
 
-    async def _ask_to_read(self, need: _NeedsAllow) -> bool:
+    async def _ask_to_read(self, need: _NeedsAllow, run: str) -> bool | None:
+        """True, False (they said no), or None (nobody answered: not a no)."""
         if self.read_gate is None:
             return False
         if time.monotonic() - self._declined.get(need.site, -1e9) < 120:
             return False  # they said no a moment ago: not asked again straight away
-        if await self.read_gate(need.site, need.title):
-            self._may_read.add(need.site)
+        answer = await self.read_gate(need.site, need.title, bool(run))
+        if answer:
+            self._may_read.add(same_place(need.site))
+            if run:  # for a task, the one yes is for reading the site and working in it
+                self._for_task.setdefault(run, set()).add(same_place(need.site))
             return True
+        if answer is None:
+            return None
         self._declined[need.site] = time.monotonic()
         return False
 
@@ -1015,7 +1082,15 @@ class ScreenLink:
             raise BrowserError("browser_page", "That's one of Pyxi's own windows, which it never touches.")
         for w in self.driver.windows():
             if w.hwnd == hwnd:
-                if w.private:
+                private = w.private if w.private is not None else self.driver.is_private(hwnd)
+                if private is None:
+                    # It couldn't be told (the browser didn't answer): not read on a guess.
+                    raise BrowserError(
+                        "browser_page",
+                        "Pyxi couldn't tell whether that is a private window, so it left it alone. "
+                        "Try again in a moment.",
+                    )
+                if private:
                     raise BrowserError(
                         "browser_page",
                         "That's a private window (Incognito, InPrivate, Private Browsing). Pyxi "
@@ -1025,6 +1100,12 @@ class ScreenLink:
                     raise self._not_showing("the window is minimised")
                 return w
         raise BrowserError("gone", "That browser window was closed.")
+
+    def _usable(self, w: Window) -> bool:
+        if self.driver.is_own(w.hwnd):
+            return False
+        private = w.private if w.private is not None else self.driver.is_private(w.hwnd)
+        return private is False
 
     def _not_showing(self, why: str) -> BrowserError:
         self.last_trouble = why  # for the logs and the measuring script
@@ -1084,7 +1165,7 @@ class ScreenLink:
     # ------------------------------------------------------------------ reading
     def _may_read_site(self, doc: Doc) -> None:
         site = site_of(doc.url)
-        if self.read_gate is not None and site not in self._may_read:
+        if self.read_gate is not None and same_place(site) not in self._may_read:
             raise _NeedsAllow(site, doc.title)
 
     def _cmd_peek(self, args: dict[str, Any], job: _Job, hint: str) -> dict[str, Any]:
@@ -1104,6 +1185,20 @@ class ScreenLink:
             return {"tabs": [], "unnamed": 0}
 
     def _cmd_read(self, args: dict[str, Any], job: _Job, hint: str) -> dict[str, Any]:
+        for _ in range(3):
+            page = self._read_once(args, hint)
+            hwnd = int(page["tab"]["id"])
+            # A page can move on while it is being read (the look takes a moment): what was
+            # read is only given out if the tab still holds that document.
+            now = self.driver.document(hwnd)
+            read = self._reads.get(hwnd)
+            if now is not None and read is not None and now.rid == read.doc and site_of(now.url) == site_of(read.url):
+                return page
+            self._reads.pop(hwnd, None)
+            time.sleep(0.3)
+        raise BrowserError("failed", "That tab keeps moving to other pages, so it wasn't read.")
+
+    def _read_once(self, args: dict[str, Any], hint: str) -> dict[str, Any]:
         hwnd = self._handle(args.get("tab"), hint)
         max_chars = min(20000, max(200, int(args.get("max_chars") or 4000)))
         max_items = min(200, max(1, int(args.get("max_items") or 90)))
@@ -1195,13 +1290,13 @@ class ScreenLink:
         if now is None:
             # Outside the document, or gone from it: never acted on.
             raise BrowserError("gone", "That element isn't on the page any more.")
-        for address in now.frames:
-            other = site_of(address)
-            if other and other != site_of(doc.url):
-                # A frame that now belongs to another site: the Allow was for this one.
-                raise BrowserError(
-                    "gone", f"That is inside a frame from {other} now, which isn't part of the page Pyxi read."
-                )
+        other = in_foreign_frame(now.frames, doc.url)
+        if other:
+            # A frame that now belongs to another site (or to nobody it can name): the Allow
+            # was for this one.
+            raise BrowserError(
+                "gone", f"That is inside a frame from {other} now, which isn't part of the page Pyxi read."
+            )
         now.handle = was.handle
         kind = str(item.get("kind") or "")
         secret = str(item.get("sensitive") or "") or private_kind(
@@ -1209,8 +1304,11 @@ class ScreenLink:
         )
         # The words, worked out the way they were when the page was read: for an element with
         # no name of its own that means the words inside it, as they are now.
-        nameless = not (now.name or now.help) and now.role not in _FIELDS
-        label = shown_label(now, kind, secret, self.driver.inner_text(was.handle) if nameless else "")
+        inner = ""
+        if not (now.name or now.help) and now.role not in _FIELDS:
+            inside = self.driver.subtree(was.handle)
+            inner = _inner_text(inside, 90, doc.url) if inside is not None else ""
+        label = shown_label(now, kind, secret, inner)
         if args.get("label") is not None and str(args["label"]) != label:
             raise BrowserError("gone", "That element isn't what it was when the page was read. Read it again.")
         if secret:
@@ -1347,9 +1445,11 @@ class ScreenLink:
                     undone = False
                 if undone:
                     raise BrowserError("failed", f"{exc} Nothing was typed.") from None
-                raise BrowserError(
-                    "failed", f"{exc} The text is in the field, but Enter was not pressed.", unanswered=True
-                ) from None
+                # It couldn't be put back: the text is in the field. That is reported as
+                # typed, not as a failure, because tabwork keeps what Pyxi typed (for the
+                # activity log and for the card before anything is sent) only for typing
+                # that succeeded. Enter was not pressed; the page not changing says so.
+                log.warning("screen tab: the text stayed in the field and Enter was not pressed (%s)", exc)
         return self._after(hwnd, doc, args.get("settle"), out)
 
     def _cmd_select(self, args: dict[str, Any], job: _Job, hint: str) -> dict[str, Any]:
@@ -1484,10 +1584,7 @@ class ScreenLink:
             self._focus(hwnd, doc, el, job)
         else:
             where = self.driver.focused(doc.rid)
-            inside = where is not None and not any(
-                site_of(f) and site_of(f) != site_of(doc.url) for f in where.frames
-            )
-            if not inside:
+            if where is None or in_foreign_frame(where.frames, doc.url):
                 raise BrowserError(
                     "failed",
                     "The cursor isn't in the page right now (it may be in the address bar or in one "
@@ -1562,7 +1659,13 @@ class ScreenLink:
         def showing() -> dict[int, Doc | None]:
             # It opens as a new tab of the window that browser used last: normally this one.
             found: dict[int, Doc | None] = {}
-            for candidate in [hwnd, *[w.hwnd for w in self.driver.windows() if w.exe == window.exe and w.hwnd != hwnd]]:
+            others = [
+                w.hwnd
+                for w in self.driver.windows()
+                # The same windows pick() would take: not private ones, not Pyxi's own.
+                if w.exe == window.exe and w.hwnd != hwnd and not w.minimised and self._usable(w)
+            ]
+            for candidate in [hwnd, *others]:
                 try:
                     found[candidate] = self.driver.document(candidate)
                 except Exception:
@@ -1584,6 +1687,9 @@ class ScreenLink:
                 if doc is None or doc.busy or not doc.rid or not host_of(doc.url) or doc.rid == before.get(candidate):
                     continue
                 if host_of(doc.url) == want:
+                    # tabwork asked them about this site before it asked for the address
+                    # (it never opens one without), so reading it is covered.
+                    self._may_read.add(same_place(site_of(url)))
                     return self._brief(candidate, doc)
                 # It loaded somewhere else (the bare address sent it to www., or to a sign-in
                 # page): given a moment in case it is still on its way, then reported as what
@@ -1658,23 +1764,57 @@ def fallback(brain: Any) -> ScreenLink | None:
     return link if link.connected else None
 
 
-def _read_card(brain: Any) -> Callable[[str, str], Awaitable[Any]]:
-    """The card shown the first time a site would be read without the extension."""
+def same_place(site: str) -> str:
+    """A site without a leading "www.": example.com and www.example.com are one place to
+    ask about, not two."""
+    scheme, sep, host = site.rpartition("://")
+    return f"{scheme}{sep}{host[4:] if host.startswith('www.') else host}"
 
-    async def ask(site: str, title: str) -> Any:
+
+def _read_card(brain: Any) -> Callable[[str, str, bool], Awaitable[Any]]:
+    """The card shown the first time a site would be read without the extension. For a task
+    (use_tab) the one card is for reading the site and working in it."""
+
+    async def ask(site: str, title: str, for_task: bool) -> Any:
+        page = _clean(title, 60).replace(chr(34), chr(39))
+        if for_task:
+            action = f"Let Pyxi read and work in {site} in your browser?"
+            reason = (
+                "No browser extension is connected, so Pyxi would work in the page that is showing "
+                f'in your browser ("{page}"): read its text and what is in its fields (never '
+                "passwords or card details), and click and type there for this task, without your "
+                "mouse. Anything that sends, submits, buys, deletes or posts asks you again."
+            )
+        else:
+            action = f"Let Pyxi read {site} in your browser?"
+            reason = (
+                "No browser extension is connected, so Pyxi would read the page that is showing "
+                f'in your browser ("{page}"): its text, and what is in its fields, never passwords '
+                "or card details. This lasts until Pyxi restarts. It asks again before it clicks or "
+                "types anything there."
+            )
         return await brain.hub.request(
-            "confirm",
-            timeout=300,
-            job_id="",
-            agent="Pyxi",
-            action=f"Let Pyxi read {site} in your browser?",
-            reason="No browser extension is connected, so Pyxi would read the page that is showing "
-            f'in your browser ("{_clean(title, 60).replace(chr(34), chr(39))}"): its text, and what is in '
-            "its fields, never passwords or card details. This lasts until you close Pyxi. It "
-            "asks again before it clicks or types anything there.",
+            "confirm", timeout=300, job_id="", agent="Pyxi", action=action, reason=reason
         )
 
     return ask
+
+
+def _watch_extension(brain: Any) -> None:
+    """Know when the extension's connection was last alive: every time it connects or goes
+    away (the bridge says so through ``on_change``), not only when a tool happened to look."""
+    link = getattr(brain, "browser", None)
+    if link is None or getattr(link, "_screen_tab_watching", False):
+        return
+    link._screen_tab_watching = True
+    told = link.on_change
+
+    async def changed() -> None:
+        brain._tab_extension_seen = time.monotonic()
+        if told is not None:
+            await told()
+
+    link.on_change = changed
 
 
 def choose(brain: Any) -> Any:
@@ -1684,6 +1824,7 @@ def choose(brain: Any) -> Any:
     screen: someone who uses the extension isn't moved to the other way of working, with
     its other rules, by a blink."""
     link = getattr(brain, "browser", None)
+    _watch_extension(brain)
     if link is not None and link.connected:
         brain._tab_extension_seen = time.monotonic()
         return link
@@ -1755,24 +1896,42 @@ _NOT_THE_PAGE = {50018, 50019, 50021, 50010, 50009, 50037}  # Tab, TabItem, Tool
 # them is their value): not asked for, which keeps a look at a big page short.
 _NO_CHILDREN = {"Edit", "Spinner", "Image", "Separator", "ScrollBar", "Slider", "ProgressBar", "Thumb", "CheckBox", "RadioButton"}
 _NAME_IS_ENOUGH = {"Button", "Hyperlink", "MenuItem", "TabItem"}
-# What marks a private window, in the browser's own shell (never in the page): Chrome and
-# Edge end the name of their root view with it, Edge also writes it in the title, Firefox
-# ends its title with it and has a button for it whose class is the same in every language.
-_PRIVATE_NAME = re.compile(
-    r"\((incognito|inprivate|inkognito|inc[oó]gnito|navigation priv[ée]e|privat\w*|ছদ্মবেশী)\)\s*$"
-    r"|\[inprivate\]"
-    r"|(private browsing|navigation priv[ée]e|privater modus|navegaci[oó]n privada|navega[cç][aã]o privada)\s*$",
-    re.I,
-)
-_PRIVATE_ID = re.compile(r"private-browsing-indicator|reset-pbm-toolbar-button", re.I)
+# What marks a private window. Looked for in the browser's own shell only (a page has no
+# say in it), and nothing here depends on the language the browser is shown in:
+# - Chrome, Edge and their kin name their root view after the window, and for a private (or
+#   guest) window they put a bracketed word after the browser's name: "... - Google Chrome
+#   (Incognito)", the same in Russian, in Japanese with full-width brackets, "... Microsoft
+#   Edge (InPrivate)".
+#   The window's own title never ends that way. Verified in Chrome and Edge with the display
+#   language set to English, Russian and Japanese.
+# - Firefox has a button for it in its toolbar whose class is "private-browsing-indicator..."
+#   whatever the language. Verified in Firefox in English; class names are not translated.
+_BRACKETED_END = re.compile(r"[(（\[［][^()（）\[\]［］]*[)）\]］]$")
+
+
+def private_verdict(engine: str, title: str, shell: list[tuple[str, str, str]]) -> bool | None:
+    """Is a browser window a private one, from its title and the (class, id, name) of the
+    elements at the top of its shell? None when the shell didn't show what it takes to
+    tell: the caller treats that as private."""
+    if engine == "gecko":
+        if any("private-browsing-indicator" in f"{cls} {aid}" for cls, aid, _ in shell):
+            return True
+        # Only a window whose toolbars were really seen is called not private.
+        return False if any(aid == "nav-bar" for _, aid, _ in shell) else None
+    views = [name.strip() for cls, _, name in shell if cls == "BrowserRootView"]
+    if not views:
+        return None
+    ending = _BRACKETED_END.search(views[0])
+    if ending is None:
+        return False
+    # A window that is only a page (an installed web app) is named after the page, which
+    # may end in a bracket: then the window's title ends the same way.
+    return not title.strip().endswith(ending.group(0))
+
+
 # A browser that a program is driving (Pyxi's own booking browser, a test run): not the
 # user's browsing, and never touched.
 _AUTOMATED = re.compile(r"--remote-debugging-(port|pipe)|--enable-automation|--headless|(^|\s)-{1,2}(marionette|juggler)\b", re.I)
-
-
-def private_marks(names: list[str], ids: list[str]) -> bool:
-    """Do these words from a browser's shell say the window is a private one?"""
-    return any(_PRIVATE_NAME.search(n or "") for n in names) or any(_PRIVATE_ID.search(i or "") for i in ids)
 
 
 def automated(command_line: str) -> bool:
@@ -1788,7 +1947,9 @@ class UiaDriver(Driver):
     def __init__(self) -> None:
         self._local = threading.local()
         self._user32: Any = None
-        self._private: dict[int, bool] = {}  # by window: a window doesn't change what it is
+        # By window, once it is known (a window doesn't change what it is). Never a guess:
+        # a look that failed leaves no entry, and the window is refused until one succeeds.
+        self._private: dict[int, bool] = {}
         self._driven: dict[int, bool] = {}  # by process
 
     # ---- plain Windows
@@ -1873,40 +2034,58 @@ class UiaDriver(Driver):
 
         u.EnumWindows(visit, 0)
         for w in found:
-            w.private = self._is_private(w.hwnd, w.title)
+            # Only what is already known: finding out takes UI Automation, which is never
+            # used from here (this runs on the assistant's own thread, and a browser that
+            # has stopped answering must not stop the assistant).
+            w.private = self._private.get(w.hwnd)
         for gone in set(self._private) - {w.hwnd for w in found}:
             self._private.pop(gone, None)
         return found
 
-    def _is_private(self, hwnd: int, title: str) -> bool:
-        if hwnd not in self._private:
-            names, ids = [title], []
-            try:
-                _, ui, _, _, kids = self._uia()
-                top = ui.ElementFromHandle(hwnd).BuildUpdatedCache(kids)
-                level = [top]
-                for _ in range(2):  # the window, what is in it, and what is in that
-                    below = []
-                    for node in level:
-                        array = node.GetCachedChildren()
-                        for i in range(array.Length if array is not None else 0):
-                            child = array.GetElement(i)
-                            kind = int(child.GetCachedPropertyValue(_P_TYPE) or 0)
-                            if kind == _DOCUMENT:
-                                continue  # the page has no say in this
-                            names.append(str(child.GetCachedPropertyValue(_P_NAME) or ""))
-                            ids.append(str(child.GetCachedPropertyValue(_P_AID) or ""))
-                            ids.append(str(child.GetCachedPropertyValue(_P_CLASS) or ""))
-                            if len(below) < 60:
-                                try:
-                                    below.append(child.BuildUpdatedCache(kids))
-                                except Exception:
-                                    pass
-                    level = below
-            except Exception as exc:
-                log.debug("screen tab: couldn't look at a window's shell: %s", exc)
-            self._private[hwnd] = private_marks(names, ids)
-        return self._private[hwnd]
+    def is_private(self, hwnd: int) -> bool | None:
+        if hwnd in self._private:
+            return self._private[hwnd]
+        try:
+            verdict = self._look_for_private(hwnd)
+        except Exception as exc:
+            log.info("screen tab: couldn't look at a window's shell: %s", exc)
+            verdict = None
+        if verdict is not None:
+            self._private[hwnd] = verdict
+        return verdict
+
+    def _look_for_private(self, hwnd: int) -> bool | None:
+        import ctypes.wintypes as wt  # noqa: F401
+
+        exe = os.path.basename(self._exe_path(self._pid(hwnd))).lower()
+        if exe not in BROWSERS:
+            return None
+        n = self.u.GetWindowTextLengthW(hwnd)
+        buf = ctypes.create_unicode_buffer(n + 1)
+        self.u.GetWindowTextW(hwnd, buf, n + 1)
+        _, ui, _, _, kids = self._uia()
+        deadline = time.monotonic() + 2.0
+        shell: list[tuple[str, str, str]] = []
+        level = [ui.ElementFromHandle(hwnd).BuildUpdatedCache(kids)]
+        for _ in range(2):  # what is in the window, and what is in that (the toolbars' buttons)
+            below = []
+            for node in level:
+                for child in _children(node):
+                    if int(child.GetCachedPropertyValue(_P_TYPE) or 0) == _DOCUMENT:
+                        continue  # the page has no say in this
+                    shell.append(
+                        (
+                            str(child.GetCachedPropertyValue(_P_CLASS) or ""),
+                            str(child.GetCachedPropertyValue(_P_AID) or ""),
+                            str(child.GetCachedPropertyValue(_P_NAME) or ""),
+                        )
+                    )
+                    if len(below) < 80:
+                        if time.monotonic() > deadline:
+                            return None  # out of time: not known
+                        below.append(child.BuildUpdatedCache(kids))
+            level = below
+        return private_verdict(BROWSERS[exe][1], buf.value, shell)
 
     def foreground(self) -> int:
         hwnd = self.u.GetForegroundWindow()
@@ -1952,8 +2131,9 @@ class UiaDriver(Driver):
         exe = self._exe_path(pid)
         if os.path.basename(exe).lower() not in BROWSERS:
             raise BrowserError("failed", "That isn't a browser window.")
-        if self._private.get(hwnd):
-            # A private window's address would open in the ordinary profile, not in it.
+        if self._private.get(hwnd) is not False:
+            # A private window's address would open in the ordinary profile, not in it. A
+            # window not yet known to be an ordinary one is treated the same.
             raise BrowserError("failed", "Pyxi doesn't open addresses from a private window.")
         args = [exe, *_profile_args(_command_line(pid))]
         if BROWSERS[os.path.basename(exe).lower()][1] == "gecko":
@@ -1989,6 +2169,15 @@ class UiaDriver(Driver):
             whole.TreeScope = 7  # the element and everything under it
             one.TreeScope = 1
             kids.TreeScope = 3  # the element and its children
+            try:
+                # How long one request to a browser may take before UI Automation gives up
+                # on it (its own defaults are 2 and 20 seconds): a browser that has stopped
+                # answering costs a few seconds, not the whole time a caller will wait.
+                newer = ui.QueryInterface(u._AutomationClient.instance().UIAutomationCore.IUIAutomation2)
+                newer.ConnectionTimeout = 2000
+                newer.TransactionTimeout = 4000
+            except Exception as exc:
+                log.debug("screen tab: UI Automation's time limits were not set: %s", exc)
             ready = self._local.ready = (u, ui, whole, one, kids)
         return ready
 
@@ -2051,7 +2240,7 @@ class UiaDriver(Driver):
         if deep:
             try:
                 array = raw.GetCachedChildren()
-                count = array.Length if array is not None else 0
+                count = array.Length if array else 0
             except Exception:
                 array, count = None, 0
             for i in range(count):
@@ -2072,13 +2261,14 @@ class UiaDriver(Driver):
         found: list[tuple[Any, str, bool, int]] = []
         stack = [(top, 0)]
         looked = 0
-        while stack and looked < 2500:
+        deadline = time.monotonic() + 3.0
+        while stack and looked < 2500 and time.monotonic() < deadline:
             raw, depth = stack.pop()
             looked += 1
             try:
                 node = raw.BuildUpdatedCache(kids)
                 array = node.GetCachedChildren()
-                count = array.Length if array is not None else 0
+                count = array.Length if array else 0
             except Exception:
                 continue
             below = []
@@ -2136,7 +2326,7 @@ class UiaDriver(Driver):
             try:
                 node = first if el is root else el.handle.BuildUpdatedCache(kids)
                 array = node.GetCachedChildren()
-                size = array.Length if array is not None else 0
+                size = array.Length if array else 0
             except Exception:
                 continue  # it went away while the page was being read
             for i in range(size):
@@ -2170,7 +2360,11 @@ class UiaDriver(Driver):
             rid = tuple(int(v) for v in (up.GetCachedPropertyValue(_P_RID) or ()))
             if rid == doc:
                 return tuple(frames)
-            if up is not raw and int(up.GetCachedPropertyValue(_P_TYPE) or 0) == _DOCUMENT:
+            if (
+                up is not raw
+                and int(up.GetCachedPropertyValue(_P_TYPE) or 0) == _DOCUMENT
+                and up.GetCachedPropertyValue(30043)  # a frame's document has an address (the Value pattern)
+            ):
                 frames.append(str(up.GetCachedPropertyValue(_P_VALUE) or "").strip())
             up = walker.GetParentElementBuildCache(up, one)
             if not up:
@@ -2205,11 +2399,11 @@ class UiaDriver(Driver):
         except Exception:
             return None
 
-    def inner_text(self, handle: Any) -> str:
+    def subtree(self, handle: Any) -> El | None:
         try:
-            return _inner_text(self._tree(handle, 300, time.monotonic() + 1.0)[0])
+            return self._tree(handle, 300, time.monotonic() + 1.0)[0]
         except Exception:
-            return ""
+            return None
 
     def _pattern(self, handle: Any, name: str) -> Any:
         u = self._uia()[0]
@@ -2316,6 +2510,13 @@ class UiaDriver(Driver):
         except Exception:
             return None
         return True
+
+
+def _children(node: Any) -> list[Any]:
+    """An element's cached children. (For an element that has none, UI Automation gives a
+    null list, which is not None and raises when it is asked its length.)"""
+    array = node.GetCachedChildren()
+    return [array.GetElement(i) for i in range(array.Length)] if array else []
 
 
 def _leaf(el: El) -> bool:

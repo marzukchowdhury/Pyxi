@@ -162,6 +162,10 @@ class FakeDriver(screenlink.Driver):
         self.lazy_options = False  # Chrome: a dropdown lists its options only while open
         self.open_now: set[int] = set()
         self.cursor_outside = False  # the keyboard is in the address bar, not in the page
+        self.private_looks = 0  # how often a window had to be looked at to tell if it is private
+        self.private_answer: bool | None = None
+        self.moves: list[El] = []  # documents the tab moves on to, one per snapshot
+        self.lands_in = HWND
         self.lands: Any = None  # open(): the document that turns up, or None for none at all
         self.asked: list[tuple[int, float]] = []  # (max_nodes, budget_s) of each snapshot
         self.y = 0.0
@@ -198,7 +202,10 @@ class FakeDriver(screenlink.Driver):
     def snapshot(self, hwnd: int, max_nodes: int, budget_s: float) -> Snapshot | None:
         self.asked.append((max_nodes, budget_s))
         doc = self._doc(hwnd)
-        return Snapshot(doc, self.pages[hwnd], (self.y, 30.0)) if doc else None
+        snap = Snapshot(doc, self.pages[hwnd], (self.y, 30.0)) if doc else None
+        if self.moves:  # the tab moves on while it is being read
+            self.pages[hwnd] = self.moves.pop(0)
+        return snap
 
     def state(self, handle: Any, doc: tuple[int, ...]) -> El | None:
         if self.slow_state is not None:
@@ -207,7 +214,7 @@ class FakeDriver(screenlink.Driver):
             if root.rid == doc and doc:
                 path = _path(root, handle)
                 if path is not None:
-                    frames = tuple(el.value for el in path[1:-1] if el.role == "Document")
+                    frames = tuple(el.value for el in path[1:-1] if el.role == "Document" and "Value" in el.patterns)
                     return dataclasses.replace(handle, children=[], frames=frames)
         return None
 
@@ -220,8 +227,12 @@ class FakeDriver(screenlink.Driver):
                     return self.state(el, doc)
         return None
 
-    def inner_text(self, handle: Any) -> str:
-        return screenlink._inner_text(handle)
+    def subtree(self, handle: Any) -> El | None:
+        return handle
+
+    def is_private(self, hwnd: int) -> bool | None:
+        self.private_looks += 1
+        return self.private_answer
 
     def do(self, handle: Any, way: str, text: str = "") -> None:
         if self.hold is not None:
@@ -278,9 +289,9 @@ class FakeDriver(screenlink.Driver):
     def open(self, hwnd: int, url: str) -> None:
         self.did.append(("open", hwnd, url))
         if self.lands is None:
-            self.pages[hwnd] = compose(rid=(9, 9), url=url)
+            self.pages[self.lands_in] = compose(rid=(9, 9), url=url)
         elif self.lands:
-            self.pages[hwnd] = self.lands
+            self.pages[self.lands_in] = self.lands
 
     def acted(self) -> list[tuple[Any, ...]]:
         return [d for d in self.did if d[0] not in ("focus", "legacy_focus")]
@@ -891,6 +902,7 @@ async def test_the_extension_is_preferred_and_the_setting_decides_the_rest(setti
 
 
 READ_CARD = f"Let Pyxi read {SITE} in your browser?"
+TASK_CARD = f"Let Pyxi read and work in {SITE} in your browser?"
 
 
 async def _peek_refs(brain: Any) -> dict[str, Any]:
@@ -942,7 +954,8 @@ async def test_use_tab_works_through_it_with_every_card_and_the_log(settings, qu
         ("done", {"ok": True, "summary": "Sent."}),
     )
     assert job.status == "done" and job.summary == "Sent."
-    assert cards.asked == [READ_CARD, f"Let Pyxi click and type on {SITE} in your browser?", f'Click "Send" on {SITE}']
+    # One Allow for the site, for reading it and working in it; then only what sends.
+    assert cards.asked == [TASK_CARD, f'Click "Send" on {SITE}']
     assert "This submits the form on the page." in cards.card()["reason"]
     assert driver.acted() == [("legacy_value", "To", "dana@example.com"), ("legacy", "Send", "")]
     assert logged(brain) == [f'Clicked "Send" on {SITE}', f'Typed "dana@example.com" into "To" on {SITE}']
@@ -951,11 +964,6 @@ async def test_use_tab_works_through_it_with_every_card_and_the_log(settings, qu
 
 
 async def test_dont_on_the_card_means_nothing_happens_and_stop_everything_reaches_it(settings, quick):
-    brain, driver = _screen_brain(settings)
-    Cards(brain.hub, answer=lambda card: card["action"] == READ_CARD)  # may read, may not act
-    page = await _peek_refs(brain)
-    job = await work(brain, "Tick the box", act({"do": "click", "ref": item(page, "Send me a copy")["ref"]}))
-    assert job.summary == "Okay, I left that for you." and driver.did == []
     nobody, driver0 = _screen_brain(settings)
     Cards(nobody.hub, answer=False)  # may not even read
     job = await work(nobody, "Tick the box", act({"do": "click", "ref": "e1"}))
@@ -1022,27 +1030,31 @@ async def test_a_frame_from_another_site_is_not_part_of_the_page():
 
 
 async def test_reading_a_site_needs_their_allow_and_it_is_asked_once():
-    asked: list[tuple[str, str]] = []
-    answer = [True]
+    asked: list[tuple[str, str, bool]] = []
+    answer: list[Any] = [True]
 
-    async def gate(site: str, title: str) -> bool:
-        asked.append((site, title))
+    async def gate(site: str, title: str, for_task: bool) -> Any:
+        asked.append((site, title, for_task))
         return answer[0]
 
     link, driver = make(read_gate=gate)
     assert (await link.call("peek", {}))["url"] == URL and asked == []  # where the tab is, not what is in it
     page = await read(link)
-    assert asked == [(SITE, "Compose - Mail")] and page["text"].startswith("Compose")
+    assert asked == [(SITE, "Compose - Mail", False)] and page["text"].startswith("Compose")
     await read(link)
     await do(link, "click", page, "Go")
-    assert len(asked) == 1  # once per site, until Pyxi is closed
+    assert len(asked) == 1  # once per site, until Pyxi restarts
+    assert not link.site_allowed(SITE)  # a yes to reading is not a yes to clicking and typing
     driver.pages[HWND] = compose(rid=(3, 1), url="https://bank.example.org/accounts")
+    answer[0] = None  # the card is left unanswered: that is not a no
+    looks = len(driver.asked)
+    no = await refused(read(link))
+    assert no.code == "failed" and "haven't answered" in str(no) and len(driver.asked) == looks  # nothing was fetched
     answer[0] = False
     no = await refused(read(link))
-    assert no.code == "failed" and "said no to Pyxi reading bank.example.org" in str(no)
-    assert asked[-1][0] == "bank.example.org" and driver.asked[-1:] != [] and len(driver.asked) == 2  # nothing was fetched
+    assert "said no to Pyxi reading bank.example.org" in str(no) and len(asked) == 3  # asked again after no answer
     await refused(read(link))
-    assert len(asked) == 2  # not asked again straight after a no
+    assert len(asked) == 3  # not asked again straight after a no
     # A yes given to the extension is not a yes here, and the other way round.
     class Base:
         on_stopped: list[Any] = []
@@ -1059,6 +1071,7 @@ async def test_reading_a_site_needs_their_allow_and_it_is_asked_once():
     assert not other.site_allowed(SITE)
     other.allow_site("shop.example.com")
     assert other.site_allowed("shop.example.com") and "shop.example.com" not in base.allowed
+    assert other.always_lasts == "lasts until Pyxi restarts"
 
 
 async def test_a_private_field_is_never_called_by_what_is_in_it():
@@ -1094,8 +1107,9 @@ async def test_type_and_enter_types_nothing_when_the_key_cannot_follow():
     no = await refused(do(link, "type", page, "Search mail", text="invoices", enter=True))
     assert no.code == "failed" and str(no).endswith("Nothing was typed.") and not no.unanswered
     assert named(driver.root, "Search mail").value == "" and not [d for d in driver.did if d[0] == "key"]
-    # If it can't be put back, it is reported as something that may have happened, which
-    # tabwork writes in the activity log.
+    # If it can't be put back, the text is in the field: then it is reported as typed (the
+    # only kind of typing tabwork keeps for the log and for the card before anything is
+    # sent), never as a failure that leaves text behind which nothing has on record.
     real = driver.do
     calls = {"n": 0}
 
@@ -1103,12 +1117,13 @@ async def test_type_and_enter_types_nothing_when_the_key_cannot_follow():
         if way in ("value", "legacy_value"):
             calls["n"] += 1
             if calls["n"] > 1:
-                raise RuntimeError("the field is gone")
+                raise RuntimeError("the field won't be changed again")
         real(handle, way, words)
 
     driver.do = only_once  # type: ignore[method-assign]
-    no = await refused(do(link, "type", page, "Search mail", text="invoices", enter=True))
-    assert no.unanswered and "The text is in the field, but Enter was not pressed" in str(no)
+    out = await do(link, "type", page, "Search mail", text="invoices", enter=True)
+    assert out["value"] == "invoices" and named(driver.root, "Search mail").value == "invoices"
+    assert not [d for d in driver.did if d[0] == "key"]
 
 
 async def test_an_element_with_no_name_of_its_own_is_checked_by_the_words_inside_it():
@@ -1150,7 +1165,7 @@ async def test_private_windows_are_refused_and_never_picked():
     link, driver = make()
     page = await read(link)
     driver.wins[0].private = True
-    assert link.pick() == ""
+    assert link.pick() == ""  # not the window to work in
     for call in (read(link), do(link, "click", page, "Go"), link.call("peek", {"tab": HWND})):
         no = await refused(call)
         assert no.code == "browser_page" and "private window" in str(no)
@@ -1158,24 +1173,41 @@ async def test_private_windows_are_refused_and_never_picked():
     assert "private window" in str(no) and driver.did == []  # and no address is opened from one
     driver.wins.append(Window(200, "News - Mozilla Firefox", "firefox.exe"))
     assert link.pick() == "w200"  # the ordinary window is the one worked in
+    driver.front = HWND  # unless the private one is the window they are in: then the answer is a plain no
+    assert link.pick() == "w100"
+    assert "private window" in str(await refused(link.call("read", {}, browser=link.pick())))
+
+
+RU = "Ready - Google Chrome (\u0438\u043d\u043a\u043e\u0433\u043d\u0438\u0442\u043e)"
+JA = "Ready - Google Chrome\uff08\u30b7\u30fc\u30af\u30ec\u30c3\u30c8 \u30e2\u30fc\u30c9\uff09"
+NAV = ("browser-toolbar", "nav-bar", "Navigation")
 
 
 @pytest.mark.parametrize(
-    "names, ids, private",
+    "engine, title, shell, private",
     [
-        (["Ready - Google Chrome", "Ready - Google Chrome (Incognito)"], ["BrowserRootView"], True),
-        (["Ready - [InPrivate] - Microsoft Edge"], [], True),
-        (["Ready - Microsoft Edge (InPrivate)"], [], True),
-        (["Ready \u2014 Mozilla Firefox Private Browsing"], [], True),
-        (["Ready"], ["private-browsing-indicator-button toolbarbutton-1"], True),
-        (["Bereit - Google Chrome (Inkognito)"], [], True),
-        (["Ready - Google Chrome"], ["BrowserRootView", "view_1018"], False),
-        (["What is Incognito mode? - Google Chrome"], [], False),  # a page's title is not the window
-        (["Private Browsing explained \u2014 Mozilla Firefox"], ["toolbarbutton-1"], False),
+        # As the real browsers gave them (Chrome 156, Edge 157, Firefox 159), in three languages.
+        ("chromium", "Ready - Google Chrome", [("BrowserRootView", "", "Ready - Google Chrome (Incognito)")], True),
+        ("chromium", "Ready - Google Chrome", [("BrowserRootView", "", RU)], True),
+        ("chromium", "Ready - Google Chrome", [("BrowserRootView", "", JA)], True),
+        ("chromium", "Ready: [InPrivate]: Microsoft\u200b Edge", [("BrowserRootView", "", "Ready: Microsoft Edge (InPrivate)")], True),
+        ("chromium", "Ready - Google Chrome", [("BrowserRootView", "", "Ready - Google Chrome (Guest)")], True),
+        ("chromium", "Ready - Google Chrome", [("BrowserRootView", "", "Ready - Google Chrome")], False),
+        ("chromium", "Ready \u2014 Profile 1: Microsoft\u200b Edge", [("BrowserRootView", "", "Ready: Microsoft Edge")], False),
+        # A page controls its title, and its title is in front of the browser's name: no mark.
+        ("chromium", "Offers [InPrivate] (Incognito) - Google Chrome", [("BrowserRootView", "", "Offers [InPrivate] (Incognito) - Google Chrome")], False),
+        # A window that is only a page (an installed app) may end in a bracket: so does its title.
+        ("chromium", "Notes (draft)", [("BrowserRootView", "", "Notes (draft)")], False),
+        ("chromium", "Ready - Google Chrome", [("ToolbarView", "", "")], None),  # the root view wasn't seen
+        ("chromium", "Ready - Google Chrome", [], None),
+        ("gecko", "Ready", [NAV, ("private-browsing-indicator-button toolbarbutton-1", "", "Private browsing info")], True),
+        ("gecko", "Private Browsing explained \u2014 Mozilla Firefox", [NAV], False),  # words in a title are not a mark
+        ("gecko", "Ready \u2014 Mozilla Firefox Private Browsing", [("titlebar", "", "")], None),  # its toolbars weren't seen
+        ("gecko", "Ready", [], None),
     ],
 )
-def test_what_marks_a_private_window(names, ids, private):
-    assert screenlink.private_marks(names, ids) is private
+def test_what_marks_a_private_window_in_any_language(engine, title, shell, private):
+    assert screenlink.private_verdict(engine, title, shell) is private
 
 
 def test_the_real_driver_never_opens_an_address_from_a_private_window(monkeypatch):
@@ -1185,13 +1217,68 @@ def test_the_real_driver_never_opens_an_address_from_a_private_window(monkeypatc
     started: list[Any] = []
     monkeypatch.setattr(screenlink.subprocess, "Popen", lambda *a, **k: started.append(a))
     monkeypatch.setattr(screenlink, "_command_line", lambda pid: "chrome.exe --profile-directory=Default")
-    driver._private[HWND] = True
-    with pytest.raises(BrowserError):
-        driver.open(HWND, "https://shop.example.com/")
+    for known in (True, None):  # private, or not yet known to be an ordinary window
+        driver._private.clear()
+        if known is not None:
+            driver._private[HWND] = known
+        with pytest.raises(BrowserError):
+            driver.open(HWND, "https://shop.example.com/")
     assert started == []
     driver._private[HWND] = False
     driver.open(HWND, "https://shop.example.com/")
     assert started[0][0][-2:] == ["--profile-directory=Default", "https://shop.example.com/"]
+
+
+def test_a_look_that_fails_never_makes_a_window_not_private(monkeypatch):
+    shell = Raw(PANE, "Ready - Google Chrome", children=(Raw(PANE, "Ready - Google Chrome (Incognito)", props={CLASS: "BrowserRootView"}),))
+    driver = uia(monkeypatch, shell)
+    monkeypatch.setattr(driver, "_pid", lambda hwnd: 4242)
+    monkeypatch.setattr(driver, "_exe_path", lambda pid: "chrome.exe")
+    titles = {HWND: "Ready - Google Chrome"}
+
+    class User32:
+        def GetWindowTextLengthW(self, hwnd: int) -> int:
+            return len(titles[hwnd])
+
+        def GetWindowTextW(self, hwnd: int, buf: Any, n: int) -> None:
+            buf.value = titles[hwnd]
+
+    driver._user32 = User32()
+    real = driver._look_for_private
+    broken = {"on": True}
+
+    def look(hwnd: int) -> bool | None:
+        if broken["on"]:
+            raise OSError("the browser didn't answer")
+        return real(hwnd)
+
+    monkeypatch.setattr(driver, "_look_for_private", look)
+    assert driver.is_private(HWND) is None and HWND not in driver._private  # unknown, and not remembered
+    broken["on"] = False
+    assert driver.is_private(HWND) is True and driver._private[HWND] is True  # the next look tells
+    # An element with no children gives a null list, which must not end the look early.
+    shell.kids[0].kids = [Raw(PANE, "", props={CLASS: "View"})]
+    shell.kids.insert(0, Raw(PANE, "", props={CLASS: "NonClientView"}))
+    driver._private.clear()
+    assert driver.is_private(HWND) is True
+    # And nothing here is asked of the browser when the windows are only listed or picked.
+    import inspect
+
+    assert "_uia(" not in inspect.getsource(screenlink.UiaDriver.windows)
+    assert "is_private" not in inspect.getsource(ScreenLink.pick)
+
+
+async def test_a_window_that_cant_be_told_is_left_alone_until_it_can():
+    link, driver = make()
+    driver.wins[0].private = None  # not looked at yet
+    assert link.pick() == "w100" and driver.private_looks == 0  # picking asks nothing of the browser
+    no = await refused(read(link))
+    assert no.code == "browser_page" and "couldn't tell whether that is a private window" in str(no)
+    assert driver.private_looks == 1 and driver.asked == []
+    driver.private_answer = True
+    assert "That's a private window" in str(await refused(read(link)))
+    driver.private_answer = False
+    assert (await read(link))["text"].startswith("Compose")
 
 
 # ---- the real driver, on a pretend UI Automation
@@ -1275,12 +1362,12 @@ def test_a_big_page_is_read_in_bounded_pieces_and_never_in_one_request(monkeypat
     assert set(REQUESTS) == {"kids"}  # an element and its children at a time: never the whole page at once
     assert len(REQUESTS) < 80  # and a text is not asked for children it doesn't have
     REQUESTS.clear()
-    clock = iter(range(0, 10_000, 4))  # each look at the clock is four seconds later
-    monkeypatch.setattr(screenlink.time, "monotonic", lambda: float(next(clock)))
+    clock = iter(x * 1.5 for x in range(10_000))  # each look at the clock is a second and a half later
+    monkeypatch.setattr(screenlink.time, "monotonic", lambda: next(clock))
     snap = driver.snapshot(HWND, 100_000, 6.0)
-    # The time ran out after the first piece (the page and its rows): it stops there.
-    assert snap is not None and snap.cut and not any(row.children for row in snap.root.children)
-    assert REQUESTS == ["kids", "kids"]
+    # The time ran out after a few pieces: it stops there, and says the page was cut.
+    assert snap is not None and snap.cut and sum(1 for row in snap.root.children if row.children) < 10
+    assert len(REQUESTS) < 12
 
 
 async def test_a_read_is_given_a_bound_that_ends_before_its_caller_gives_up():
@@ -1451,6 +1538,195 @@ async def test_a_field_with_no_label_on_the_page_beside_a_password_is_left_to_th
     plain, driver3 = make()  # no password field in the form: nothing is suspect
     driver3.pages[HWND] = page_with(password=False)
     assert not any(i.get("sensitive") for i in (await read(plain))["items"])
+
+
+# ====================================================================== the second review
+@pytest.mark.parametrize(
+    "address, own",
+    [
+        ("", False),
+        ("about:blank", False),
+        ("about:srcdoc", False),
+        ("data:text/html,<button>Pay</button>", False),
+        ("blob:https://pay.example.net/0f5b", False),  # a blob belongs to the site named in it
+        ("blob:https://mail.example.com/0f5b", True),
+        ("https://mail.example.com/notes", True),
+        ("http://mail.example.com/notes", False),  # not the same site without https
+        ("https://mail.example.com.evil.example/notes", False),
+    ],
+)
+async def test_a_frame_is_the_pages_own_only_when_its_site_is_known_and_the_same(address, own):
+    link, driver = make()
+    press = P("Invoke", "LegacyIAccessible")
+    frame = _frame(address, text("Words in the frame"), El("Button", name="Frame button", patterns=press, rect=(0, 0, 9, 9), rid=(7, 3)))
+    # Chrome wraps a frame's document in an element with no address: that one is looked through.
+    driver.root.children.append(El("Document", name="Frame holder", rect=(0, 0, 300, 90), rid=(7, 0), children=[frame]))
+    _wire(driver)
+    page = await read(link)
+    listed = "Frame button" in [i["label"] for i in page["items"]]
+    assert listed is own and ("Words in the frame" in page["text"]) is own
+    if own:
+        frame.value = "about:blank"  # and one that stops saying whose it is, is no longer acted in
+        no = await refused(do(link, "click", page, "Frame button"))
+        assert no.code == "gone" and "can't place" in str(no) and driver.did == []
+    else:
+        assert "not part of this page" in page["text"]
+
+
+async def test_a_label_never_has_words_from_another_sites_frame():
+    link, driver = make()
+    press = P("Invoke", "LegacyIAccessible")
+    secret = _frame("https://pay.example.net/checkout", text("Card ending 4242, balance 1,905.00"))
+    bare = El("Group", patterns=press, rect=(0, 0, 9, 9), rid=(6, 1), children=[secret])
+    mixed = El("Group", patterns=press, rect=(0, 0, 9, 9), rid=(6, 2), children=[text("Pay by card"), _frame("https://pay.example.net/x", text("balance 1,905.00"), rid=(7, 9))])
+    driver.root.children += [bare, mixed]
+    _wire(driver)
+    page = await read(link)
+    assert "balance" not in json.dumps(page) and "4242" not in json.dumps(page)
+    labels = [i["label"] for i in page["items"] if i["kind"] == "clickable"]
+    assert "Pay by card" in labels and "" not in labels  # its own words only; one with none isn't offered
+    await do(link, "click", page, "Pay by card")  # and the words are worked out the same way again
+    assert driver.did == [("legacy", "", "")]
+
+
+async def test_the_grace_counts_from_when_the_extension_was_last_alive(settings):
+    brain, _ = _screen_brain(settings)
+    link = brain._screen_tab
+    PretendBrowser(brain.browser)
+    assert screenlink.choose(brain) is brain.browser
+    brain._tab_extension_seen -= 600  # ten quiet minutes, connected all the while, nothing looked
+    brain.browser._conns.clear()
+    await brain.browser._changed()  # the bridge says its connection has just gone
+    assert screenlink.choose(brain) is None  # a moment ago it was alive: no fallback yet
+    brain._tab_extension_seen -= screenlink.EXTENSION_GRACE_S + 1
+    assert screenlink.choose(brain) is link
+
+
+async def test_open_only_looks_for_the_page_in_windows_pyxi_may_work_in():
+    link, driver = make()
+    link.open_wait_s = 1.2
+    driver.wins.append(Window(300, "New Incognito tab - Google Chrome", "chrome.exe", private=True))
+    driver.wins.append(Window(400, "Booking - Google Chrome", "chrome.exe"))
+    driver.own = {400}  # Pyxi's own booking browser
+    for where in (300, 400):
+        driver.lands_in = where  # a page turns up there during the wait
+        no = await refused(link.call("open", {"tab": HWND, "url": "https://shop.example.com/", "expect_host": "shop.example.com"}))
+        assert no.code == "failed" and "didn't show up" in str(no), where
+    driver.wins.append(Window(500, "Shop - Google Chrome", "chrome.exe"))
+    driver.lands_in = 500  # another ordinary window of that browser: that one is fine
+    out = await link.call("open", {"tab": HWND, "url": "https://shop.example.com/", "expect_host": "shop.example.com"})
+    assert out["id"] == 500
+
+
+async def test_one_allow_for_a_site_covers_reading_it_and_working_in_it(settings, quick):
+    brain, driver = _screen_brain(settings)
+    cards = Cards(brain.hub)
+    page = await _peek_refs(brain)
+    job = await work(brain, "Tick the box", act({"do": "click", "ref": item(page, "Send me a copy")["ref"]}))
+    assert job.status == "done" and cards.asked == [TASK_CARD]  # one card, not a read card and then an act card
+    assert "click and type there for this task" in cards.card()["reason"]
+    assert driver.acted() == [("legacy", "Send me a copy", "")]
+    # The next task there: reading is still allowed, working in it is asked again (as tabwork's
+    # own Allow is for one task), on tabwork's card, whose words about Always are true here.
+    job = await work(brain, "Tick it again", act({"do": "click", "ref": item(page, "Send me a copy")["ref"]}))
+    assert cards.asked == [TASK_CARD, f"Let Pyxi click and type on {SITE} in your browser?"]
+    assert '"Always allow on this site" lasts until Pyxi restarts.' in cards.card()["reason"]
+    assert "30 days" not in cards.card()["reason"]
+
+
+async def test_a_site_and_its_www_are_one_place_to_ask_about():
+    asked: list[str] = []
+
+    async def gate(site: str, title: str, for_task: bool) -> bool:
+        asked.append(site)
+        return True
+
+    link, driver = make(read_gate=gate)
+    driver.pages[HWND] = compose(url="https://shop.example.com/")
+    await read(link)
+    driver.pages[HWND] = compose(rid=(4, 1), url="https://www.shop.example.com/cart")
+    await read(link)
+    assert asked == ["shop.example.com"]  # sent on to www.: not asked again
+    assert screenlink.same_place("www.example.com") == "example.com" == screenlink.same_place("example.com")
+    assert screenlink.same_place("http://www.example.com") == "http://example.com"
+    # An address tabwork had them allow before it was opened is not asked about again when it is read.
+    driver.lands = compose(rid=(9, 9), url="https://news.example.org/today")
+    await link.call("open", {"tab": HWND, "url": "https://news.example.org/today", "expect_host": "news.example.org"})
+    await read(link)
+    assert asked == ["shop.example.com"]
+    # But one that led somewhere else (a sign-in page on another site) is.
+    driver.lands = compose(rid=(9, 10), url="https://login.example.net/")
+    await link.call("open", {"tab": HWND, "url": "https://club.example.org/", "expect_host": "club.example.org"})
+    await read(link)
+    assert asked == ["shop.example.com", "login.example.net"]
+
+
+async def test_a_label_written_in_pieces_is_still_a_label():
+    link, driver = make()
+    field = P("Value", "LegacyIAccessible")
+    box = (0, 0, 9, 9)
+    form = driver.root.children[2]  # the form with the password field
+    form.children += [
+        El("Group", children=[text("Your "), El("Text", name="email", aria="strong"), El("Edit", name="Your email", patterns=field, rect=box, rid=(1, 80))]),
+        El("Group", children=[El("Group", children=[text("Company "), text("(optional)")]), El("Edit", name="Company (optional)", patterns=field, rect=box, rid=(1, 81))]),
+        El("Edit", name="Referral code", named_by="other", patterns=field, rect=box, rid=(1, 82)),  # no words on the page
+    ]
+    _wire(driver)
+    page = await read(link)
+    flagged = {i["label"]: i.get("sensitive") for i in page["items"]}
+    assert flagged["Your email"] is None and flagged["Company (optional)"] is None
+    assert flagged["Referral code"] == "unclear"
+    assert (await do(link, "type", page, "Your email", text="dana@example.com"))["value"] == "dana@example.com"
+
+
+async def test_work_that_was_dropped_while_it_waited_is_never_started():
+    link, driver = make()
+    page = await read(link)
+    driver.slow_state = threading.Event()
+    go = item(page, "Go")
+    busy = asyncio.ensure_future(link.call("click", {"tab": HWND, "page": page["page"], "host": SITE, "ref": go["ref"], "label": "Go"}))
+    await asyncio.sleep(0.1)
+    looks = len(driver.asked)
+    waiting = asyncio.ensure_future(link.call("read", {"tab": HWND}))  # queued behind the first
+    await asyncio.sleep(0.05)
+    waiting.cancel()
+    busy.cancel()
+    await asyncio.sleep(0.05)
+    driver.slow_state.set()
+    driver.slow_state = None
+    await asyncio.sleep(0.3)
+    assert len(driver.asked) == looks and driver.did == []  # the page was not even looked at for it
+
+
+async def test_a_tab_that_moves_on_while_it_is_read_is_asked_about_or_read_again():
+    asked: list[str] = []
+
+    async def gate(site: str, title: str, for_task: bool) -> bool:
+        asked.append(site)
+        return site != "bank.example.org"
+
+    # Between the look at where the tab is and the reading, it moved to another site: that
+    # site is asked about; its contents are not what comes back for the first one.
+    link, driver = make(read_gate=gate)
+    real = driver.snapshot
+
+    def moved(hwnd: int, max_nodes: int, budget_s: float) -> Any:
+        driver.pages[hwnd] = compose(rid=(3, 1), url="https://bank.example.org/accounts")
+        driver.snapshot = real  # type: ignore[method-assign]
+        return real(hwnd, max_nodes, budget_s)
+
+    driver.snapshot = moved  # type: ignore[method-assign]
+    no = await refused(read(link))
+    assert asked == [SITE, "bank.example.org"] and "said no to Pyxi reading bank.example.org" in str(no)
+    # It moved on (same site, another document) while the page was being read: read again.
+    link, driver = make()
+    driver.moves = [compose(rid=(5, 1))]
+    page = await read(link)
+    assert len(driver.asked) == 2 and page["page"] == link._reads[HWND].page
+    assert link._reads[HWND].doc == (5, 1)  # what is given out is the page that is there now
+    driver.moves = [compose(rid=(6, n)) for n in range(1, 6)]  # and one that never holds still isn't read
+    no = await refused(read(link))
+    assert no.code == "failed" and "keeps moving" in str(no)
 
 
 # ====================================================================== what people read
