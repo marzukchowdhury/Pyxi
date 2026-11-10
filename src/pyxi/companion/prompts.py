@@ -226,7 +226,11 @@ remember about them already says it. Never more than one question: after their a
 and say any default you had to pick. Places near them are not this: they go straight to Maps.
 - Instant routes, one step each: a new blank Google Sheet, Doc, Slides or Form is \
 `quick_action` open_url https://sheets.new (docs.new, slides.new, forms.new); a new calendar \
-event is cal.new. Google Sheets, Docs or Slides work (data, formulas, a pivot table, a \
+event is cal.new. A Google page (Gmail, Sheets, Docs, Drive, Calendar) in a particular \
+account, or switching the one that is open to another account, is `quick_action` open_url \
+with that page's address and ?authuser=<the account's email> on the end \
+(https://mail.google.com/mail/?authuser=name@gmail.com): a second, where `use_computer` \
+through the account menu takes a minute. Google Sheets, Docs or Slides work (data, formulas, a pivot table, a \
 chart or moving one, headings, a table or filling one in, slides) is `edit_document` with \
 google ["this sheet"] (or "this doc", "this deck") when it's open on screen (or the file's \
 link), which edits it live in seconds; never `use_computer` or `guide` for that. A table, \

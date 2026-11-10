@@ -301,6 +301,45 @@ async def test_a_paste_that_arrived_is_done_and_one_that_cant_be_checked_is_trus
     assert [a["kind"] for a in rec.of("action")] == ["insert_table"]
 
 
+async def test_when_it_doesnt_land_pyxi_puts_the_cursor_in_the_cell_and_pastes_again(settings, monkeypatch, fast_paste):
+    """Live: a spreadsheet Pyxi had just opened with the mouse. "The table didn't land, click
+    cell A1 first", four times, while the founder asked it to just do it."""
+    empty = ["Untitled Spreadsheet.xlsx", "A", "B", "C"]
+    full = [*empty, "Region", "Sales", "West", "1200"]
+    # the turn's look, before, three looks after the first paste, before again, after the click
+    looks = [empty, empty, empty, empty, empty, empty, full]
+    brain, rec, _ = _on_a_sheet(settings, monkeypatch, looks, [[("paste_table", {"rows": ROWS}), ("say", {"text": "It's in."})]])
+    clicks = []
+
+    async def click(target):
+        clicks.append(target)
+        return True
+
+    brain._put_cursor_in_cell = click  # type: ignore[method-assign]
+    await brain.turn("create a sample sales table here")
+    assert clicks == [4]
+    assert [a["kind"] for a in rec.of("action")] == ["insert_table", "insert_table"]  # pasted again, nothing left copied
+    assert "outcome" not in next(c for c in brain._calls if c["tool"] == "paste_table")
+    assert [s["text"] for s in rec.of("say")] == ["It's in."]
+
+
+async def test_no_click_without_their_standing_allow_for_the_mouse(settings, monkeypatch, fast_paste):
+    from pyxi import hands
+
+    empty = ["Untitled Spreadsheet.xlsx", "A", "B", "C"]
+    brain, rec, _ = _on_a_sheet(
+        settings, monkeypatch, [empty],
+        [[("paste_table", {"rows": ROWS})], [("say", {"text": "It didn't land. It's copied."})]],
+    )
+    pressed = []
+    monkeypatch.setattr(hands, "available", lambda: True)
+    monkeypatch.setattr(hands, "Hands", lambda: pressed.append("made") or None)
+    brain._hands_always = lambda: False  # type: ignore[method-assign]
+    await brain.turn("create a sample sales table here")
+    assert pressed == []  # the mouse was never touched
+    assert [a["kind"] for a in rec.of("action")] == ["insert_table", "copy"]
+
+
 @pytest.fixture
 def fast_paste(monkeypatch):
     """The waits between looks, without the waiting."""

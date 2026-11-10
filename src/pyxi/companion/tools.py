@@ -572,8 +572,10 @@ COMPANION_TOOLS += [
     ),
     _tool(
         "quick_action",
-        "Do a small thing for the user right now: open_url (a website), open_app (notepad, calculator, chrome, "
-        "word, excel, spotify, discord, settings, 'sound settings', 'microphone privacy'...), copy (exact text to "
+        "Do a small thing for the user right now: open_url (a website), open_app (ANY program on this PC, by the "
+        "name they said, even if it sounds a little off: it knows every program in their Start menu and on "
+        "their desktop, so try it before saying you can't see one; also settings pages like 'sound settings', "
+        "'microphone privacy'), copy (exact text to "
         "the clipboard), or insert (type a drafted message into the text field they're in, e.g. 'write a reply "
         "to this'), media (the music or video that's playing, in any app: value playpause, next, "
         "previous; instant, no mouse), or volume (Windows' volume, instant: a number like 30, a change "

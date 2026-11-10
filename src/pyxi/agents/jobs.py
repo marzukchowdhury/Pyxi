@@ -745,7 +745,7 @@ class JobManager:
 
         async def ask(system: str, prompt: str) -> tuple[str, float]:
             response = await llm.complete(
-                system=system + UNTRUSTED_RULE, messages=[Message.user(prompt)], max_tokens=4000
+                system=system + UNTRUSTED_RULE, messages=[Message.user(prompt)], max_tokens=8000
             )
             return response.text, response.usage.cost_usd
 

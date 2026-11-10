@@ -1102,7 +1102,13 @@ class GoogleSheet(SheetExtras):
             g = self._col(rows, op.get("group_by") or op.get("rows"), head)
             if g is None:
                 raise LedgerError("pivot needs group_by.")
-            v = self._col(rows, op.get("value"), head)
+            # One value column, or several ("sum of Units and sum of Sales"): live, two of
+            # them had no named edit, the model wrote the request out by hand, the reply ran
+            # past its limit and the pivot was never made.
+            wanted = op.get("values") if isinstance(op.get("values"), list) else op.get("value")
+            wanted = wanted if isinstance(wanted, list) else [wanted]
+            cols = [c for c in (self._col(rows, w, head) for w in wanted if w not in (None, "")) if c is not None]
+            v = cols[0] if cols else None
             agg = str(op.get("agg") or ("sum" if v is not None else "count")).lower()
             fn = {"sum": "SUM", "count": "COUNTA", "average": "AVERAGE"}.get(agg)
             if fn is None:
@@ -1132,7 +1138,7 @@ class GoogleSheet(SheetExtras):
                 },
                 "rows": [{"sourceColumnOffset": g, "showTotals": True, "sortOrder": "ASCENDING"}],
                 "values": [
-                    {"summarizeFunction": fn, "sourceColumnOffset": v if v is not None else g}
+                    {"summarizeFunction": fn, "sourceColumnOffset": c} for c in (cols or [g])
                 ],
                 "valueLayout": "HORIZONTAL",
             }
@@ -1150,7 +1156,9 @@ class GoogleSheet(SheetExtras):
             )
             await self.load()  # a chart in the same batch goes beside the pivot, not under it
             g_name = rows[head][g] if g < len(rows[head]) else get_column_letter(g + 1)
-            v_name = rows[head][v] if v is not None and v < len(rows[head]) else "rows"
+            v_name = (
+                " and ".join(str(rows[head][c]) for c in cols if c < len(rows[head])) or "rows"
+            )
             return f"Made a pivot table {where}: {agg} of {v_name} by {g_name}"
         if name == "chart":
             title, sheet_id, rows = self._tab(op.get("sheet"))
@@ -1640,7 +1648,7 @@ _SHEET_EDITS = """Spreadsheets (Excel .xlsx and Google Sheets). "sheet" names a 
 - {"op": "set_cells", "sheet"?: name, "cells": {"B5": 120, "C5": "=B5*1.13"}}
 - {"op": "append_row", "sheet"?: name, "values": [..]}
 - {"op": "totals_row", "sheet"?: name, "columns"?: ["B", "Amount"], "function"?: "SUM"|"AVERAGE"|"COUNT"|"MAX"|"MIN", "label"?: "Total"}  (finds the number columns and the last row itself)
-- {"op": "pivot", "sheet"?: name, "group_by": column, "value"?: column, "agg": "sum"|"count"|"average", "target"?: "Pivot"}  (Google Sheets: beside the data, where they can see it; give "target" only when they asked for a new tab. Excel: on a new sheet)
+- {"op": "pivot", "sheet"?: name, "group_by": column, "value"?: column or [columns], "agg": "sum"|"count"|"average", "target"?: "Pivot"}  (Google Sheets: beside the data, where they can see it; give "target" only when they asked for a new tab; several value columns go in one pivot as a list, never as raw requests. Excel: on a new sheet)
 - {"op": "chart", "sheet"?: name, "labels": column, "values": column, "type": "bar"|"horizontal bar"|"line"|"area"|"pie", "title"?: "..", "at"?: "H2"}  (beside the data unless "at" says where; repeated labels are summed)
 - {"op": "move_chart", "chart"?: its id or title from the outline, "to": "H2", "width"?: pixels, "height"?: pixels}  (no "chart": the newest one. A chart that's already there is moved, never added again)
 - {"op": "delete_chart", "chart"?: ..}
@@ -1872,10 +1880,25 @@ async def run_ledger(
     changed: set[int] = set()
     tried = False
     pending = prompt
+    unread = False  # the model's last reply was not the plan asked for
     for attempt in range(2):
         text, cost = await ask(system, pending)
         result.cost_usd += cost
         data = parse_edits(text)
+        if not data and attempt == 0:
+            # Cut off at its limit, or not JSON at all (live: a pivot ended "I couldn't make
+            # that change" twice, with nothing said about why). Asked once more, plainly.
+            unread = True
+            text, cost = await ask(
+                system,
+                prompt
+                + "\n\nYour last reply could not be read: it was cut off or was not the JSON "
+                "object asked for. Reply again with ONLY that JSON object, as short as it can "
+                "be: named edits, no raw requests unless nothing else can do it.",
+            )
+            result.cost_usd += cost
+            data = parse_edits(text)
+        unread = not data
         edits = [e for e in data.get("edits") or [] if isinstance(e, dict)]
         if attempt == 1 and not edits:
             break  # nothing more it can do: keep the first round's problems
@@ -1929,5 +1952,10 @@ async def run_ledger(
         # The model's summary was written before its edits ran ("Added a total row"): when
         # none of them worked, say why instead.
         why = f" {result.problems[0]}" if result.problems else ""
+        if not why and unread and not tried:
+            why = (
+                " I couldn't work out the edits for it: my plan came out unreadable, twice. "
+                "Nothing in the file was touched. Ask again, or for one part at a time."
+            )
         result.summary = f"I couldn't make that change.{why}"
     return result

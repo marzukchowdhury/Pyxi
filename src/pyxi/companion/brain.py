@@ -39,12 +39,19 @@ from otto.types import ToolCall, Usage
 from PIL import Image
 from pydantic import ValidationError
 
-from pyxi import booking, hands, media, safety, tidy, weather, web, windows
+from pyxi import alarms, booking, hands, media, safety, tidy, weather, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
-from pyxi import alarms
-from pyxi.companion import answers, filework, instant, paperwork, pricecheck, prompts, specialists
-from pyxi.companion import tabwork  # Pyxi in your browser (the extension)
+from pyxi.companion import (
+    answers,
+    filework,
+    instant,
+    paperwork,
+    pricecheck,
+    prompts,
+    specialists,
+    tabwork,  # Pyxi in your browser (the extension)
+)
 from pyxi.companion.actions import app_target, in_account, open_app, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
@@ -1104,6 +1111,14 @@ class Brain:
         before = await self._cells_on_screen(target, words) if words else None
         await self.hub.emit("action", kind="insert_table", value=message)
         if before is not None and not await self._pasted(target, words, before):
+            # The keyboard isn't in the sheet (live: a spreadsheet Pyxi had just opened with
+            # the mouse; "click cell A1 first" four times over). With their standing Allow
+            # for the mouse, Pyxi makes that one click itself and pastes once more.
+            if await self._put_cursor_in_cell(target):
+                before = await self._cells_on_screen(target, words)
+                await self.hub.emit("action", kind="insert_table", value=message)
+                if before is None or await self._pasted(target, words, before):
+                    return f"The table is pasted. {changed}" if changed else None
             # It was sent and nothing arrived (live: three times into a spreadsheet, "Done"
             # each time). The cells stay copied, so one click and ctrl+v by them finishes it.
             await asyncio.sleep(0.4)  # after the app has put their own clipboard back
@@ -1116,6 +1131,51 @@ class Brain:
                 "start and press ctrl+v. Don't call paste_table again until they have clicked."
             )
         return f"The table is pasted. {changed}" if changed else None
+
+    async def _put_cursor_in_cell(self, target: int | None) -> bool:
+        """One click on the cell that is selected in that window, so a paste has somewhere to
+        go. Only with their standing "Always allow" for the mouse (no card is put up for
+        it, and without the Allow nothing is clicked), only inside that window, and never
+        on one of Pyxi's own. False when it wasn't done."""
+        from pyxi.companion.aim import match, survey
+
+        if not target or not hands.available() or not self._hands_always():
+            return False
+        try:
+            ctx = await self._capture(follow_mouse=False, hwnd=target)
+            if ctx.excluded or ctx.screenshot is None:
+                return False
+            if getattr(self, "_aim_llm", None) is None:
+                self._aim_llm = StreamingChat(self.settings.model_aim)
+            found, usage = await survey(
+                self._aim_llm,
+                ctx.screenshot,
+                ctx.origin,
+                "Where is the selected cell of the spreadsheet: the one cell drawn with a "
+                "coloured outline? If no cell is outlined, the first cell, A1.",
+                ["selected cell"],
+            )
+            if usage is not None:
+                self._usage = self._usage + usage
+            point = match("selected cell", found.points)
+            rect = windows.rect_of(target)
+            if point is None or rect is None:
+                return False
+            x, y = point
+            if not (rect[0] < x < rect[0] + rect[2] and rect[1] < y < rect[1] + rect[3]):
+                return False  # not in that window: nothing is clicked
+            self.audit.add(
+                "clicked",
+                "the selected cell, so a pasted table has somewhere to go",
+                agent="Pyxi (mouse and keyboard)",
+                detail=f"at {x}, {y}",
+            )
+            await asyncio.to_thread(hands.Hands().click, x, y)
+            await asyncio.sleep(0.3)
+            return not windows.available() or windows.foreground() == target
+        except Exception:  # they moved the mouse, one of Pyxi's own windows, a look that failed
+            log.debug("couldn't put the cursor in the cell", exc_info=True)
+            return False
 
     async def _cells_on_screen(self, target: int | None, words: list[str]) -> int | None:
         """How many times a table's cells can be read in the window it is meant for. None when
@@ -4140,13 +4200,7 @@ _WORD = re.compile(r"[a-z0-9']+")
 
 # Words that carry no news: a sentence made only of these plus words already said says nothing new.
 _PLAIN = set(
-    """a an the and or but so then now just also too very really okay ok right yes no not it its it's
-    this that these those there here is are was were be been being am i i'm i'll i've me my you your
-    you're we our us they them their he she him her his to of in on at for with from by as up down
-    out off over into onto about all any some one more most can could will would should do does did
-    done have has had get got go going let let's make made what which who when where how why if
-    already still again sure guess guessing think mean meant way bit little quick fresh
-    new open opening opened up coming now ready here""".split()
+    ["a", "an", "the", "and", "or", "but", "so", "then", "now", "just", "also", "too", "very", "really", "okay", "ok", "right", "yes", "no", "not", "it", "its", "it's", "this", "that", "these", "those", "there", "here", "is", "are", "was", "were", "be", "been", "being", "am", "i", "i'm", "i'll", "i've", "me", "my", "you", "your", "you're", "we", "our", "us", "they", "them", "their", "he", "she", "him", "her", "his", "to", "of", "in", "on", "at", "for", "with", "from", "by", "as", "up", "down", "out", "off", "over", "into", "onto", "about", "all", "any", "some", "one", "more", "most", "can", "could", "will", "would", "should", "do", "does", "did", "done", "have", "has", "had", "get", "got", "go", "going", "let", "let's", "make", "made", "what", "which", "who", "when", "where", "how", "why", "if", "already", "still", "again", "sure", "guess", "guessing", "think", "mean", "meant", "way", "bit", "little", "quick", "fresh", "new", "open", "opening", "opened", "up", "coming", "now", "ready", "here"]
 )
 
 

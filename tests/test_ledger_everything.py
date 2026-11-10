@@ -176,7 +176,13 @@ class FakeGoogle:
 
     async def sheets_batch(self, sid, requests):
         self.sent += requests
-        return {"replies": [{"findReplace": {"occurrencesChanged": 2}}]}
+        replies = [
+            {"addSheet": {"properties": {"sheetId": 900 + i, "title": r["addSheet"]["properties"]["title"]}}}
+            if "addSheet" in r
+            else {"findReplace": {"occurrencesChanged": 2}}
+            for i, r in enumerate(requests)
+        ]
+        return {"replies": replies}
 
     # docs
     async def docs_get(self, did):
@@ -777,3 +783,49 @@ def test_powerpoint_gets_boxes_shapes_tables_charts_and_things_move(tmp_path):
     assert len(copy.shapes) == len(first.shapes)  # the copy has the box, star and table too
     with pytest.raises(LedgerError, match="needs the id"):
         d.apply({"op": "delete", "slide": 1})
+
+
+# ============================================================================ from the founder's trial
+SHEET = "https://docs.google.com/spreadsheets/d/abc/edit"
+
+
+async def test_a_pivot_with_two_value_columns_is_one_named_edit_on_its_own_tab():
+    """Live: "pivot, rows Region, values sum of Units and sum of Sales, on a new sheet" had no
+    named edit for two values. The model wrote the requests out by hand, its reply ran past
+    the limit, and the job ended "I couldn't make that change", twice."""
+    g = FakeGoogle()
+    g.rows = [["Region", "Product", "Units", "Sales"], ["West", "Laptop", 12, 14400], ["East", "Laptop", 8, 9600]]
+    ask = answers({"file": 0, "op": "pivot", "group_by": "Region", "value": ["Units", "Sales"], "agg": "sum", "target": "Pivot"})
+    result = await run_ledger("pivot by region", files=[], google=g, google_refs=[SHEET], ask=ask)
+    assert result.changes == ["Made a pivot table on tab Pivot: sum of Units and Sales by Region"]
+    added, cells = g.sent[-2], g.sent[-1]["updateCells"]
+    assert added["addSheet"]["properties"]["title"] == "Pivot" and cells["start"]["sheetId"] == 900
+    pivot = cells["rows"][0]["values"][0]["pivotTable"]
+    assert [v["sourceColumnOffset"] for v in pivot["values"]] == [2, 3]
+    assert {v["summarizeFunction"] for v in pivot["values"]} == {"SUM"}
+    assert '"value"?: column or [columns]' in ask.system  # the menu says so
+
+
+async def test_a_plan_that_cant_be_read_is_asked_for_again_and_then_said_plainly():
+    g = FakeGoogle()
+    replies = ["<invoke_json_placeholder>" * 50, json.dumps({"edits": [{"file": 0, "op": "pivot", "group_by": "Region", "value": "Sales"}], "summary": "Pivot made."})]
+    asked: list[str] = []
+
+    async def cut_off_once(system: str, prompt: str):
+        asked.append(prompt)
+        return replies[len(asked) - 1], 0.0001
+
+    result = await run_ledger("make a pivot", files=[], google=g, google_refs=[SHEET], ask=cut_off_once)
+    assert len(asked) == 2 and "could not be read" in asked[1] and "ONLY that JSON object" in asked[1]
+    assert result.changes and result.changes[0].startswith("Made a pivot table beside the data")
+
+    # Unreadable both times: nothing is touched, and the reason is said, not left out.
+    g = FakeGoogle()
+
+    async def never(system: str, prompt: str):
+        return "<invoke_json_placeholder>" * 50, 0.0001
+
+    result = await run_ledger("make a pivot", files=[], google=g, google_refs=[SHEET], ask=never)
+    assert g.sent == [] and not result.changes
+    assert result.summary.startswith("I couldn't make that change. I couldn't work out the edits for it")
+    assert "Nothing in the file was touched" in result.summary

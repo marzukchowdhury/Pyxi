@@ -186,6 +186,11 @@ def test_a_program_is_found_by_the_name_they_say(monkeypatch):
     assert found("office")[0] == "GenOffice"  # most of that name, and a word of the long one is not it
     assert found("language") is None and found("support") is None
     assert found("uninstall genoffice") is None and found("zzz") is None and found("") is None
+    # Live: "open Jen Office" (misheard) was answered "I don't see anything called Jen Office".
+    assert found("Jen Office")[0] == "GenOffice"
+    assert found("visual studio cod")[0] == "Visual Studio Code"
+    assert found("stream") is None or found("stream")[0] == "Steam"  # near enough to one name only
+    assert found("blorbo") is None
 
 
 async def test_opening_a_program_pyxi_has_no_word_for(monkeypatch):

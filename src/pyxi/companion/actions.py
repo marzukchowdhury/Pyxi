@@ -165,6 +165,17 @@ def installed_app(name: str) -> tuple[str, str] | None:
     ):
         if len({target for _, target in fits}) == 1:
             return fits[0]
+    # Misheard by a letter or two ("Jen Office" for GenOffice): the one name that is nearly it.
+    import difflib
+
+    near = sorted(
+        ((difflib.SequenceMatcher(None, key, k).ratio(), v) for k, v in apps.items() if abs(len(k) - len(key)) <= 2),
+        key=lambda pair: pair[0],
+        reverse=True,
+    )
+    if near and near[0][0] >= 0.8 and len(key) >= 5:
+        if len(near) == 1 or near[1][0] < near[0][0] - 0.05 or near[1][1][1] == near[0][1][1]:
+            return near[0][1]
     return None
 
 
