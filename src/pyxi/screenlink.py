@@ -410,6 +410,11 @@ def shown_label(el: El, kind: str, secret: str, inner: str) -> str:
         return hide_numbers(_clean(el.name) or _clean(el.help) or _clean(el.auto_id))
     if kind == "editable text":
         return hide_numbers(_clean(el.name or el.help)) or "text box"
+    if kind == "dropdown box" and not (el.name.strip() or el.help.strip()):
+        # A dropdown built from a div has no name but the choice it shows ("Choose a size").
+        # It is not a private field (that was decided above), and what it shows is given as
+        # its value anyway.
+        return hide_numbers(_clean(el.value) or label_of(el, inner))
     return hide_numbers(label_of(el, inner))
 
 
@@ -1456,8 +1461,9 @@ class ScreenLink:
                 # It couldn't be put back: the text is in the field. That is reported as
                 # typed, not as a failure, because tabwork keeps what Pyxi typed (for the
                 # activity log and for the card before anything is sent) only for typing
-                # that succeeded. Enter was not pressed; the page not changing says so.
+                # that succeeded. Enter was not pressed, and the answer says so.
                 log.warning("screen tab: the text stayed in the field and Enter was not pressed (%s)", exc)
+                out["enter"] = False  # tabwork writes it down as typed, Enter not pressed
         return self._after(hwnd, doc, args.get("settle"), out)
 
     def _cmd_select(self, args: dict[str, Any], job: _Job, hint: str) -> dict[str, Any]:

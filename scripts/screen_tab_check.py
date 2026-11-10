@@ -1460,12 +1460,20 @@ async def private_window(name: str, tmp: Path, site: Site, driver: OwnWindows, l
                 refusals.append(f"{call} was not refused")
             except BrowserError as exc:
                 refusals.append("" if "private window" in str(exc) else f"{call}: {exc.code}: {exc}")
-        picked = link.pick()  # once it is known to be private it is not the window to work in
+        # It is not the window Pyxi works in. (When it is the window in front, it is the one
+        # that is answered for, with the same plain no, rather than some window behind it.)
+        picked = link.pick()
+        if picked:
+            try:
+                await link.call("read", {}, browser=picked, timeout=30)
+                refusals.append(f"picked ({picked}) and read")
+            except BrowserError as exc:
+                refusals.append("" if "private window" in str(exc) else f"picked: {exc.code}: {exc}")
         await asyncio.sleep(0.5)
         still = site.state().get("page") == "form" and len(site.tabs) == 1
-        row.found, row.acted = loaded, picked == ""
-        row.confirmed = loaded and picked == "" and not any(refusals) and still
-        row.note = "; ".join(r for r in refusals if r) + ("" if picked == "" else f" it was picked ({picked})")
+        row.found, row.acted = loaded, not any(refusals)
+        row.confirmed = loaded and not any(refusals) and still
+        row.note = "; ".join(r for r in refusals if r)
     except Exception as exc:
         row.note = str(exc)[:120]
     finally:

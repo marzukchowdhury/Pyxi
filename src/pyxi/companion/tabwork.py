@@ -580,10 +580,11 @@ class TabOperator:
 
     def _same_site(self, site: str) -> bool:
         """Is the task still on the site it started on? A page that moved from http to https
-        on the same host is the same site, made safer."""
+        on the same host is the same site, made safer; and a site and its exact "www." form
+        (example.com, www.example.com) are one place, as a bare address is sent on to it."""
         if site == self.home:
             return True
-        if self.home == f"http://{site}":
+        if self.home == f"http://{site}" or screenlink.same_place(site) == screenlink.same_place(self.home):
             if self.home in self._allowed:
                 self._allowed.add(site)
             self.home = site
@@ -995,10 +996,15 @@ class TabOperator:
                 return line, f"failed: the browser hasn't let Pyxi into {exc.host or 'that site'} yet"
             return line, f"failed: {_plain(str(exc))}"
         self._last = result
+        unpressed = name == "type" and result.get("enter") is False  # the text is in, the key was refused
+        if unpressed:
+            line = line.removesuffix(" and pressed Enter") + ", but Enter could not be pressed"
         await self.report(line, "status" if quiet else "clicked")
         note = ""
         if name == "type" and "value" in result and _as_shown(result["value"]) != _as_shown(args.get("text")):
             note = f"the field now shows \"{_quoted(result['value'])}\", not what you typed"
+        if unpressed:
+            note = (note + " Enter was not pressed: click the page's own button instead.").strip()
         if name == "scroll" and result.get("moved") is False:
             note = "the page didn't scroll: that's the end"
         if result.get("covered"):

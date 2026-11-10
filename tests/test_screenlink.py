@@ -1093,6 +1093,18 @@ async def test_a_private_field_is_never_called_by_what_is_in_it():
     assert "123-45-6789" not in whole and "4111" not in whole and "typed by them" not in whole
     shown = tabwork.render(page)
     assert 'text field "ssn" (an ID number field: theirs to fill, never yours)' in shown
+    # A dropdown built from a div is called by the choice it shows; a private one never is.
+    combo = P("Value", "ExpandCollapse", "LegacyIAccessible")
+    form.children += [
+        El("ComboBox", aria="combobox", auto_id="cb", value="Choose a size", patterns=combo, rect=box, rid=(1, 74), children=[text("Choose a size")]),
+        El("ComboBox", aria="combobox", auto_id="cardNumberPicker", value="4111 1111 1111 1111", patterns=combo, rect=box, rid=(1, 75)),
+    ]
+    _wire(driver)
+    page = await read(link)
+    labels = {i["label"]: i for i in page["items"]}
+    assert labels["Choose a size"]["kind"] == "dropdown box" and labels["cardNumberPicker"]["sensitive"] == "card"
+    assert "4111" not in json.dumps(page)
+    await do(link, "click", page, "Choose a size")  # and the same words are found again before acting
 
 
 async def test_type_and_enter_types_nothing_when_the_key_cannot_follow():
@@ -1123,6 +1135,7 @@ async def test_type_and_enter_types_nothing_when_the_key_cannot_follow():
     driver.do = only_once  # type: ignore[method-assign]
     out = await do(link, "type", page, "Search mail", text="invoices", enter=True)
     assert out["value"] == "invoices" and named(driver.root, "Search mail").value == "invoices"
+    assert out["enter"] is False  # and it says the key was not pressed
     assert not [d for d in driver.did if d[0] == "key"]
 
 
@@ -1753,6 +1766,71 @@ def test_a_big_page_is_not_gone_into_above_where_it_is_scrolled_to(monkeypatch):
     words = " ".join(el.name for el in _all(snap.root) if el.role == "Text")
     assert "showing 0" in words and "below 29" in words and "past" not in words
     assert len(REQUESTS) < 70  # the two sections above were not asked for what is in them
+
+
+async def test_text_left_in_a_field_after_a_refused_enter_is_on_record_as_it_was(settings, quick):
+    brain, driver = _screen_brain(settings)
+    cards = Cards(brain.hub)
+    driver.front = HWND
+    page = await _peek_refs(brain)
+    real = driver.do
+
+    def no_cursor_and_no_undo(handle: Any, way: str, words: str = "") -> None:
+        if way in ("focus", "legacy_focus"):
+            raise RuntimeError("the cursor can't be put there")
+        if way in ("value", "legacy_value") and words == "":
+            raise RuntimeError("the field won't be changed back")
+        real(handle, way, words)
+
+    driver.do = no_cursor_and_no_undo  # type: ignore[method-assign]
+    await work(
+        brain,
+        "Look up the invoices, then send",
+        act({"do": "type", "ref": item(page, "Search mail")["ref"], "text": "invoices", "enter": True}),
+        act({"do": "click", "ref": item(page, "Send")["ref"]}),
+    )
+    log = logged(brain)
+    assert f'Typed "invoices" into "Search mail" on {SITE}, but Enter could not be pressed' in log
+    assert not any("pressed Enter" in line for line in log)  # the record says what happened, no more
+    assert '- Search mail: "invoices"' in cards.card()["reason"]  # and the card before sending has what Pyxi typed
+    assert "Enter was not pressed: click the page's own button instead." in brain._tab_llm.seen[1]
+
+
+def test_a_site_and_only_its_exact_www_form_are_the_same_place():
+    op = tabwork.TabOperator(None, None, None, None, None)
+    for home, site in (("example.com", "www.example.com"), ("www.example.com", "example.com"), ("http://example.com", "http://www.example.com")):
+        op.home, op._allowed = home, {home}
+        assert op._same_site(site) and op.home == site and site in op._allowed, (home, site)
+    for other in ("wwwevil.example.com", "www.example.com.evil.net", "www.www.example.com", "shop.example.com", "example.org", "http://www.example.com"):
+        op.home, op._allowed = "example.com", {"example.com"}
+        assert not op._same_site(other) and op.home == "example.com" and op._allowed == {"example.com"}, other
+
+
+async def test_with_the_extension_only_the_exact_www_form_goes_unasked(settings, quick):
+    brain = _brain(settings)  # the extension's path, with a pretend extension
+    browser = PretendBrowser(brain.browser)
+    brain.browser.allow_site(SITE)
+    cards = Cards(brain.hub)
+    moves = [
+        ("https://www.mail.example.com/inbox", None),  # sent on to its www. form: the same place
+        ("https://wwwevil.mail.example.com/", "wwwevil.mail.example.com"),
+        ("https://www.mail.example.com.evil.net/", "www.mail.example.com.evil.net"),
+        ("https://calendar.example.com/", "calendar.example.com"),  # any other host: asked, as before
+        ("http://www.mail.example.com/", "http://www.mail.example.com"),
+    ]
+    for where, asks in moves:
+
+        async def the_link_leads_there(name: str, args: dict, run: str, where: str = where) -> None:
+            if name == "click":
+                browser.tabs[7]["url"] = where
+
+        browser.tabs[7]["url"] = "https://mail.example.com/compose"
+        browser.before = the_link_leads_there
+        browser.did.clear()
+        cards.events.clear()
+        await work(brain, "Open the latest post", act({"do": "click", "ref": "e8"}), act({"do": "click", "ref": "e12"}))
+        assert cards.asked == ([f"Let Pyxi go on to {asks} in your browser?"] if asks else []), where
+        assert [a["ref"] for n, a in browser.acted() if n == "click"] == ["e8", "e12"], where
 
 
 # ====================================================================== what people read
