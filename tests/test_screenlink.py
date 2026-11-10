@@ -223,6 +223,9 @@ class FakeDriver(screenlink.Driver):
             return []
         return screenlink._options_of(handle)
 
+    def has_children(self, handle: Any) -> bool:
+        return bool(handle.children)
+
     def scroll(self, doc: Doc, direction: str) -> bool | None:
         self.did.append(("scroll", direction))
         self.y = {"down": self.y + 30, "up": max(0.0, self.y - 30), "top": 0.0, "bottom": 100.0}[direction]
@@ -467,16 +470,60 @@ async def test_an_element_with_no_action_of_its_own_is_not_done_some_other_way()
     assert no.code == "failed" and "can't be done without the mouse" in str(no) and driver.did == []
     driver.refuse = {"invoke", "legacy"}
     assert (await refused(do(link, "click", page, "Go"))).code == "failed"
-    rich = El("Group", name="Message body", aria="textbox", props={"readonly": "false"}, rect=(0, 0, 9, 9), rid=(1, 60))
+    rich = El("Group", name="Message body", props={"multiline": "true"}, rect=(0, 0, 9, 9), rid=(1, 60))
     rich.handle = rich
     driver.root.children.append(rich)
     page = await read(link)
     assert item(page, "Message body")["kind"] == "editable text"
     no = await refused(do(link, "type", page, "Message body", text="Hi"))
-    assert no.code == "failed" and "can't be typed into without Pyxi's browser extension" in str(no)
+    assert no.code == "failed" and "rich text box" in str(no) and "Settings, Connect your browser" in str(no)
     # Nothing here ever drives the real mouse or keyboard.
     source = (ROOT / "src" / "pyxi" / "screenlink.py").read_text(encoding="utf-8")
     assert not re.search(r"SendInput|mouse_event|keybd_event|SetCursorPos|Hands\(|pyautogui", source)
+
+
+def _mail_body(driver: FakeDriver, name: str, words: str = "") -> El:
+    """A contenteditable with the textbox role: to the tree, a text area."""
+    box = El(
+        "Edit",
+        name=name,
+        aria="textbox",
+        props={"multiline": "true"},
+        patterns=P("Value", "LegacyIAccessible"),
+        rect=(0, 0, 9, 9),
+        rid=(1, 60 + len(driver.root.children)),
+        children=[text(words)] if words else [],
+    )
+    driver.root.children.append(box)
+    for el in _all(driver.root):
+        el.handle = el
+    return box
+
+
+async def test_in_chrome_a_rich_text_box_is_not_taken_for_a_field_that_took_the_text():
+    link, driver = make()
+    _mail_body(driver, "Message body", "Dear Dana")
+    _mail_body(driver, "Reply")
+    page = await read(link)
+    # Its text is elements inside it, which a real field never has: refused before anything.
+    no = await refused(do(link, "type", page, "Message body", text="Hi"))
+    assert no.code == "failed" and "rich text box" in str(no) and driver.did == []
+    real = driver.do
+
+    def chrome(handle: Any, way: str, words: str = "") -> None:
+        real(handle, way, words)
+        if handle.name == "Reply":  # measured: the words go in as an element, the page isn't told
+            handle.children = [text(words)]
+
+    driver.do = chrome  # type: ignore[method-assign]
+    no = await refused(do(link, "type", page, "Reply", text="Hi"))  # empty, so it looked like a field
+    assert no.code == "failed" and "the page was not told" in str(no) and "Don't try again" in str(no)
+    out = await do(link, "type", page, "To", text="dana@example.com")  # a real field is not affected
+    assert out["value"] == "dana@example.com"
+    fox, driver2 = make("firefox.exe")  # Firefox tells the page (measured), so there it is typed
+    _mail_body(driver2, "Message body", "Dear Dana")
+    page = await read(fox)
+    assert (await do(fox, "type", page, "Message body", text="Hi"))["value"] == "Hi"
 
 
 @pytest.mark.parametrize("lazy", [False, True])

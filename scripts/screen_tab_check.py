@@ -564,7 +564,7 @@ class Browser:
         while time.monotonic() < end:
             if foreground() == self.hwnd:
                 self.focus_at_start = True
-                self.hand_back()
+                self.hand_back(force=True)
             time.sleep(0.1)
 
     def quiet(self, on: bool) -> None:
@@ -587,25 +587,38 @@ class Browser:
         if not on_top:
             user32.SetWindowPos(self.hwnd, wt.HWND(1), 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
 
-    def hand_back(self) -> bool:
-        """This window has the keyboard and shouldn't: minimise it (Windows then gives the
-        keyboard to the window behind) and bring it back without activating it."""
+    def hand_back(self, force: bool = False) -> bool:
+        """Is this window behind (not holding the keyboard)? In the main runs the window is
+        marked never-activate; if a browser takes the keyboard all the same it is counted and
+        left alone, because minimising a browser under its own feet makes it miss requests.
+        With ``force`` (the few runs where it must start behind) it is minimised, which makes
+        Windows give the keyboard to the window behind, and brought back without activating."""
         now = foreground()
         if now != self.hwnd:
             self.other = now or self.other
             if user32.IsIconic(self.hwnd):
-                user32.ShowWindow(self.hwnd, 4)
-                self.place()
+                self.restore()
             return True
+        if not force:
+            return False
         user32.ShowWindow(self.hwnd, 6)  # SW_MINIMIZE
+        end = time.monotonic() + 1.0
+        while not user32.IsIconic(self.hwnd) and time.monotonic() < end:
+            time.sleep(0.05)
         time.sleep(0.25)
+        self.restore()
+        return foreground() != self.hwnd
+
+    def restore(self) -> None:
         user32.ShowWindow(self.hwnd, 4)  # SW_SHOWNOACTIVATE
-        time.sleep(0.3)
+        end = time.monotonic() + 1.5
+        while user32.IsIconic(self.hwnd) and time.monotonic() < end:
+            time.sleep(0.05)
         if user32.IsIconic(self.hwnd):
             user32.ShowWindow(self.hwnd, 9)  # SW_RESTORE
-            time.sleep(0.3)
+            time.sleep(0.4)
         self.place()
-        return foreground() != self.hwnd
+        time.sleep(0.25)
 
     def show(self) -> bool:
         """Make sure the page is really showing. Chrome and Edge decide for themselves
@@ -616,10 +629,9 @@ class Browser:
             if self.site is None or not self.site.state().get("hidden"):
                 return True
             user32.ShowWindow(self.hwnd, 6)
-            time.sleep(0.3)
-            user32.ShowWindow(self.hwnd, 4)
-            self.place()
-            time.sleep(1.6)
+            time.sleep(0.4)
+            self.restore()
+            time.sleep(1.4)
         self.hand_back()
         return not self.site.state().get("hidden")
 
@@ -672,6 +684,9 @@ class OwnWindows(screenlink.UiaDriver):
             raise BrowserError("failed", "not a window of this check")
         super().open(hwnd, url)
 
+
+PATTERNS_FIRST = dict(screenlink.WAYS["chromium"])
+LEGACY_FIRST = dict(screenlink.WAYS["gecko"])
 
 # ---------------------------------------------------------------------- measuring
 @dataclass
@@ -733,8 +748,8 @@ class Check:
         """For a failed read: what the window looked like to the check."""
         state = self.site.state()
         return (
-            f"(page says: {state.get('page')}, hidden={state.get('hidden')}; window minimised={bool(user32.IsIconic(self.b.hwnd))}, "
-            f"in front={foreground() == self.b.hwnd})"
+            f"({self.link.last_trouble}; page says: {state.get('page')}, hidden={state.get('hidden')}; "
+            f"window minimised={bool(user32.IsIconic(self.b.hwnd))}, in front={foreground() == self.b.hwnd})"
         )
 
     def row(self, group: str, case: str, **values: Any) -> Row:
@@ -743,7 +758,7 @@ class Check:
         mark = "ok  " if row.confirmed else ("--  " if row.confirmed is None else "FAIL")
         print(
             f"  {mark} {self.b.name:8s} {group:22s} {case:44s} found={_yn(row.found)} acted={_yn(row.acted)} "
-            f"confirmed={_yn(row.confirmed)}{' FOCUS' if row.focus else ''}{'  [' + row.note[:110] + ']' if row.note else ''}",
+            f"confirmed={_yn(row.confirmed)}{' FOCUS' if row.focus else ''}{'  [' + row.note[:200] + ']' if row.note else ''}",
             flush=True,
         )
         return row
@@ -784,6 +799,8 @@ class Check:
             await act(page, item)
         except BrowserError as exc:
             acted, note = False, f"{exc.code}: {exc}"
+            if "isn't answering" in note:
+                note = f"{exc.code}: the page isn't answering {self.seen()}"
         took = (time.monotonic() - started) * 1000
         focus = foreground() == self.b.hwnd and not front_before
         if refuses:
@@ -1044,10 +1061,8 @@ class Check:
 
     async def keys(self, in_front: bool) -> None:
         s = self.site
-        where = "window in front" if in_front else "window not in front"
         if not in_front:
             self.b.quiet(True)
-        group = f"keys ({where})"
         typed_enter = lambda page, item: self.do("type", page, item, text="milk", enter=True, settle=True)  # noqa: E731
         front = lambda: self.b.to_front() if in_front else True  # noqa: E731
 
@@ -1055,13 +1070,15 @@ class Check:
             self.b.hand_back()
             await s.go(path)
             if in_front and not front():
-                self.row(group, name, found=None, note="the check couldn't bring the window to the front")
+                self.row("keys (window in front)", name, found=None, note="the check couldn't bring the window to the front")
                 return
+            # Named for where the window really is when the key is pressed.
+            group = f"keys (window {'in front' if foreground() == self.b.hwnd else 'not in front'})"
             try:
                 await self.case(group, name, None, pick, act, confirm)
             finally:
                 if in_front:
-                    self.b.hand_back()
+                    self.b.hand_back(force=True)
                     self.b.quiet(True)
 
         await run("Enter in a search box", "/list", lambda p: item_of(p, "Search groceries"), typed_enter, lambda st: st["text"].get("found") == "Searched: milk")
@@ -1097,7 +1114,7 @@ class Check:
             ("/private", "Number", "cardnum", "only its name= says card", "card"),
             ("/private", "Code", "otpcode", "only its name= says one-time code", "password"),
             ("/private", "3 digits", "verification_value", "only its name= says security code", "card"),
-            ("/private", "Nickname", "sneak", "turns into a password field when entered", "password"),
+            ("/private", "Nickname", "sneak", "would turn into a password field if the cursor entered it", "password"),
         ]
         for path, words, name, why, kind in fields:
             self.b.hand_back()
@@ -1153,11 +1170,18 @@ class Check:
             lambda page, item: self.do("type", page, item, text="Corner Bakery"), lambda st: st["fields"].get("businessname") == "Corner Bakery",
         )  # fmt: skip
 
-    async def takes_keyboard(self) -> None:
+    async def takes_keyboard(self, legacy_first: bool) -> None:
         """Does acting bring the browser window to the front? The window is allowed to be
         activated for these few actions only, starts each one behind, and "confirmed" means
-        it stayed behind."""
+        it stayed behind. Run with each of the two orders in which the ways to act can be
+        tried (UI Automation's patterns first, or the older default action first): the
+        order screenlink uses for an engine is the one that takes the keyboard least.
+        Windows itself only lets a window come to the front when the person at the PC hasn't
+        just typed or clicked, so the same action can come out either way."""
         s = self.site
+        group = f"takes the keyboard? ({'older default action first' if legacy_first else 'UI Automation patterns first'})"
+        saved = screenlink.WAYS[self.b.engine]
+        screenlink.WAYS[self.b.engine] = PATTERNS_FIRST if not legacy_first else LEGACY_FIRST
         self.b.quiet(False)
         todo = [
             ("reading the page", "/form", None, None),
@@ -1171,7 +1195,7 @@ class Check:
         try:
             for name, path, words, act in todo:
                 await s.go(path)
-                behind = self.b.hand_back()
+                behind = self.b.hand_back(force=True)
                 await asyncio.sleep(0.3)
                 note = "" if behind else "the window couldn't be put behind first"
                 try:
@@ -1182,9 +1206,10 @@ class Check:
                     note = str(exc)[:80]
                 await asyncio.sleep(0.5)
                 took = foreground() == self.b.hwnd
-                self.row("takes the keyboard?", name, found=behind, acted=not note, confirmed=behind and not took, focus=took and behind, note=note)
+                self.row(group, name, found=behind, acted=not note, confirmed=behind and not took, focus=took and behind, note=note)
         finally:
-            self.b.hand_back()
+            screenlink.WAYS[self.b.engine] = saved
+            self.b.hand_back(force=True)
             self.b.quiet(True)
 
     async def conditions(self) -> None:
@@ -1546,7 +1571,9 @@ async def main(opts: argparse.Namespace) -> int:
                 print(f"  -- round {n + 1}")
                 await check.round()
             if not opts.quick:
-                await check.takes_keyboard()
+                for _ in range(2):
+                    await check.takes_keyboard(legacy_first=False)
+                    await check.takes_keyboard(legacy_first=True)
                 await check.conditions()
             if opts.front:
                 await check.keys(in_front=True)

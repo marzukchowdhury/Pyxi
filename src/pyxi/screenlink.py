@@ -96,6 +96,12 @@ NOT_SHOWING = (
     "showing on screen (not minimised, not covered by another window). Ask them to bring it "
     "to the front, then try again."
 )
+RICH_TEXT = (
+    "That's a rich text box (the kind a mail body or a chat message is written in). Without "
+    "Pyxi's browser extension its text can't be set in a way the page notices. Don't try "
+    "again: say what is left for them, and that the extension can do it (Settings, Connect "
+    "your browser)."
+)
 NO_WAY = (
     "That can't be done without the mouse here: the page gives this element no action of "
     "its own. Pyxi's browser extension can do it (Settings, Connect your browser)."
@@ -229,6 +235,9 @@ class Driver:
 
     def options(self, handle: Any) -> list[El]:
         return []
+
+    def has_children(self, handle: Any) -> bool:
+        return False
 
     def scroll(self, doc: Doc, direction: str) -> bool | None:
         return None
@@ -403,7 +412,11 @@ def kind_of(el: El) -> str:
 
 def _editable(el: El) -> bool:
     """A rich text box (contenteditable): a container the browser says can be edited."""
-    return el.aria in ("textbox", "searchbox") or el.props.get("readonly") == "false"
+    # Chrome and Edge say "readonly" of everything that can't be edited, and leave it out
+    # for what can; Firefox says nothing either way, so there only the role tells.
+    return el.aria in ("textbox", "searchbox") or (
+        bool(el.props) and "readonly" not in el.props and el.props.get("multiline") == "true"
+    )
 
 
 def _href(value: str, page_url: str) -> str:
@@ -661,6 +674,7 @@ class ScreenLink:
         self._halted: list[str] = []
         self._watch: dict[str, asyncio.Task[Any]] = {}
         self._pool: concurrent.futures.ThreadPoolExecutor | None = None
+        self.last_trouble = ""
 
     # ------------------------------------------------------------------ what tabwork asks of a link
     @property
@@ -839,9 +853,14 @@ class ScreenLink:
         for w in self.driver.windows():
             if w.hwnd == hwnd:
                 if w.minimised:
-                    raise BrowserError("failed", NOT_SHOWING)
+                    raise self._not_showing("the window is minimised")
                 return w
         raise BrowserError("gone", "That browser window was closed.")
+
+    def _not_showing(self, why: str) -> BrowserError:
+        self.last_trouble = why  # for the logs and the measuring script
+        log.info("screen tab: the page isn't answering (%s)", why)
+        return BrowserError("failed", NOT_SHOWING)
 
     def _engine(self, hwnd: int) -> str:
         return BROWSERS[self._window(hwnd).exe][1]
@@ -857,7 +876,7 @@ class ScreenLink:
         title = (doc.title if doc is not None else "") or (window.title if window else "")
         return {"id": hwnd, "title": title, "url": doc.url if doc else "", "active": True, "window": hwnd}
 
-    def _doc(self, hwnd: int, wait_s: float = 2.5) -> Doc:
+    def _doc(self, hwnd: int, wait_s: float = 3.5) -> Doc:
         """The web page showing in this window, or why there isn't one to work in."""
         self._window(hwnd)
         end = time.monotonic() + wait_s
@@ -868,7 +887,7 @@ class ScreenLink:
                 break
             time.sleep(0.2)
         if doc is None or not doc.url:
-            raise BrowserError("failed", NOT_SHOWING)
+            raise self._not_showing("no web page was found in the window" if doc is None else "the page gave no address")
         if not host_of(doc.url):
             raise BrowserError("browser_page", "That's one of the browser's own pages, which Pyxi can't work in.")
         return doc
@@ -912,7 +931,7 @@ class ScreenLink:
         max_items = min(200, max(1, int(args.get("max_items") or 90)))
         self._doc(hwnd)
         snap = None
-        end = time.monotonic() + 3.0
+        end = time.monotonic() + 5.0
         while True:
             # The first look wakes the browser's accessibility for the page: it answers with
             # an empty document, then fills it in.
@@ -921,7 +940,7 @@ class ScreenLink:
                 break
             time.sleep(0.3)
         if snap is None or not snap.root.children:
-            raise BrowserError("failed", NOT_SHOWING)
+            raise self._not_showing("the page gave no contents")
         if not host_of(snap.doc.url):
             raise BrowserError("browser_page", "That's one of the browser's own pages, which Pyxi can't work in.")
         seen = self._passwords.setdefault(snap.doc.rid, set())
@@ -1079,22 +1098,37 @@ class ScreenLink:
             raise BrowserError("sensitive", "That looks like a card number. Pyxi never types those.")
         kind = str(item.get("kind") or "")
         if kind == "editable text" or "Value" not in el.patterns:
-            if kind == "editable text" or kind in ("text field", "text area", "search box", "dropdown box"):
-                raise BrowserError(
-                    "failed",
-                    "That box can't be typed into without Pyxi's browser extension (a rich text box "
-                    "gives no way to set its text). Don't try again: say what is left for them.",
-                )
+            if kind in ("editable text", "text field", "text area", "search box", "dropdown box"):
+                raise BrowserError("failed", RICH_TEXT)
             raise BrowserError("failed", "That isn't something text can be typed into. Click it instead.")
         if el.props.get("readonly") == "true" and kind not in ("text field", "text area", "search box"):
             raise BrowserError("failed", "That field can't be changed (read only).")
         engine = self._engine(hwnd)
+        # Measured: Chrome and Edge take a value for a rich text box (a contenteditable with
+        # the textbox role) and put the words in it without telling the page, so the page's
+        # own code never learns of them. Such a box looks exactly like a text area until it
+        # has text: then, unlike a real field, it has that text as elements inside it.
+        rich = engine == "chromium" and el.role == "Edit"
+        if rich and self.driver.has_children(el.handle):
+            raise BrowserError("failed", RICH_TEXT)
 
         def took() -> bool:
-            now = self.driver.state(el.handle, doc.rid)
-            return now is not None and " ".join(now.value.split()) == " ".join(text.split())
+            end = time.monotonic() + 0.5  # Firefox reports the new value a moment later
+            while True:
+                now = self.driver.state(el.handle, doc.rid)
+                if now is not None and " ".join(now.value.split()) == " ".join(text.split()):
+                    return True
+                if now is None or time.monotonic() > end:
+                    return False
+                time.sleep(0.05)
 
         self._try(el, engine, "type", job, text, check=took)  # what it shows now is reported back
+        if rich and text.strip() and self.driver.has_children(el.handle):
+            raise BrowserError(
+                "failed",
+                "The words were put in that box, but it is a rich text box and the page was not "
+                "told, so it will most likely ignore them. " + RICH_TEXT,
+            )
         now = self.driver.state(el.handle, doc.rid)
         out: dict[str, Any] = {"value": hide_numbers(_clean(now.value if now else "", 200))}
         if args.get("enter"):
@@ -1120,13 +1154,19 @@ class ScreenLink:
         options = self.driver.options(el.handle)
         if not options and "ExpandCollapse" in el.patterns:
             # Chrome and Edge only list a dropdown's options while it is open.
-            job.about_to_act()
-            self.driver.do(el.handle, "expand")
             opened = True
-            end = time.monotonic() + 1.5
-            while not options and time.monotonic() < end:
-                time.sleep(0.15)
-                options = self.driver.options(el.handle)
+            for way in ("expand", "legacy"):
+                job.about_to_act()
+                try:
+                    self.driver.do(el.handle, way)
+                except Exception:
+                    continue
+                end = time.monotonic() + 2.0
+                while not options and time.monotonic() < end:
+                    time.sleep(0.15)
+                    options = self.driver.options(el.handle)
+                if options:
+                    break
         try:
             names = [(_clean(o.name).lower(), o) for o in options]
             hit = (
@@ -1768,6 +1808,14 @@ class UiaDriver(Driver):
             return _options_of(self._el(handle.BuildUpdatedCache(whole), True, [400]))
         except Exception:
             return []
+
+    def has_children(self, handle: Any) -> bool:
+        _, _, _, _, kids = self._uia()
+        try:
+            array = handle.BuildUpdatedCache(kids).GetCachedChildren()
+            return bool(array is not None and array.Length)
+        except Exception:
+            return False
 
     def scroll_state(self, doc: Doc) -> tuple[float, float] | None:
         try:
