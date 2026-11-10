@@ -31,8 +31,9 @@ Safety: the only windows this script can see or touch are those of the browser p
 started (the driver it gives ScreenLink lists no others), every profile is temporary, the
 pages are served from here, and nothing touches the installed Pyxi's data. The windows are
 small, sit in the bottom right corner on top of other windows (a covered Chrome window stops
-answering for its page) and are put there without taking the keyboard; when a browser takes
-it anyway, it is handed straight back and counted.
+answering for its page) and are put there without taking the keyboard. A browser can still
+take it by itself, when it starts and on some actions: Windows only allows that while nobody
+is typing or clicking, and every time it happens is counted.
 """
 
 from __future__ import annotations
@@ -320,6 +321,24 @@ RICH = """<!doctype html><title>Write a note</title>
  }
 </script>"""
 
+# Controls that listen for something other than a click, the way some component libraries do
+# (a menu that opens on pointerdown, a button on mousedown, a menu that shows on hover).
+EVENTS = """<!doctype html><title>Other events</title>
+<h1>Other events</h1>
+<p><button id="md">Opens on mouse down</button> <button id="pd">Opens on pointer down</button></p>
+<div id="hov" style="border:1px solid #888;padding:6px;width:200px">Account menu
+ <div id="sub" hidden><button id="so">Sign-in options</button></div></div>
+<p id="state">idle</p>
+<script>
+ const state = document.getElementById("state");
+ document.getElementById("md").addEventListener("mousedown", () => { state.textContent = "mouse down heard"; });
+ document.getElementById("pd").addEventListener("pointerdown", () => { state.textContent = "pointer down heard"; });
+ const hov = document.getElementById("hov"), sub = document.getElementById("sub");
+ hov.addEventListener("mouseenter", () => { sub.hidden = false; });
+ hov.addEventListener("mouseleave", () => { sub.hidden = true; });
+ document.getElementById("so").addEventListener("click", () => { state.textContent = "hover menu used"; });
+</script>"""
+
 LINKS = """<!doctype html><title>Links</title>
 <h1>Links</h1>
 <p><a href="/plain" target="_blank" rel="noopener">Open the cake form in a new tab</a></p>
@@ -342,6 +361,7 @@ PAGES: dict[str, str] = {
     "/shadow": SHADOW,
     "/rich": RICH,
     "/links": LINKS,
+    "/events": EVENTS,
     "/start": "<!doctype html><title>Ready</title><h1>Ready</h1><p>The check starts here.</p>",
 }
 
@@ -435,11 +455,6 @@ user32.GetWindowThreadProcessId.restype = wt.DWORD
 user32.AttachThreadInput.argtypes = [wt.DWORD, wt.DWORD, wt.BOOL]
 user32.SetForegroundWindow.argtypes = [wt.HWND]
 user32.IsWindow.argtypes = [wt.HWND]
-user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
-user32.GetWindowLongPtrW.argtypes = [wt.HWND, ctypes.c_int]
-user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
-user32.SetWindowLongPtrW.argtypes = [wt.HWND, ctypes.c_int, ctypes.c_ssize_t]
-WS_EX_NOACTIVATE = 0x08000000
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x0001, 0x0002, 0x0010, 0x0040
 
 
@@ -558,23 +573,15 @@ class Browser:
             self.hwnd = wins[0] if wins else 0
         if not self.hwnd:
             raise RuntimeError(f"{self.name} never showed a window")
-        self.quiet(True)
         self.place()
-        end = time.monotonic() + 5  # browsers take the keyboard a moment after the window shows
-        while time.monotonic() < end:
+        end = time.monotonic() + 4  # browsers take the keyboard a moment after the window shows
+        while time.monotonic() < end and not self.focus_at_start:
             if foreground() == self.hwnd:
                 self.focus_at_start = True
-                self.hand_back(force=True)
             time.sleep(0.1)
-
-    def quiet(self, on: bool) -> None:
-            """Mark this check's own window as one that is never activated, so that it can't
-            take the keyboard from whoever is using the PC (taken off for the few runs that
-            measure exactly that)."""
-            style = user32.GetWindowLongPtrW(self.hwnd, -20)  # GWL_EXSTYLE
-            wanted = style | WS_EX_NOACTIVATE if on else style & ~WS_EX_NOACTIVATE
-            if wanted != style:
-                user32.SetWindowLongPtrW(self.hwnd, -20, wanted)
+        if self.focus_at_start:
+            self.hand_back(force=True)  # once: a browser bounced about while starting misses requests
+            time.sleep(1.0)
 
     def place(self, on_top: bool = True) -> None:
         """Small, bottom right, and (unless being covered on purpose) above other windows,
@@ -588,11 +595,14 @@ class Browser:
             user32.SetWindowPos(self.hwnd, wt.HWND(1), 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
 
     def hand_back(self, force: bool = False) -> bool:
-        """Is this window behind (not holding the keyboard)? In the main runs the window is
-        marked never-activate; if a browser takes the keyboard all the same it is counted and
-        left alone, because minimising a browser under its own feet makes it miss requests.
-        With ``force`` (the few runs where it must start behind) it is minimised, which makes
-        Windows give the keyboard to the window behind, and brought back without activating."""
+        """Is this window behind (not holding the keyboard)? In the main runs a browser that
+        takes the keyboard is counted and left alone: Windows itself refuses to let a window
+        come to the front while the person at the PC is typing or clicking, so it only
+        happens when they aren't, and minimising a browser under its own feet makes it miss
+        requests. (Marking the window never-activate was tried: Chrome then minimises itself
+        when a dropdown opens.) With ``force``, for the few runs where it must start behind,
+        it is minimised, which makes Windows give the keyboard to the window behind, and
+        brought back without activating."""
         now = foreground()
         if now != self.hwnd:
             self.other = now or self.other
@@ -636,7 +646,6 @@ class Browser:
         return not self.site.state().get("hidden")
 
     def to_front(self) -> bool:
-        self.quiet(False)
         user32.ShowWindow(self.hwnd, 6)
         time.sleep(0.2)
         user32.ShowWindow(self.hwnd, 9)  # SW_RESTORE: comes back as the active window
@@ -703,6 +712,7 @@ class Row:
 
 
 ROWS: list[Row] = []
+RESTORED: list[str] = []  # each time a window was found minimised when it shouldn't be
 
 
 async def until(test: Any, timeout: float = 3.0, every: float = 0.05) -> bool:
@@ -731,9 +741,19 @@ class Check:
     def __init__(self, browser: Browser, site: Site, link: screenlink.ScreenLink, opts: argparse.Namespace) -> None:
         self.b, self.site, self.link, self.opts = browser, site, link, opts
         self.hint = f"w{browser.hwnd}"
+        self.steady = True  # False while a run minimises or covers the window on purpose
 
     # ---- the link, called the way tabwork's operator calls it
+    def upright(self) -> None:
+        """The window is meant to be showing for everything but the runs that minimise it on
+        purpose. If something else minimised it (the person at the PC, or the browser still
+        settling after this check moved it), it is put back and counted."""
+        if self.steady and user32.IsIconic(self.b.hwnd):
+            RESTORED.append(self.b.name)
+            self.b.restore()
+
     async def read(self, **more: Any) -> dict[str, Any]:
+        self.upright()
         return await self.link.call(
             "read", {"tab": self.b.hwnd, "max_chars": 6000, "max_items": 150, **more}, browser=self.hint
         )
@@ -742,6 +762,7 @@ class Check:
         seen: dict[str, Any] = {"tab": self.b.hwnd, "page": page["page"], "host": host_of(page["tab"]["url"])}
         if item is not None:
             seen.update(ref=item["ref"], label=item["label"])
+        self.upright()
         return await self.link.call(name, {**seen, **args}, browser=self.hint, timeout=30)
 
     def seen(self) -> str:
@@ -779,6 +800,8 @@ class Check:
         """One measured action: load the page fresh, look for the element in what Pyxi
         reads, act on it, and ask the page whether it happened. ``refuses`` names the
         refusal that is the right outcome (then "confirmed" means the page did not change)."""
+        if self.opts.only and self.opts.only.lower() not in f"{group} {name}".lower():
+            return Row(self.b.name, group, name)  # not asked for in this run
         self.b.hand_back()
         try:
             if path is not None:
@@ -870,6 +893,11 @@ class Check:
         await self.case("button", "Bottom button, far off screen", "/long", lambda p: item_of(p, "Bottom button", "button"), click, text("state", "bottom clicked"))
         await self.case("clickable div", "Show opening hours (a div with a listener)", "/list", lambda p: item_of(p, "Show opening hours"), click, text("hours", "Open 7 to 5."))
         await self.case("link", "Go to the sign-up form", "/list", lambda p: item_of(p, "Go to the sign-up form", "link"), click, lambda st: st["page"] == "form", wait=8)
+
+        # -- controls that don't listen for a click
+        await self.case("other events", "a button that only hears mouse down", "/events", lambda p: item_of(p, "Opens on mouse down"), click, text("state", "mouse down heard"))
+        await self.case("other events", "a button that only hears pointer down", "/events", lambda p: item_of(p, "Opens on pointer down"), click, text("state", "pointer down heard"))
+        await self.case("other events", "a menu that only shows on hover", "/events", lambda p: item_of(p, "Sign-in options"), click, text("state", "hover menu used"))
 
         # -- text
         typed = lambda text, **more: lambda page, item: self.do("type", page, item, text=text, **more)  # noqa: E731
@@ -1061,8 +1089,6 @@ class Check:
 
     async def keys(self, in_front: bool) -> None:
         s = self.site
-        if not in_front:
-            self.b.quiet(True)
         typed_enter = lambda page, item: self.do("type", page, item, text="milk", enter=True, settle=True)  # noqa: E731
         front = lambda: self.b.to_front() if in_front else True  # noqa: E731
 
@@ -1079,7 +1105,6 @@ class Check:
             finally:
                 if in_front:
                     self.b.hand_back(force=True)
-                    self.b.quiet(True)
 
         await run("Enter in a search box", "/list", lambda p: item_of(p, "Search groceries"), typed_enter, lambda st: st["text"].get("found") == "Searched: milk")
         await run(
@@ -1182,7 +1207,6 @@ class Check:
         group = f"takes the keyboard? ({'older default action first' if legacy_first else 'UI Automation patterns first'})"
         saved = screenlink.WAYS[self.b.engine]
         screenlink.WAYS[self.b.engine] = PATTERNS_FIRST if not legacy_first else LEGACY_FIRST
-        self.b.quiet(False)
         todo = [
             ("reading the page", "/form", None, None),
             ("pressing a button", "/list", "Add Milk", lambda p, i: self.do("click", p, i)),
@@ -1210,12 +1234,12 @@ class Check:
         finally:
             screenlink.WAYS[self.b.engine] = saved
             self.b.hand_back(force=True)
-            self.b.quiet(True)
 
     async def conditions(self) -> None:
         """The same three things (read a page, press a button, fill a field) with the
         window showing, covered by other windows, and minimised."""
         s = self.site
+        self.steady = False
         for label, arrange in (
             ("showing, not in front", lambda: self.b.place(True)),
             ("covered by other windows", lambda: self.b.place(False)),
@@ -1238,9 +1262,7 @@ class Check:
             if page is not None:
                 await self.case(group, "press a button", None, lambda p: item_of(p, "Add Milk"), lambda p, i: self.do("click", p, i), lambda st: "Milk" in st["text"].get("cart", ""), page=page, wait=5)
                 await self.case(group, "type in a field", None, lambda p: item_of(p, "Search groceries"), lambda p, i: self.do("type", p, i, text="eggs"), lambda st: st["fields"].get("q") == "eggs", page=page, wait=5)
-            if label == "minimised":
-                user32.ShowWindow(self.b.hwnd, 4)
-            self.b.place(True)
+            self.b.restore()
             await asyncio.sleep(1.0)
         # Read while showing, then act once the window is covered or minimised.
         for label, arrange in (
@@ -1259,9 +1281,9 @@ class Check:
             await asyncio.sleep(2.5)
             await self.case(f"window {label}", "press a button", None, lambda p: item_of(p, "Add Milk"), lambda p, i: self.do("click", p, i), lambda st: "Milk" in st["text"].get("cart", ""), page=page, wait=5)
             await self.case(f"window {label}", "type in a field", None, lambda p: item_of(p, "Search groceries"), lambda p, i: self.do("type", p, i, text="eggs"), lambda st: st["fields"].get("q") == "eggs", page=page, wait=5)
-            user32.ShowWindow(self.b.hwnd, 4)
-            self.b.place(True)
+            self.b.restore()
             await asyncio.sleep(1.0)
+        self.steady = True
 
     async def new_tabs(self) -> None:
         """Things that open another tab. Run last: afterwards the window has more tabs."""
@@ -1527,6 +1549,13 @@ def table(rows: list[Row], browsers: list[Browser], opts: argparse.Namespace) ->
                 notes.append(line)
     if notes:
         out += ["", "## Notes from the runs (failures, and what the page said)", "", *notes[:120]]
+    if RESTORED:
+        out += [
+            "",
+            f"The check found its window minimised {len(RESTORED)} time(s) in the main runs and put it back "
+            f"({', '.join(f'{n}: {RESTORED.count(n)}' for n in dict.fromkeys(RESTORED))}): somebody at the PC, or the browser "
+            "settling after the check itself had moved it. The runs that minimise the window on purpose are the \"window\" rows.",
+        ]
     speed = [r for r in rows if r.group == "read" and r.ms]
     if speed:
         out += ["", "## How long a look takes", ""]
@@ -1602,6 +1631,7 @@ if __name__ == "__main__":
     parser.add_argument("--browsers", default="chrome,edge,firefox")
     parser.add_argument("--repeat", type=int, default=3)
     parser.add_argument("--quick", action="store_true", help="skip the covered and minimised window runs")
+    parser.add_argument("--only", default="", help="only the cases whose kind or name has these words")
     parser.add_argument("--front", action="store_true", help="also press keys with the window in front (takes the keyboard briefly)")
     parser.add_argument("--public", action="store_true", help="also a read-only pass on a few public pages")
     parser.add_argument("--real-model", action="store_true")

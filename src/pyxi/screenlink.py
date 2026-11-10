@@ -1610,7 +1610,8 @@ class UiaDriver(Driver):
             whole = ui.CreateCacheRequest()
             one = ui.CreateCacheRequest()
             kids = ui.CreateCacheRequest()
-            for request in (whole, one, kids):
+            controls = ui.CreateCacheRequest()
+            for request in (whole, one, kids, controls):
                 for prop in (
                     _P_RID, _P_RECT, _P_TYPE, _P_NAME, _P_FOCUS, _P_ENABLED, _P_AID, _P_CLASS, _P_HELP,
                     _P_PASSWORD, _P_OFFSCREEN, _P_VALUE, _P_TOGGLE, _P_SELECTED, _P_ARIA,
@@ -1618,6 +1619,9 @@ class UiaDriver(Driver):
                 ):  # fmt: skip
                     request.AddProperty(prop)
                 request.TreeFilter = ui.RawViewCondition  # groups and forms are only in the raw view
+            controls.TreeFilter = ui.ControlViewCondition
+            controls.TreeScope = 7
+            self._local.controls = controls
             whole.TreeScope = 7  # the element and everything under it
             one.TreeScope = 1
             kids.TreeScope = 3  # the element and its children
@@ -1671,6 +1675,8 @@ class UiaDriver(Driver):
             rid=tuple(int(v) for v in (get(_P_RID) or ())),
             handle=raw,
         )
+        if el.value and private_kind(el):
+            el.value = ""  # private by its words: its value is not kept either
         if deep:
             try:
                 array = raw.GetCachedChildren()
@@ -1804,10 +1810,15 @@ class UiaDriver(Driver):
 
     def options(self, handle: Any) -> list[El]:
         _, _, whole, _, _ = self._uia()
-        try:
-            return _options_of(self._el(handle.BuildUpdatedCache(whole), True, [400]))
-        except Exception:
-            return []
+        # Chrome and Edge show an open dropdown's options in the control view only.
+        for request in (whole, self._local.controls):
+            try:
+                found = _options_of(self._el(handle.BuildUpdatedCache(request), True, [400]))
+            except Exception:
+                found = []
+            if found:
+                return found
+        return []
 
     def has_children(self, handle: Any) -> bool:
         _, _, _, _, kids = self._uia()

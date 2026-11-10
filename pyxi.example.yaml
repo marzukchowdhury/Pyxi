@@ -15,6 +15,8 @@ screen:
   keep_screenshots: false     # let time travel show real pixels
   retention_hours: 72
   excluded_windows: ["1password", "bitwarden", "keepass", "\bbank\b", "banking", "credential"]
+  tab_fallback: false         # no browser extension connected: work in the tab on screen instead
+  tab_keys: true              # in that mode, may it press Enter and Escape in the tab
 
 budget:
   max_tool_rounds: 4
