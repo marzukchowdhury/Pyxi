@@ -454,7 +454,10 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
   // Flows and glowing parts are light, not matter: they never throw a shadow.
   const casts = part.shape !== "arrow" && part.material !== "emissive" && part.material !== "glass";
 
-  const click = onPick ? (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onPick(part); } : undefined;
+  // A click, not the end of a drag: turning the model round ended over a part every time, and
+  // each time that asked Pyxi to "tell me more" about it (live: the same question three times
+  // in twenty seconds, answered aloud each time). e.delta is how far the pointer moved.
+  const click = onPick ? (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); if (e.delta > 4) return; onPick(part); } : undefined;
   const hover = onPick ? (on: boolean) => (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); document.body.style.cursor = on ? "pointer" : ""; } : undefined;
   const lineColor = style === "blueprint" ? "#9ecbff" : "#dbe9ff";
   const rounded = part.shape === "rounded_box";
