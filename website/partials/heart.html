@@ -1,0 +1,69 @@
+<svg class="plate" viewBox="0 0 600 660" role="img" aria-label="A textbook drawing of the human heart, cut open to show its four chambers and the large vessels, with no labels on it">
+  <defs>
+    <linearGradient id="plate-paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6f1e6" />
+      <stop offset="1" stop-color="#ebe3d3" />
+    </linearGradient>
+    <radialGradient id="plate-wall" cx="0.45" cy="0.35" r="0.8">
+      <stop offset="0" stop-color="#efc2b2" />
+      <stop offset="1" stop-color="#d99a8b" />
+    </radialGradient>
+  </defs>
+  <rect width="600" height="660" fill="url(#plate-paper)" />
+  <rect x="9" y="9" width="582" height="642" fill="none" stroke="#b9ad97" stroke-width="1" />
+
+  <!-- behind the heart: the right branch of the pulmonary artery, the lower vena cava, the veins from the lungs -->
+  <g fill="none" stroke-linecap="butt">
+    <path d="M300 222C250 222 180 212 86 214" stroke="#2f4d78" stroke-width="41" />
+    <path d="M300 222C250 222 180 212 84 214" stroke="#86add9" stroke-width="35" />
+    <path d="M196 330C192 420 184 520 178 630" stroke="#2f4d78" stroke-width="47" />
+    <path d="M196 330C192 420 184 520 178 632" stroke="#7fa8d9" stroke-width="41" />
+    <path d="M440 286L548 270" stroke="#7a2b28" stroke-width="27" />
+    <path d="M440 286L550 270" stroke="#e58175" stroke-width="21" />
+    <path d="M440 324L548 336" stroke="#7a2b28" stroke-width="27" />
+    <path d="M440 324L550 336" stroke="#e58175" stroke-width="21" />
+  </g>
+
+  <!-- the aorta: up from the middle, over the arch, and down behind the heart -->
+  <g fill="none" stroke-linecap="butt">
+    <path d="M372 104V62M401 98V54M430 104V62" stroke="#7a2b28" stroke-width="21" />
+    <path d="M372 106V60M401 100V52M430 106V60" stroke="#e2756a" stroke-width="15" />
+    <path d="M338 310C338 230 322 112 400 112C476 112 478 200 478 300" stroke="#7a2b28" stroke-width="53" />
+    <path d="M338 312C338 230 322 112 400 112C476 112 478 200 478 302" stroke="#e2756a" stroke-width="47" />
+  </g>
+
+  <!-- the upper vena cava -->
+  <g fill="none" stroke-linecap="butt">
+    <path d="M206 34V280" stroke="#2f4d78" stroke-width="51" />
+    <path d="M206 32V282" stroke="#7fa8d9" stroke-width="45" />
+  </g>
+
+  <!-- the heart's own wall -->
+  <path d="M168 288C146 250 176 224 216 232C256 238 276 264 300 270C330 264 352 252 382 242C442 226 504 252 502 322C506 404 470 506 346 616C278 572 178 474 158 372C150 340 156 312 168 288Z" fill="url(#plate-wall)" stroke="#7a3a34" stroke-width="3" stroke-linejoin="round" />
+
+  <!-- the pulmonary artery: up from the right ventricle, in front of the aorta, off to the left lung -->
+  <g fill="none" stroke-linecap="butt">
+    <path d="M288 404C276 300 290 248 318 228C352 206 432 210 522 216" stroke="#2f4d78" stroke-width="43" />
+    <path d="M288 406C276 300 290 248 318 228C352 206 432 210 524 216" stroke="#86add9" stroke-width="37" />
+  </g>
+
+  <!-- the four chambers -->
+  <g stroke-width="2.5" stroke-linejoin="round">
+    <path d="M184 302C178 264 214 250 244 262C262 270 268 290 268 312C268 336 258 352 228 354C204 354 188 340 184 302Z" fill="#7fa8d9" stroke="#2f4d78" />
+    <path d="M196 376C224 364 262 364 286 372C306 380 312 420 320 470C326 510 332 548 338 584C290 548 214 466 196 376Z" fill="#6f9bd1" stroke="#2f4d78" />
+    <path d="M372 288C370 260 408 250 444 258C474 266 484 300 472 328C452 348 398 348 380 332C372 320 372 304 372 288Z" fill="#e58175" stroke="#7a2b28" />
+    <path d="M354 376C386 362 440 364 468 380C470 444 422 536 356 596C348 524 344 434 354 376Z" fill="#dc685d" stroke="#7a2b28" />
+  </g>
+
+  <!-- the valves between the upper and lower chambers -->
+  <g fill="none" stroke="#fff6e8" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M204 360Q219 378 233 364Q247 378 262 360" />
+    <path d="M384 358Q400 376 413 362Q427 376 446 358" />
+  </g>
+  <g fill="none" stroke="#7a3a34" stroke-width="1.4" stroke-linecap="round" opacity="0.7">
+    <path d="M219 372L236 420M247 372L246 420" />
+    <path d="M400 370L404 420M427 370L416 420" />
+  </g>
+
+  <text x="300" y="643" text-anchor="middle" font-family="Fraunces Variable, Fraunces, Georgia, serif" font-style="italic" font-size="15" fill="#7b6f5b">Fig. 1. The heart, opened from the front</text>
+</svg>

@@ -1,0 +1,539 @@
+/* "Explains any picture": a replay of Pyxi writing on a diagram, as it does in the app. */
+.onpic {
+  position: relative;
+  padding: clamp(60px, 9vh, 110px) 0 clamp(70px, 10vh, 120px);
+}
+.onpic::before {
+  content: "";
+  position: absolute;
+  inset: 12% 0 0;
+  background: radial-gradient(40% 40% at 34% 56%, rgba(229, 56, 59, 0.07), transparent 70%);
+  pointer-events: none;
+}
+.onpic .wrap {
+  position: relative;
+}
+.op {
+  display: grid;
+  grid-template-columns: minmax(0, 1.72fr) minmax(280px, 1fr);
+  gap: 18px;
+  margin-top: clamp(34px, 5vh, 56px);
+  scroll-margin-top: 16px;
+}
+
+/* ---------------------------------------------------------------- the stage: a page with a picture on it */
+.op-stage {
+  position: relative;
+  padding: 58px clamp(14px, 2.4vw, 30px) clamp(14px, 2.4vw, 30px);
+  border-radius: 26px;
+  border: 1px solid var(--hair-hi);
+  background:
+    radial-gradient(70% 60% at 40% 50%, rgba(158, 203, 255, 0.06), transparent 72%),
+    linear-gradient(180deg, rgba(16, 19, 27, 0.92), rgba(8, 10, 15, 0.94));
+  box-shadow:
+    0 0 0 7px rgba(255, 255, 255, 0.025),
+    0 50px 130px rgba(0, 0, 0, 0.6),
+    0 1px 0 rgba(255, 255, 255, 0.07) inset;
+  isolation: isolate;
+  align-self: start;
+}
+/* the notch: what Pyxi hears and says, as in the app */
+.op-notch {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 36px);
+  min-width: 190px;
+  margin: 0;
+  padding: 10px 16px 11px 14px;
+  border-radius: 0 0 16px 16px;
+  border: 1px solid var(--hair-hi);
+  border-top: 0;
+  background: rgba(6, 8, 12, 0.96);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  transform: translateX(-50%);
+  font-size: 13.5px;
+  font-weight: 560;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.op-notch > i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fly);
+  box-shadow: 0 0 10px var(--fly);
+}
+.op-notch-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.op-notch[data-state="idle"] .op-notch-text,
+.op-notch[data-state="thinking"] .op-notch-text {
+  color: var(--ink-2);
+}
+.op-wave {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 18px;
+}
+.op-wave i {
+  width: 2.5px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--ice-hi);
+  box-shadow: 0 0 6px rgba(158, 203, 255, 0.7);
+  transform: scaleY(0.18);
+  transform-origin: center;
+}
+.op-notch[data-state="listening"] .op-wave i,
+.op-notch[data-state="speaking"] .op-wave i {
+  animation: op-buzz 0.52s ease-in-out infinite alternate;
+  animation-delay: calc(var(--i) * -0.13s);
+}
+.op-notch[data-state="listening"] .op-wave i {
+  background: var(--fly);
+  box-shadow: 0 0 6px rgba(255, 200, 97, 0.7);
+}
+@keyframes op-buzz {
+  to {
+    transform: scaleY(1);
+  }
+}
+.op-window {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #f4f1ea;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.op-chrome {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  background: #1a1d25;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.op-chrome i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+}
+.op-chrome span {
+  flex: 1;
+  max-width: 320px;
+  margin-left: 10px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.op-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1.72fr) minmax(0, 1fr);
+  gap: clamp(14px, 2.2vw, 30px);
+  align-items: start;
+  padding: clamp(14px, 2vw, 26px) clamp(14px, 2vw, 26px) clamp(14px, 2vw, 26px) clamp(20px, 3.4vw, 46px);
+  color: #2a2620;
+}
+.op-pic {
+  position: relative;
+  aspect-ratio: 600 / 660;
+  border-radius: 4px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 10px 30px rgba(60, 40, 10, 0.18),
+    0 0 0 1px rgba(60, 40, 10, 0.14);
+}
+.op-pic .plate,
+.op-ink {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.op-pic .plate {
+  border-radius: 4px;
+}
+.op-ink {
+  overflow: visible;
+  pointer-events: none;
+}
+/* the app's own marks: a red route traced along the picture, a leader, a dot on the part */
+.op-route {
+  fill: none;
+  stroke: #ff4d4f;
+  stroke-width: 4.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.9)) drop-shadow(0 0 5px rgba(255, 77, 79, 0.55));
+  animation: op-draw 1.5s 0.35s cubic-bezier(0.45, 0.05, 0.3, 1) forwards;
+}
+.op-route.head {
+  animation-delay: 1.8s;
+  animation-duration: 0.3s;
+}
+.op-leader {
+  fill: none;
+  stroke: #ff4d4f;
+  stroke-width: 2.4;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.85));
+  animation: op-draw 0.35s 0.15s ease-out forwards;
+}
+.op-dot {
+  fill: #ff4d4f;
+  stroke: #fff;
+  stroke-width: 2.6;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: op-pop 0.3s 0.4s both;
+}
+.op-dot.live {
+  animation:
+    op-pop 0.3s 0.4s both,
+    op-pulse 1.6s 0.8s ease-in-out infinite;
+}
+.op-ink .quick * {
+  animation-duration: 0.01s;
+  animation-delay: 0s;
+}
+@keyframes op-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes op-pop {
+  from {
+    transform: scale(0);
+  }
+}
+@keyframes op-pulse {
+  50% {
+    transform: scale(1.45);
+  }
+}
+.op-tags {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.op-tag {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  padding: 3px 9px 4px;
+  border-radius: 7px;
+  background: #e5383b;
+  color: #fff;
+  font: 600 12.5px/1.25 var(--font);
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.25) inset,
+    0 4px 14px rgba(120, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 255, 255, 0.6);
+  animation: op-tag-in 0.32s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+@keyframes op-tag-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -30%) scale(0.7);
+  }
+}
+/* the rest of the page the picture sits on */
+.op-text h3 {
+  margin: 4px 0 6px;
+  font: 600 clamp(20px, 2.2vw, 28px) / 1.1 "Fraunces Variable", Fraunces, Georgia, serif;
+  letter-spacing: -0.01em;
+  color: #2a2620;
+}
+.op-text p {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  color: #8a8172;
+}
+.op-text i {
+  display: block;
+  height: 7px;
+  margin: 0 0 10px;
+  width: var(--w, 100%);
+  border-radius: 4px;
+  background: rgba(60, 45, 20, 0.13);
+}
+.op-text i.gap {
+  margin-bottom: 24px;
+}
+/* Pyxi itself, waiting beside the picture as it does on a desktop */
+.op-fly {
+  position: absolute;
+  right: 9%;
+  bottom: 16%;
+  z-index: 3;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff0cc;
+  box-shadow:
+    0 0 8px 2px var(--fly),
+    0 0 26px 8px rgba(255, 200, 97, 0.45);
+  animation: op-hover 4.2s ease-in-out infinite;
+}
+@keyframes op-hover {
+  50% {
+    transform: translate(-7px, -10px);
+  }
+}
+
+/* ---------------------------------------------------------------- beside the stage */
+.op-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.op-you {
+  align-self: flex-end;
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 16px 13px;
+  border-radius: 18px 18px 6px 18px;
+  border: 1px solid rgba(255, 200, 97, 0.45);
+  background: rgba(255, 200, 97, 0.08);
+  font-size: 15.5px;
+  line-height: 1.35;
+  color: var(--ink);
+}
+.op-you span {
+  display: block;
+  margin-bottom: 5px;
+  font:
+    600 10.5px/1 ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fly);
+}
+.op-you b {
+  font-weight: 560;
+}
+.op.is-asking .op-you b::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.12em;
+  background: var(--fly);
+  animation: op-caret 0.8s steps(1) infinite;
+}
+@keyframes op-caret {
+  50% {
+    opacity: 0;
+  }
+}
+.op-talk {
+  flex: 1;
+  padding: 16px 14px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--hair);
+  background: rgba(12, 14, 20, 0.72);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+}
+.op-talk-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 4px 8px;
+  font:
+    600 10.5px/1.3 ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fly);
+}
+.op-talk-head span {
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+  text-transform: none;
+  text-align: right;
+}
+.op-lines {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.op-lines button {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  width: 100%;
+  padding: 7px 6px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink-2);
+  font: 480 14.5px/1.45 var(--font);
+  text-align: left;
+  cursor: pointer;
+  opacity: 0.32;
+  transition:
+    opacity 0.4s,
+    background 0.2s,
+    color 0.2s;
+}
+.op-lines button:hover {
+  background: rgba(255, 255, 255, 0.05);
+  opacity: 1;
+}
+.op-lines li.on button {
+  opacity: 1;
+}
+.op-lines li.now button {
+  color: var(--ink);
+}
+.op-lines button i {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 6px;
+  background: rgba(229, 56, 59, 0.16);
+  border: 1px solid rgba(229, 56, 59, 0.5);
+  font:
+    600 10.5px/1 ui-monospace,
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  font-style: normal;
+  color: #ff9a9c;
+  transition: all 0.3s var(--ease);
+}
+.op-lines button i:empty {
+  border-radius: 50%;
+  border-color: rgba(255, 200, 97, 0.5);
+  background: rgba(255, 200, 97, 0.14);
+}
+.op-lines li.now button i {
+  background: #e5383b;
+  border-color: #fff;
+  color: #fff;
+  box-shadow: 0 0 14px rgba(229, 56, 59, 0.6);
+}
+.op-lines li.now button i:empty {
+  background: var(--fly);
+  border-color: transparent;
+  box-shadow: 0 0 14px rgba(255, 200, 97, 0.6);
+}
+.op-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.op-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--hair-hi);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--ink);
+  font: 560 13.5px/1 var(--font);
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    transform 0.3s var(--spring);
+}
+.op-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(158, 203, 255, 0.5);
+}
+.op.is-done a.op-btn {
+  border-color: rgba(255, 200, 97, 0.6);
+  background: rgba(255, 200, 97, 0.08);
+  color: #ffe2a8;
+}
+.onpic .fine {
+  max-width: 62em;
+}
+
+@media (max-width: 1040px) {
+  .op {
+    grid-template-columns: 1fr;
+  }
+  .op-you {
+    align-self: flex-start;
+    border-radius: 18px 18px 18px 6px;
+  }
+}
+@media (max-width: 640px) {
+  .op-stage {
+    padding: 52px 10px 10px;
+    border-radius: 20px;
+  }
+  .op-page {
+    grid-template-columns: 1fr;
+    padding: 12px 34px 12px;
+  }
+  .op-text {
+    display: none;
+  }
+  .op-tag {
+    font-size: 10.5px;
+    padding: 2px 6px 3px;
+    border-radius: 6px;
+  }
+  .op-fly {
+    right: 4%;
+    bottom: 6%;
+  }
+  .op-notch {
+    font-size: 12.5px;
+    width: calc(100% - 36px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not(.force-motion) .op-ink *,
+  html:not(.force-motion) .op-tag {
+    animation-duration: 0.01s;
+    animation-delay: 0s;
+  }
+  html:not(.force-motion) .op-dot.live,
+  html:not(.force-motion) .op-fly,
+  html:not(.force-motion) .op-wave i {
+    animation: none;
+  }
+}

@@ -32,11 +32,12 @@
     <canvas class="swarm" aria-hidden="true"></canvas>
     <nav class="rail" aria-label="On this page">
       <a href="#in3d"><i></i><b>01</b><span>Explained in 3D</span></a>
-      <a href="#story"><i></i><b>02</b><span>What Pyxi does</span></a>
-      <a href="#how"><i></i><b>03</b><span>How it works</span></a>
-      <a href="#demos"><i></i><b>04</b><span>Watch it work</span></a>
-      <a href="#explore"><i></i><b>05</b><span>Explore</span></a>
-      <a href="#get"><i></i><b>06</b><span>Get Pyxi</span></a>
+      <a href="#onpicture"><i></i><b>02</b><span>On any picture</span></a>
+      <a href="#story"><i></i><b>03</b><span>What Pyxi does</span></a>
+      <a href="#how"><i></i><b>04</b><span>How it works</span></a>
+      <a href="#demos"><i></i><b>05</b><span>Watch it work</span></a>
+      <a href="#explore"><i></i><b>06</b><span>Explore</span></a>
+      <a href="#get"><i></i><b>07</b><span>Get Pyxi</span></a>
     </nav>
 
     <main id="main">
@@ -185,6 +186,51 @@
             <li><b>Yours to change</b><span>Say "show the inside", "remove the casing" or "make that part move". Pyxi edits the model you already have instead of starting again.</span></li>
           </ul>
           <p class="fine reveal">Both models are Pyxi's own, drawn live in your browser rather than played from a video. In the app they float over your real windows and Pyxi tells the story out loud. Here the steps are written beside the model.</p>
+        </div>
+      </section>
+
+      <!-- ============================================================ explains any picture, on the picture -->
+      <section class="onpic" id="onpicture" data-swarm="field" data-swarm-opacity="0.45" data-say="Show me any picture. I'll explain it right on it.">
+        <div class="wrap">
+          <p class="kicker reveal">Explains any picture</p>
+          <h2 class="h2 reveal" data-scrub>Ask about a diagram.<br /><span class="dim">Pyxi explains it on the diagram.</span></h2>
+          <p class="lead narrow reveal">A heart, an engine cutaway, a circuit, a map. Pyxi finds the real parts in the picture on your screen, pins a name on each one as it says it, and traces how things move from one to the next. Nothing is redrawn: it writes on the picture you already have open.</p>
+
+          <div class="op reveal" id="op">
+            <div class="op-stage" role="img" aria-label="Illustration: a page with a drawing of the heart. Pyxi pins red name tags on the vena cava, the right atrium, the right ventricle, the pulmonary artery, the left atrium, the left ventricle and the aorta, one at a time, and traces the path of the blood between them in red.">
+              <p class="op-notch" data-state="idle" aria-hidden="true"><i></i><span class="op-notch-text">Hold Ctrl Alt and ask</span><span class="op-wave"><i style="--i: 0"></i><i style="--i: 3"></i><i style="--i: 1"></i><i style="--i: 4"></i><i style="--i: 2"></i><i style="--i: 5"></i><i style="--i: 1"></i></span></p>
+              <div class="op-window" aria-hidden="true">
+                <div class="op-chrome"><i></i><i></i><i></i><span>Anatomy notes: the heart</span></div>
+                <div class="op-page">
+                  <div class="op-pic">
+                    <!--include:heart-->
+                    <svg class="op-ink" viewBox="0 0 600 660"></svg>
+                    <div class="op-tags"></div>
+                  </div>
+                  <div class="op-text">
+                    <h3>The heart</h3>
+                    <p>Chapter 4 &middot; Circulation</p>
+                    <i></i><i style="--w: 94%"></i><i style="--w: 98%"></i><i class="gap" style="--w: 62%"></i>
+                    <i style="--w: 96%"></i><i></i><i style="--w: 90%"></i><i class="gap" style="--w: 44%"></i>
+                    <i style="--w: 98%"></i><i style="--w: 92%"></i><i style="--w: 70%"></i>
+                  </div>
+                </div>
+              </div>
+              <span class="op-fly" aria-hidden="true"></span>
+            </div>
+            <div class="op-side">
+              <p class="op-you"><span>You ask, out loud</span><b>Explain this diagram to me.</b></p>
+              <div class="op-talk">
+                <p class="op-talk-head">Pyxi says <span>as each tag lands</span></p>
+                <ol class="op-lines"></ol>
+              </div>
+              <div class="op-tools">
+                <button type="button" class="op-btn" data-act="replay">Play it again</button>
+                <a class="op-btn" href="#b3">See Pyxi build in 3D</a>
+              </div>
+            </div>
+          </div>
+          <p class="fine reveal">This is a replay on a drawing made for this page. In the app Pyxi does it on whatever picture is on your screen, labelled or not, and says each line out loud as its tag appears.</p>
         </div>
       </section>
 

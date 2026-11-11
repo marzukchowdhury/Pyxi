@@ -16,6 +16,8 @@ import { initSwarm } from "./swarm.js";
 import { initStory } from "./story.js";
 import { initBuild3D } from "./build3d.js";
 import "./build3d.css";
+import { initOnPicture } from "./onpicture.js";
+import "./onpicture.css";
 
 document.documentElement.classList.add("js");
 // Reduced motion keeps Pyxi calm: no typing, trail or sway, but it still answers and points.
@@ -261,6 +263,9 @@ initStory({ reduced, swarm });
 
 // ------------------------------------------------------------------ explained in 3D, live
 initBuild3D({ reduced });
+
+// ------------------------------------------------------------------ explains any picture, on the picture
+initOnPicture({ reduced });
 
 // ------------------------------------------------------------------ animations off on this PC?
 // Then say so, and offer to play them anyway. One click, remembered, and one click to undo.
