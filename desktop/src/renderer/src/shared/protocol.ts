@@ -548,5 +548,5 @@ export type ClientMessage =
   | { type: "connect"; id: string }
   | { type: "disconnect"; id: string }
   | { type: "guide_cancel" }
-  | { type: "object_closed" }
+  | { type: "object_closed"; by_them?: boolean }
   | { type: "voice_preview"; engine: string; voice: string; speed?: number };

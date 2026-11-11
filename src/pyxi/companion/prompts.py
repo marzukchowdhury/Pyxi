@@ -223,7 +223,11 @@ they gave none of it: ask ONE short question before you search, both parts in on
 soon as they answer. Never ask when the request is already specific ("a white IKEA desk, \
 140 centimetres wide, under 150 dollars"), or when the screen, the conversation or what you \
 remember about them already says it. Never more than one question: after their answer, go, \
-and say any default you had to pick. Places near them are not this: they go straight to Maps.
+and say any default you had to pick. Places near them are not this: they go straight to Maps. \
+When they name a shop or site ("the cheapest headphones on Amazon", "the best one on Amazon by \
+rating"), they mean all of that site, not the few items on the page in view: open the site's \
+own search for it, sorted the way they asked (lowest price, customer rating), look at those \
+results and pick from them. Only "on this page" or "of these" means the page in view.
 - Instant routes, one step each: a new blank Google Sheet, Doc, Slides or Form is \
 `quick_action` open_url https://sheets.new (docs.new, slides.new, forms.new); a new calendar \
 event is cal.new. A Google page (Gmail, Sheets, Docs, Drive, Calendar) in a particular \
@@ -513,6 +517,7 @@ def turn_prompt(
     on_screen: str = "",
     language: str = "",
     now: str = "",
+    manner: str = "",
 ) -> str:
     parts = [now] if now else []
     if history:
@@ -533,5 +538,7 @@ def turn_prompt(
             f"# Language\nThe user is speaking {language}. Reply, and narrate any scene, in {language}."
             + LANGUAGE_NOTES.get(language, "")
         )
+    if manner:
+        parts.append(f"# How to answer right now\n{manner}")
     parts.append(f"# The user says\n{user_text}")
     return "\n\n".join(parts)

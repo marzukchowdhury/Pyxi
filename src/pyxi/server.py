@@ -524,7 +524,7 @@ def create_app(
         elif kind == "interrupt":
             brain.interrupt()
         elif kind == "object_closed":
-            brain.object_closed()
+            brain.object_closed(by_them=bool(msg.get("by_them", True)))
         elif kind == "stop_everything":
             await brain.stop_everything()
         elif kind == "answer":

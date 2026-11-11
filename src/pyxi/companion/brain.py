@@ -2556,10 +2556,19 @@ class Brain:
             return user_text, failed
         return f"{left['text']} {user_text}", failed
 
-    def object_closed(self) -> None:
-        """They closed the 3D model themselves. Nothing more is said about it: the answer
-        under way about one of its parts stops, and the ones waiting behind it are dropped.
-        Live: "I crossed the 3D demonstration, even after that you..." kept explaining it."""
+    def _quiet(self) -> bool:
+        """Have they asked her not to talk (and not yet said she can again)?"""
+        return time.monotonic() < getattr(self, "_quiet_until", 0.0)
+
+    def object_closed(self, by_them: bool = True) -> None:
+        """The 3D model has left the screen. Closed by them: nothing more is said about it,
+        the answer under way about one of its parts stops, and the ones waiting behind it are
+        dropped (live: "I crossed the 3D demonstration, even after that you..." kept
+        explaining it). Gone by itself when its story ended: Pyxi just knows it is no longer
+        showing (live: "the earbud cutaway is still up", a minute after it had gone)."""
+        self._object_showing = False
+        if not by_them:
+            return
         self._object_shut = True
         if self._lock.locked() and _PART_CLICKED.match(self._user_text or ""):
             self.interrupt()
@@ -2629,7 +2638,41 @@ class Brain:
                 hit = None if synthetic else instant.match(user_text)
                 asked = None if synthetic or hit else weather.simple_question(user_text)
                 song = None if synthetic or hit or asked else instant.play_request(user_text)
-                if not synthetic and instant.is_stop(user_text):
+                # (Not while a card is waiting for an answer or Ditto is watching: "okay" and
+                # "done" mean something then.)
+                busy = bool(getattr(self.hub, "_pending", None)) or self._ditto_watching()
+                polite = None if synthetic or hit or asked or song or busy else only_polite(user_text)
+                if not synthetic and _ASKS_QUIET.search(user_text):
+                    # Kept to from now on: her words are shown, not spoken, and nothing is said
+                    # for the sake of saying something. "Stop" in the same breath still stops.
+                    self._quiet_until = time.monotonic() + QUIET_FOR_S
+                    self._speech_gen += 1
+                    self._spawn(self.hub.emit("stop_audio"))
+                    if instant.is_stop(user_text):
+                        await self.stop_everything()
+                    self._calls.append({"round": 1, "tool": "quiet", "arguments": {}, "instant": True})
+                    await self._notify(
+                        "quiet",
+                        ok=True,
+                        title="Okay, not a word",
+                        body='I will show what I do instead of saying it. Say "you can talk again" for my voice.',
+                    )
+                elif not synthetic and self._quiet() and _TALK_AGAIN.search(user_text):
+                    self._quiet_until = 0.0
+                    self._calls.append({"round": 1, "tool": "say", "arguments": {"text": "Okay."}, "instant": True})
+                    self._speak("Okay.")
+                elif polite == "thanks":
+                    # One word back, with no model call and nothing tacked on (live: "Thanks."
+                    # got "Anytime. The earbud cutaway is still up if you want to poke around
+                    # it. Good luck with the hunt.").
+                    line = random.choice(["Anytime.", "You're welcome.", "Any time."])
+                    self._calls.append({"round": 1, "tool": "say", "arguments": {"text": line}, "instant": True})
+                    self._speak(line)
+                elif polite == "heard" and not (self.history and self.history[-1][1].rstrip().endswith("?")):
+                    # "Okay, got it." asks for nothing, so nothing is said (unless it answers a
+                    # question of hers: then it is a yes, and the model takes it).
+                    self._calls.append({"round": 1, "tool": "say", "arguments": {"text": ""}, "instant": True})
+                elif not synthetic and instant.is_stop(user_text):
                     # A spoken "stop" stops for real: jobs, the hands, cards and anything queued,
                     # like the hotkey. Before, it only made the model say "Stopping."
                     message = await self.stop_everything()
@@ -2880,10 +2923,22 @@ class Brain:
                 jobs=jobs,
                 memories=memories,
                 notes=state.get("notes", []),
+                manner=(
+                    "They told you not to talk. Your words are shown, not spoken: answer in the "
+                    "fewest words that do the job (a fact is the fact alone; work is done "
+                    "without comment), no offers, no questions unless you cannot go on, no "
+                    "recap, no apology."
+                    if self._quiet()
+                    else ""
+                ),
                 on_screen="\n".join(
                     x
                     for x in (
-                        object_summary(self._object) if self._object else "",
+                        (
+                            object_summary(self._object)
+                            if self._object and getattr(self, "_object_showing", True)
+                            else ""
+                        ),
                         answers.on_screen(self),
                     )
                     if x
@@ -3318,8 +3373,10 @@ class Brain:
                     # framed, and Pyxi said "Hmm, I'm not sure what to say to that."): the
                     # step is said as it stands.
                     self._speak(step)
-                else:
-                    self._speak("Hmm, I'm not sure what to say to that.")
+                elif _A_QUESTION.search(self._user_text or ""):
+                    self._speak("Sorry, I didn't get that. Say it another way?")
+                # (Anything else gets silence: "I don't want you to talk" was once answered
+                # "Hmm, I'm not sure what to say to that.")
             return {}
 
         g = StateGraph(TurnState)
@@ -4137,6 +4194,20 @@ class Brain:
             notes = [eid for kind, eid in markers if kind.lower() == "note"]
             if not clean and not anns and not notes:
                 continue
+            if self._quiet():
+                # Shown in the notch, not spoken: they asked her not to talk.
+                await self.hub.emit(
+                    "say",
+                    agent=agent,
+                    index=i,
+                    total=len(sentences),
+                    text=clean,
+                    audio=None,
+                    duration_s=round(max(1.5, len(clean) / 16), 2),
+                    annotations=anns,
+                    notes=notes,
+                )
+                continue
             speech = await self.tts.synthesize(clean, voice)
             if gen != self._speech_gen:
                 return
@@ -4244,6 +4315,7 @@ class Brain:
         the same stage as last time (a model still assembling), without re-reading the screen."""
         self._object = model
         self._object_shut = False  # showing again: clicks on its parts count once more
+        self._object_showing = True
         if not background:  # a finished background build mustn't reshape the turn in progress
             self._visual_turn = True
         place = getattr(self, "_object_place", None) if keep_place else None
@@ -4602,6 +4674,8 @@ class Brain:
         After anyone has been talking it waits for a real silence, not the first gap. Live:
         the founder pressed talk as a job's line began, paused mid-sentence, and the line came
         back in the pause, and again: "Just when I'm talking, don't talk." """
+        if self._quiet():
+            return  # they asked her not to talk: the notice and the card carry it
         for attempt in range(2):
             quiet, talked = 0.0, attempt > 0
             for _ in range(2400):  # ten minutes at most
@@ -4707,6 +4781,28 @@ _MULTI_SCREEN_NOTE = (
 
 # Words from a turn they talked over are carried into their next turn only this soon after.
 _CARRY_S = 90.0
+# "Don't talk": kept to, for this long or until they say she can talk again. Live, three times
+# in one evening: "Stop, stop. Don't talk. You're still talking too much", "It's done. Just
+# don't talk", and "Why are you talking? I don't want you to talk", which was answered
+# "Hmm, I'm not sure what to say to that."
+QUIET_FOR_S = 30 * 60.0
+_ASKS_QUIET = re.compile(
+    r"(?i)\b(?:(?:don'?t|do not|stop|no more|quit|without) (?:talk|speak|narrat|explain)\w*|"
+    r"be quiet|shut up|hush|too much talk\w*|talk\w* (?:too much|so much)|talk less|less talk\w*|"
+    r"why are you (?:still )?talking|(?:don'?t|do not) (?:want|need) you to (?:talk|speak)|"
+    r"quiet,? please|stay (?:quiet|silent)|keep quiet|silent mode|mute yourself|zip it)\b"
+)
+_TALK_AGAIN = re.compile(
+    r"(?i)\b(?:you (?:can|may) (?:talk|speak)|(?:talk|speak) (?:again|to me|now)|unmute|"
+    r"start talking|use your voice|i want (?:you )?to hear you)\b"
+)
+# Words that are only thanks, or only "I heard you": nothing in them asks for anything.
+_ONLY_POLITE = frozenset(
+    ["ok", "okay", "thanks", "thank", "you", "so", "much", "very", "a", "lot", "pyxi", "for", "your", "the", "help", "that", "that's", "thats", "all", "alright", "cool", "great", "perfect", "nice", "got", "it", "yeah", "yes", "yep", "good", "job", "beautiful", "awesome", "fine", "sure", "is", "its", "it's", "done", "now", "well", "then", "right", "i", "appreciate", "cheers", "thx"]
+)
+_A_QUESTION = re.compile(
+    r"(?i)\?\s*$|^\W*(?:what|who|where|when|why|how|which|can|could|would|will|do|does|did|is|are|should)\b"
+)
 # The words the 3D panel sends when a part of the model is clicked (ObjectPanel.tsx).
 _PART_CLICKED = re.compile(r"(?i)^in the .+ model, tell me more about the .+")
 _SCREEN_MARKS = {"explain_on_screen", "point", "circle", "highlight", "arrow"}
@@ -4741,6 +4837,17 @@ _BACKGROUND_TOOLS = {
 # Tools that can say no (a file that isn't there, an account that isn't connected, a card they
 # decline): a line said with one waits for its answer, and is dropped if the answer is no.
 _ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def only_polite(text: str) -> str | None:
+    """'thanks' when the words are only thanks, 'heard' when they are only "okay, got it",
+    None when anything in them asks for something."""
+    words = re.findall(r"[a-z']+", (text or "").lower())
+    if not words or len(words) > 12 or "?" in text or any(w not in _ONLY_POLITE for w in words):
+        return None
+    if any(w in ("thanks", "thank", "thx", "cheers", "appreciate") for w in words):
+        return "thanks"
+    return "heard"
 
 
 def guide_step_words(calls: list[dict[str, Any]]) -> str:

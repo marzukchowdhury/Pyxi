@@ -118,7 +118,10 @@ export function ObjectPanel() {
 
   // Done means gone: the model leaves on its own once the story ends (resting the pointer on it keeps it).
   // Done: gone 2.5 s after the last beat. Interrupted: it waits 15 s for a follow-up, then goes.
-  const linger = useLinger((finished && playing) || stalled, closeObject, finished && playing ? 2500 : 15000);
+  // Gone by itself once its story is told: the brain is told that too, so Pyxi never says a
+  // model "is still up" when it isn't.
+  const tidyAway = () => { brain.send({ type: "object_closed", by_them: false }); closeObject(); };
+  const linger = useLinger((finished && playing) || stalled, tidyAway, finished && playing ? 2500 : 15000);
 
   if (!object || !spec) return null;
   const current = spec.beats[Math.min(beat, spec.beats.length - 1)];
@@ -166,7 +169,7 @@ export function ObjectPanel() {
         <button className="icon" onClick={() => seek(0)} title="Replay"><Replay /></button>
         {/* Their own close (not the model going away by itself when its story ends): the
             brain is told, so nothing more is said about a model they have shut. */}
-        <button className="icon" onClick={() => { brain.send({ type: "object_closed" }); closeObject(); }} title="Close"><Close /></button>
+        <button className="icon" onClick={() => { brain.send({ type: "object_closed", by_them: true }); closeObject(); }} title="Close"><Close /></button>
       </div>
       <ObjectView scene={spec} clock={clock} beat={current} beatIndex={beat} cutaway={cutaway} width={width} height={height} onPick={ask} />
       {/* No card: the model floats on its own. A slim bar says where we are; the voice tells it. */}

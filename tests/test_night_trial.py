@@ -257,3 +257,15 @@ async def test_closing_the_model_ends_what_was_being_said_about_it(settings):
     brain._object_shut = False  # (what showing a model again does)
     await brain.turn("In the Inside a desktop PC tower model, tell me more about the case.")
     assert len(llm.prompts) == 2
+
+
+def test_a_model_that_left_by_itself_is_not_said_to_be_still_up(settings):
+    """Live: "The earbud cutaway is still up if you want another look", a minute after it had
+    tidied itself away. The app tells the brain when a model goes, by itself or closed."""
+    brain, _ = make_brain(settings)
+    brain._object_showing = True
+    brain.object_closed(by_them=False)
+    assert brain._object_showing is False
+    assert not getattr(brain, "_object_shut", False)  # clicks were not waiting on a closed model
+    brain.object_closed(by_them=True)
+    assert brain._object_shut is True
