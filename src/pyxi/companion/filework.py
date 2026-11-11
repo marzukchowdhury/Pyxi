@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -115,7 +116,32 @@ async def _open_google_file(brain: Brain, ref: str) -> str:
             url = await asyncio.to_thread(uia.browser_url, hwnd)
             if url and _GOOGLE_LINK.search(url):
                 return url
+    if generic:
+        # "This sheet", and no window gave up its link (the address bar can't always be read):
+        # the file Ledger made or edited a moment ago is the one they mean. Live: Ledger made
+        # a new sheet, and the next request, "make the header bold" on "this sheet", ended
+        # "I couldn't find a Google Sheet called 'this sheet'".
+        return _just_worked_on(brain, kind)
     return "" if _UNTITLED.match(ref) else ref
+
+
+_RECENT_S = 30 * 60  # how long "this sheet" still means the file Ledger last touched
+_KIND_IN_LINK = {"Sheets": "spreadsheets", "Docs": "document", "Slides": "presentation"}
+
+
+def _just_worked_on(brain: Brain, kind: str) -> str:
+    """The link of the Google file Ledger last made or edited, if that was recent ('' if not).
+    ``kind``: 'Sheets', 'Docs', 'Slides', or '' for whichever was last."""
+    now = time.time()
+    for job in reversed(brain.jobs.recent(12)):
+        if job.agent_name != "Ledger" or job.status != "done":
+            continue
+        if job.ended_at is None or now - job.ended_at > _RECENT_S:
+            continue
+        for m in re.finditer(r"https://docs\.google\.com/(spreadsheets|document|presentation)/d/[\w-]+", job.summary or ""):
+            if not kind or m.group(1) == _KIND_IN_LINK.get(kind):
+                return m.group(0) + "/edit"
+    return ""
 
 
 # Ledger can't open the file, but the file is open in front of them: cells can still go in.
@@ -225,9 +251,10 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         google = [await _open_google_file(brain, g) for g in google]
         if "" in google:
             return (
-                "edit_document: I can't tell which Untitled file they mean: none is open in a "
-                "browser window I can read. Ask them to bring it to the front (or say its name), "
-                "and never guess by the name Untitled."
+                "edit_document: I can't tell which file they mean: none is open in a browser "
+                "window I can read, and there is none I worked on in the last half hour. Ask "
+                "them to bring it to the front (or say its name or paste its link), and never "
+                "guess by the name Untitled."
             )
         out_of_reach = [g for g in google if not await _reachable(brain, g)]
         made_instead = False

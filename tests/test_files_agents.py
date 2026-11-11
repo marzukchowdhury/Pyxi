@@ -1062,3 +1062,41 @@ async def test_the_open_sheet_is_found_on_any_screen_and_untitled_is_never_guess
     monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(1, "Claude", "")])
     assert await filework._open_google_file(brain, "Untitled spreadsheet") == ""  # never by name
     assert await filework._open_google_file(brain, "Budget 2026") == "Budget 2026"  # a real name is fine
+
+
+async def test_this_sheet_is_the_one_ledger_just_worked_on_when_no_window_gives_its_link(monkeypatch):
+    """Live: Ledger made a new sheet; the next request, "make the header bold" on "this sheet",
+    ended "I couldn't find a Google Sheet called 'this sheet'"."""
+    import time
+    from types import SimpleNamespace
+
+    from pyxi import windows
+    from pyxi.companion import filework
+    from pyxi.screen import uia
+
+    made = "https://docs.google.com/spreadsheets/d/1NC6-A_new/edit"
+    doc = "https://docs.google.com/document/d/1Gzj_doc/edit"
+
+    def job(agent, summary, ago, status="done"):
+        return SimpleNamespace(agent_name=agent, status=status, ended_at=time.time() - ago, summary=summary)
+
+    jobs = [
+        job("Ledger", f"Added a 3 x 3 table. It's a new file in your Google Drive: {doc}", 600),
+        job("Ledger", f"Set 12 cells on Sheet1. It's a new file in your Google Drive: {made}", 20),
+        job("Scout", "Found https://docs.google.com/spreadsheets/d/someoneElses/edit on a page", 5),
+    ]
+    brain = SimpleNamespace(
+        _ctx=SimpleNamespace(window=SimpleNamespace(hwnd=1, title="Claude")),
+        jobs=SimpleNamespace(recent=lambda n=8: jobs),
+    )
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(1, "Claude", ""), (5, "Sample data - Google Sheets - Mozilla Firefox", "")])
+    monkeypatch.setattr(uia, "browser_url", lambda hwnd, budget_s=0.5: None)  # the address bar can't be read
+    assert await filework._open_google_file(brain, "this sheet") == made  # Ledger's, never a link Scout read
+    assert await filework._open_google_file(brain, "this doc") == doc
+    assert await filework._open_google_file(brain, "this deck") == ""  # none: it asks, it doesn't guess
+    # Half an hour on, "this sheet" is no longer that file.
+    jobs[1].ended_at = time.time() - 3600
+    assert await filework._open_google_file(brain, "this sheet") == ""
+    # A window that does give its link still wins.
+    monkeypatch.setattr(uia, "browser_url", lambda hwnd, budget_s=0.5: "https://docs.google.com/spreadsheets/d/onScreen/edit" if hwnd == 5 else None)
+    assert await filework._open_google_file(brain, "this sheet") == "https://docs.google.com/spreadsheets/d/onScreen/edit"

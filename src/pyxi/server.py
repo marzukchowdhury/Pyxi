@@ -518,6 +518,7 @@ def create_app(
             brain._spawn(brain.dictate(base64.b64decode(msg["data"])))
         elif kind == "ptt_cancel":
             brain._prefetch = None
+            brain._release_hands()  # they let go without a word: the mouse work carries on
             await brain.set_state("idle")
         elif kind == "interrupt":
             brain.interrupt()

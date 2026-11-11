@@ -263,6 +263,7 @@ class Operator:
         self.image_width = image_width
         self.max_steps = max_steps
         self.cancelled = False
+        self.held = False  # talk is pressed: wait for their words before the next click
         self.usage = None
 
     async def run(self, task: str, window: int | None = None, come_back: bool = False) -> Outcome:
@@ -287,6 +288,7 @@ class Operator:
         seen: list[Image.Image] = []  # every look so far, to notice going round in circles
         laps = 0  # times the screen came back to how it was a few steps earlier
         for n in range(1, self.max_steps + 1):
+            await self._while_held()
             if self.cancelled or (h.interrupted() and not await self._yield(h, window)):
                 log.info("hands stopped: %s", h.reason or "cancelled")
                 return Outcome(False, "Stopped, as you asked.", steps, stopped=True)
@@ -400,6 +402,9 @@ class Operator:
                 continue
             done_here, notes = [], []
             for a in actions:
+                await self._while_held()
+                if self.cancelled:
+                    return Outcome(False, "Stopped, as you asked.", steps, stopped=True)
                 try:
                     line, note = await self._do(h, ctx, a, n)
                 except hands.Interrupted:
@@ -428,6 +433,17 @@ class Operator:
         return Outcome(
             False, "That took more steps than I expected, so I stopped where it is.", steps
         )
+
+    async def _while_held(self) -> None:
+        """They pressed talk: nothing is clicked or typed until their words are in. "Stop" (or
+        "no", "wait") then ends the work; anything else, the next request or a question, lets
+        it carry on. Live: every new request spoken while a slow job ran cancelled it, with
+        "Stopped, as you asked", though nobody had asked. A minute at most, then it goes on."""
+        waited = 0.0
+        while getattr(self, "held", False) and not self.cancelled and waited < 60:
+            await asyncio.sleep(0.1)
+            waited += 0.1
+        self.held = False
 
     # ------------------------------------------------------------------ thinking
     async def _yield(self, h: Any, window: int | None) -> bool:

@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
-import re
 import ctypes.wintypes as wt
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -182,15 +182,68 @@ def exe_of(hwnd: int) -> str:
         k.CloseHandle(handle)
 
 
+# The default browser, as Windows names its choice for https links -> the program.
+_DEFAULT_BROWSERS = {
+    "firefox": "firefox.exe",
+    "chrome": "chrome.exe",
+    "msedge": "msedge.exe",
+    "brave": "brave.exe",
+}
+
+
+def default_browser() -> str:
+    """The full path of the browser Windows opens links with, if it is one Pyxi can open a
+    new window in ('' otherwise)."""
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
+        ) as key:
+            choice = str(winreg.QueryValueEx(key, "ProgId")[0]).lower()
+        name = next((exe for word, exe in _DEFAULT_BROWSERS.items() if word in choice), "")
+        if not name:
+            return ""
+        for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                with winreg.OpenKey(
+                    root, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{name}"
+                ) as key:
+                    path = str(winreg.QueryValueEx(key, "")[0]).strip('"')
+                if path and Path(path).is_file():
+                    return path
+            except OSError:
+                continue
+    except (OSError, ImportError):
+        pass
+    return ""
+
+
+def their_browser() -> str:
+    """The browser to open a site in when they are not in one: the one they have open (the
+    window nearest the front), else their default one. '' when neither is one Pyxi knows."""
+    for hwnd, _title, _exe in open_windows():
+        exe = exe_of(hwnd)
+        if Path(exe).name.lower() in BROWSER_FLAGS:
+            return exe
+    return default_browser()
+
+
 async def open_new_window(target: str, like: int | None = None, is_url: bool = True) -> int | None:
     """Open a site or app in its own new window and return that window (None if it never showed).
 
-    Sites open in a new window of the browser the user is in (so it can be placed), falling back to
-    Edge, which every Windows PC has."""
+    Sites open in a new window of the browser the user is in (so it can be placed); when the
+    window they are in is not a browser, in the browser they have open, else their default
+    one; and only then Edge, which every Windows PC has. (Live: asked from another app, YouTube
+    went to Edge beside a Firefox full of their tabs: "I want you to work on Mozilla Firefox".)"""
     before = _visible_windows()
     if is_url:
         exe = exe_of(like) if like else ""
         flag = BROWSER_FLAGS.get(Path(exe).name.lower()) if exe else None
+        if not flag:
+            exe = their_browser()
+            flag = BROWSER_FLAGS.get(Path(exe).name.lower()) if exe else None
         if flag:
             subprocess.Popen([exe, flag, target])
         else:

@@ -161,9 +161,38 @@ def _wav(samples, rate: int = 16000) -> bytes:
 _NO_SPEECH = re.compile(r"^[\[(]?\s*(no speech|silence|inaudible|no audio)[^)\]]*[)\]]?\.?$", re.I)
 
 
+# "name at the rate of gmail dot com": how an address is said aloud in much of South Asia.
+_AT = re.compile(r"(?i)\s+at the rate(?: of)?\s+(?=[\w-]+\s*(?:\.|dot)\s*(?:com|net|org|io|co|ca|in|bd|uk|edu)\b)")
+_DOT = re.compile(r"(?i)(@[\w-]{1,40})\s+dot\s+(?=(?:com|net|org|io|co|ca|in|bd|uk|edu)\b)")
+
+
 def _tidy(text: str) -> str:
     text = text.strip().strip('"“”').strip()
-    return "" if _NO_SPEECH.match(text) else text
+    if _NO_SPEECH.match(text):
+        return ""
+    return _DOT.sub(r"\1.", _AT.sub("@", text))
+
+
+# Words people say to Pyxi that Whisper mishears without a hint: "Hi Pyxi" came out "Hi Wes",
+# "Open Gmail" came out "OpenGL" and "open G means".
+HOTWORDS = "Pyxi, Gmail, Google Sheets, Google Docs, spreadsheet, YouTube, Notepad, alarm, timer"
+MAX_HINT_CHARS = 320  # the model's prompt is short: the standing words, then what fits
+
+
+def hotwords(hints: list[str] | None) -> str:
+    """The standing words, then names likely to be said right now (the programs and pages that
+    are open, what is on the desktop), each once, as many as fit. Live: "GenOffice" was heard
+    as "Jen Office", "TechLand" as "Deckland", "Gmail.com" as "Chimeel.com"."""
+    out, seen = HOTWORDS, {w.strip().lower() for w in HOTWORDS.split(",")}
+    for hint in hints or []:
+        word = " ".join(str(hint).split())[:40].strip(" ,.-")
+        if len(word) < 3 or word.lower() in seen or "," in word:
+            continue
+        if len(out) + len(word) + 2 > MAX_HINT_CHARS:
+            break
+        out += ", " + word
+        seen.add(word.lower())
+    return out
 
 
 class CloudEars:
@@ -244,6 +273,7 @@ class Transcriber:
         self._lock = asyncio.Lock()
         self._warming: asyncio.Task | None = None
         self.ears = CloudEars(config.stt_cloud_model)
+        self.hints: list[str] = []  # names likely to be said now; the brain sets them per request
 
     def _device(self) -> str:
         device = self.config.stt_device
@@ -391,7 +421,7 @@ class Transcriber:
                     beam_size=1,
                     # Words people say to Pyxi that Whisper mishears without a hint: "Hi Pyxi"
                     # came out "Hi Wes", "Open Gmail" came out "OpenGL" and "open G means".
-                    hotwords="Pyxi, Gmail, Google Sheets, Google Docs, spreadsheet, YouTube, Notepad, alarm, timer",
+                    hotwords=hotwords(self.hints),
                 )
                 text = " ".join(s.text.strip() for s in segments).strip()
                 return text, language or getattr(info, "language", "en") or "en"

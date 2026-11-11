@@ -313,3 +313,33 @@ async def test_tab_keys_only_ever_go_to_a_browser(settings, monkeypatch):
     assert note is None and sum(k == "ctrl+w" for k, _ in sent) == 10
     note, sent = await _tabs(settings, monkeypatch, "close everything")
     assert note.startswith("tabs: I can close") and sent == []
+
+
+# ---------------------------------------------------------------------- which browser a site opens in
+async def test_a_site_opens_in_the_browser_they_use_not_in_edge(monkeypatch):
+    """Live: "Gmail on the left, YouTube on the right", asked from another app. YouTube opened
+    in Edge beside a Firefox full of their tabs. "I think you opened Microsoft Edge, I want
+    you to work on Mozilla Firefox." """
+    started: list[list[str]] = []
+    exes = {3: r"C:\Apps\GenOffice.exe", 7: r"C:\Program Files\Mozilla Firefox\firefox.exe"}
+    monkeypatch.setattr(windows.subprocess, "Popen", lambda args, **kw: started.append(list(args)))
+    monkeypatch.setattr(windows, "_visible_windows", lambda: set())
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(3, "Untitled.xlsx", ""), (7, "Inbox - Mozilla Firefox", "")])
+    monkeypatch.setattr(windows, "exe_of", lambda hwnd: exes.get(hwnd, ""))
+    monkeypatch.setattr(windows.asyncio, "sleep", _no_sleep)
+    # Asked from GenOffice: the Firefox they have open, in a new window of its own.
+    await windows.open_new_window("https://www.youtube.com", like=3)
+    assert started[-1] == [exes[7], "-new-window", "https://www.youtube.com"]
+    # No browser open: their default one.
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(3, "Untitled.xlsx", "")])
+    monkeypatch.setattr(windows, "default_browser", lambda: r"C:\Apps\chrome.exe")
+    await windows.open_new_window("https://www.youtube.com", like=3)
+    assert started[-1] == [r"C:\Apps\chrome.exe", "--new-window", "https://www.youtube.com"]
+    # Neither, or one Pyxi can't place: Edge, as before.
+    monkeypatch.setattr(windows, "default_browser", lambda: "")
+    await windows.open_new_window("https://www.youtube.com", like=3)
+    assert started[-1][:5] == ["cmd", "/c", "start", "", "msedge"]
+
+
+async def _no_sleep(seconds: float) -> None:
+    return None

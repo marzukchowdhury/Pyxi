@@ -253,7 +253,7 @@ class Brain:
 
     def begin_listening(self) -> None:
         """Push-to-talk pressed: capture the screen *now*, while the user starts speaking."""
-        self.interrupt()
+        self.interrupt(hold=True)
         self._words_gen = self._speech_gen  # more words are coming: a running turn is talked over
         self._prefetch = asyncio.create_task(self._capture())
         self._spawn(self.set_state("listening"))
@@ -297,9 +297,27 @@ class Brain:
             log.info("idle: let go of %s", ", ".join(gone))
         return gone
 
+    def _names_in_reach(self) -> list[str]:
+        """Names the next request is likely to hold, for the ears: the programs and pages that
+        are open, and what is on the desktop. Their own PC's words only; nothing is sent."""
+        names: list[str] = []
+        try:
+            if windows.available():
+                for _hwnd, title, _exe in windows.open_windows()[:10]:
+                    parts = [p.strip() for p in re.split(r"\s+[-|\u2013\u2014]\s+", title) if p.strip()]
+                    # "Inbox (42) - me@x.com - Gmail - Mozilla Firefox": the app and the site.
+                    names += [p for p in parts[-2:] if not re.search(r"\d{3,}|@", p)]
+                from pyxi.companion.actions import _desktop_shortcuts
+
+                names += [name for name, _ in _desktop_shortcuts()][:25]
+        except Exception:  # never in the way of hearing them
+            log.debug("couldn't gather names for the ears", exc_info=True)
+        return names
+
     async def hear(self, audio: bytes) -> None:
         await self.set_state("transcribing")
         try:
+            self.stt.hints = await asyncio.to_thread(self._names_in_reach)
             studio = self.studio
             text, took, spoken = await self.stt.transcribe(
                 audio, studio.prefs.language if studio else "en"
@@ -318,6 +336,7 @@ class Brain:
         await self.hub.emit("transcript", text=text, seconds=round(took, 2))
         if not text.strip():
             self._prefetch = None  # the next question looks at the screen afresh
+            self._release_hands()
             await self.say_line("Sorry, I didn't catch that.")
             await self.set_state("idle")
             return
@@ -2030,11 +2049,26 @@ class Brain:
         await self.hub.emit("notice", message=message)
         return message
 
-    def interrupt(self) -> None:
+    def interrupt(self, *, hold: bool = False) -> None:
+        """``hold``: talk was pressed. Pyxi's voice stops, and her hands wait for the words
+        (see _release_hands); without it (the stop button) the hands stop for good."""
         self._speech_gen += 1
         if self._operator is not None:
-            self._operator.cancelled = True  # talking to Pyxi stops her hands too
+            if hold:
+                self._operator.held = True
+            else:
+                self._operator.cancelled = True
         self._spawn(self.hub.emit("stop_audio"))
+
+    def _release_hands(self, words: str = "") -> None:
+        """Their words are in (or they let go without any): hands that were waiting stop for
+        "stop", "no", "wait" and the like, and carry on for anything else."""
+        op = self._operator
+        if op is None or not getattr(op, "held", False):
+            return
+        if _HANDS_OFF.match(words.strip()):
+            op.cancelled = True
+        op.held = False
 
     def _done_so_far(self) -> list[str]:
         """What this turn's tool calls started or did, a few words each (not speech, not lookups)."""
@@ -2170,6 +2204,8 @@ class Brain:
             self._turn_id = turn_id
             started = time.monotonic()
             self._stages = [("start", started)]
+            if not synthetic:
+                self._release_hands(user_text)
             await self.hub.emit("user", text=shown or user_text, turn_id=turn_id)
             error = None
             cut_off: list[str] = []  # what a turn they talked over had already done, if it had
@@ -4072,6 +4108,11 @@ _BACKGROUND_TOOLS = {
 }
 # Tools that can say no (a file that isn't there, an account that isn't connected, a card they
 # decline): a line said with one waits for its answer, and is dropped if the answer is no.
+# Said while Pyxi is using the mouse: these end that work. Anything else lets it carry on.
+_HANDS_OFF = re.compile(
+    r"(?i)^\W*(?:(?:hey\s+)?pyxi\W+)?(?:stop|wait|no|nope|don'?t|do not|cancel|hold on|hang on|"
+    r"not that|never\s?mind|leave it|pause|enough|quit|hands off|that's wrong|wrong)\b"
+)
 CAN_REFUSE = {
     "edit_document",
     "convert_files",
