@@ -392,3 +392,22 @@ def test_a_site_opens_in_the_browser_they_name_or_are_in(monkeypatch):
     # Their default browser is the one in front: nothing special, the link opens the usual way.
     monkeypatch.setattr(windows, "default_browser", lambda: exes[7])
     assert real("open YouTube", like=7) == ""
+
+
+def test_a_site_opens_in_the_window_they_are_in_not_that_browsers_other_one(monkeypatch):
+    """Live, three times running: "open techlandbd.com on a new tab", with Firefox in front of
+    them and a second Firefox window on another screen. The tab went to the other window each
+    time. The window they are in is brought to the front first, when it is that browser's."""
+    did: list = []
+    firefox = r"C:\Apps\firefox.exe"
+    monkeypatch.setattr(windows, "exe_of", lambda hwnd: {5: firefox, 6: r"C:\Apps\Code.exe"}.get(hwnd, ""))
+    monkeypatch.setattr(windows, "focus", lambda hwnd: did.append(("focus", hwnd)) or True)
+    monkeypatch.setattr(windows.subprocess, "Popen", lambda args: did.append(("open", args[1])))
+    monkeypatch.setattr(windows.time, "sleep", lambda s: None)
+    open_in = windows.open_in.real  # the test set-up turns it off: this is the real one
+    open_in(firefox, "https://techlandbd.com", 5)
+    assert did == [("focus", 5), ("open", "https://techlandbd.com")]
+    did.clear()
+    open_in(firefox, "https://techlandbd.com", 6)  # they are in another program: nothing is moved
+    open_in(firefox, "https://techlandbd.com")
+    assert did == [("open", "https://techlandbd.com"), ("open", "https://techlandbd.com")]

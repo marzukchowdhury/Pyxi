@@ -75,7 +75,11 @@ def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     no_browser.real = windows.browser_for  # for the test of the real one
     monkeypatch.setattr(windows, "browser_for", no_browser)
-    monkeypatch.setattr(windows, "open_in", lambda exe, url: None)
+    def no_open(exe, url, window=None):
+        return None
+
+    no_open.real = windows.open_in  # for the test of the real one
+    monkeypatch.setattr(windows, "open_in", no_open)
     # No test asks the internet whether a site exists (the test of that gives its own answers).
     from pyxi.companion import actions as actions_mod
 

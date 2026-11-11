@@ -256,8 +256,17 @@ def browser_for(words: str, like: int | None = None) -> str:
     return "" if not exe or (default and Path(exe).name.lower() == Path(default).name.lower()) else exe
 
 
-def open_in(exe: str, url: str) -> None:
-    """Open an address in that browser (a new tab in its window that was used last)."""
+def open_in(exe: str, url: str, window: int | None = None) -> None:
+    """Open an address in that browser: a new tab in its window that was used last. ``window``:
+    the one they are in. When it is a window of that browser it is brought to the front
+    first, so the tab lands there.
+
+    Live, three times running: "open techlandbd.com on a new tab", with Firefox on the
+    screen in front of them and a second Firefox window on another screen. The tab went to
+    the other window each time, and "then why not opening it?"."""
+    if window and Path(exe_of(window)).name.lower() == Path(exe).name.lower():
+        focus(window)
+        time.sleep(0.15)  # the browser has to notice which of its windows is in front
     subprocess.Popen([exe, url])
 
 

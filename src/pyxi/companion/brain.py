@@ -1033,7 +1033,8 @@ class Brain:
             )
             if where:
                 try:
-                    await asyncio.to_thread(windows.open_in, where, url)
+                    here = self._ctx.window.hwnd if self._ctx and self._ctx.window.hwnd else None
+                    await asyncio.to_thread(windows.open_in, where, url, here)
                     return None
                 except OSError:
                     log.warning("couldn't open the address in %s; opening it the usual way", where)
