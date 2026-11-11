@@ -31,8 +31,8 @@
     <!--include:firefly-->
     <canvas class="swarm" aria-hidden="true"></canvas>
     <nav class="rail" aria-label="On this page">
-      <a href="#story"><i></i><b>01</b><span>What Pyxi does</span></a>
-      <a href="#in3d"><i></i><b>02</b><span>Explained in 3D</span></a>
+      <a href="#in3d"><i></i><b>01</b><span>Explained in 3D</span></a>
+      <a href="#story"><i></i><b>02</b><span>What Pyxi does</span></a>
       <a href="#how"><i></i><b>03</b><span>How it works</span></a>
       <a href="#demos"><i></i><b>04</b><span>Watch it work</span></a>
       <a href="#explore"><i></i><b>05</b><span>Explore</span></a>
@@ -60,6 +60,7 @@
               </a>
               <a class="btn btn-ghost btn-lg" href="/download">How to install</a>
             </div>
+            <p class="hero-peek reveal"><a href="#b3" data-track="hero-3d"><i aria-hidden="true"></i>Watch Pyxi build an engine in 3D</a></p>
             <p class="fine reveal">
               Free beta with an invite code. No API key or payment needed.<br />
               Version <span data-version>{{version}}</span> &middot; <span data-size>{{downloadSize}}</span> &middot; <!--if:macDownloadUrl-->On a Mac? <a href="{{macDownloadUrl}}" data-track="hero-download-mac">Download for Mac</a> (beta)<!--end--><!--if:macWaitlistOnly-->On a Mac? <a href="{{macWaitlistUrl}}">Join the Mac waitlist</a><!--end--><!--if:macNotYet-->Mac is next on the roadmap<!--end-->
@@ -133,6 +134,57 @@
               <span>Real screenshots of Pyxi on Windows</span>
             </figcaption>
           </figure>
+        </div>
+      </section>
+
+      <!-- ============================================================ explained in 3D, live -->
+      <section class="in3d" id="in3d" data-swarm="field" data-swarm-opacity="0.45" data-say="Ask how something works. I'll build it for you.">
+        <div class="wrap">
+          <p class="kicker reveal">Explained in 3D</p>
+          <h2 class="h2 reveal" data-scrub>Ask how it works.<br /><span class="dim">Pyxi builds it on your screen.</span></h2>
+          <p class="lead narrow reveal">Not a picture and not a video. Pyxi puts a real-looking model together from parts, in real 3D, on top of whatever you have open, and talks you through it step by step. Turn it around, look inside, or ask for a change and the same model changes.</p>
+
+          <div class="b3 reveal" id="b3">
+            <div class="b3-stage">
+              <div class="b3-desk" aria-hidden="true">
+                <i class="col"></i>
+                <i style="--x: 4%; --y: 22%; --w: 12%"></i><i style="--x: 4%; --y: 31%; --w: 9%"></i><i style="--x: 4%; --y: 40%; --w: 13%"></i><i style="--x: 4%; --y: 49%; --w: 8%"></i>
+                <i style="--x: 25%; --y: 22%; --w: 30%"></i><i style="--x: 25%; --y: 34%; --w: 68%"></i><i style="--x: 25%; --y: 42%; --w: 62%"></i><i style="--x: 25%; --y: 50%; --w: 66%"></i><i style="--x: 25%; --y: 58%; --w: 40%"></i><i style="--x: 25%; --y: 72%; --w: 64%"></i><i style="--x: 25%; --y: 80%; --w: 52%"></i>
+              </div>
+              <p class="b3-ask" aria-hidden="true"><i></i><b class="b3-ask-text">How does a car engine work?</b></p>
+              <img class="b3-poster" src="/img/ai-chip-600.webp" srcset="/img/ai-chip-600.webp 600w, /img/ai-chip.webp 1200w" sizes="(min-width: 1040px) 60vw, 92vw" width="1200" height="750" alt="A 3D model of an AI chip that Pyxi built over a settings window, taken apart layer by layer with a label on each part" loading="lazy" />
+              <div class="b3-view" role="img" aria-label="A 3D model that Pyxi built, playing live. Drag to turn it."></div>
+              <p class="b3-count" aria-hidden="true"></p>
+              <div class="b3-bar"><div class="b3-dots"></div><span class="b3-step"></span></div>
+              <p class="b3-hint" aria-hidden="true">Drag to turn it</p>
+            </div>
+            <div class="b3-side">
+              <div class="b3-tabs" role="group" aria-label="Pick something to explain">
+                <button type="button" data-model="engine" aria-pressed="true"><b>A car engine</b><span>How does a car engine work?</span></button>
+                <button type="button" data-model="seat" aria-pressed="false"><b>An ejection seat</b><span>How does a pilot eject?</span></button>
+              </div>
+              <div class="b3-walk">
+                <p class="b3-walk-head">Pyxi's walkthrough <span>spoken out loud in the app</span></p>
+                <ol class="b3-steps" aria-live="polite"></ol>
+              </div>
+              <div class="b3-tools">
+                <button type="button" class="b3-btn" data-act="inside" aria-pressed="false">Show the inside</button>
+                <div class="b3-seg" role="group" aria-label="How it looks">
+                  <button type="button" data-look="studio" aria-pressed="true">Studio</button>
+                  <button type="button" data-look="blueprint" aria-pressed="false">Blueprint</button>
+                  <button type="button" data-look="xray" aria-pressed="false">X-ray</button>
+                </div>
+                <button type="button" class="b3-btn" data-act="replay">Build it again</button>
+              </div>
+            </div>
+          </div>
+
+          <ul class="b3-facts reveal">
+            <li><b>Built from parts, as you watch</b><span>Pyxi describes the thing as parts with real materials: metal, glass, rubber, paint. They show up on your screen as each one is ready.</span></li>
+            <li><b>Told like a short video</b><span>Every step has its own camera angle, the parts it is about, and a sentence or two that Pyxi says out loud. Parts that are in the way fade so you can see.</span></li>
+            <li><b>Yours to change</b><span>Say "show the inside", "remove the casing" or "make that part move". Pyxi edits the model you already have instead of starting again.</span></li>
+          </ul>
+          <p class="fine reveal">Both models are Pyxi's own, drawn live in your browser rather than played from a video. In the app they float over your real windows and Pyxi tells the story out loud. Here the steps are written beside the model.</p>
         </div>
       </section>
 
@@ -307,57 +359,6 @@
             <div class="story-bar" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
             <p class="story-hint" aria-hidden="true">Scroll</p>
           </div>
-        </div>
-      </section>
-
-      <!-- ============================================================ explained in 3D, live -->
-      <section class="in3d" id="in3d" data-swarm="field" data-swarm-opacity="0.45" data-say="Ask how something works. I'll build it for you.">
-        <div class="wrap">
-          <p class="kicker reveal">Explained in 3D</p>
-          <h2 class="h2 reveal" data-scrub>Ask how it works.<br /><span class="dim">Pyxi builds it on your screen.</span></h2>
-          <p class="lead narrow reveal">Not a picture and not a video. Pyxi puts a real-looking model together from parts, in real 3D, on top of whatever you have open, and talks you through it step by step. Turn it around, look inside, or ask for a change and the same model changes.</p>
-
-          <div class="b3 reveal" id="b3">
-            <div class="b3-stage">
-              <div class="b3-desk" aria-hidden="true">
-                <i class="col"></i>
-                <i style="--x: 4%; --y: 22%; --w: 12%"></i><i style="--x: 4%; --y: 31%; --w: 9%"></i><i style="--x: 4%; --y: 40%; --w: 13%"></i><i style="--x: 4%; --y: 49%; --w: 8%"></i>
-                <i style="--x: 25%; --y: 22%; --w: 30%"></i><i style="--x: 25%; --y: 34%; --w: 68%"></i><i style="--x: 25%; --y: 42%; --w: 62%"></i><i style="--x: 25%; --y: 50%; --w: 66%"></i><i style="--x: 25%; --y: 58%; --w: 40%"></i><i style="--x: 25%; --y: 72%; --w: 64%"></i><i style="--x: 25%; --y: 80%; --w: 52%"></i>
-              </div>
-              <p class="b3-ask" aria-hidden="true"><i></i><b class="b3-ask-text">How does a car engine work?</b></p>
-              <img class="b3-poster" src="/img/ai-chip-600.webp" srcset="/img/ai-chip-600.webp 600w, /img/ai-chip.webp 1200w" sizes="(min-width: 1040px) 60vw, 92vw" width="1200" height="750" alt="A 3D model of an AI chip that Pyxi built over a settings window, taken apart layer by layer with a label on each part" loading="lazy" />
-              <div class="b3-view" role="img" aria-label="A 3D model that Pyxi built, playing live. Drag to turn it."></div>
-              <p class="b3-count" aria-hidden="true"></p>
-              <div class="b3-bar"><div class="b3-dots"></div><span class="b3-step"></span></div>
-              <p class="b3-hint" aria-hidden="true">Drag to turn it</p>
-            </div>
-            <div class="b3-side">
-              <div class="b3-tabs" role="group" aria-label="Pick something to explain">
-                <button type="button" data-model="engine" aria-pressed="true"><b>A car engine</b><span>How does a car engine work?</span></button>
-                <button type="button" data-model="seat" aria-pressed="false"><b>An ejection seat</b><span>How does a pilot eject?</span></button>
-              </div>
-              <div class="b3-walk">
-                <p class="b3-walk-head">Pyxi's walkthrough <span>spoken out loud in the app</span></p>
-                <ol class="b3-steps" aria-live="polite"></ol>
-              </div>
-              <div class="b3-tools">
-                <button type="button" class="b3-btn" data-act="inside" aria-pressed="false">Show the inside</button>
-                <div class="b3-seg" role="group" aria-label="How it looks">
-                  <button type="button" data-look="studio" aria-pressed="true">Studio</button>
-                  <button type="button" data-look="blueprint" aria-pressed="false">Blueprint</button>
-                  <button type="button" data-look="xray" aria-pressed="false">X-ray</button>
-                </div>
-                <button type="button" class="b3-btn" data-act="replay">Build it again</button>
-              </div>
-            </div>
-          </div>
-
-          <ul class="b3-facts reveal">
-            <li><b>Built from parts, as you watch</b><span>Pyxi describes the thing as parts with real materials: metal, glass, rubber, paint. They show up on your screen as each one is ready.</span></li>
-            <li><b>Told like a short video</b><span>Every step has its own camera angle, the parts it is about, and a sentence or two that Pyxi says out loud. Parts that are in the way fade so you can see.</span></li>
-            <li><b>Yours to change</b><span>Say "show the inside", "remove the casing" or "make that part move". Pyxi edits the model you already have instead of starting again.</span></li>
-          </ul>
-          <p class="fine reveal">Both models are Pyxi's own, drawn live in your browser rather than played from a video. In the app they float over your real windows and Pyxi tells the story out loud. Here the steps are written beside the model.</p>
         </div>
       </section>
 

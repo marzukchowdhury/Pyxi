@@ -193,7 +193,10 @@ export function initBuild3D({ reduced = false } = {}) {
     (entries, o) => {
       if (entries.some((e) => e.isIntersecting)) {
         o.disconnect();
-        boot();
+        // the section sits just under the first screen: let that finish loading first
+        const idle = () => (window.requestIdleCallback ?? setTimeout)(boot, { timeout: 1200 });
+        if (document.readyState === "complete") idle();
+        else addEventListener("load", idle, { once: true });
       }
     },
     { rootMargin: "900px 0px" },
