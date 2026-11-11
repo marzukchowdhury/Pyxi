@@ -224,3 +224,20 @@ def test_an_address_said_aloud_that_finds_nothing_may_be_one_word():
     from pyxi.connectors.google import GoogleConnector
 
     assert "may be tareknoorxyz@example.com" in inspect.getsource(GoogleConnector.gmail_search)
+
+
+def test_a_click_on_a_part_of_the_model_is_not_answered_on_the_page_behind_it(settings):
+    """Live: with a 3D model of a CPU showing over Facebook, a click on its motherboard was
+    answered with a note card and a frame drawn on the web page behind, around nothing, and the
+    model was gone. Those drawing tools are off the table for that turn."""
+    brain, _ = make_brain(settings)
+    marks = {"explain_on_screen", "point", "circle", "highlight", "arrow"}
+    brain._user_text = "In the CPU seated in its socket model, tell me more about the Motherboard."
+    brain._object = object()  # a model is showing
+    assert not marks & {t.name for t in brain._companion_tools()}
+    # The same words with no model showing, and any other request with one, keep them.
+    brain._object = None
+    assert marks <= {t.name for t in brain._companion_tools()}
+    brain._object = object()
+    brain._user_text = "What does this page say about returns?"
+    assert "explain_on_screen" in {t.name for t in brain._companion_tools()}

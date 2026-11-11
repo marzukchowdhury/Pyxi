@@ -1550,6 +1550,12 @@ class Brain:
             tools = [t for t in tools if t.name not in THREE_D_TOOLS]
         if self._builder_on():
             tools = [BUILD_BRIEF if t.name == "build_3d_model" else t for t in tools]
+        if self._object is not None and _PART_CLICKED.match(self._user_text or ""):
+            # They clicked a part of the model that is showing. Live: "tell me more about the
+            # Motherboard" was answered with a note card and a frame drawn on the Facebook
+            # page behind it, around nothing, and the model was gone. It is answered in
+            # words or in the model, never on the screen behind.
+            tools = [t for t in tools if t.name not in _SCREEN_MARKS]
         tools += tabwork.tools(self)  # read_tab and use_tab, only while a browser is connected
         return tools
 
@@ -4665,6 +4671,9 @@ _MULTI_SCREEN_NOTE = (
 
 # Words from a turn they talked over are carried into their next turn only this soon after.
 _CARRY_S = 90.0
+# The words the 3D panel sends when a part of the model is clicked (ObjectPanel.tsx).
+_PART_CLICKED = re.compile(r"(?i)^in the .+ model, tell me more about the .+")
+_SCREEN_MARKS = {"explain_on_screen", "point", "circle", "highlight", "arrow"}
 # The end of Ledger's summary for a Google file: where it is, as an address.
 _LINK_TAIL = re.compile(
     r"\s*(?:Edited in Google \([^)]*\)|It's a new file in your Google Drive):\s*(?:https?://\S+\s*)+"
