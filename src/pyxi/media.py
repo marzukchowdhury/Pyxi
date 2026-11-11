@@ -102,9 +102,9 @@ def parse_volume(value: str, now: float) -> float | None:
         return 0.5
     if v in ("high", "loud", "max", "full"):
         return 1.0 if v in ("max", "full") else 0.8
-    if any(w in v for w in ("lower", "quieter", "down", "softer", "less")):
+    if any(w in v for w in ("lower", "quieter", "down", "softer", "less", "decrease", "reduce")):
         return max(0.05, now - 0.2 if "bit" not in v and "little" not in v else now - 0.12)
-    if any(w in v for w in ("higher", "louder", "up", "more")):
+    if any(w in v for w in ("higher", "louder", "up", "more", "increase", "raise", "boost")):
         return min(1.0, now + 0.2 if "bit" not in v and "little" not in v else now + 0.12)
     return None
 
@@ -115,6 +115,19 @@ def set_volume(value: str) -> str:
     level = parse_volume(value, now)
     if level is None:
         return f"volume: I can set a number (30%), or lower, higher, low, mute; not {value!r}."
+    if round(level * 100) == round(now * 100):
+        # Live: "increase the volume", three times, with Windows already near the top and
+        # the video's own slider low. "Nothing happened", and Pyxi said it had forgotten to.
+        way = "up" if level >= 0.99 else "down" if level <= 0.01 else "there"
+        return (
+            f"volume: Windows' volume is already at {round(now * 100)}%, so nothing changed"
+            + (
+                ". If it still sounds quiet, the app's own volume is low (the player's slider, "
+                "or a muted tab): say so, and offer to raise that."
+                if way == "up"
+                else "."
+            )
+        )
     spk = _speakers()
     if level > 0:
         spk.SetMute(0, None)

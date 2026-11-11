@@ -984,6 +984,21 @@ class Brain:
                 return "open_url: that's already open from this request. Don't open it again; answer or stop."
             opened.add(url)
             self._opened_urls = opened
+            # In the browser they named or are in, when that isn't the one links open in anyway.
+            words = self._user_text or ""
+            link = getattr(self, "browser", None)
+            if link is not None and link.connected:
+                # The browser their extension is in is the one they mean, named or not.
+                words += " " + " ".join(link.browsers())
+            where = windows.browser_for(
+                words, self._ctx.window.hwnd if self._ctx and self._ctx.window.hwnd else None
+            )
+            if where:
+                try:
+                    await asyncio.to_thread(windows.open_in, where, url)
+                    return None
+                except OSError:
+                    log.warning("couldn't open the address in %s; opening it the usual way", where)
             await self.hub.emit("action", kind="open_url", value=url)
             return None
         if action == "open_app":
@@ -1595,6 +1610,24 @@ class Brain:
     ) -> None:
         """Do it quietly, then tell the user once, in the notch."""
         job = await self.jobs.track("Pyxi", task)
+        # A newer request for the same thing takes this one's place (live: "it's Shad, not
+        # Shah" started a second draft while the first one's card was still up; "press Don't
+        # on both of those cards", and two emails went out, one of them with the wrong name).
+        errands = getattr(self, "_errands", None)
+        if errands is None:
+            errands = self._errands = {}
+        for old_id, (old_task, old_run, waiting) in list(errands.items()):
+            if same_errand(old_task, task) and not old_run.done():
+                old_job = self.jobs.jobs.get(old_id)
+                if old_job is not None:
+                    old_job.status = "stopped"  # a stopped job is not announced
+                    old_job.summary = "Replaced by your newer request."
+                if waiting["card"] is not None:
+                    waiting["card"].cancel()  # its card comes down on every screen
+                old_run.cancel()
+                errands.pop(old_id, None)
+        waiting: dict[str, Any] = {"card": None}
+        errands[job.id] = (task, asyncio.current_task(), waiting)
 
         async def progress(line: str) -> None:
             await self.hub.emit(
@@ -1602,15 +1635,20 @@ class Brain:
             )
 
         async def approve(out: Outgoing) -> bool:
-            ok = await self.hub.request(
-                "confirm",
-                timeout=900,
-                job_id=job.id,
-                agent="Pyxi",
-                action=out.action,
-                reason=out.preview,
+            waiting["card"] = asyncio.ensure_future(
+                self.hub.request(
+                    "confirm",
+                    timeout=900,
+                    job_id=job.id,
+                    agent="Pyxi",
+                    action=out.action,
+                    reason=out.preview,
+                )
             )
-            return bool(ok)
+            try:
+                return bool(await waiting["card"])
+            finally:
+                waiting["card"] = None
 
         try:
             result = await run_errand(
@@ -1625,12 +1663,19 @@ class Brain:
                 gate=lambda out: self._within_limits(out.channel, out.action),
                 on_sent=self._count_sent,
             )
+        except asyncio.CancelledError:
+            # Replaced by a newer request for the same thing: it ends without a word.
+            self._errands.pop(job.id, None)
+            await self.jobs._update(job)
+            return
         except Exception as exc:
             log.exception("errand failed")
+            self._errands.pop(job.id, None)
             await self.jobs.settle(job, ok=False, summary=str(exc)[:200])
             await self._notify(job.id, ok=False, title="Couldn't finish that", body=str(exc)[:200])
             self._spawn(self._say_when_free("I couldn't finish that. The notification says why."))
             return
+        self._errands.pop(job.id, None)
         self.turns.add_spend("errand", result.cost_usd)
         await self.jobs.settle(
             job,
@@ -4108,6 +4153,28 @@ _BACKGROUND_TOOLS = {
 }
 # Tools that can say no (a file that isn't there, an account that isn't connected, a card they
 # decline): a line said with one waits for its answer, and is dropped if the answer is no.
+_ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def same_errand(old: str, new: str) -> bool:
+    """Is the new errand the old one asked again (a corrected name, a changed line)? The same
+    words, mostly, and not addressed to someone else. Two different errands stay two."""
+    a, b = old.lower(), new.lower()
+    to_a, to_b = set(_ADDRESS.findall(a)), set(_ADDRESS.findall(b))
+    if (to_a - to_b) and (to_b - to_a):
+        return False  # each names an address the other doesn't: two people, two errands
+    words_a, words_b = (
+        {w for w in re.findall(r"[a-z']{3,}", _ADDRESS.sub(" ", t)[:240]) if w not in _SMALL_WORDS}
+        for t in (a, b)
+    )
+    if not words_a or not words_b:
+        return False
+    return len(words_a & words_b) / min(len(words_a), len(words_b)) >= 0.6
+
+
+_SMALL_WORDS = {"the", "and", "for", "from", "with", "that", "this", "his", "her", "their", "you", "your"}
+
+
 # Said while Pyxi is using the mouse: these end that work. Anything else lets it carry on.
 _HANDS_OFF = re.compile(
     r"(?i)^\W*(?:(?:hey\s+)?pyxi\W+)?(?:stop|wait|no|nope|don'?t|do not|cancel|hold on|hang on|"

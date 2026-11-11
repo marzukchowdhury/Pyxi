@@ -254,7 +254,8 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
                 "edit_document: I can't tell which file they mean: none is open in a browser "
                 "window I can read, and there is none I worked on in the last half hour. Ask "
                 "them to bring it to the front (or say its name or paste its link), and never "
-                "guess by the name Untitled."
+                "guess by the name Untitled. Don't call edit_document again in this reply: say "
+                "that in one short line and stop."
             )
         out_of_reach = [g for g in google if not await _reachable(brain, g)]
         made_instead = False

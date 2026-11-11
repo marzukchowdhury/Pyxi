@@ -191,6 +191,26 @@ _DEFAULT_BROWSERS = {
 }
 
 
+def _program_path(name: str) -> str:
+    """Where a program is installed ("chrome.exe" -> its full path), as Windows records it."""
+    try:
+        import winreg
+
+        for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                with winreg.OpenKey(
+                    root, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{name}"
+                ) as key:
+                    path = str(winreg.QueryValueEx(key, "")[0]).strip('"')
+                if path and Path(path).is_file():
+                    return path
+            except OSError:
+                continue
+    except ImportError:
+        pass
+    return ""
+
+
 def default_browser() -> str:
     """The full path of the browser Windows opens links with, if it is one Pyxi can open a
     new window in ('' otherwise)."""
@@ -202,22 +222,43 @@ def default_browser() -> str:
             r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
         ) as key:
             choice = str(winreg.QueryValueEx(key, "ProgId")[0]).lower()
-        name = next((exe for word, exe in _DEFAULT_BROWSERS.items() if word in choice), "")
-        if not name:
-            return ""
-        for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-            try:
-                with winreg.OpenKey(
-                    root, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{name}"
-                ) as key:
-                    path = str(winreg.QueryValueEx(key, "")[0]).strip('"')
-                if path and Path(path).is_file():
-                    return path
-            except OSError:
-                continue
     except (OSError, ImportError):
-        pass
-    return ""
+        return ""
+    name = next((exe for word, exe in _DEFAULT_BROWSERS.items() if word in choice), "")
+    return _program_path(name) if name else ""
+
+
+_NAMED_BROWSER = re.compile(r"(?i)\b(chrome|firefox|edge|brave)\b")
+_BROWSER_EXE = {"chrome": "chrome.exe", "firefox": "firefox.exe", "edge": "msedge.exe", "brave": "brave.exe"}
+
+
+def browser_for(words: str, like: int | None = None) -> str:
+    """The browser a site should open in: the one their words name ("on Chrome"), else the
+    one they are in, else the one they have open. '' when that is their default browser
+    anyway or none is known: the link is then opened the ordinary way.
+
+    Live: "open Google Sheets on Chrome", three times. Each one opened in Edge, the default
+    browser, behind the Chrome window they were looking at: "still not done"."""
+    if not available():
+        return ""
+    named = _NAMED_BROWSER.search(words or "")
+    if named:
+        want = _BROWSER_EXE[named.group(1).lower()]
+        for hwnd, _title, _exe in open_windows():
+            exe = exe_of(hwnd)
+            if Path(exe).name.lower() == want:
+                return exe
+        return _program_path(want)
+    exe = exe_of(like) if like else ""
+    if Path(exe).name.lower() not in BROWSER_FLAGS:
+        exe = their_browser()
+    default = default_browser()
+    return "" if not exe or (default and Path(exe).name.lower() == Path(default).name.lower()) else exe
+
+
+def open_in(exe: str, url: str) -> None:
+    """Open an address in that browser (a new tab in its window that was used last)."""
+    subprocess.Popen([exe, url])
 
 
 def their_browser() -> str:

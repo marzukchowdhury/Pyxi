@@ -692,8 +692,10 @@ _PAIR = (
     "(Now pair the extension with you. Guide me with the guide tool, one step at a time: "
     "1. click the Extensions button in {name}'s toolbar (the puzzle piece); 2. click 'Pyxi in "
     "your browser' in the list; 3. type this code into the box (a guide step with action "
-    "'type' and text '{code}'); 4. press Connect. When the little window says Connected, call "
-    "guide with done=true. One short sentence per step.)"
+    "'type' and text '{code}'), and say the code itself in that step's sentence, exactly as "
+    "it is written here, every time you mention it ('Type {code} in the box'): they can't "
+    "type a code nobody told them; 4. press Connect. When the little window says Connected, "
+    "call guide with done=true. One short sentence per step.)"
 )
 _GET_A_CODE = (
     "press I already have the extension: show me a code, in Pyxi's Settings under Connect "
@@ -919,6 +921,8 @@ async def _pair(brain: Brain, browser: Browser) -> None:
     link = brain.browser
     code = link.new_code()["code"]
     await announce(brain, code=code, expires_in=int(PAIR_WAIT_S))  # Settings shows it too
+    # On screen from the start (live: "what's the code?", three steps into typing it).
+    await brain.hub.emit("notice", message=f"Your pairing code: {code}")
     good_until = time.monotonic() + PAIR_WAIT_S
     await _guide(
         brain, _PAIR.format(name=browser.name, code=code), "Pairing the browser", PAIR_WAIT_S

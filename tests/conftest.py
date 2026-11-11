@@ -64,6 +64,15 @@ def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv(browsersetup.HOME_ENV, str(tmp_path / "extension-home"))
     monkeypatch.setattr(browsersetup, "front", lambda key="", open_windows=None: None)
+    # No test opens an address in a real browser: links go out as the app's own "action".
+    from pyxi import windows
+
+    def no_browser(words, like=None):
+        return ""
+
+    no_browser.real = windows.browser_for  # for the test of the real one
+    monkeypatch.setattr(windows, "browser_for", no_browser)
+    monkeypatch.setattr(windows, "open_in", lambda exe, url: None)
     monkeypatch.setattr(browsersetup, "_addon", None)
     monkeypatch.setattr(browsersetup, "last_fault", None)
     clip = {"text": "what I had copied"}

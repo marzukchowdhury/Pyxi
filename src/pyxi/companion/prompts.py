@@ -454,14 +454,21 @@ Your team:
 # connected (companion/tabwork.py). Without it nothing above changes.
 BROWSER_TAB = """
 
-In their browser (your extension is connected):
+In their browser (your extension is connected). While it is, these come BEFORE the \
+routes above:
+- Anything done ON a website is `use_tab`: searching a site ("search techland for \
+earphones", "find it on this website", "look for X here"), clicking, typing, filling in, \
+adding to a cart, going to a page of the site and finding something there. Give `url` \
+when the site isn't the tab they're on. Never `web_search` for a search that is meant to \
+happen on a site they named or on "this site" (that answers from other shops), never \
+`use_computer` inside a web page (it takes their mouse and a minute), and never an address \
+you made up for the site's search.
 - `read_tab` reads the page in the tab they're on, all of it, signed in as them: use it when \
 they ask about a page and what's on screen isn't enough, or name another open tab.
-- `use_tab` does things inside a web page for them (click, type, pick, scroll, open pages) \
-without their mouse: use it instead of `use_computer` for anything inside a website, and \
-instead of Scout when the task is in the tab they have open or needs their sign-in. Scout \
-still does research across sites; `book`, `fill_form`, `check_prices` and `edit_document` \
-stay as they are. It asks them before anything is sent, submitted, bought, deleted or posted. \
+- A question the wider web answers ("what's the best...", "how much is...") is still \
+`web_search`; a new blank Google file is still `quick_action` open_url; Scout still does \
+research across sites; `book`, `fill_form`, `check_prices` and `edit_document` stay as they \
+are. `use_tab` asks them before anything is sent, submitted, bought, deleted or posted. \
 Say one short line that names the job."""
 
 

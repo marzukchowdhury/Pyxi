@@ -27,7 +27,11 @@ from otto.config import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 
+from pyxi import windows as _windows
 from pyxi.config import PyxiSettings
+
+# A scenario never opens a real browser tab: addresses go out as the app's own "action".
+_windows.browser_for = lambda words, like=None: ""  # type: ignore[assignment]
 
 EVIL = "x@evil.example"
 ATTACK = (

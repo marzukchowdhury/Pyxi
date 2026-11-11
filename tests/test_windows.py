@@ -343,3 +343,26 @@ async def test_a_site_opens_in_the_browser_they_use_not_in_edge(monkeypatch):
 
 async def _no_sleep(seconds: float) -> None:
     return None
+
+
+def test_a_site_opens_in_the_browser_they_name_or_are_in(monkeypatch):
+    """Live: "open Google Sheets on Chrome", three times. Each opened in Edge, the default
+    browser, behind the Chrome window in front. "Still not done." """
+    real = windows.browser_for.real  # the test set-up turns it off: this is the real one
+    exes = {
+        3: r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        7: r"C:\Program Files\Mozilla Firefox\firefox.exe",
+        9: r"C:\Apps\GenOffice.exe",
+    }
+    monkeypatch.setattr(windows, "available", lambda: True)
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(9, "Sheet", ""), (7, "Inbox - Mozilla Firefox", ""), (3, "New Tab - Google Chrome", "")])
+    monkeypatch.setattr(windows, "exe_of", lambda hwnd: exes.get(hwnd, ""))
+    monkeypatch.setattr(windows, "default_browser", lambda: r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
+    monkeypatch.setattr(windows, "_program_path", lambda name: rf"C:\Found\{name}")
+    assert real("open Google Sheets on Chrome") == exes[3]  # the one they name
+    assert real("open it in Brave") == r"C:\Found\brave.exe"  # named, not open: where it is installed
+    assert real("open YouTube", like=3) == exes[3]  # the one they are in
+    assert real("open YouTube", like=9) == exes[7]  # not in a browser: the one they have open
+    # Their default browser is the one in front: nothing special, the link opens the usual way.
+    monkeypatch.setattr(windows, "default_browser", lambda: exes[7])
+    assert real("open YouTube", like=7) == ""

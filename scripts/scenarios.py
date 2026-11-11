@@ -24,16 +24,19 @@ from pathlib import Path
 
 from otto.config import load_dotenv
 from PIL import Image
+from specialist_scenarios import SCENARIOS as SPECIALIST_SCENARIOS
+from specialist_scenarios import install as specialist_fakes
+from specialist_scenarios import problems as specialist_problems
 
-from pyxi import files_access, tidy
+from pyxi import files_access, tidy, windows
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
 from pyxi.hub import Hub
 from pyxi.screen.context import ScreenContext, UIElement, WindowInfo
 from pyxi.screen.ocr import TextLine
-from specialist_scenarios import SCENARIOS as SPECIALIST_SCENARIOS
-from specialist_scenarios import install as specialist_fakes
-from specialist_scenarios import problems as specialist_problems
+
+# A scenario never opens a real browser tab: addresses go out as the app's own "action".
+windows.browser_for = lambda words, like=None: ""  # type: ignore[assignment]
 
 DB = ".pyxi/pyxi.db"
 MAPS_SCREEN = "turn_7252307e"  # Google Maps showing coffee places open now
@@ -387,6 +390,12 @@ SIMPLE_SCENARIOS = [
     ("simple merge windows", FIREFOX, "Put all the tabs from both Firefox windows into one window.", "do"),
     ("simple zoom", FIREFOX, "Zoom in on this page a bit.", "do"),
     # Live: done with the mouse, 63 seconds, and it gave up. The browser's own keys take a second.
+    # Live, with the extension just connected: "search techland.bd for earphones" went to a
+    # web search and an answer about other shops; "find it on this website" went to the mouse.
+    ("tab search a site", FIREFOX, "Search techlandbd.com for earphones.", "tab:use_tab"),
+    ("tab find here", SHOP_SCREEN, "Find wireless earbuds on this website.", "tab:use_tab"),
+    ("tab add to cart", SHOP_SCREEN, "Add the first one to my cart.", "tab:use_tab"),
+    ("tab read page", SHOP_SCREEN, "What does this page say about returns and refunds?", "tab:read_tab"),
     ("simple close tabs", FIREFOX, "Close the last two tabs.", "tabs:close last 2"),
     ("simple close tab", FIREFOX, "Close this tab.", "tabs:close"),
     ("simple reopen tab", FIREFOX, "Oops, bring back the tab I just closed.", "tabs:reopen"),
@@ -503,6 +512,20 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     hub.connect(record)
     brain = Brain(settings, hub, screen=Replay(screen_from(turn_id)))
     background: list[str] = []
+    if expect.startswith("tab:"):
+        # Their browser is connected (pretend): which route does the request take? Nothing is
+        # sent to a browser: the tab tools only record what they were asked.
+        from pyxi.companion import tabwork
+
+        brain.browser._conns["pretend"] = type("Conn", (), {"browser": "Chrome", "id": "pretend"})()
+
+        async def fake_tab(brain_, name, args):
+            if name not in ("read_tab", "use_tab"):
+                return await real_tab(brain_, name, args)
+            background.append(f"tab: {name} {json.dumps(args)[:200]}")
+            return "Tab: TechLand BD (https://www.techlandbd.com/)\nEarphones, headphones, laptops." if name == "read_tab" else None
+
+        real_tab, tabwork.handle = tabwork.handle, fake_tab
 
     async def fake_errand(task: str, user_text: str, **kw) -> None:
         background.append(f"errand: {task[:70]}")
@@ -653,6 +676,23 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     brain.connectors.tools = lambda: dummies  # type: ignore[method-assign]
     brain._build_from_brief = fake_build  # type: ignore[method-assign]
     brain.jobs.start = fake_start  # type: ignore[method-assign]
+    from pyxi.companion import filework
+
+    async def open_on_screen(brain_, ref):
+        # The sheet or doc in the scenario's screen is open in a browser, so it has a link, as
+        # a real one does (no real window is looked at, and no real file is reached).
+        if filework._GOOGLE_LINK.search(ref) or ref.lower().startswith("new "):
+            return ref
+        if filework._THIS.match(ref) or filework._UNTITLED.match(ref) or not ref.strip():
+            kind = "document" if "doc" in ref.lower() else "presentation" if any(w in ref.lower() for w in ("slide", "deck")) else "spreadsheets"
+            return f"https://docs.google.com/{kind}/d/scenarioFile/edit"
+        return ref
+
+    async def reachable(brain_, ref):
+        return True
+
+    filework._open_google_file = open_on_screen  # type: ignore[assignment]
+    filework._reachable = reachable  # type: ignore[assignment]
     # File search is allowed, only on the sample Desktop, and never through the real Search index
     # (so the founder's own files never come into it).
     files_access.save(settings.data_dir, files_access.FileAccess(True, [str(mess)], True))
@@ -832,6 +872,16 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("didn't point at it")
     if expect == "volume" and not any(b.startswith("volume") for b in background):
         problems.append("didn't set the volume")
+    if expect.startswith("tab:"):
+        from pyxi.companion import tabwork
+
+        tabwork.handle = real_tab
+        want = expect.split(":", 1)[1]
+        if not any(b.startswith(f"tab: {want}") for b in background):
+            problems.append(f"didn't use {want} in their tab")
+        for wrong in ("use_computer", "web_search") if want == "use_tab" else ("use_computer",):
+            if wrong in tools:
+                problems.append(f"used {wrong} though their browser is connected")
     if expect.startswith("tabs:"):
         want = expect.split(":", 1)[1]
         got = [b.split(": ", 1)[1].lower().replace(" tabs", "").strip() for b in background if b.startswith("tabs: ")]
