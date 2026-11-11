@@ -173,10 +173,13 @@
 }
 .op-pic .plate {
   border-radius: 4px;
+  /* its own layer: the shading is worked out once, not again each time a mark above it moves */
+  will-change: transform;
 }
 .op-ink {
   overflow: visible;
   pointer-events: none;
+  will-change: transform;
 }
 /* the app's own marks: a red route traced along the picture, a leader, a dot on the part */
 .op-route {
@@ -187,7 +190,9 @@
   stroke-linejoin: round;
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
-  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.9)) drop-shadow(0 0 5px rgba(255, 77, 79, 0.55));
+  /* a white edge, so the red reads on the red side of the heart too */
+  filter: drop-shadow(0 0 1.2px #fff) drop-shadow(0 0 1.2px rgba(255, 255, 255, 0.9))
+    drop-shadow(0 0 5px rgba(255, 77, 79, 0.55));
   animation: op-draw 1.5s 0.35s cubic-bezier(0.45, 0.05, 0.3, 1) forwards;
 }
 .op-route.head {

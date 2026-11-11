@@ -1,69 +1,167 @@
-<svg class="plate" viewBox="0 0 600 660" role="img" aria-label="A textbook drawing of the human heart, cut open to show its four chambers and the large vessels, with no labels on it">
+<svg class="plate" viewBox="0 0 600 660" role="img" aria-label="An anatomy plate of the human heart, cut open from the front to show its four chambers, the valves and the large vessels, with no labels on it">
   <defs>
     <linearGradient id="plate-paper" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f6f1e6" />
-      <stop offset="1" stop-color="#ebe3d3" />
+      <stop offset="0" stop-color="#f7f1e4" />
+      <stop offset="1" stop-color="#e9dfcb" />
     </linearGradient>
-    <radialGradient id="plate-wall" cx="0.45" cy="0.35" r="0.8">
-      <stop offset="0" stop-color="#efc2b2" />
-      <stop offset="1" stop-color="#d99a8b" />
+    <radialGradient id="plate-vignette" cx="0.5" cy="0.46" r="0.72">
+      <stop offset="0.55" stop-color="#5b4526" stop-opacity="0" />
+      <stop offset="1" stop-color="#5b4526" stop-opacity="0.22" />
     </radialGradient>
+    <!-- the cut muscle of the wall: lit from the upper left -->
+    <radialGradient id="plate-wall" cx="0.36" cy="0.3" r="0.85">
+      <stop offset="0" stop-color="#d98a76" />
+      <stop offset="0.55" stop-color="#bb5c4e" />
+      <stop offset="1" stop-color="#8f3a33" />
+    </radialGradient>
+    <!-- the hollows: darkest where they are deepest -->
+    <radialGradient id="plate-ra" cx="0.42" cy="0.4" r="0.75">
+      <stop offset="0" stop-color="#7f9fd0" />
+      <stop offset="1" stop-color="#3a5488" />
+    </radialGradient>
+    <radialGradient id="plate-rv" cx="0.4" cy="0.3" r="0.9">
+      <stop offset="0" stop-color="#7696cb" />
+      <stop offset="1" stop-color="#31497c" />
+    </radialGradient>
+    <radialGradient id="plate-la" cx="0.45" cy="0.4" r="0.75">
+      <stop offset="0" stop-color="#e2685c" />
+      <stop offset="1" stop-color="#93282a" />
+    </radialGradient>
+    <radialGradient id="plate-lv" cx="0.45" cy="0.3" r="0.9">
+      <stop offset="0" stop-color="#d9574d" />
+      <stop offset="1" stop-color="#7f1f24" />
+    </radialGradient>
+    <filter id="plate-soft" filterUnits="userSpaceOnUse" x="0" y="0" width="600" height="660"><feGaussianBlur stdDeviation="2.6" /></filter>
+    <filter id="plate-softer" filterUnits="userSpaceOnUse" x="0" y="0" width="600" height="660"><feGaussianBlur stdDeviation="7" /></filter>
+    <filter id="plate-lift" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="4" dy="7" stdDeviation="7" flood-color="#4a2f14" flood-opacity="0.3" /></filter>
+    <!-- grain: the tooth of the paper, and the fibres of the muscle -->
+    <filter id="plate-grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="7" />
+      <feColorMatrix values="0 0 0 0 0.25  0 0 0 0 0.16  0 0 0 0 0.1  0 0 0 0.55 0" />
+    </filter>
+    <filter id="plate-fibre" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.11" numOctaves="3" seed="3" />
+      <feColorMatrix values="0 0 0 0 0.3  0 0 0 0 0.06  0 0 0 0 0.05  0 0 0 1.5 -0.55" />
+    </filter>
+    <path id="plate-body" d="M168 290C144 250 172 222 216 230C254 237 276 262 300 270C328 264 352 252 382 242C444 224 508 252 504 324C508 408 472 508 348 618C276 574 176 476 157 372C149 340 155 314 168 290Z" />
+    <path id="plate-c-ra" d="M184 302C178 264 214 250 244 262C262 270 268 290 268 312C268 336 258 352 228 354C204 354 188 340 184 302Z" />
+    <path id="plate-c-rv" d="M194 378C224 366 262 366 288 374C308 382 314 422 322 472C328 512 334 550 340 588C290 552 212 468 194 378Z" />
+    <path id="plate-c-la" d="M372 288C370 260 408 250 444 258C474 266 484 300 472 328C452 348 398 348 380 332C372 320 372 304 372 288Z" />
+    <path id="plate-c-lv" d="M358 380C388 368 432 370 454 384C456 446 414 528 362 586C354 520 350 436 358 380Z" />
+    <clipPath id="plate-clip-body"><use href="#plate-body" /></clipPath>
+    <clipPath id="plate-clip-ra"><use href="#plate-c-ra" /></clipPath>
+    <clipPath id="plate-clip-rv"><use href="#plate-c-rv" /></clipPath>
+    <clipPath id="plate-clip-la"><use href="#plate-c-la" /></clipPath>
+    <clipPath id="plate-clip-lv"><use href="#plate-c-lv" /></clipPath>
   </defs>
+
   <rect width="600" height="660" fill="url(#plate-paper)" />
-  <rect x="9" y="9" width="582" height="642" fill="none" stroke="#b9ad97" stroke-width="1" />
+  <rect width="600" height="660" filter="url(#plate-grain)" opacity="0.2" />
+  <rect width="600" height="660" fill="url(#plate-vignette)" />
+  <rect x="9" y="9" width="582" height="642" fill="none" stroke="#a89a80" stroke-width="1" />
 
-  <!-- behind the heart: the right branch of the pulmonary artery, the lower vena cava, the veins from the lungs -->
-  <g fill="none" stroke-linecap="butt">
-    <path d="M300 222C250 222 180 212 86 214" stroke="#2f4d78" stroke-width="41" />
-    <path d="M300 222C250 222 180 212 84 214" stroke="#86add9" stroke-width="35" />
-    <path d="M196 330C192 420 184 520 178 630" stroke="#2f4d78" stroke-width="47" />
-    <path d="M196 330C192 420 184 520 178 632" stroke="#7fa8d9" stroke-width="41" />
-    <path d="M440 286L548 270" stroke="#7a2b28" stroke-width="27" />
-    <path d="M440 286L550 270" stroke="#e58175" stroke-width="21" />
-    <path d="M440 324L548 336" stroke="#7a2b28" stroke-width="27" />
-    <path d="M440 324L550 336" stroke="#e58175" stroke-width="21" />
+  <g filter="url(#plate-lift)">
+    <!-- behind the heart: the right branch of the pulmonary artery, the lower vena cava, the veins from the lungs -->
+    <g fill="none" stroke-linecap="butt">
+      <path d="M300 222C250 222 180 212 86 214" stroke="#22395e" stroke-width="41" />
+      <path d="M300 222C250 222 180 212 84 214" stroke="#4a6da6" stroke-width="35" />
+      <path d="M300 222C250 222 180 212 84 214" stroke="#7093c8" stroke-width="20" transform="translate(0 -3)" filter="url(#plate-soft)" />
+      <path d="M300 222C250 222 180 212 84 214" stroke="#c3d6f0" stroke-width="5" transform="translate(0 -8)" opacity="0.75" filter="url(#plate-soft)" />
+
+      <path d="M196 330C192 420 184 520 178 630" stroke="#22395e" stroke-width="47" />
+      <path d="M196 330C192 420 184 520 178 632" stroke="#46689f" stroke-width="41" />
+      <path d="M196 330C192 420 184 520 178 632" stroke="#6c8fc4" stroke-width="22" transform="translate(-4 0)" filter="url(#plate-soft)" />
+      <path d="M196 330C192 420 184 520 178 632" stroke="#c3d6f0" stroke-width="5" transform="translate(-10 0)" opacity="0.7" filter="url(#plate-soft)" />
+
+      <path d="M440 286L548 270M440 324L548 336" stroke="#5e1b1b" stroke-width="27" />
+      <path d="M440 286L550 270M440 324L550 336" stroke="#b33a36" stroke-width="21" />
+      <path d="M440 286L550 270M440 324L550 336" stroke="#dc6a60" stroke-width="10" transform="translate(0 -2)" filter="url(#plate-soft)" />
+      <path d="M440 286L550 270M440 324L550 336" stroke="#f6c1b8" stroke-width="3" transform="translate(0 -5)" opacity="0.7" filter="url(#plate-soft)" />
+    </g>
+
+    <!-- the aorta: up from the middle, over the arch with its three branches, and down behind the heart -->
+    <g fill="none" stroke-linecap="butt">
+      <path d="M372 104V62M401 98V54M430 104V62" stroke="#5e1b1b" stroke-width="21" />
+      <path d="M372 106V60M401 100V52M430 106V60" stroke="#ac3431" stroke-width="15" />
+      <path d="M372 106V60M401 100V52M430 106V60" stroke="#e07a6f" stroke-width="5" transform="translate(-2 0)" filter="url(#plate-soft)" />
+      <path d="M338 310C338 230 322 112 400 112C476 112 478 200 478 300" stroke="#5e1b1b" stroke-width="53" />
+      <path d="M338 312C338 230 322 112 400 112C476 112 478 200 478 302" stroke="#a52f2d" stroke-width="47" />
+      <path d="M338 312C338 230 322 112 400 112C476 112 478 200 478 302" stroke="#d2554c" stroke-width="27" transform="translate(-4 -4)" filter="url(#plate-soft)" />
+      <path d="M338 312C338 230 322 112 400 112C476 112 478 200 478 302" stroke="#f7c4bb" stroke-width="6" transform="translate(-11 -10)" opacity="0.75" filter="url(#plate-soft)" />
+    </g>
+
+    <!-- the upper vena cava -->
+    <g fill="none" stroke-linecap="butt">
+      <path d="M206 34V280" stroke="#22395e" stroke-width="51" />
+      <path d="M206 32V282" stroke="#46689f" stroke-width="45" />
+      <path d="M206 32V282" stroke="#7093c8" stroke-width="25" transform="translate(-4 0)" filter="url(#plate-soft)" />
+      <path d="M206 32V282" stroke="#c9dbf3" stroke-width="6" transform="translate(-12 0)" opacity="0.75" filter="url(#plate-soft)" />
+    </g>
+
+    <!-- the heart's own wall: a thin rim of fat outside, cut muscle inside it, darker toward the edges -->
+    <use href="#plate-body" fill="url(#plate-wall)" />
+    <g clip-path="url(#plate-clip-body)">
+      <rect x="140" y="220" width="380" height="410" filter="url(#plate-fibre)" opacity="0.5" />
+      <use href="#plate-body" fill="none" stroke="#571c1a" stroke-width="30" filter="url(#plate-softer)" opacity="0.5" />
+      <use href="#plate-body" fill="none" stroke="#ecca8e" stroke-width="9" opacity="0.9" />
+      <use href="#plate-body" fill="none" stroke="#c9963f" stroke-width="2.4" opacity="0.6" />
+    </g>
+    <use href="#plate-body" fill="none" stroke="#4a1d1a" stroke-width="2.6" stroke-linejoin="round" />
+
+    <!-- the pulmonary artery: up from the right ventricle, in front of the aorta, off to the left lung -->
+    <g fill="none" stroke-linecap="butt">
+      <path d="M288 404C276 300 290 248 318 228C352 206 432 210 522 216" stroke="#22395e" stroke-width="43" />
+      <path d="M288 406C276 300 290 248 318 228C352 206 432 210 524 216" stroke="#4a6da6" stroke-width="37" />
+      <path d="M288 406C276 300 290 248 318 228C352 206 432 210 524 216" stroke="#7698cd" stroke-width="21" transform="translate(-3 -3)" filter="url(#plate-soft)" />
+      <path d="M288 406C276 300 290 248 318 228C352 206 432 210 524 216" stroke="#cddef5" stroke-width="5" transform="translate(-8 -8)" opacity="0.75" filter="url(#plate-soft)" />
+    </g>
+
+    <!-- the four chambers, each a hollow -->
+    <use href="#plate-c-ra" fill="url(#plate-ra)" />
+    <g clip-path="url(#plate-clip-ra)">
+      <use href="#plate-c-ra" fill="none" stroke="#1c2c52" stroke-width="20" filter="url(#plate-soft)" opacity="0.6" />
+      <path d="M196 286C214 276 236 276 254 288M194 306C214 296 240 298 260 310M198 326C216 318 240 320 258 332" fill="none" stroke="#1c2c52" stroke-width="2.4" stroke-linecap="round" opacity="0.32" />
+    </g>
+    <use href="#plate-c-rv" fill="url(#plate-rv)" />
+    <g clip-path="url(#plate-clip-rv)">
+      <use href="#plate-c-rv" fill="none" stroke="#17264a" stroke-width="24" filter="url(#plate-soft)" opacity="0.62" />
+      <path d="M230 452C246 470 262 494 274 520M252 440C270 462 288 492 300 526M282 470C296 492 308 520 316 548M226 420C240 432 252 446 262 462" fill="none" stroke="#17264a" stroke-width="3.2" stroke-linecap="round" opacity="0.34" />
+    </g>
+    <use href="#plate-c-la" fill="url(#plate-la)" />
+    <g clip-path="url(#plate-clip-la)">
+      <use href="#plate-c-la" fill="none" stroke="#4d0f14" stroke-width="20" filter="url(#plate-soft)" opacity="0.6" />
+      <ellipse cx="462" cy="286" rx="9" ry="11" fill="#4d0f14" opacity="0.55" />
+      <ellipse cx="462" cy="322" rx="9" ry="10" fill="#4d0f14" opacity="0.55" />
+    </g>
+    <use href="#plate-c-lv" fill="url(#plate-lv)" />
+    <g clip-path="url(#plate-clip-lv)">
+      <use href="#plate-c-lv" fill="none" stroke="#450c12" stroke-width="24" filter="url(#plate-soft)" opacity="0.62" />
+      <path d="M372 470C378 496 380 520 378 548M392 500C394 520 392 540 386 558M430 430C432 452 428 474 420 496" fill="none" stroke="#450c12" stroke-width="3.2" stroke-linecap="round" opacity="0.34" />
+    </g>
+    <g fill="none" stroke-width="2.2" stroke-linejoin="round">
+      <use href="#plate-c-ra" stroke="#1f3157" />
+      <use href="#plate-c-rv" stroke="#1f3157" />
+      <use href="#plate-c-la" stroke="#561418" />
+      <use href="#plate-c-lv" stroke="#561418" />
+    </g>
+
+    <!-- the muscles that hold the valve flaps, and their cords -->
+    <g stroke-linejoin="round">
+      <path d="M268 532C260 502 256 476 256 452C266 462 276 492 282 524Z" fill="#b9675c" stroke="#5b2320" stroke-width="1.6" />
+      <path d="M392 548C386 512 388 480 396 452C406 478 408 514 404 544Z" fill="#c2685c" stroke="#5b2320" stroke-width="1.6" />
+      <path d="M428 506C426 482 428 462 434 446C442 462 442 486 438 504Z" fill="#c2685c" stroke="#5b2320" stroke-width="1.6" />
+    </g>
+    <g fill="none" stroke="#f4e6cf" stroke-width="1.5" stroke-linecap="round" opacity="0.9">
+      <path d="M256 452L222 374M257 452L236 378M258 452L250 374" />
+      <path d="M396 452L398 376M397 452L410 378M434 446L424 378M435 446L440 374" />
+    </g>
+
+    <!-- the valves between the upper and lower chambers: pale flaps hanging down -->
+    <g fill="#f6ead4" stroke="#8a6c52" stroke-width="1.3" stroke-linejoin="round">
+      <path d="M200 358C212 380 224 384 233 368C242 384 254 380 266 358C254 366 242 364 233 358C224 364 212 366 200 358Z" />
+      <path d="M380 358C394 380 405 384 413 368C422 384 434 380 450 358C436 366 423 364 413 358C403 364 392 366 380 358Z" />
+    </g>
   </g>
 
-  <!-- the aorta: up from the middle, over the arch, and down behind the heart -->
-  <g fill="none" stroke-linecap="butt">
-    <path d="M372 104V62M401 98V54M430 104V62" stroke="#7a2b28" stroke-width="21" />
-    <path d="M372 106V60M401 100V52M430 106V60" stroke="#e2756a" stroke-width="15" />
-    <path d="M338 310C338 230 322 112 400 112C476 112 478 200 478 300" stroke="#7a2b28" stroke-width="53" />
-    <path d="M338 312C338 230 322 112 400 112C476 112 478 200 478 302" stroke="#e2756a" stroke-width="47" />
-  </g>
-
-  <!-- the upper vena cava -->
-  <g fill="none" stroke-linecap="butt">
-    <path d="M206 34V280" stroke="#2f4d78" stroke-width="51" />
-    <path d="M206 32V282" stroke="#7fa8d9" stroke-width="45" />
-  </g>
-
-  <!-- the heart's own wall -->
-  <path d="M168 288C146 250 176 224 216 232C256 238 276 264 300 270C330 264 352 252 382 242C442 226 504 252 502 322C506 404 470 506 346 616C278 572 178 474 158 372C150 340 156 312 168 288Z" fill="url(#plate-wall)" stroke="#7a3a34" stroke-width="3" stroke-linejoin="round" />
-
-  <!-- the pulmonary artery: up from the right ventricle, in front of the aorta, off to the left lung -->
-  <g fill="none" stroke-linecap="butt">
-    <path d="M288 404C276 300 290 248 318 228C352 206 432 210 522 216" stroke="#2f4d78" stroke-width="43" />
-    <path d="M288 406C276 300 290 248 318 228C352 206 432 210 524 216" stroke="#86add9" stroke-width="37" />
-  </g>
-
-  <!-- the four chambers -->
-  <g stroke-width="2.5" stroke-linejoin="round">
-    <path d="M184 302C178 264 214 250 244 262C262 270 268 290 268 312C268 336 258 352 228 354C204 354 188 340 184 302Z" fill="#7fa8d9" stroke="#2f4d78" />
-    <path d="M196 376C224 364 262 364 286 372C306 380 312 420 320 470C326 510 332 548 338 584C290 548 214 466 196 376Z" fill="#6f9bd1" stroke="#2f4d78" />
-    <path d="M372 288C370 260 408 250 444 258C474 266 484 300 472 328C452 348 398 348 380 332C372 320 372 304 372 288Z" fill="#e58175" stroke="#7a2b28" />
-    <path d="M354 376C386 362 440 364 468 380C470 444 422 536 356 596C348 524 344 434 354 376Z" fill="#dc685d" stroke="#7a2b28" />
-  </g>
-
-  <!-- the valves between the upper and lower chambers -->
-  <g fill="none" stroke="#fff6e8" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M204 360Q219 378 233 364Q247 378 262 360" />
-    <path d="M384 358Q400 376 413 362Q427 376 446 358" />
-  </g>
-  <g fill="none" stroke="#7a3a34" stroke-width="1.4" stroke-linecap="round" opacity="0.7">
-    <path d="M219 372L236 420M247 372L246 420" />
-    <path d="M400 370L404 420M427 370L416 420" />
-  </g>
-
-  <text x="300" y="643" text-anchor="middle" font-family="Fraunces Variable, Fraunces, Georgia, serif" font-style="italic" font-size="15" fill="#7b6f5b">Fig. 1. The heart, opened from the front</text>
+  <text x="300" y="643" text-anchor="middle" font-family="Fraunces Variable, Fraunces, Georgia, serif" font-style="italic" font-size="15" fill="#6f634f">Fig. 1. The heart, opened from the front</text>
 </svg>
