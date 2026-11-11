@@ -127,6 +127,8 @@ def parse_ranges(spec: str, pages: int) -> list[tuple[int, int]]:
     spec = re.sub(r"(?i)\bfirst\b", "1", spec)
     # "page 2 to page 4" is one range: the words go, they don't split it (as commas they made
     # it "2 to the end" and "4", and deleting those pages took nine of the ten).
+    # ...but "page 1 page 3", said without a comma, is still two pages.
+    spec = re.sub(r"(?i)(\d)\s+(?=pages?\s*\d)", r"\1, ", spec)
     spec = re.sub(r"(?i)\b(pages?|the)\b", " ", spec)
     spec = re.sub(r"(?i)\band\b", ",", spec)
     for part in re.split(r"[,;]\s*", spec.strip()):

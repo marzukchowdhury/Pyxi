@@ -242,25 +242,91 @@ def find_deck(data_dir: Path, said: str = "", strict: bool = False) -> Deck | No
     """The deck they mean: one whose title or file has a word they said, else the newest.
     ``strict``: a topic they named that no deck has gives None, not the newest deck (audit:
     "quiz me on the heart" with only a French Revolution deck saved quizzed them on the
-    French Revolution). Words in any script count: 生物学 is a topic too."""
+    French Revolution). Words in any script count: 生物学 is a topic too.
+
+    A word they said needn't be the deck's own word (review: with a deck called "Cell
+    Structure and Function", "quiz me on cells" found nothing and a deck was made up from
+    general knowledge instead). So it also counts in another form (:func:`about`), and when
+    it is what the deck's cards are about."""
     decks = load_decks(data_dir)
     words = [
         w
         for w in re.findall(r"[^\W_]+", said.lower())
         if (len(w) >= 3 or not w.isascii()) and w not in NOT_A_NAME
     ]
+    # Their own notes before a deck Pyxi once made up on the same topic.
+    by_theirs = sorted(decks, key=lambda d: is_topic_deck(d))
 
     def having(group: list[str]) -> Deck | None:
-        for d in decks:
+        for d in by_theirs:
             hay = f"{d.title} {Path(d.source).stem}".lower()
-            if any(w in hay for w in group):
+            names = re.findall(r"[^\W_]+", hay)
+            if any(w in hay or singular(w) in hay or about(w, names) for w in group):
                 return d
         return None
 
+    def asking(group: list[str]) -> Deck | None:
+        """The deck whose cards say the most about it: "the heart" is in the cards of The
+        Cardiovascular System and in neither its title nor its file's name."""
+        want = {singular(w) for w in group if len(w) >= 4 or not w.isascii()}
+        best, most = None, 0
+        for d in by_theirs:
+            n = sum(
+                1
+                for c in d.cards
+                if want & {singular(t) for t in re.findall(r"[^\W_]+", f"{c.q} {c.a}".lower())}
+            )
+            if n > most:
+                best, most = d, n
+        return best
+
     topic = [w for w in words if w not in VAGUE]
-    if topic and ((deck := having(topic)) or strict):
+    if topic and ((deck := having(topic) or asking(topic)) or strict):
         return deck
     return having([w for w in words if w in VAGUE]) or (decks[0] if decks else None)
+
+
+def is_topic_deck(deck: Deck) -> bool:
+    """Made from general knowledge for "quiz me on X" (companion/specialists.py), not from
+    their notes."""
+    return deck.source.endswith(".topic")
+
+
+def made_up(data_dir: Path, deck: Deck) -> bool:
+    """Is this a deck from general knowledge while they have decks of their own notes? Then
+    the quiz says so: they may think these cards came from their slides."""
+    return is_topic_deck(deck) and any(not is_topic_deck(d) for d in load_decks(data_dir))
+
+
+def singular(word: str) -> str:
+    """cells -> cell, classes -> class, theories -> theory (English, and only roughly)."""
+    if not word.isascii() or len(word) <= 3 or word.endswith("ss"):
+        return word
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"
+    if word.endswith(("ses", "xes", "zes", "ches", "shes")):
+        return word[:-2]
+    return word[:-1] if word.endswith("s") else word
+
+
+def about(word: str, names: list[str]) -> bool:
+    """Does a word they said mean one of the words in a deck's title or file name? The same
+    word in another form (cells and Cell, cardio and Cardiovascular, biological and Biology:
+    the same first four letters or more, and most of the shorter word), or the subject a
+    course code stands for (biology and BIO101)."""
+    w = singular(word)
+    for name in names:
+        n = singular(name)
+        same = 0
+        while same < min(len(w), len(n)) and w[same] == n[same]:
+            same += 1
+        # Most of the shorter word (not history and Histology), and a word, not "week3".
+        if same >= 4 and same >= 0.75 * min(len(w), len(n)) and not re.search(r"\d", n):
+            return True
+        code = re.fullmatch(r"([a-z]{2,5})\d{2,}", name)  # BIO101, CS50; not "week3"
+        if code and len(w) > len(code.group(1)) and w.startswith(code.group(1)):
+            return True
+    return False
 
 
 _NUMBERS = {

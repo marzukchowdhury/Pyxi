@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from pyxi import safety
-from pyxi.mailwatch import DATE, merchant, parse_date, read_back_to, said_day
+from pyxi.mailwatch import DATE, merchant, not_read, parse_date, read_back_to, said_day
 
 if TYPE_CHECKING:
     from pyxi.agents.jobs import Job, JobManager
@@ -40,8 +40,9 @@ TRAVEL_WORDS = re.compile(
     re.I,
 )
 CANCELLED = re.compile(
-    r"\b(has been|was|is now|been) cancell?ed\b|\bcancell?ation (confirmed|confirmation)\b|"
-    r"\byour (booking|reservation|trip|flight) (is|was) cancell?ed\b",
+    r"\b(has been|was|is now|been) cancell?ed\b|"
+    r"\bcancell?ation (?:is |has been |was )?(confirmed|confirmation)\b|"
+    r"\byour (booking|reservation|trip|flight|itinerary|stay) (is|was) cancell?ed\b",
     re.I,
 )
 REF = re.compile(
@@ -50,9 +51,13 @@ REF = re.compile(
     r"\s*(?i:is)?\s*[:#]?\s*#?\s*(?P<ref>[A-Z0-9]{5,14})\b"
 )
 # "Your booking confirmation TP9WQL": the word alone, so the code has to follow on the same
-# line and have a digit in it. Live shape: "E-TICKET CONFIRMATION" over "PASSENGER: ..." made
-# PASSENGER the booking reference, on the itinerary and for check-in.
-REF_BARE = re.compile(r"(?i:confirmation)[ \t]*[:#-]?[ \t]*#?[ \t]*(?P<ref>[A-Z0-9]{5,14})\b")
+# line (or under "Confirmation:") and either have a digit in it or be an airline's six
+# letters ("for Confirmation KLMNOP"). Live shape: "E-TICKET CONFIRMATION" over "PASSENGER:
+# ..." made PASSENGER the booking reference, on the itinerary and for check-in.
+REF_BARE = re.compile(
+    r"(?i:confirmation)(?:[ \t]*:[ \t]*\n?[ \t]*|[ \t]*[#-][ \t]*|[ \t]+)#?"
+    r"(?P<ref>[A-Z0-9]{5,14})\b"
+)
 # Words in capitals that follow a label in a table heading, not a code.
 NOT_A_REF = {
     "FLIGHT", "FLIGHTS", "TICKET", "TICKETS", "NUMBER", "DETAIL", "DETAILS", "HOTEL", "HOTELS",
@@ -61,7 +66,8 @@ NOT_A_REF = {
     "ROOMS", "NIGHT", "NIGHTS", "DEPART", "ARRIVE", "ARRIVAL", "RETURN", "BOOKING", "RECEIPT",
     "INVOICE", "PAYMENT", "ONLINE", "MANAGE", "CHANGE", "CHANGED", "UPDATE", "UPDATED",
     "CONFIRM", "PENDING", "ACTIVE", "ISSUED", "HOLDER", "CLIENT", "MEMBER", "FIRST", "TITLE",
-    "WHERE", "WHICH", "ABOUT", "VALID", "ENTER", "CLICK", "HELLO",
+    "WHERE", "WHICH", "ABOUT", "VALID", "ENTER", "CLICK", "HELLO", "LETTER", "NOTICE", "RECORD",
+    "RESULT", "NEEDED", "FAILED", "SCREEN", "DOCUMENT", "COPIES", "ATTACHED", "REQUIRED",
 }  # fmt: skip
 # A notice that puts them on another flight, not one that only takes a booking away.
 REBOOKED = re.compile(
@@ -73,9 +79,17 @@ REBOOKED = re.compile(
 # the trip.
 BOOKED_THING = re.compile(
     r"\b(?:flights?|bookings?|reservations?|trips?|itinerar(?:y|ies)|stays?|hotels?|rooms?|"
-    r"tickets?)\b",
+    r"tickets?|purchase)\b",
     re.I,
 )
+# A part of a booking that can be cancelled while the booking stands.
+PART_OF_BOOKING = re.compile(
+    r"\b(?:seats?|meals?|bags?|baggage|luggage|upgrades?|selection|special request|check-?in|"
+    r"insurance|transfer|shuttle|lounge|wi-?fi|standby|waitlist|car)\b",
+    re.I,
+)
+# "If your flight is cancelled, ..." in the small print cancels nothing.
+ONLY_IF = re.compile(r"\b(?:if|should|unless|in case|in the event|whether)\b", re.I)
 # "SK 482", "AC123", "WS 702", "U2 8421". Two characters (letters, or a letter and a digit),
 # then 1-4 digits, not part of a time or a longer word.
 FLIGHT_NO = re.compile(
@@ -448,7 +462,7 @@ def _refs(text: str) -> list[str]:
         if ref.isdigit():
             ok = len(ref) >= 6
         elif ref.isalpha():  # an airline's code of letters, or a heading in capitals
-            ok = not bare and 5 <= len(ref) <= 7 and ref not in NOT_A_REF
+            ok = (len(ref) == 6 if bare else 5 <= len(ref) <= 7) and ref not in NOT_A_REF
         else:
             ok = True
         if ok and ref not in out:
@@ -724,19 +738,36 @@ def _stay_key(s: Stay) -> str:
     return s.ref or f"{s.name.lower()}:{s.check_in.date()}"
 
 
-def _cancelled(text: str, sent: datetime, day_first: bool) -> tuple[bool, set[str], set[str]]:
+def _cancelled(
+    subject: str, body: str, sent: datetime, day_first: bool, known: bool
+) -> tuple[bool, set[str], set[str]]:
     """What a mail cancels: (does it cancel a booking at all, the flight numbers its
     cancellation sentence names, the days it names for them). No flight named means the whole
-    booking; "your seat selection was cancelled" is neither."""
+    booking.
+
+    It is a cancellation when the sentence names a flight or a booking, when it reads
+    "cancellation confirmed", when it is the subject, or when the mail carries the reference
+    of a booking already read (``known``): "Cancellation confirmed" with only a number under
+    it used to leave the hotel in the trip, reminders and all. It is none when the sentence
+    is about a part of the booking ("your seat selection has been cancelled") or only says
+    what would happen ("if your flight is cancelled"). The sentence is the words on the same
+    line: a "Booking Reference:" line above doesn't make a seat a booking."""
+    text = f"{subject}\n{body}"
     about, named, days = False, set(), set()
     for m in CANCELLED.finditer(text):
-        head = text[max(0, m.start() - 200) : m.start()]
-        cut = max((x.end() for x in re.finditer(r"[.!?]\s|\n\s*\n", head)), default=0)
-        tail = text[m.end() : m.end() + 120]
-        stop = re.search(r"[.!?]\s|\n\s*\n", tail)
-        sentence = head[cut:] + m.group(0) + (tail[: stop.start()] if stop else tail)
+        a = text.rfind("\n", 0, m.start()) + 1
+        b = text.find("\n", m.end())
+        head, tail = text[a : m.start()], text[m.end() : len(text) if b < 0 else b]
+        cut = max((x.end() for x in re.finditer(r"[.!?]\s", head)), default=0)
+        stop = re.search(r"[.!?](?:\s|$)", tail)
+        before = head[cut:]
+        sentence = before + m.group(0) + (tail[: stop.start()] if stop else tail)
+        if PART_OF_BOOKING.search(before[-60:]) or ONLY_IF.search(before):
+            continue
         numbers = [f"{n.group('code')} {n.group('num')}" for n in _flight_numbers(sentence)]
-        if not numbers and not BOOKED_THING.search(sentence):
+        confirmed = m.group(0).lower().startswith("cancel")  # "cancellation confirmed"
+        in_subject = m.start() < len(subject)
+        if not (numbers or BOOKED_THING.search(sentence) or confirmed or in_subject or known):
             continue
         about = True
         named.update(numbers)
@@ -763,14 +794,17 @@ def read_mail(
     gone: list[Flight] = replaced if replaced is not None else []
     unread: list[dict[str, Any]] = []
     for mail in sorted(mails, key=_mail_date):  # oldest first, so a schedule change wins
-        text = f"{mail.get('subject', '')}\n{mail.get('text', '')}"
+        subject, body = str(mail.get("subject", "")), str(mail.get("text", ""))
+        text = f"{subject}\n{body}"
         fs = read_flights(mail)
         ss = read_stays(mail)  # a package deal has both
-        about, named, days = (
-            _cancelled(text, _mail_date(mail), _day_first(text))
-            if CANCELLED.search(text)
-            else (False, set(), set())
-        )
+        about, named, days = False, set(), set()
+        if CANCELLED.search(text):
+            booked = {f.ref for f in flights.values()} | {s.ref for s in stays.values()}
+            known = any(ref in booked for ref in _refs(text))
+            about, named, days = _cancelled(
+                subject, body, _mail_date(mail), _day_first(text), known
+            )
         if about:
             rebooked = bool(REBOOKED.search(text))
             dropped: set[tuple[str, str]] = set()
@@ -930,9 +964,9 @@ def trips(flights: list[Flight], stays: list[Stay], now: datetime, gap_days: int
     while joined:
         joined = False
         for i in range(len(groups)):
-            j = next(
-                (j for j in range(len(groups) - 1, i, -1) if _one_trip(groups[i], groups[j])), 0
-            )
+            # The nearest way back, not the last: two trips to the same city in a month are
+            # two trips, and a weekly commute is one trip a week (they used to be one).
+            j = next((j for j in range(i + 1, len(groups)) if _one_trip(groups[i], groups[j])), 0)
             if j:  # everything between the way out and the way back happened on that trip
                 for g in groups[i + 1 : j + 1]:
                     groups[i].flights += g.flights
@@ -1175,6 +1209,8 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         if since
         else ""
     )
+    if unread := not_read(mails):  # some mails could not be fetched: a booking may be among them
+        older += f" {unread}"
     replaced: list[Flight] = []
     flights, stays, unread = read_mail(mails, replaced)
     if unread and job.params.get("model", True):

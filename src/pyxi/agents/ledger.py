@@ -126,34 +126,59 @@ def _worked_out(wb: Any, suffix: str) -> Any:
     """This workbook as it stands, with every formula calculated by LibreOffice: a values-only
     copy, or None when LibreOffice isn't installed or couldn't do it."""
     import shutil
-    import subprocess
     import tempfile
 
     from openpyxl import load_workbook
 
-    from pyxi.agents.libreoffice import command
-    from pyxi.agents.pixel import libreoffice
-
-    soffice = libreoffice()
+    soffice = _soffice()
     if soffice is None:
         return None
     tmp = Path(tempfile.mkdtemp(prefix="pyxi_calc_"))
+    pictures = [(ws, ws._images) for ws in wb.worksheets]
     try:
         src = tmp / f"book{suffix if suffix.lower() in ('.xlsx', '.xlsm') else '.xlsx'}"
-        wb.save(src)
-        subprocess.run(
-            command(soffice, "--convert-to", "xlsx", "--outdir", str(tmp / "out"), str(src)),
-            check=True,
-            capture_output=True,
-            timeout=120,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        # Saved without its pictures: openpyxl can write a picture it loaded only once, so
+        # this save used to leave the real one, at the end of the job, with "I/O operation on
+        # closed file" and nothing saved at all. The sums don't need the logo.
+        try:
+            for ws, _ in pictures:
+                ws._images = []
+            wb.save(src)
+        finally:
+            for ws, images in pictures:
+                ws._images = images
+        _convert(soffice, src, tmp / "out")
         return load_workbook(tmp / "out" / "book.xlsx", data_only=True)
     except Exception:  # never the command line; the edit that needed it says what to do
         log.info("ledger: LibreOffice couldn't work the formulas out", exc_info=True)
         return None
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _soffice() -> str | None:
+    """Where LibreOffice is, or None when it isn't installed."""
+    from pyxi.agents.pixel import libreoffice
+
+    return libreoffice()
+
+
+def _convert(soffice: str, src: Path, out: Path, to: str = "xlsx") -> None:
+    """One run of LibreOffice, turning ``src`` into ``to`` in the folder ``out``. Never on
+    the event loop (it takes seconds), and one at a time: two runs share Pyxi's one
+    LibreOffice profile, and the second would hand its file to the first and exit."""
+    import subprocess
+
+    from pyxi.agents.libreoffice import CONVERTING, command
+
+    with CONVERTING:
+        subprocess.run(
+            command(soffice, "--convert-to", to, "--outdir", str(out), str(src)),
+            check=True,
+            capture_output=True,
+            timeout=180,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
 
 
 class Workbook(WorkbookExtras):
@@ -1058,10 +1083,7 @@ def _open_old(path: Path) -> Workbook | WordDoc | Deck:
     import subprocess
     import tempfile
 
-    from pyxi.agents.libreoffice import command
-    from pyxi.agents.pixel import libreoffice
-
-    soffice = libreoffice()
+    soffice = _soffice()
     new_ext = path.suffix.lower() + "x"
     if soffice is None:
         raise LedgerError(
@@ -1070,13 +1092,7 @@ def _open_old(path: Path) -> Workbook | WordDoc | Deck:
         )
     tmp = Path(tempfile.mkdtemp(prefix="pyxi_old_"))
     try:
-        subprocess.run(
-            command(soffice, "--convert-to", new_ext[1:], "--outdir", str(tmp), str(path)),
-            check=True,
-            capture_output=True,
-            timeout=180,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        _convert(soffice, path, tmp, new_ext[1:])
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):  # never the command line
         raise LedgerError(
             f"LibreOffice couldn't open {path.name}. If it's open in another app, close it and "
@@ -1098,31 +1114,72 @@ class NoSuchTab(LedgerError):
     """An edit named a tab the spreadsheet doesn't have (as far as the last read knows)."""
 
 
-# The most of one tab read at once. A tab with more in it than this is still edited by range,
-# but nothing is added "at the end" of it: Ledger can't see where the end is.
+# The most of one tab that is ever read. A tab with more in it than this is still edited by
+# range, but nothing is added "at the end" of it: Ledger can't see where the end is.
 _READ_ROWS, _READ_COLS = 20000, 200
-# Edits that work from what's in the cells (or the list of charts and tabs): the spreadsheet
-# is read again before one of these if an earlier edit in the same job changed it.
+# The most of a tab the first read takes. The outline shows 40 rows of it; an edit that works
+# from the cells reads its own tab whole, then. (Reading every tab whole, again before each
+# such edit, was 4.8 million cells for one job on a 20,000-row tab.)
+_OUTLINE_ROWS = 2000
+# Edits that work from what's in the cells: their tab is read whole first, and read again
+# only if an earlier edit in the job changed it.
 _READS = frozenset(
+    {"totals_row", "pivot", "chart", "add_sheet", "sort", "filter", "banding", "remove_duplicates"}
+)
+# Edits that work from the list of tabs and charts.
+_NEEDS_TABS = frozenset({"move_chart", "delete_chart", "edit_chart", "delete_sheet", "add_sheet"})
+# After one of these the tabs are read again before the next edit, whatever it is: the tab an
+# edit means when it names none may have a new name, or be gone.
+_RESHAPES = frozenset({"rename_sheet", "delete_sheet", "duplicate_sheet", "raw"})
+# Edits that change the list of charts (or a tab's look), and none of the cells.
+_NO_CELLS = frozenset(
     {
-        "totals_row",
-        "pivot",
         "chart",
-        "add_sheet",
-        "sort",
-        "filter",
-        "banding",
-        "remove_duplicates",
         "move_chart",
         "delete_chart",
         "edit_chart",
-        "delete_sheet",
+        "freeze",
+        "resize",
+        "note",
+        "filter",
+        "banding",
+        "conditional_format",
+        "dropdown",
+        "checkbox",
+        "hide_sheet",
+        "rename",
     }
 )
+_GROWS = frozenset({"insert_rows", "insert_columns", "delete_rows", "delete_columns", "append_row"})
 _DATEISH = re.compile(
     r"\d\s*[/:]\s*\d|\d{1,4}-\d{1,2}-\d{1,4}|"
     r"(?i:\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)"
 )
+_DURATION = re.compile(r"\d+:\d\d(:\d\d)?")  # hours worked, as 7:30 or 7:30:00: a number
+
+
+def _seconds(text: Any) -> int | None:
+    """"7:30" or "7:30:00" as seconds, or None for anything else."""
+    s = str(text).strip()
+    if not _DURATION.fullmatch(s):
+        return None
+    h, m, *rest = (int(x) for x in s.split(":"))
+    return h * 3600 + m * 60 + (rest[0] if rest else 0)
+
+
+def _same_heading(top: list[Any], heading: list[str], values: list[str]) -> bool:
+    """Is this run of cells (a pivot's top row, as shown) the heading of the pivot being made:
+    the grouping column, then one cell per value? In English that is "SUM of Sales" exactly.
+    A spreadsheet in another language words it its own way ("SUMME von Sales"), so there the
+    value's name at the end of the cell is enough."""
+    run = [str(x).strip().lower() for x in top]
+    if len(run) != len(heading):
+        return False
+    if run == heading:
+        return True
+    if run[0] != heading[0] or any(" of " in cell for cell in run[1:]):
+        return False
+    return all(cell.endswith(" " + v) for cell, v in zip(run[1:], values, strict=True))
 
 
 class GoogleSheet(SheetExtras):
@@ -1138,15 +1195,23 @@ class GoogleSheet(SheetExtras):
         self.meta: dict[str, Any] = {}
         self.grids: dict[str, list[list[Any]]] = {}  # what was typed: values and formulas
         self.shown: dict[str, list[list[Any]]] = {}  # what shows: a pivot's cells are only here
-        self.cut: set[str] = set()  # tabs with more in them than one read takes
+        self.cut: set[str] = set()  # tabs with more in them than is ever read
         self.wanted: set[str] = set()  # tabs past the first six that an edit named
-        self.stale = False  # an edit has landed since the last read
+        self.whole: set[str] = set()  # tabs read to the end of their data, not just for the outline
+        self.dirty: set[str] = set()  # tabs an edit has changed since they were read
+        self.reshown: set[str] = set()  # tabs where only what shows changed (a pivot went in)
+        self.tabs_stale = False  # the list of tabs or charts changed since it was read
+        self.sizes_stale = False  # a tab may have more or fewer rows than the list of tabs says
+        self.reread = False  # read the tabs again before the next edit (one was renamed, deleted..)
+        self.stale = False  # an edit has run since the last full read
+        # The pivots this job has written, by the tab they are on: where, and of which columns.
+        self.placed: dict[str, list[dict[str, Any]]] = {}
 
     async def load(self) -> None:
-        """The tabs, their charts, and the cells of the first six tabs (plus the open one and
-        any an edit named), twice over: as typed and as shown. Live, a tab holding only a
-        pivot table read as empty (its cells are worked out, not typed), so Ledger was sure
-        the pivot wasn't there and made it again, twice."""
+        """The tabs, their charts, and the top of the first six tabs (plus the open one and any
+        an edit named), twice over: as typed and as shown. Live, a tab holding only a pivot
+        table read as empty (its cells are worked out, not typed), so Ledger was sure the
+        pivot wasn't there and made it again, twice."""
         self.meta = await self.google.sheets_meta(self.id)
         props = [s["properties"] for s in self.meta.get("sheets", [])]
         titles = [p["title"] for p in props[:6]]
@@ -1155,26 +1220,55 @@ class GoogleSheet(SheetExtras):
             for p in props[6:]
             if p["title"] in self.wanted or (self.gid is not None and p.get("sheetId") == self.gid)
         ]
-        self.grids, self.shown, self.cut = {}, {}, set()
-        await self._read(titles)
-        self.stale = False
+        self.grids, self.shown, self.cut, self.whole, self.dirty = {}, {}, set(), set(), set()
+        self.reshown = set()
+        await self._read(titles, _OUTLINE_ROWS)
+        self.tabs_stale = self.sizes_stale = self.reread = self.stale = False
 
-    async def _read(self, titles: list[str]) -> None:
-        """These tabs' cells, in one round trip for all of them where the connector can."""
+    async def _tabs(self) -> None:
+        """The list of tabs and charts again (not the cells): what a tab is called, how big it
+        is, which charts there are."""
+        self.meta = await self.google.sheets_meta(self.id)
+        have = {s["properties"]["title"] for s in self.meta.get("sheets", [])}
+        for kept in (self.grids, self.shown):
+            for title in [t for t in kept if t not in have]:
+                del kept[title]
+        self.whole &= have
+        self.dirty &= have
+        self.reshown &= have
+        self.cut &= have
+        self.tabs_stale = self.sizes_stale = self.reread = False
+
+    def _size(self, title: str) -> dict[str, Any]:
+        for s in self.meta.get("sheets", []):
+            if s["properties"]["title"] == title:
+                return s["properties"].setdefault("gridProperties", {})
+        return {}
+
+    async def _read(self, titles: list[str], most: int, typed_too: bool = True) -> None:
+        """These tabs' cells, down to row ``most`` at the latest, in one round trip for all of
+        them where the connector can. Without ``typed_too``, only what shows is read again
+        (after a pivot went in beside the data, nothing that was typed has changed)."""
         if not titles:
             return
-        sizes = {
-            s["properties"]["title"]: s["properties"].get("gridProperties") or {}
-            for s in self.meta.get("sheets", [])
-        }
-        ranges, limits = [], []
+        ranges, asked = [], []
         for title in titles:
-            size = sizes.get(title, {})
-            rows = min(int(size.get("rowCount") or 1000), _READ_ROWS)
-            cols = min(int(size.get("columnCount") or 26), _READ_COLS)
+            size = self._size(title)
+            rows = min(int(size.get("rowCount") or most), most)
+            cols = min(int(size.get("columnCount") or 26), _READ_COLS + 1)
             ranges.append(f"{a1_tab(title)}!A1:{col_letter(cols)}{rows}")
-            limits.append((rows, cols, int(size.get("rowCount") or 0), int(size.get("columnCount") or 0)))
+            asked.append((rows, int(size.get("rowCount") or 0)))
         batch = getattr(self.google, "sheets_values_batch", None)
+        if not typed_too:
+            shown = (
+                await batch(self.id, ranges)
+                if batch is not None
+                else [await self.google.sheets_values(self.id, r) for r in ranges]
+            )
+            for title, b in zip(titles, shown, strict=True):
+                self.shown[title] = b
+                self.reshown.discard(title)
+            return
         if batch is not None:
             typed, shown = await asyncio.gather(
                 batch(self.id, ranges, formulas=True), batch(self.id, ranges)
@@ -1182,16 +1276,42 @@ class GoogleSheet(SheetExtras):
         else:  # a connector with no batch read: one tab at a time
             typed = [await self.google.sheets_values(self.id, r, formulas=True) for r in ranges]
             shown = [await self.google.sheets_values(self.id, r) for r in ranges]
-        for title, a, b, (rows, cols, all_rows, all_cols) in zip(
-            titles, typed, shown, limits, strict=True
-        ):
+        for title, a, b, (rows, all_rows) in zip(titles, typed, shown, asked, strict=True):
             self.grids[title], self.shown[title] = a, b
-            deep = max(len(a), len(b)) >= rows and (not all_rows or all_rows > rows)
-            wide = max((len(r) for r in [*a, *b]), default=0) >= cols and (
-                not all_cols or all_cols > cols
-            )
-            if deep or wide:
+            self.dirty.discard(title)
+            self.reshown.discard(title)
+            deep = max(len(a), len(b))
+            # Everything there is, when the read wasn't stopped by its own limit.
+            if deep < rows or (all_rows and all_rows <= rows):
+                self.whole.add(title)
+            else:
+                self.whole.discard(title)
+            wide = max((len(r) for r in [*a, *b]), default=0)
+            if deep > _READ_ROWS or wide > _READ_COLS:
                 self.cut.add(title)
+            else:
+                self.cut.discard(title)
+
+    async def _fresh(self, titles: list[str]) -> None:
+        """Before an edit that works from the cells: its tabs read to the end of their data,
+        unless that was done already and nothing has changed them since."""
+        if self.sizes_stale or (self.tabs_stale and any(self._title(t) is None for t in titles)):
+            await self._tabs()
+        need, light = [], []
+        for name in titles:
+            title = self._title(name)
+            if not title or title in need or title in light:
+                continue
+            if title not in self.whole or title in self.dirty:
+                need.append(title)
+            elif title in self.reshown:
+                light.append(title)
+        if need:
+            await self._read(need, _READ_ROWS + 1)
+            self.whole.update(need)
+            self.wanted.update(need)
+        if light:
+            await self._read(light, _READ_ROWS + 1, typed_too=False)
 
     @property
     def title(self) -> str:
@@ -1210,6 +1330,13 @@ class GoogleSheet(SheetExtras):
                 return s["properties"]
         return None
 
+    def _default(self) -> str | None:
+        """The tab an edit means when it names none."""
+        sheets = self.meta.get("sheets", [])
+        if not sheets:
+            return None
+        return (self._open_tab() or sheets[0]["properties"])["title"]
+
     def _title(self, name: Any) -> str | None:
         """A tab's real title from the name an edit used (any capitals), or None."""
         want = str(name).lower()
@@ -1223,10 +1350,7 @@ class GoogleSheet(SheetExtras):
         sheets = self.meta.get("sheets", [])
         if not sheets:
             raise LedgerError("That spreadsheet has no sheets.")
-        if not name:
-            p = self._open_tab() or sheets[0]["properties"]
-            return p["title"], p["sheetId"], self.grids.get(p["title"], [])
-        title = self._title(name)
+        title = self._title(name) if name else self._default()
         for s in sheets:
             p = s["properties"]
             if p["title"] == title:
@@ -1248,6 +1372,11 @@ class GoogleSheet(SheetExtras):
                 ]
             )
         return out
+
+    def _typed(self, title: str, r: int, c: int) -> bool:
+        """Did someone type this cell (or is it worked out, like a pivot's)?"""
+        rows = self.grids.get(title, [])
+        return r < len(rows) and c < len(rows[r]) and rows[r][c] not in (None, "")
 
     def _whole(self, title: str) -> None:
         """Refuse an edit that needs the end of the data on a tab too big to read whole. Live
@@ -1272,12 +1401,17 @@ class GoogleSheet(SheetExtras):
         out = [first]
         for title in self.grids:
             rows = self._seen(title)
-            typed = self.grids.get(title, [])
-            out.append(f"\nTab {title!r}: {len(rows)} rows.")
             if title in self.cut:
-                out.append(f"  (only the first {_READ_ROWS:,} rows and {_READ_COLS} columns were read)")
+                out.append(
+                    f"\nTab {title!r}: more than {_READ_ROWS:,} rows or {_READ_COLS} columns. "
+                    "Too big to total, pivot, chart or sort; an edit that gives its range works."
+                )
+            elif title not in self.whole:
+                out.append(f"\nTab {title!r}: its first {len(rows):,} rows (it has more).")
+            else:
+                out.append(f"\nTab {title!r}: {len(rows)} rows.")
             worked_out = any(
-                v not in (None, "") and not (r < len(typed) and c < len(typed[r]) and typed[r][c] not in (None, ""))
+                v not in (None, "") and not self._typed(title, r, c)
                 for r, row in enumerate(rows)
                 for c, v in enumerate(row)
             )
@@ -1337,36 +1471,73 @@ class GoogleSheet(SheetExtras):
                 found.append(split_tab(op[key])[0])
         return [str(n) for n in found if n not in (None, "")]
 
+    def _works_on(self, op: dict[str, Any]) -> list[str]:
+        """The tabs an edit reads or writes: the ones it names, or the one meant by none."""
+        if op.get("op") == "add_sheet":  # it only looks at a lone tab, to see if it's blank
+            return [self._default()] if len(self.meta.get("sheets", [])) == 1 else []
+        named = self._named(op)
+        if not op.get("sheet") and (not named or op.get("op") == "pivot") and self._default():
+            named.append(self._default())
+        return [n for n in named if n]
+
     async def apply(self, op: dict[str, Any]) -> str:
         """One edit. The wider set lives in ledger_google.SheetExtras (``x_<name>``); what
         Ledger started with is below.
 
-        The spreadsheet is read again only when an edit needs it: before one that works from
-        the cells, if an earlier edit in the batch changed them (a chart after a pivot), and
-        for a tab that was made a moment ago. It used to be read again after every edit: 17
-        of one job's 22 round trips. And a read that failed just after an edit had landed
-        made that edit look failed, so it was done a second time."""
+        Nothing is read again that doesn't have to be. An edit that works from the cells
+        (a total, a pivot, a chart, a sort) reads its own tab first, whole, and only if it
+        wasn't read whole already or an earlier edit changed it. It used to be every tab
+        after every edit: 17 of one job's 22 round trips. And a read that failed just after
+        an edit had landed made that edit look failed, so it was done a second time."""
         name = str(op.get("op") or "")
-        if self.stale and name in _READS:
-            await self.load()
+        if self.reread or (self.tabs_stale and name in _NEEDS_TABS):
+            await self._tabs()
         try:
             return await self._run(op)
         except NoSuchTab:
-            if not self.stale:
+            if not self.tabs_stale:
                 raise
-            await self.load()  # the tab may have been made by an earlier edit in this batch
+            await self._tabs()  # the tab may have been made by an earlier edit in this batch
             return await self._run(op)
         finally:
-            self.stale = True
+            self._mark(op)
 
     async def _run(self, op: dict[str, Any]) -> str:
-        for name in self._named(op):  # a tab past the first six is read when an edit names it
-            title = self._title(name)
-            if title is not None and title not in self.grids:
-                self.wanted.add(title)
-                await self._read([title])
+        if op.get("op") in _READS:
+            await self._fresh(self._works_on(op))
         fn = getattr(self, f"x_{op.get('op')}", None)
         return await fn(op) if fn else await self._first_edits(op)
+
+    def _mark(self, op: dict[str, Any]) -> None:
+        """What an edit that just ran (or died part-way) leaves to be read again."""
+        name = str(op.get("op") or "")
+        self.stale = True
+        if name in _RESHAPES:
+            self.reread = self.tabs_stale = True
+            if name != "rename_sheet":  # anything may have changed
+                self.dirty.update(self.grids)
+            return
+        if name in ("chart", "move_chart", "delete_chart", "edit_chart", "hide_sheet", "rename"):
+            self.tabs_stale = True
+        if name in _GROWS:
+            self.sizes_stale = True
+        if name in _NO_CELLS or name in ("pivot", "add_sheet"):
+            return  # no cells changed, or the edit said which itself
+        if name == "find_replace" and not op.get("sheet"):
+            self.dirty.update(self.grids)
+            return
+        for n in self._works_on(op):
+            if title := self._title(n):
+                self.dirty.add(title)
+
+    def _know_tab(self, title: str, sheet_id: int, grid: dict[str, Any] | None = None) -> None:
+        """A tab this job just made, added to the list of tabs without reading it again."""
+        size = {"rowCount": 1000, "columnCount": 26, **(grid or {})}
+        self.meta.setdefault("sheets", []).append(
+            {"properties": {"title": title, "sheetId": sheet_id, "gridProperties": size}}
+        )
+        self.grids[title], self.shown[title] = [], []
+        self.whole.add(title)
 
     async def _first_edits(self, op: dict[str, Any]) -> str:
         from openpyxl.utils import get_column_letter
@@ -1385,7 +1556,7 @@ class GoogleSheet(SheetExtras):
             )
             return f"Added a row on {title}"
         if name == "totals_row":
-            title, _, rows = self._tab(op.get("sheet"))
+            title, sheet_id, rows = self._tab(op.get("sheet"))
             self._whole(title)
             head = self._header(rows)
             last = len(rows)
@@ -1394,41 +1565,57 @@ class GoogleSheet(SheetExtras):
             if _is_total_label((rows[-1] or [""])[0]):
                 return f"{title} already ends with a total row"
             width = max(len(r) for r in rows)
+            shown = self.shown.get(title, [])
+
+            def show(i: int, c: int) -> str:
+                return str(shown[i][c]).strip() if i < len(shown) and c < len(shown[i]) else ""
+
             if op.get("columns"):
                 cols = [
                     c for c in (self._col(rows, x, head) for x in op["columns"]) if c is not None
                 ]
             else:
-                shown = self.shown.get(title, [])
                 cols = []
                 for c in range(1, width):
                     at = [i for i in range(head + 1, last) if c < len(rows[i]) and rows[i][c] not in (None, "")]
+                    # Hours worked (7:30) add up like any number, though they read as text.
+                    hours = {i for i in at if _seconds(rows[i][c]) is not None or _seconds(show(i, c)) is not None}
                     numbers = sum(
-                        1 for i in at if _num(rows[i][c]) is not None or str(rows[i][c]).startswith("=")
+                        1
+                        for i in at
+                        if i in hours or _num(rows[i][c]) is not None or str(rows[i][c]).startswith("=")
                     )
                     # A date is a number underneath (46298), and a column of them was totalled:
                     # what a cell shows ("10/3/2026") says whether it's one.
-                    dates = sum(
-                        1
-                        for i in at
-                        if i < len(shown) and c < len(shown[i]) and _DATEISH.search(str(shown[i][c]))
-                    )
+                    dates = sum(1 for i in at if i not in hours and _DATEISH.search(show(i, c)))
                     if at and numbers >= 0.8 * len(at) and dates < 0.5 * len(at):
                         cols.append(c)
             row = ["Total"] + [""] * (width - 1)
             for c in cols:
                 L = get_column_letter(c + 1)
                 row[c] = f"=SUM({L}{head + 2}:{L}{last})"
+            size = self._size(title)
+            if size.get("rowCount") and last + 1 > int(size["rowCount"]):
+                # The data fills the tab to its last row: Google refuses a write below it.
+                await self.google.sheets_batch(
+                    self.id,
+                    [{"appendDimension": {"sheetId": sheet_id, "dimension": "ROWS", "length": 1}}],
+                )
+                size["rowCount"] = int(size["rowCount"]) + 1
             await self.google.sheets_write(
                 self.id, [{"range": f"{a1_tab(title)}!A{last + 1}", "values": [row]}]
             )
             sums = []
             for c in cols:
-                nums = [n for r in rows[head + 1 :] if c < len(r) and (n := _num(r[c])) is not None]
+                heading = rows[head][c] if c < len(rows[head]) else get_column_letter(c + 1)
+                cells = [r[c] for r in rows[head + 1 :] if c < len(r) and r[c] not in (None, "")]
+                nums = [n for v in cells if (n := _num(v)) is not None]
+                spans = [s for i in range(head + 1, last) if (s := _seconds(show(i, c))) is not None]
                 if nums:
-                    sums.append(
-                        f"{rows[head][c] if c < len(rows[head]) else get_column_letter(c + 1)} {_shown(sum(nums))}"
-                    )
+                    sums.append(f"{heading} {_shown(sum(nums))}")
+                elif spans:
+                    t = sum(spans)
+                    sums.append(f"{heading} {t // 3600}:{t % 3600 // 60:02d}" + (f":{t % 60:02d}" if t % 60 else ""))
             return f"Added a Total row (row {last + 1}) on {title}" + (
                 f": {', '.join(sums)}" if sums else ""
             )
@@ -1456,54 +1643,86 @@ class GoogleSheet(SheetExtras):
             last = len(rows)  # a Total row under the data is not one of the groups
             while last > head + 1 and _is_total_label((rows[last - 1] or [""])[0]):
                 last -= 1
-            g_name = rows[head][g] if g < len(rows[head]) else get_column_letter(g + 1)
-            v_name = (
-                " and ".join(str(rows[head][c]) for c in cols if c < len(rows[head])) or "rows"
-            )
+
+            def header(c: int) -> str:
+                return str(rows[head][c]) if c < len(rows[head]) else get_column_letter(c + 1)
+
+            g_name = header(g)
+            v_name = " and ".join(header(c) for c in cols) or "rows"
             # What the pivot's own top row will say ("Region", "SUM of Sales"): how one that is
-            # already there is told from anything else on a tab.
-            heading = [str(g_name).strip().lower()] + [
-                f"{fn} of {rows[head][c] if c < len(rows[head]) else ''}".strip().lower()
-                for c in (cols or [g])
-            ]
+            # already there is told from anything else.
+            names = [header(c).strip().lower() for c in (cols or [g])]
+            heading = [g_name.strip().lower()] + [f"{fn} of {n}".lower() for n in names]
             what = f"{agg} of {v_name} by {g_name}"
-            if op.get("target"):  # they asked for it on its own tab
+            verb = "Made a pivot table"
+
+            def holds_it(tab: str) -> bool:
+                on_it = self._seen(tab)
+                top = on_it[0] if on_it else []
+                while top and top[-1] in (None, ""):
+                    top = top[:-1]
+                return _same_heading(top, heading, names)
+
+            def anything_on(tab: str) -> bool:
+                return any(x not in (None, "") for r in self._seen(tab) for x in r)
+
+            # On its own tab, if they asked for one (the data's own tab is "beside the data").
+            if op.get("target") and self._title(str(op["target"])[:90]) != title:
+                # Live: "chart the pivot on the Pivot tab" made the pivot again on "Pivot 2",
+                # then "Pivot 3". Now a tab of that name is used if it's empty. If it holds
+                # this very pivot, the pivot is written again in its place, with the rows
+                # the data has now (so a row added a moment ago is in it, and Q2's pivot is
+                # not mistaken for Q1's). A different pivot on it is left alone: the new one
+                # gets a tab named for what it is.
                 target = str(op["target"])[:90]
                 there = self._title(target)
-                if there is None:
-                    added = await self.google.sheets_batch(
-                        self.id, [{"addSheet": {"properties": {"title": target}}}]
-                    )
-                    new_id = added["replies"][0]["addSheet"]["properties"]["sheetId"]
-                    there = target
-                else:
-                    # Live: "chart the pivot on the Pivot tab" made the pivot again on "Pivot 2"
-                    # and then on "Pivot 3". A tab of that name is used if it's empty, left
-                    # alone if it already holds this pivot, and never copied under a new name.
-                    on_it = self._seen(there)
-                    top = [str(x).strip().lower() for x in (on_it[0] if on_it else [])]
-                    if top[: len(heading)] == heading:
-                        return f"That pivot is already on tab {there}: {what}"
-                    if any(x not in (None, "") for r in on_it for x in r):
+                if there is not None and anything_on(there) and not holds_it(there):
+                    if any(x not in (None, "") for r in self.grids.get(there, []) for x in r):
                         raise LedgerError(
                             f"There's already a tab called {there} with other things on it. "
                             "Name another tab for the pivot, or delete that one first."
                         )
+                    base = f"{'Count' if v is None else v_name} by {g_name}"[:90]
+                    target, n = base, 2
+                    while True:
+                        there = self._title(target)
+                        if there is None:
+                            break
+                        await self._fresh([there])
+                        if not anything_on(there) or holds_it(there):
+                            break
+                        target, n = f"{base} {n}", n + 1
+                if there is None:
+                    added = await self.google.sheets_batch(
+                        self.id, [{"addSheet": {"properties": {"title": target}}}]
+                    )
+                    made = added["replies"][0]["addSheet"]["properties"]
+                    new_id, there = made["sheetId"], target
+                    self._know_tab(there, new_id, made.get("gridProperties"))
+                else:
                     new_id = self._tab(there)[1]
-                at_row, at_col, where = 0, 0, f"on tab {there}"
+                    if holds_it(there):
+                        verb = "Updated the pivot"
+                at_row, at_col, where, dest = 0, 0, f"on tab {there}", there
             else:  # beside the data, where they're already looking (a new tab goes unseen)
                 shown = self.shown.get(title, [])
-                block = _summary_block(shown, str(g_name), avoid=g)
-                if block is not None:
-                    r0, _, c0, _ = block
-                    top = [str(x).strip().lower() for x in shown[r0][c0 : c0 + len(heading)]]
-                    if top == heading:
-                        return f"That pivot is already beside the data on {title}: {what}"
-                # Right of everything that shows there: a pivot already beside the data has
-                # no typed cells, and a second one must not land on top of it.
-                free = max([width] + [len(r) for r in shown])
-                new_id, at_row, at_col = sheet_id, head, free + 1
-                where = f"beside the data on {title}, from {get_column_letter(free + 2)}{head + 1}"
+                same = next(
+                    (
+                        b
+                        for b in _blocks(shown, g_name, avoid=g)
+                        if _same_heading([g_name, *(t for _, t in b[3])], heading, names)
+                    ),
+                    None,
+                )
+                if same is not None:  # the same pivot again: written where it is, never beside it
+                    at_row, at_col = same[0], same[2]
+                    verb = "Updated the pivot"
+                else:
+                    # Right of everything that shows there: a pivot already beside the data
+                    # has no typed cells, and a second one must not land on top of it.
+                    at_row, at_col = head, max([width] + [len(r) for r in shown]) + 1
+                new_id, dest = sheet_id, title
+                where = f"beside the data on {title}, from {get_column_letter(at_col + 1)}{at_row + 1}"
             pivot = {
                 "source": {
                     "sheetId": sheet_id,
@@ -1518,19 +1737,30 @@ class GoogleSheet(SheetExtras):
                 ],
                 "valueLayout": "HORIZONTAL",
             }
-            await self.google.sheets_batch(
-                self.id,
-                [
-                    {
-                        "updateCells": {
-                            "rows": [{"values": [{"pivotTable": pivot}]}],
-                            "start": {"sheetId": new_id, "rowIndex": at_row, "columnIndex": at_col},
-                            "fields": "pivotTable",
-                        }
+            requests: list[dict[str, Any]] = [
+                {
+                    "updateCells": {
+                        "rows": [{"values": [{"pivotTable": pivot}]}],
+                        "start": {"sheetId": new_id, "rowIndex": at_row, "columnIndex": at_col},
+                        "fields": "pivotTable",
                     }
-                ],
+                }
+            ]
+            size = self._size(dest)
+            short = at_col + len(pivot["values"]) + 1 - int(size.get("columnCount") or 10**6)
+            if short > 0:  # the tab ends before the pivot would: Google refuses a write past it
+                requests.insert(
+                    0,
+                    {"appendDimension": {"sheetId": new_id, "dimension": "COLUMNS", "length": short}},
+                )
+                size["columnCount"] = int(size["columnCount"]) + short
+            # A pivot beside the data changes what shows there and nothing that was typed.
+            (self.reshown if dest == title else self.dirty).add(dest)
+            await self.google.sheets_batch(self.id, requests)
+            self.placed.setdefault(dest, []).append(
+                {"row": at_row, "col": at_col, "source": title, "group": g, "values": cols or [g]}
             )
-            return f"Made a pivot table {where}: {what}"
+            return f"{verb} {where}: {what}"
         if name == "chart":
             title, sheet_id, _ = self._tab(op.get("sheet"))
             self._whole(title)
@@ -1557,23 +1787,55 @@ class GoogleSheet(SheetExtras):
                 last -= 1
             while last > head + 1 and all(c in (None, "") for c in rows[last - 1][: vc + 1]):
                 last -= 1
-            # Where it reads from: the column itself, or, when a label repeats (North on several
-            # rows), a pivot's totals: a plain chart draws one bar per row, never per region.
             r0, r1, dc, sc = head, last, lc, vc
+
+            def of_a_pivot(c: int) -> bool:
+                return rows[head][c] not in (None, "") and not self._typed(title, head, c)
+
             labels = [str(r[lc]) for r in rows[head + 1 : last] if len(r) > lc]
-            if len(set(labels)) < len(labels):
-                # The pivot of the column that was asked for. Live risk: with a pivot of Sales
-                # beside the data, a chart of Units drew Sales under the title "Units by Region".
-                block = _summary_block(self.shown.get(title, []), label_name, lc, value_name)
-                if block is None:
+            if of_a_pivot(lc) or of_a_pivot(vc):
+                # They named a pivot's own cells (the outline lists them: "SUM of Sales", or
+                # columns G and H beside the data). Its groups are the bars: not the Grand
+                # Total, and not the blank rows under it down to where the data ends.
+                c0 = lc if of_a_pivot(lc) else vc
+                while not of_a_pivot(lc) and c0 > 0 and of_a_pivot(c0 - 1):
+                    c0 -= 1
+                r0, r1, dc = head, _block_end(rows, head, c0), c0
+                sc = vc if of_a_pivot(vc) and vc > c0 else c0 + 1
+                label_name, value_name = str(rows[head][dc]), str(rows[head][sc])
+            elif len(set(labels)) < len(labels):
+                # A label repeats (North on several rows), so the bars are a pivot's totals: a
+                # plain chart draws one bar per row, never per region. The pivot of the column
+                # that was asked for: with a pivot of Sales beside the data, a chart of Units
+                # used to draw Sales under the title "Units by Region".
+                def known() -> set[str]:  # the groups, as the data shows them
+                    shown = self.shown.get(title, [])
+                    return {str(r[lc]).strip() for r in shown[head + 1 : last] if len(r) > lc}
+
+                def mine() -> tuple[int, int, int, int] | None:
+                    # A pivot of these very columns that this job wrote: it is at a cell
+                    # Ledger knows, whatever its headings say. They are worded in the
+                    # spreadsheet's language, so nothing may hang on the words "SUM of".
+                    for p in reversed(self.placed.get(title, [])):
+                        if p["source"] == title and p["group"] == lc and vc in p["values"]:
+                            end = _block_end(self.shown.get(title, []), p["row"], p["col"], total=True)
+                            if end > p["row"] + 1:
+                                return p["row"], end, p["col"], p["col"] + 1 + p["values"].index(vc)
+                    return None
+
+                def look() -> tuple[int, int, int, int] | None:
+                    return _pick(self.shown.get(title, []), label_name, lc, value_name, known()) or mine()
+
+                found = look()
+                if found is None:
                     await self._first_edits(
                         {"op": "pivot", "sheet": title, "group_by": label_name, "value": value_name}
                     )
-                    await self.load()
+                    await self._fresh([title])
                     rows = self._seen(title)
-                    block = _summary_block(self.shown.get(title, []), label_name, lc, value_name)
-                if block is not None:
-                    r0, r1, dc, sc = block
+                    found = look()
+                if found is not None:
+                    r0, r1, dc, sc = found
 
             def col(c: int) -> dict[str, Any]:
                 return {
@@ -1646,13 +1908,20 @@ class GoogleSheet(SheetExtras):
                 # A1, where they're looking (a new tab next to an empty Sheet1 looked like nothing
                 # had happened).
                 await self.google.sheets_write(self.id, [{"range": f"{a1_tab(only)}!A1", "values": op["rows"]}])
+                # What was just written is what is there: no need to read it back.
                 self.grids[only] = [list(r) for r in op["rows"]]
+                self.shown[only] = [["" if c is None else str(c) for c in r] for r in op["rows"]]
                 self.aliases[title.lower()] = only  # a later edit "on Sample Sales" means here
                 return f"Put the data on {only}, from A1"
-            await self.google.sheets_batch(
+            self.tabs_stale = True
+            added = await self.google.sheets_batch(
                 self.id, [{"addSheet": {"properties": {"title": title}}}]
             )
+            made = ((added or {}).get("replies") or [{}])[0].get("addSheet", {}).get("properties", {})
+            if made.get("sheetId") is not None and self._title(title) is None:
+                self._know_tab(title, made["sheetId"], made.get("gridProperties"))
             if op.get("rows"):
+                self.dirty.add(title)
                 await self.google.sheets_write(
                     self.id, [{"range": f"{a1_tab(title)}!A1", "values": op["rows"]}]
                 )
@@ -1660,32 +1929,65 @@ class GoogleSheet(SheetExtras):
         raise LedgerError(f"Google Sheets doesn't have an edit called {name!r} here.")
 
 
-def _summary_block(
-    grid: list[list[Any]], label: str, avoid: int, value: str | None = None
-) -> tuple[int, int, int, int] | None:
-    """A pivot's output in the shown grid: a header cell named like the labels column (not that
-    column itself), number columns to its right, and one row per group until Grand Total.
-    Returns (header row, one past the last group row, label column, value column). With
-    ``value``, only a block that sums that very column counts ("SUM of Sales" for Sales)."""
-    want = f"sum of {value.strip().lower()}" if value else None
+def _block_end(grid: list[list[Any]], r: int, c: int, total: bool = False) -> int:
+    """One past the last group row of a pivot whose top-left cell is (r, c): its rows run down
+    to the first blank, and its Grand Total row is not a group. ``total``: the pivot is known
+    to end with a totals row, whatever that row is called in the spreadsheet's language."""
+    end = r + 1
+    while end < len(grid) and len(grid[end]) > c and str(grid[end][c]).strip():
+        if str(grid[end][c]).strip().lower() in ("grand total", "total"):
+            return end
+        end += 1
+    return end - 1 if total and end > r + 2 else end
+
+
+def _blocks(grid: list[list[Any]], label: str, avoid: int) -> list[tuple[int, int, int, list[tuple[int, str]]]]:
+    """Every pivot shown on a tab that groups by this column: a header cell named like it (not
+    that column itself, ``avoid``), heading cells to its right, a row per group under it.
+    Each is (header row, one past the last group row, label column, [(column, heading)..])."""
+    out = []
     for r, row in enumerate(grid[:60]):
         for c, v in enumerate(row):
             if c == avoid or c + 1 >= len(row) or str(v).strip().lower() != label.strip().lower():
                 continue
-            end = r + 1
-            while end < len(grid) and len(grid[end]) > c + 1 and str(grid[end][c]).strip():
-                if str(grid[end][c]).strip().lower() in ("grand total", "total"):
-                    break
-                end += 1
+            end = _block_end(grid, r, c)
             if end <= r + 1:
                 continue
-            if want is None:
-                return r, end, c, c + 1
+            heads = []
             for sc in range(c + 1, len(row)):
-                head = str(row[sc]).strip().lower()
-                if not head:
+                if not str(row[sc]).strip():
                     break
-                if head == want:
+                heads.append((sc, str(row[sc]).strip()))
+            if heads:
+                out.append((r, end, c, heads))
+    return out
+
+
+def _pick(
+    grid: list[list[Any]], label: str, avoid: int, value: str, known: set[str] | None = None
+) -> tuple[int, int, int, int] | None:
+    """The pivot to chart for "value by label", as (header row, one past the last group row,
+    label column, value column), or None when no pivot shown there is of that column.
+
+    A sum of it first ("SUM of Sales"), then any other summary of it (the average they made
+    a moment ago is what they mean to chart), then a column that is simply called that (they
+    named the pivot's own heading, "SUM of Sales", which the outline shows them). Last, in a
+    spreadsheet that isn't in English ("SUMME von Sales"), a heading that ends in its name.
+    ``known``: the groups the data has. A last row that isn't one of them is the pivot's
+    grand total under another name, and is left off."""
+    want = value.strip().lower()
+    blocks = _blocks(grid, label, avoid)
+    for fits in (
+        lambda h, heads: h == f"sum of {want}",
+        lambda h, heads: h.endswith(f" of {want}"),
+        lambda h, heads: h == want,
+        lambda h, heads: h.endswith(f" {want}") and not any(" of " in t.lower() for _, t in heads),
+    ):
+        for r, end, c, heads in blocks:
+            for sc, text in heads:
+                if fits(text.lower(), heads):
+                    if known and end > r + 2 and str(grid[end - 1][c]).strip() not in known:
+                        end -= 1
                     return r, end, c, sc
     return None
 
@@ -2238,8 +2540,60 @@ def parse_edits(text: str) -> dict[str, Any]:
 
 
 async def _apply(target: Any, op: dict[str, Any]) -> str:
-    result = target.apply(op)
-    return await result if asyncio.iscoroutine(result) else result
+    """One edit on one target. A local file's edit runs in a thread, one at a time and in
+    order: working a workbook's formulas out through LibreOffice takes 6 to 14 seconds, and on
+    the event loop that froze all of Pyxi for as long."""
+    if asyncio.iscoroutinefunction(target.apply):
+        return await target.apply(op)
+    return await asyncio.to_thread(target.apply, op)
+
+
+# Local edits that can write something and then fail with a plain LedgerError (a table that
+# grew rows before a cell turned out not to exist). After one of these the file is opened
+# again; after any other LedgerError nothing was written, so there's nothing to undo. Every
+# PowerPoint edit counts: several place a thing on the slide before they check its look.
+_WRITES_FIRST = {
+    "xlsx": {"resize", "move_chart"},
+    "docx": {
+        "set_table_cells",
+        "add_table_row",
+        "add_table_column",
+        "add_table",
+        "format_table",
+        "page_setup",
+        "spacing",
+    },
+}
+
+
+def _may_have_written(target: Any, op: dict[str, Any], exc: Exception) -> bool:
+    kind = getattr(target, "kind", "")
+    if not isinstance(exc, LedgerError) or kind == "pptx":
+        return True
+    return str(op.get("op")) in _WRITES_FIRST.get(kind, set())
+
+
+def _alike(failed: dict[str, Any], new: dict[str, Any]) -> int:
+    """How much a second-pass edit looks like the try again of one that failed: the same kind
+    of edit, or one that names the same things (a raw addChart with the failed chart's title)."""
+    text = json.dumps(new, default=str).lower()
+    op = str(failed.get("op") or "")
+    score = 3 if op and op == new.get("op") else 0
+    score += 1 if op and op.replace("_", "") in text.replace("_", "") else 0
+    for key, value in failed.items():
+        if key not in ("op", "file") and isinstance(value, str) and len(value) >= 3:
+            score += 1 if value.lower() in text else 0
+    return score
+
+
+def _reopen(path: Path, edits: list[dict[str, Any]]) -> Any:
+    target = open_local(path)
+    for e in edits:
+        try:
+            target.apply(e)
+        except Exception:  # it worked a moment ago on the same file; say so and carry on
+            log.warning("ledger: %s didn't replay on %s", e.get("op"), path.name, exc_info=True)
+    return target
 
 
 def _edit_key(index: int, edit: dict[str, Any]) -> str:
@@ -2251,13 +2605,7 @@ async def _reopened(path: Path, edits: list[dict[str, Any]]) -> Any:
     """A local file opened afresh, with the edits that worked done again in order. An edit
     that died part-way leaves half its work in memory (a sort that stopped at a merged cell
     had already rewritten three rows): this is the file without that half."""
-    target = await asyncio.to_thread(open_local, path)
-    for e in edits:
-        try:
-            target.apply(e)
-        except Exception:  # it worked a moment ago on the same file; say so and carry on
-            log.warning("ledger: %s didn't replay on %s", e.get("op"), path.name, exc_info=True)
-    return target
+    return await asyncio.to_thread(_reopen, path, edits)
 
 
 Ask = Callable[[str, str], Awaitable[tuple[str, float]]]
@@ -2309,17 +2657,17 @@ async def run_ledger(
     done: list[tuple[int, dict[str, Any], str]] = []  # edits that worked: file, edit, what it said
     done_keys: set[str] = set()
     half_done: set[int] = set()  # local files an edit died on: reopened before they're used again
-    first: list[tuple[int, str]] = []  # the first pass's failures: file, why
+    first: list[tuple[int, dict[str, Any], str]] = []  # the first pass's failures: file, edit, why
     tried = False
     pending = prompt
     unread = False  # the model's last reply was not the plan asked for
 
     async def clean(index: int) -> None:
         if index in half_done:
-            half_done.discard(index)
             targets[index] = await _reopened(
                 sources[index], [e for i, e, _ in done if i == index]
             )
+            half_done.discard(index)
 
     for attempt in range(2):
         asked = time.perf_counter()
@@ -2360,8 +2708,8 @@ async def run_ledger(
         tried = tried or bool(edits)
         failed: list[str] = []  # for the model: the edit itself and why
         reasons: list[str] = []  # for the user's card: just why
-        fails: list[tuple[int, str]] = []
-        answered: dict[int, int] = {}  # this pass's edits that were tried, by file
+        fails: list[tuple[int, dict[str, Any], str]] = []
+        retried: list[tuple[int, dict[str, Any]]] = []  # this pass's edits that were tried
         for e in edits:
             try:
                 index = int(e.get("file") or 0)
@@ -2369,7 +2717,7 @@ async def run_ledger(
             except (ValueError, IndexError):
                 failed.append(f"{json.dumps(e)[:200]}: there's no file {e.get('file')}")
                 reasons.append(f"There's no file {e.get('file')}.")
-                fails.append((-1, reasons[-1]))
+                fails.append((-1, e, reasons[-1]))
                 continue
             key = _edit_key(index, e)
             if key in done_keys and attempt == 1:
@@ -2379,8 +2727,8 @@ async def run_ledger(
             if progress:
                 await progress(f"{e.get('op', 'edit').replace('_', ' ')}")
             began_edit = time.perf_counter()
-            answered[index] = answered.get(index, 0) + 1
-            why = ""
+            retried.append((index, e))
+            why, wrote = "", False
             try:
                 if stray := fetched_from(e, allowed):
                     raise LedgerError(
@@ -2396,15 +2744,18 @@ async def run_ledger(
                 done_keys.add(key)
             except LedgerError as exc:
                 failed.append(f"{json.dumps(e)[:200]}: {exc}")
-                why = str(exc)
+                why, wrote = str(exc), _may_have_written(target, e, exc)
             except Exception as exc:  # a bad cell address, a style the file lacks...
                 failed.append(f"{json.dumps(e)[:200]}: {type(exc).__name__}: {str(exc)[:160]}")
                 what = str(e.get("op") or "edit").replace("_", " ")
-                why = f"The {what} didn't work ({str(exc)[:120]})."
+                why, wrote = f"The {what} didn't work ({str(exc)[:120]}).", True
             if why:
                 reasons.append(why)
-                fails.append((index, why))
-                if index in sources:
+                fails.append((index, e, why))
+                # Only an edit that may have got part-way has anything to undo. An edit that
+                # was refused before it wrote ("no column called Nope") used to cost a second
+                # opening of the whole file all the same: 4 seconds more on a 20,000-row one.
+                if index in sources and wrote:
                     half_done.add(index)
             log.info(
                 "ledger: %s took %.1fs%s",
@@ -2416,16 +2767,17 @@ async def run_ledger(
             first = fails
             result.problems = reasons
         else:
-            # A problem from the first pass is dropped only when this pass tried something on
-            # that file in its place. One it never came back to is still reported: it used to
-            # vanish whenever a second reply arrived, even one that mended nothing.
-            kept = []
-            for index, why in first:
-                if answered.get(index, 0) > 0:
-                    answered[index] -= 1
-                else:
-                    kept.append(why)
-            result.problems = list(dict.fromkeys([*kept, *reasons]))
+            # A problem from the first pass is dropped only when this pass tried something in
+            # its place: the edit most like the one that failed, not whichever failed first.
+            # One it never came back to is still reported: it used to vanish whenever a second
+            # reply arrived, even one that mended nothing.
+            left = list(first)
+            for index, e in retried:
+                on_file = [f for f in left if f[0] == index]
+                scored = sorted(on_file, key=lambda f: -_alike(f[1], e))
+                if scored and (_alike(scored[0][1], e) > 0 or len(on_file) == 1):
+                    left.remove(scored[0])
+            result.problems = list(dict.fromkeys([*(why for _, _, why in left), *reasons]))
         if not failed:
             break
         if attempt == 0:

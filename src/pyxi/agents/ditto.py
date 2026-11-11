@@ -48,9 +48,14 @@ SCOUTS_AT_ONCE = 3  # a web route of sixty items is sixty browsers otherwise
 # A card number or a security code is typed into an ordinary field, not a password one, so
 # the field's name is checked too (and what was typed, by memory_guard).
 HIDDEN = "(hidden)"
+# Whole words and the real phrases only. "card" or "pin" anywhere in the name hid what was
+# typed into Trello's "Enter a title for this card" and into Pinterest's fields, so the
+# pattern they were showing could not be learned (review).
 PRIVATE_FIELD = re.compile(
-    r"\b(card|cvv|cvc|cvn|security code|ssn|sin|pin|passwords?|passcode|pass phrase|otp|"
-    r"one[- ]time code|iban|routing|account (number|no)|social (security|insurance))\b",
+    r"\b(card (number|no|#)|(credit|debit) card|cvv2?|cvc2?|cvn|security code|expiry|"
+    r"expiration|pin (code|number)|ssn|social (security|insurance)|sin|passwords?|passcode|"
+    r"pass ?phrase|one[- ]time code|iban|routing number|account (number|no))(?![^\W_])"
+    r"|\bpin\s*[:*]?\s*$",  # "PIN", "Enter PIN", "4-digit PIN": the last word of the field's name
     re.I,
 )
 

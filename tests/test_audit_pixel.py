@@ -7,6 +7,7 @@ that did not survive, and failures that showed the user a line of Python.
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
 import io
 import re
@@ -84,6 +85,8 @@ def no_libreoffice(monkeypatch):
         ("2 through 4", [(2, 4)]),
         ("1-3, 5, 7-", [(1, 3), (5, 5), (7, 10)]),
         ("-3", [(1, 3)]),
+        ("page 1 page 3", [(1, 1), (3, 3)]),  # no comma: it worked before, and must still
+        ("pages 2 page 4 and page 6", [(2, 2), (4, 4), (6, 6)]),
     ],
 )
 def test_page_ranges_said_in_words(spec, want):
@@ -100,6 +103,9 @@ def test_page_2_to_page_4_is_three_pages_not_nine(tmp_path):
     assert page_numbers(r.outputs[0]) == [2, 3, 4]
     with pytest.raises(PixelError, match="don't understand"):
         parse_ranges("-", 10)  # a dash alone is not "every page"
+    for said in ("last 2 pages", "first 3"):  # two numbers side by side are not two pages
+        with pytest.raises(PixelError, match="don't understand"):
+            parse_ranges(said, 10)
     assert page_numbers(pixel.run("merge_pdfs", [pdf(tmp_path / "b.pdf", 2), src]).outputs[0]) == [
         1, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
     ]  # fmt: skip
@@ -124,6 +130,27 @@ def test_a_csv_from_excel_with_an_accent_is_not_read_as_chinese(tmp_path):
         (tmp_path / name).write_bytes(raw)
         assert pixel_render.read_any_text(tmp_path / name).startswith("Zo")
         assert "\x00" not in pixel_render.read_any_text(tmp_path / name)
+
+
+def test_utf16_with_no_mark_is_still_read_in_any_script(tmp_path):
+    """Telling UTF-16 by its empty bytes works for English. Bengali and Japanese have almost
+    none, and after the fix above they were read as Windows-1252 nonsense."""
+    samples = {
+        "bengali": "আমি বাংলায় গান গাই। তুমি কি আসবে?\r\n",
+        "japanese": "これは日本語のテキストです。\r\n",
+        "mixed": "Name: 田中さん, City: 東京, Total: 12\r\n",
+        "latin": "name,amount\r\ncafé,12\r\n",
+    }
+    for name, text in samples.items():
+        for enc in ("utf-16-le", "utf-16-be"):
+            path = tmp_path / f"{name}-{enc}.txt"
+            path.write_bytes(text.encode(enc))
+            assert pixel_render.read_any_text(path) == text, (name, enc)
+    # And what the first fix was for still holds, at either length.
+    for text in ("café au lait!\n", "café au lait\n", "name,city\nJosé,Montréal\nZoë,Köln\n"):
+        path = tmp_path / "western.txt"
+        path.write_bytes(text.encode("cp1252"))
+        assert pixel_render.read_any_text(path) == text
 
 
 # ---------------------------------------------------------------------------- compress
@@ -161,6 +188,45 @@ def test_compressing_a_pdf_keeps_a_logo_see_through(tmp_path):
     r = pixel.run("compress_pdf", [src])
     assert r.outputs and "smaller" in r.summary  # the photo was still worth shrinking
     assert _colour_at(r.outputs[0], 200, 792 - 600) == blue  # and the page shows through the logo
+
+
+def _photo_pdf(path: Path, img: Image.Image) -> Path:
+    """A blue page with one big picture on it, placed the way design apps export them."""
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    buf.seek(0)
+    c = canvas.Canvas(str(path), pagesize=(900, 600))
+    c.setFillColorRGB(0.05, 0.2, 0.6)
+    c.rect(0, 0, 900, 600, fill=1, stroke=0)
+    c.drawImage(ImageReader(buf), 0, 0, 900, 600, mask="auto")
+    c.save()
+    return path
+
+
+def test_a_photo_stored_with_a_mask_is_still_made_smaller(tmp_path):
+    """Canva, Keynote and PowerPoint store every photo with a soft mask, most of them hiding
+    nothing. Left alone like real see-through pictures, "make this PDF smaller" answered
+    "already about as small as it gets" for a 3.4 MB page that used to come out 86% smaller."""
+    photo = _noise(1800).resize((1800, 1200)).convert("RGBA")  # an alpha channel, all opaque
+    src = _photo_pdf(tmp_path / "opaque.pdf", photo)
+    [stored] = PdfReader(str(src)).pages[0].images
+    assert stored.image.mode == "RGBA" and "/SMask" in stored.indirect_reference.get_object()
+    r = pixel.run("compress_pdf", [src])
+    assert r.outputs and r.details["after"] < r.details["before"] * 0.5, r.summary
+
+    # Really see-through: made smaller too, picture and mask together, and still see-through.
+    fading = photo.copy()
+    fading.putalpha(Image.linear_gradient("L").resize(fading.size))  # clear at the top
+    src = _photo_pdf(tmp_path / "fading.pdf", fading)
+    blue = _colour_at(src, 450, 2)
+    r = pixel.run("compress_pdf", [src])
+    assert r.outputs and r.details["after"] < r.details["before"] * 0.5, r.summary
+    [kept] = PdfReader(str(r.outputs[0])).pages[0].images
+    mask = kept.indirect_reference.get_object()["/SMask"].get_object()
+    assert (mask["/Width"], mask["/Height"]) == kept.image.size  # scaled down together
+    top = _colour_at(r.outputs[0], 450, 2)
+    assert all(abs(a - b) <= 6 for a, b in zip(top, blue, strict=True))  # the page shows through
+    assert _colour_at(r.outputs[0], 450, 597) != blue  # and the picture is still there
 
 
 # ---------------------------------------------------------------------------- scans
@@ -374,6 +440,25 @@ def test_csv_to_excel_keeps_every_digit_of_a_long_number(tmp_path):
     )
     row = list(load_workbook(pixel.run("csv_to_excel", [src]).outputs[0]).active.iter_rows(values_only=True))[1]
     assert row == (1, "4111111111111111", "9400111899223344556677", "02134", 1234.5)
+
+
+def test_a_long_decimal_is_still_a_number_in_excel(tmp_path):
+    """Keeping long numbers as text caught decimals too: 0.30000000000000004 and pi became
+    text, a column came out as four numbers and three texts, and its SUM was silently short."""
+    rows = [["sensor", "reading"]] + [[f"s{i}", repr(0.1 * i + 0.2)] for i in range(1, 8)]
+    rows += [["pi", "3.141592653589793"], ["big", "1,234,567,890,123.45"]]
+    src = tmp_path / "readings.csv"
+    with src.open("w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerows(rows)
+    assert any(len(r[1]) > 17 for r in rows[1:8])  # some of them are long
+    ws = load_workbook(pixel.run("csv_to_excel", [src]).outputs[0]).active
+    readings = [c.value for c in ws["B"][1:]]
+    assert all(isinstance(v, float) for v in readings)
+    assert sum(readings[:7]) == pytest.approx(sum(0.1 * i + 0.2 for i in range(1, 8)))
+    # Only a whole number of 16 digits or more is kept as text.
+    assert pixel._cell("123456789012345") == 123456789012345
+    assert pixel._cell("1234567890123456") == "1234567890123456"
+    assert pixel._cell("1,234,567,890,123,456") == "1,234,567,890,123,456"
 
 
 # ---------------------------------------------------------------------------- LibreOffice

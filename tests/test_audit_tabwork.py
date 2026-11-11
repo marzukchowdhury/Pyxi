@@ -39,7 +39,8 @@ def on_site(settings, frozen: bool = False):
 async def test_done_counts_only_when_ok_is_true(settings, quick):
     for args in (
         {"ok": "false", "summary": "I couldn't find that button."},
-        {"ok": "true", "summary": "It's pressed."},  # a word, not a yes
+        {"ok": "yes", "summary": "It's pressed."},
+        {"ok": 1, "summary": "It's pressed."},
         {"summary": "I couldn't find that button."},
         {"ok": None, "summary": "Hm."},
     ):
@@ -49,6 +50,75 @@ async def test_done_counts_only_when_ok_is_true(settings, quick):
     brain, _ = on_site(settings)
     job = await work(brain, "Read the page", ("done", {"ok": True, "summary": "It says Compose."}))
     assert job.status == "done" and brain.said == ["It says Compose."]
+
+
+async def test_true_written_as_a_word_is_still_true(settings, quick):
+    """The first fix took only the bare value, so a model that writes "ok": "true" (some do)
+    had every finished task filed as failed."""
+    for word in ("true", "True", " TRUE "):
+        brain, _ = on_site(settings)
+        job = await work(brain, "Read the page", ("done", {"ok": word, "summary": "It says Compose."}))
+        assert job.status == "done" and brain.said == ["It says Compose."], word
+
+
+async def test_a_right_done_is_not_answered_with_your_actions_arent_working(settings, quick):
+    """"Pause the video": one click whose effect is not in what the page reads as, then
+    done. The look after "(done?)" was counted as a second unchanged look, so the model was
+    told "your actions aren't working. Try a different way", clicked Pause again (playing
+    it), and could end in "I got stuck"."""
+    brain, browser = on_site(settings, frozen=True)
+    job = await work(
+        brain,
+        "Pause the video",
+        act({"do": "click", "ref": "e12"}),
+        ("done", {"ok": True, "summary": "It's paused."}),
+        ("done", {"ok": True, "summary": "It's paused."}),
+    )
+    seen = brain._tab_llm.seen
+    assert len(seen) == 3 and "Not taken as done yet" in seen[2]
+    assert "aren't working" not in seen[2] and "hasn't changed for" not in seen[2]
+    assert job.status == "done" and brain.said == ["It's paused."]
+    assert len([1 for n, _ in browser.acted() if n == "click"]) == 1  # Pause was pressed once
+
+
+async def test_the_question_is_not_a_look_towards_getting_stuck(settings, quick):
+    brain, _ = on_site(settings, frozen=True)
+    click = act({"do": "click", "ref": "e12"})
+    other = act({"do": "click", "ref": "e9"})
+    job = await work(
+        brain,
+        "Go on",
+        click,
+        ("done", {"ok": True, "summary": "Done."}),
+        other,  # asked, it tries another way: that is the second look with nothing new
+        ("done", {"ok": False, "summary": "Neither button does anything."}),
+    )
+    seen = brain._tab_llm.seen
+    assert "hasn't changed for" not in seen[2]
+    assert "The page hasn't changed for 2 looks" in seen[3]  # counted from the clicks only
+    assert job.status == "failed" and "stuck" not in job.summary
+
+
+class _OneLookLeft(tabwork.TabOperator):
+    """A page that reads the same whatever is done to it, and an action that always works."""
+
+    async def _look(self):
+        return {"tab": {"id": 5, "url": "https://video.example/watch", "title": "A video"}, "scroll": {"y": 0}, "text": "A video.", "items": []}
+
+    async def _do(self, a, page, n):
+        return 'clicked "Pause"', ""
+
+
+async def test_a_doubt_on_the_last_step_takes_the_done(settings):
+    """Asked on its last allowed step, there was no step left to answer in, and a finished
+    task ended as "That took more steps than I expected, so I stopped where it is"."""
+    from test_browserlink import Scripted
+
+    llm = Scripted(act({"do": "click", "ref": "7"}), ("done", {"ok": True, "summary": "It's paused."}))
+    op = _OneLookLeft(llm, None, None, None, None, settle_s=0, max_steps=2)
+    out = await op._run("pause the video", "", "")
+    assert (out.ok, out.summary) == (True, "It's paused.")
+    assert len(llm.seen) == 2
 
 
 async def test_done_after_a_click_that_changed_nothing_is_questioned_once(settings, quick):
@@ -95,24 +165,45 @@ async def test_done_is_taken_at_once_when_the_page_did_change_or_nothing_was_cli
 
 
 # ------------------------------------------------------------------ Scout
-def test_a_result_that_says_it_found_nothing_is_not_a_success():
-    assert honest_result("I couldn't find a price for that model anywhere.", True) == (
-        "I couldn't find a price for that model anywhere.",
+def test_a_result_that_says_the_job_could_not_be_done_is_not_a_success():
+    assert honest_result("I couldn't open the shop's site: it kept timing out.", True) == (
+        "I couldn't open the shop's site: it kept timing out.",
         False,
     )
-    assert honest_result("No results came up for that name on the site.", True)[1] is False
     assert honest_result("Unable to reach the shop's page.", True)[1] is False
-    # It found the next best thing: that is a result, and it is called what it is.
-    text, ok = honest_result("I couldn't find the 2 TB model, but the 1 TB one is $89 at Newegg.", True)
-    assert ok and text.startswith("Best guess: I couldn't find the 2 TB model, but")
+    assert honest_result("I was unable to complete the checkout form.", True)[1] is False
+    # It got somewhere all the same: that is a result.
+    assert honest_result("I couldn't reach Newegg, but Amazon has the 1 TB one at $89.", True)[1] is True
+
+
+def test_an_answer_that_nothing_was_there_is_an_answer():
+    """A review of the first version: "No recalls were found" and "I didn't find any unpaid
+    tickets" were called failures and spoken as "Scout couldn't finish that." They are what
+    was asked for. Whether a search came up empty is the teammate's own flag to set."""
+    for answer in (
+        "No recalls were found for the 2019 Honda Civic on NHTSA's site.",
+        "No outages found: GitHub's status page shows all systems operational.",
+        "I didn't find any unpaid parking tickets for plate 7ABC123.",
+        "No direct flights came up for Friday. The shortest is Delta via Atlanta, $212.",
+        "I couldn't find a price for that model anywhere.",
+    ):
+        assert honest_result(answer, True) == (answer, True)
 
 
 def test_an_answer_it_isnt_sure_of_is_called_a_best_guess_up_front():
-    text, ok = honest_result("The GLADOM is $34.99. I couldn't confirm it's in stock.", True)
-    assert ok and text == "Best guess: The GLADOM is $34.99. I couldn't confirm it's in stock."
-    assert honest_result("It's probably the 2019 model.", True)[0].startswith("Best guess: ")
+    text, ok = honest_result("The price appears to be $34.99, though the page was unclear.", True)
+    assert ok and text.startswith("Best guess: The price appears to be $34.99")
+    assert honest_result("I'm not sure, but it looks like the 2019 model.", True)[0].startswith("Best guess: ")
     # Said once: a summary that already starts that way is left alone.
-    assert honest_result("Best guess: it's probably the 2019 model.", True)[0] == "Best guess: it's probably the 2019 model."
+    assert honest_result("Best guess: it seems to be the 2019 model.", True)[0] == "Best guess: it seems to be the 2019 model."
+    # A firm answer with an aside after it is not a guess (a review of the first version).
+    for firm in (
+        "The GLADOM is $34.99. I couldn't confirm it's in stock.",
+        "The Sony WH-1000XM5 is $298 at Amazon. I couldn't find a lower price at Best Buy or Walmart.",
+        "The store is open until 9 PM tonight. You might be able to order ahead.",
+        "Your package arrives Thursday, says UPS. I think you'll need to sign for it.",
+    ):
+        assert honest_result(firm, True) == (firm, True)
 
 
 def test_a_plain_result_and_a_plain_failure_are_left_as_they_are():
@@ -166,10 +257,12 @@ async def _scout(settings, monkeypatch, summary: str, success: bool = True, kind
 
 
 async def test_scouts_job_is_held_to_what_its_summary_says(settings, monkeypatch):
-    job = await _scout(settings, monkeypatch, "I couldn't find a price for that model anywhere.")
+    job = await _scout(settings, monkeypatch, "I couldn't open the shop's site: it kept timing out.")
     assert job.status == "failed"
-    job = await _scout(settings, monkeypatch, "The GLADOM is $34.99. I couldn't confirm it's in stock.")
-    assert job.status == "done" and job.summary.startswith("Best guess: The GLADOM is $34.99.")
+    job = await _scout(settings, monkeypatch, "The price appears to be $34.99, though the page was unclear.")
+    assert job.status == "done" and job.summary.startswith("Best guess: The price appears to be $34.99")
+    job = await _scout(settings, monkeypatch, "No recalls were found for the 2019 Honda Civic.")
+    assert (job.status, job.summary) == ("done", "No recalls were found for the 2019 Honda Civic.")
     job = await _scout(settings, monkeypatch, "The GLADOM tray table, at $34.99 on Amazon.ca.")
     assert (job.status, job.summary) == ("done", "The GLADOM tray table, at $34.99 on Amazon.ca.")
     # A booking answers for itself (a confirmation, a card they approved): left alone.

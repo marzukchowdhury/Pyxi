@@ -128,8 +128,9 @@ class ScreenContext:
         "right" for ones that run past the window). A row half under the bottom of a list
         looks, in numbers, like a row that is simply short; live the model had to work out
         from "@(432,721,716x14)" that Recovery needed scrolling to. Two signs: it runs past
-        the window, or it is the last (first) of its kind in its list and much shorter than
-        the others, which is what a list does to the row its edge cuts."""
+        the window; or it is the last (first) of its kind in its list, much shorter than the
+        others, and right on the edge of the list or the window, which is what a list does
+        to the row its edge cuts."""
         bounds = self.view_rect() or self.window.rect
         bx, by, bw, bh = bounds
         if bw <= 0 or bh <= 0:
@@ -142,6 +143,7 @@ class ScreenContext:
             and (e.role + "Control" in uia.INTERACTIVE or e.role in ("Text", "Image"))
         ]
         out: dict[int, str] = {}
+        by_id = {e.id: e for e in self.elements}
         rows: dict[tuple[int | None, str], list[UIElement]] = {}
         for e in mine:
             x, y, w, h = e.rect
@@ -169,9 +171,19 @@ class ScreenContext:
                 others = sorted(s.rect[3] for s in col if s is not e)
                 if e.rect[3] >= 0.6 * others[len(others) // 2]:
                     continue
-                if all(s.rect[1] <= e.rect[1] for s in col):
+                # Short is not enough: two one-line fields over a tall message box are all
+                # in plain view. It is cut only when its short side sits on the edge that
+                # does the cutting: its list's, or the window's (a few px; a maximised
+                # window's frame hangs 8 px past what it shows).
+                top, bottom = e.rect[1], e.rect[1] + e.rect[3]
+                box = by_id.get(e.parent) if e.parent is not None else None
+                on_bottom = abs(bottom - (by + bh)) <= 10 or (
+                    box is not None and abs(bottom - (box.rect[1] + box.rect[3])) <= 3
+                )
+                on_top = abs(top - by) <= 10 or (box is not None and abs(top - box.rect[1]) <= 3)
+                if on_bottom and all(s.rect[1] <= e.rect[1] for s in col):
                     out[e.id] = "bottom"
-                elif all(s.rect[1] >= e.rect[1] for s in col):
+                elif on_top and all(s.rect[1] >= e.rect[1] for s in col):
                     out[e.id] = "top"
         return out
 

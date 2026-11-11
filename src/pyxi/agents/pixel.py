@@ -326,6 +326,25 @@ def split_pdf(files: list[Path], ranges: str = "", out: Path | None = None) -> P
     )
 
 
+def _soft_mask(writer: Any, ref: Any, alpha: Any) -> None:
+    """Give the image at ``ref`` this transparency (an 8-bit grey picture of the same size)."""
+    from pypdf.generic import DecodedStreamObject, NameObject, NumberObject
+
+    mask = DecodedStreamObject()
+    mask.set_data(alpha.convert("L").tobytes())
+    mask.update(
+        {
+            NameObject("/Type"): NameObject("/XObject"),
+            NameObject("/Subtype"): NameObject("/Image"),
+            NameObject("/Width"): NumberObject(alpha.width),
+            NameObject("/Height"): NumberObject(alpha.height),
+            NameObject("/ColorSpace"): NameObject("/DeviceGray"),
+            NameObject("/BitsPerComponent"): NumberObject(8),
+        }
+    )
+    ref.get_object()[NameObject("/SMask")] = writer._add_object(mask.flate_encode())
+
+
 def compress_pdf(
     files: list[Path], quality: int = 60, max_px: int = 1600, out: Path | None = None
 ) -> PixelResult:
@@ -343,19 +362,34 @@ def compress_pdf(
                 pic = img.image
                 if pic is None:
                     continue
-                # Only plain photos are re-saved. A logo with a see-through background, a
-                # stencil or a black-and-white scan is left alone: as a JPEG it loses what makes
-                # it see-through (a logo on a blue page came back in a white box) and a scan
-                # gets bigger.
                 ref = img.indirect_reference
                 xobj = ref.get_object() if ref is not None else {}
-                if pic.mode not in ("RGB", "L", "CMYK") or any(
-                    k in xobj for k in ("/SMask", "/Mask", "/ImageMask")
-                ):
+                # A stencil or a colour-keyed image is left alone: as a JPEG it would lose
+                # what makes it see-through, and a black-and-white scan gets bigger.
+                if "/ImageMask" in xobj or "/Mask" in xobj:
+                    continue
+                alpha = None
+                if pic.mode in ("RGBA", "LA"):
+                    # A picture with a soft mask, which is how Canva, Keynote and PowerPoint
+                    # export every photo. Most of those masks hide nothing: then it is an
+                    # ordinary photo. (Skipping them all, "make this smaller" did nothing.)
+                    alpha = pic.getchannel("A")
+                    if alpha.getextrema()[0] == 255:
+                        alpha = None
+                    pic = pic.convert("L" if pic.mode == "LA" else "RGB")
+                elif pic.mode not in ("RGB", "L", "CMYK") or "/SMask" in xobj:
                     continue
                 if max(pic.size) > max_px:
-                    pic.thumbnail((max_px, max_px), Image.LANCZOS)
+                    scale = max_px / max(pic.size)
+                    size = (max(1, round(pic.width * scale)), max(1, round(pic.height * scale)))
+                    pic = pic.resize(size, Image.LANCZOS)
+                    if alpha is not None:
+                        alpha = alpha.resize(size, Image.LANCZOS)
                 img.replace(pic if pic.mode == "L" else flat_rgb(pic), quality=quality)
+                if alpha is not None:
+                    # Really see-through (a logo): the picture is re-saved and its mask goes
+                    # back on at the same size. As a bare JPEG it came back in a white box.
+                    _soft_mask(writer, ref, alpha)
             except Exception:  # an image pypdf can't re-encode stays as it is
                 continue
         page.compress_content_streams()
@@ -516,9 +550,10 @@ def _soffice_pdf(soffice: str, src: Path, target: Path) -> None:
 # ---------------------------------------------------------------------------- CSV and Excel
 def _cell(value: str) -> Any:
     v = value.strip()
-    if sum(c.isdigit() for c in v) > 15:
+    if re.fullmatch(r"-?(\d+|\d{1,3}(,\d{3})+)", v) and sum(c.isdigit() for c in v) > 15:
         # A card, tracking or account number. Excel keeps 15 digits of a number and turns the
-        # rest into zeros, so a long one stays text, every digit of it.
+        # rest into zeros, so a long whole number stays text, every digit of it. A long
+        # decimal (0.30000000000000004) is still a number: as text it dropped out of a SUM.
         return value
     if re.fullmatch(r"-?\d+", v) and not (len(v) > 1 and v.lstrip("-").startswith("0")):
         return int(v)

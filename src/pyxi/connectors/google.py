@@ -583,7 +583,12 @@ class GoogleConnector(Connector):
             params: dict[str, Any] = {"q": q, "maxResults": min(n - len(ids), 500)}
             if token:
                 params["pageToken"] = token
-            listing = await self._api("GET", f"{GMAIL}/messages", params=params)
+            try:
+                listing = await self._api("GET", f"{GMAIL}/messages", params=params)
+            except Exception:
+                if not ids:
+                    raise  # nothing was listed at all: the scan fails, as it always did
+                break  # a later page failed: go on with the pages read, as a list cut short
             page = [m["id"] for m in listing.get("messages", [])]
             ids += page
             token = listing.get("nextPageToken")
@@ -809,20 +814,30 @@ class GoogleConnector(Connector):
         """Whole emails for Pyxi's own background checks (receipts, orders): sender, subject,
         date, plain text and every link with its words. Fetched 25 at a time, so a big scan
         stays under Gmail's rate limit. The list's ``cut`` is True when Gmail had more
-        matching mail than ``n`` (see ``pyxi.mailwatch.read_back_to``)."""
+        matching mail than ``n`` (see ``pyxi.mailwatch.read_back_to``).
+
+        A mail that can't be fetched (one "busy" answer among 300) is left out and counted
+        in the list's ``failed`` (``pyxi.mailwatch.not_read`` says it in the result); the
+        scan fails only when not one mail could be read. One failure used to lose them all."""
         from pyxi.mailwatch import Fetched
 
         ids = await self._list(query, min(n, 500))
-        msgs: list[dict[str, Any]] = []
+        got: list[Any] = []
         for i in range(0, len(ids), 25):  # 25 at a time: well inside Gmail's per-second quota
-            msgs += await asyncio.gather(
+            got += await asyncio.gather(
                 *(
                     self._api("GET", f"{GMAIL}/messages/{m}", params={"format": "full"})
                     for m in ids[i : i + 25]
-                )
+                ),
+                return_exceptions=True,
             )
+        errors = [m for m in got if isinstance(m, BaseException)]
+        msgs: list[dict[str, Any]] = [m for m in got if not isinstance(m, BaseException)]
+        if errors and not msgs:
+            raise errors[0]
         out = Fetched()
         out.cut = bool(getattr(ids, "cut", False))
+        out.failed = len(errors)
         for msg in msgs:
             h = self._headers(msg)
             payload = msg.get("payload", {})

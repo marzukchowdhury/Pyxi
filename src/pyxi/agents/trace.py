@@ -41,6 +41,13 @@ KINDS = {  # what kind of thing it was, which is rarely written on the thing its
     "emails", "mail", "message", "file", "files", "document", "doc", "pdf", "link", "video",
     "article", "picture", "photo", "image", "spreadsheet", "sheet", "slide", "slides", "folder",
 }  # fmt: skip
+EVERYDAY = {  # on too many screens to find one by: never enough alone, of two words
+    "main", "home", "start", "menu", "view", "edit", "help", "search", "settings", "options",
+    "tools", "info", "list", "open", "close", "save", "share", "next", "back", "more", "other",
+    "sign", "login", "account", "welcome", "untitled", "inbox", "online", "free", "best", "good",
+    "thing", "stuff", "name", "time", "date", "today", "google", "chrome", "microsoft", "edge",
+    "firefox", "mozilla", "windows", "browser", "your",
+}  # fmt: skip
 BROWSERS = {"chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "arc"}
 APP_NAMES = {  # what they call the app, not its process ("winword")
     "winword": "Word", "excel": "Excel", "powerpnt": "PowerPoint", "acrobat": "Adobe Acrobat",
@@ -133,13 +140,36 @@ def named(terms: list[str]) -> list[str]:
     """The words a screen has to have on it: the ones the screen history can search on,
     without the words for what kind of thing it was ("that pricing page" is about pricing;
     the page itself is titled "Pricing | Acme")."""
-    real = [t for t in terms if len(t) > 2 or not t.isascii()]
-    return [t for t in real if t not in KINDS] or real
+    real = [t for t in terms if len(t) > 2 or not t.isascii() or any(c.isdigit() for c in t)]
+    return [t for t in real if t not in KINDS] or real  # "q3" and "v2" name things too
 
 
-def enough(want: int, have: int) -> bool:
-    """At least half of the words, and all of them when there are one or two."""
-    return have == want if want <= 2 else have * 2 >= want
+def telling(word: str) -> bool:
+    """A word that picks a window out on its own: not an everyday one, and not a scrap."""
+    long_enough = len(word) >= 4 or not word.isascii() or any(c.isdigit() for c in word)
+    return long_enough and word not in EVERYDAY
+
+
+def on_it(want: list[str], seen: str, heading: str) -> int:
+    """How many of the words they named were on this screen, or 0 when that isn't enough
+    to call it the one. ``seen``: everything on it; ``heading``: its title and its app.
+
+    One word has to be there. Of three or more, at least half. Of two, both, or one that is
+    in the heading and tells: people add a word of their own ("that stripe dashboard" for
+    "Payments - Stripe", "the kitchenaid blender" for a mixer), and asking for both lost
+    those (review). What that must not let back in is one ordinary word doing the finding
+    ("page", "main"), which is how Wikipedia's Main Page was once "found" for an invoice."""
+    tokens = set(re.findall(r"[^\W_]+", seen))
+
+    def there(word: str, text: str) -> bool:  # a scrap like "q3" as a word, not inside one
+        return word in tokens if len(word) <= 2 and word.isascii() else word in text
+
+    have = [w for w in want if there(w, seen)]
+    if len(want) == 2 and len(have) == 1:
+        return 1 if telling(have[0]) and there(have[0], heading) else 0
+    if len(want) <= 2:
+        return len(have) if len(have) == len(want) else 0
+    return len(have) if len(have) * 2 >= len(want) else 0
 
 
 def from_screen(spatial: Any, terms: list[str], span: tuple[float, float] | None) -> list[Hit]:
@@ -161,12 +191,14 @@ def from_screen(spatial: Any, terms: list[str], span: tuple[float, float] | None
         # pricing page" was "Found it: Wikipedia", for its Main Page).
         snap = spatial.snapshot(int(s["id"])) or {}
         names = [str(e.get("name") or "") for e in snap.get("elements") or []]
-        seen = " ".join([str(s.get("title") or ""), app, *names]).lower()
-        have = sum(1 for w in want if w in seen)
-        if not enough(len(want), have):
-            continue
         exe = app.lower().removesuffix(".exe")
         what = "your browser" if exe in BROWSERS else APP_NAMES.get(exe, app) or "a window"
+        seen = " ".join([str(s.get("title") or ""), app, *names]).lower()
+        # The heading is the title without " - Google Chrome": the browser's own name is on
+        # every one of its windows.
+        have = on_it(want, seen, f"{title} {exe} {what}".lower())
+        if not have:
+            continue
         score = (
             0.2
             + 0.6 * have / len(want)

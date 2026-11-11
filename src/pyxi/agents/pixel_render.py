@@ -829,7 +829,35 @@ def read_any_text(path: Path) -> str:
             return raw.decode(enc)
         except UnicodeDecodeError:
             continue
-    return raw.decode("cp1252", errors="replace")
+    western = raw.decode("cp1252", errors="replace")
+    return _utf16_unmarked(raw, western) or western
+
+
+def _utf16_unmarked(raw: bytes, western: str) -> str | None:
+    """UTF-16 with no mark in a script that isn't Latin (Bengali, Japanese): few empty bytes
+    to tell it by, so it is told by what it would be otherwise. Read as Windows-1252, real
+    Western text has no control characters in it and is mostly letters. Only a file that
+    fails that is tried as UTF-16, and only taken if every character of it is a real one."""
+    import unicodedata
+
+    sample = raw[:4096]
+    odd_bytes = any(b < 32 and b not in (9, 10, 11, 12, 13, 26, 27) for b in sample)
+    shown = [c for c in western[:4096] if not c.isspace()]
+    letters = sum(
+        (c.isascii() and c.isalnum()) or (c.isalpha() and "À" <= c <= "ÿ") for c in shown
+    )
+    if len(raw) % 2 or not (odd_bytes or letters * 2 < len(shown)):
+        return None
+    le_first = sample[1::2].count(0) >= sample[0::2].count(0)
+    for enc in ("utf-16-le", "utf-16-be") if le_first else ("utf-16-be", "utf-16-le"):
+        try:
+            text = raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+        # No control, private-use or unassigned characters: that is what a wrong guess is full of.
+        if all(c in "\t\r\n" or unicodedata.category(c) not in ("Cc", "Cs", "Co", "Cn") for c in text[:2048]):
+            return text
+    return None
 
 
 def to_pdf(src: Path, target: Path, *, sheet: str = "") -> int:

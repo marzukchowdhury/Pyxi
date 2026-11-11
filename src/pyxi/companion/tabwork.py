@@ -674,6 +674,7 @@ class TabOperator:
         last, still = "", 0
         acted = False  # the last thing done could have changed the page (a click, a key, an address)
         doubted = False  # "done" was questioned once already
+        asked = False  # ...and the look now is the one right after that question
         for n in range(1, self.max_steps + 1):
             if self.cancelled:
                 raise _Stopped
@@ -682,13 +683,20 @@ class TabOperator:
                 page.steps = steps
                 return page
             seen = _fingerprint(page)
-            still = still + 1 if steps and seen == last else 0
+            if asked:
+                # The look after "(done?)". Nothing was done in between, so a page that reads
+                # the same is no second failure: counted as one, a right "done" ("pause the
+                # video") was answered with "your actions aren't working", the model clicked
+                # Pause again, and it could end in "I got stuck".
+                asked = False
+            else:
+                still = still + 1 if steps and seen == last else 0
+                if still >= 2 and steps:
+                    steps[-1].note = (
+                        f"{steps[-1].note} The page hasn't changed for {still} looks: your "
+                        "actions aren't working. Try a different way, or call done with ok=false."
+                    ).strip()
             last = seen
-            if still >= 2 and steps:
-                steps[-1].note = (
-                    f"{steps[-1].note} The page hasn't changed for {still} looks: your actions "
-                    "aren't working. Try a different way, or call done with ok=false."
-                ).strip()
             if still >= 5:
                 return Outcome(
                     False,
@@ -709,14 +717,18 @@ class TabOperator:
             if call is None:
                 return Outcome(False, "I lost my train of thought there. Want me to try again?", steps)
             if call.name == "done":
-                # Done is done only when it says so in so many words: "ok": "false", or no
-                # "ok" at all, used to count as success and was said aloud as one.
-                ok = call.arguments.get("ok") is True
-                if ok and acted and still >= 1 and not doubted:
+                # Done is done only when it says so: true, or the word "true" (some models
+                # write it as a string). "ok": "false", or no "ok" at all, used to count as
+                # success and was said aloud as one.
+                said_ok = call.arguments.get("ok")
+                ok = said_ok is True or (isinstance(said_ok, str) and said_ok.strip().lower() == "true")
+                if ok and acted and still >= 1 and not doubted and n < self.max_steps:
                     # It clicked (or pressed, or went somewhere) and the page reads exactly as
                     # it did before: nothing on it shows the click did anything. Asked once;
-                    # if it says done again, that is its answer.
-                    doubted = True
+                    # if it says done again, that is its answer. (Not on the last step it is
+                    # allowed: there the done is taken, not turned into "that took more
+                    # steps than I expected".)
+                    doubted = asked = True
                     steps.append(
                         Step(
                             n,

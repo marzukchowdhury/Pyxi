@@ -82,6 +82,7 @@ def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     async def every_site_exists(host):
         return True
 
+    every_site_exists.real = actions_mod._resolves  # for the test of the real one
     monkeypatch.setattr(actions_mod, "_resolves", every_site_exists)
     monkeypatch.setattr(browsersetup, "_addon", None)
     monkeypatch.setattr(browsersetup, "last_fault", None)

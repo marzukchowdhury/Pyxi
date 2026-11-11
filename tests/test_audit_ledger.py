@@ -63,7 +63,12 @@ class Sheets:
         self.wrote: list[dict[str, Any]] = []  # every values write
         self.next_id = 900
         self.fail_meta_on: int | None = None  # this numbered read of the tabs fails once
-        self.metas = 0
+        self.fail_read_on: int | None = None  # this numbered read of cells fails once
+        self.metas = self.reads = 0
+        self.cells_read = 0  # how many cells every read so far has returned
+        # A pivot's wording, which goes by the spreadsheet's language.
+        self.heading = lambda fn, name: f"{fn} of {name}"
+        self.total = "Grand Total"
 
     def connected(self) -> bool:
         return True
@@ -121,10 +126,15 @@ class Sheets:
         grid = [row[:last_col] for row in grid[:last_row]]
         while grid and not any(v not in ("", None) for v in grid[-1]):
             grid.pop()
+        self.cells_read += sum(len(row) for row in grid)
         return grid
 
     async def sheets_values_batch(self, sid, ranges, formulas=False):
         self.calls.append(("read", (tuple(ranges), formulas)))
+        if formulas:  # the typed read; the read of what shows goes with it, in the same breath
+            self.reads += 1
+        if self.reads == self.fail_read_on:
+            raise RuntimeError("Google said 429: Quota exceeded for quota metric 'Read requests'")
         return [self._grid(a1, formulas) for a1 in ranges]
 
     async def sheets_values(self, sid, a1, formulas=False):
@@ -132,6 +142,9 @@ class Sheets:
 
     async def sheets_write(self, sid, data):
         self.calls.append(("write", [d["range"] for d in data]))
+        for d in data:
+            if not any(t.title == split_tab(d["range"])[0] for t in self.tabs):
+                raise RuntimeError(f"Google said 400: Unable to parse range: {d['range']}")
         self.wrote += data
         for d in data:
             title, cell = split_tab(d["range"])
@@ -161,6 +174,16 @@ class Sheets:
                 self.tabs.append(Tab(title, self.next_id))
                 replies.append({"addSheet": {"properties": {"sheetId": self.next_id, "title": title}}})
                 continue
+            renamed = r.get("updateSheetProperties", {}).get("properties", {})
+            if "title" in renamed:
+                self.by_id(renamed["sheetId"]).title = renamed["title"]
+            if "deleteSheet" in r:
+                self.tabs = [t for t in self.tabs if t.id != r["deleteSheet"]["sheetId"]]
+            if "appendDimension" in r:
+                t = self.by_id(r["appendDimension"]["sheetId"])
+                more = r["appendDimension"]["length"]
+                rows = r["appendDimension"]["dimension"] == "ROWS"
+                t.size = (t.size[0] + more, t.size[1]) if rows else (t.size[0], t.size[1] + more)
             if "updateCells" in r and "pivotTable" in json.dumps(r):
                 start = r["updateCells"]["start"]
                 pivot = r["updateCells"]["rows"][0]["values"][0]["pivotTable"]
@@ -173,30 +196,47 @@ class Sheets:
         return {"replies": replies}
 
     def show_pivot(self, dest: Tab, r0: int, c0: int, pivot: dict[str, Any]) -> None:
-        """What Sheets shows for a pivot: its headings, a row per group, Grand Total."""
+        """What Sheets shows for a pivot: its headings, a row per group, Grand Total. One
+        written where another starts takes its place."""
+        how = {"SUM": sum, "AVERAGE": lambda xs: sum(xs) / len(xs) if xs else 0, "COUNTA": len}
         src = pivot["source"]
         rows = self.by_id(src["sheetId"]).rows[src["startRowIndex"] : src["endRowIndex"]]
         g = pivot["rows"][0]["sourceColumnOffset"]
         head = rows[0]
-        dest.worked_out[(r0, c0)] = head[g]
-        sums: dict[str, list[float]] = {}
+        placed = dest.__dict__.setdefault("pivot_cells", {})
+        for at in placed.pop((r0, c0), []):
+            dest.worked_out.pop(at, None)
+        mine = placed[(r0, c0)] = []
+
+        def put(at: tuple[int, int], v: Any) -> None:
+            dest.worked_out[at] = v
+            mine.append(at)
+
+        put((r0, c0), head[g])
+        groups: dict[str, list[list[Any]]] = {}
         for i, v in enumerate(pivot["values"], 1):
-            dest.worked_out[(r0, c0 + i)] = f"{v['summarizeFunction']} of {head[v['sourceColumnOffset']]}"
+            put((r0, c0 + i), self.heading(v["summarizeFunction"], head[v["sourceColumnOffset"]]))
         for row in rows[1:]:
             if len(row) <= g or row[g] in ("", None):
                 continue
-            into = sums.setdefault(str(row[g]), [0.0] * len(pivot["values"]))
+            into = groups.setdefault(str(row[g]), [[] for _ in pivot["values"]])
             for i, v in enumerate(pivot["values"]):
-                x = row[v["sourceColumnOffset"]] if v["sourceColumnOffset"] < len(row) else 0
-                into[i] += float(x) if isinstance(x, int | float) else 0.0
-        for n, key in enumerate(sorted(sums), 1):
-            dest.worked_out[(r0 + n, c0)] = key
-            for i, x in enumerate(sums[key], 1):
-                dest.worked_out[(r0 + n, c0 + i)] = x
-        end = r0 + len(sums) + 1
-        dest.worked_out[(end, c0)] = "Grand Total"
-        for i in range(len(pivot["values"])):
-            dest.worked_out[(end, c0 + 1 + i)] = sum(s[i] for s in sums.values())
+                x = row[v["sourceColumnOffset"]] if v["sourceColumnOffset"] < len(row) else None
+                if x not in ("", None):
+                    into[i].append(x)
+
+        def worked(fn: str, xs: list[Any]) -> Any:
+            return how[fn](xs if fn == "COUNTA" else [float(x) for x in xs if isinstance(x, int | float)])
+
+        for n, key in enumerate(sorted(groups), 1):
+            put((r0 + n, c0), key)
+            for i, v in enumerate(pivot["values"]):
+                put((r0 + n, c0 + 1 + i), worked(v["summarizeFunction"], groups[key][i]))
+        end = r0 + len(groups) + 1
+        put((end, c0), self.total)
+        for i, v in enumerate(pivot["values"]):
+            everything = [x for xs in groups.values() for x in xs[i]]
+            put((end, c0 + 1 + i), worked(v["summarizeFunction"], everything))
 
     def pivots(self) -> list[dict[str, Any]]:
         return [r for r in self.sent if "updateCells" in r and "pivotTable" in json.dumps(r)]
@@ -277,12 +317,14 @@ async def test_a_tab_that_holds_only_a_pivot_is_not_seen_as_empty():
 
 async def test_a_pivot_that_is_already_on_its_tab_is_not_made_again():
     """Live: "made a pivot table on tab Pivot 2 ... on tab Pivot 3". A pivot asked for on a tab
-    that already holds that pivot is left alone; an empty tab of that name is used; a tab with
-    something else on it is refused. A copy under a new name is never made."""
+    that already holds that pivot is written again in its place; an empty tab of that name is
+    used; a tab with something typed on it is refused. "Pivot 2" is never made."""
     g = that_evening()
     r, _ = await on_google(g, [PIVOT])
-    assert r.changes == ["That pivot is already on tab Pivot: sum of Sales by Region"]
-    assert not g.sent and [t.title for t in g.tabs] == ["Sheet1", "Pivot"]
+    assert r.changes == ["Updated the pivot on tab Pivot: sum of Sales by Region"]
+    assert [next(iter(x)) for x in g.sent] == ["updateCells"]  # no new tab
+    assert g.sent[0]["updateCells"]["start"] == {"sheetId": 901, "rowIndex": 0, "columnIndex": 0}
+    assert [t.title for t in g.tabs] == ["Sheet1", "Pivot"]
 
     g = Sheets(Tab("Sheet1", 0, SALES), Tab("Pivot", 5))  # the tab is there, with nothing on it
     r, _ = await on_google(g, [PIVOT])
@@ -364,7 +406,7 @@ async def test_every_tab_is_read_in_one_round_trip_and_only_when_an_edit_needs_i
         ],
     )
     assert len(r.changes) == 2 and not r.problems
-    assert g.count("meta") == 2 and g.count("read") == 4
+    assert g.count("meta") == 1 and g.count("read") == 4  # the tab's cells again, not the tabs
 
 
 # ============================================================================ 4: the chart's column
@@ -449,7 +491,7 @@ async def test_a_tab_too_big_to_read_whole_is_refused_and_never_written_over(mon
     assert len(r.problems) == 3  # the total, the pivot and the sort: none of them guessed
     assert all("bigger than I can read in one go (50 rows" in p for p in r.problems)
     assert not g.wrote and [next(iter(x)) for x in g.sent] == ["repeatCell"]
-    assert "(only the first 50 rows" in ask.prompts[0]
+    assert "Tab 'Sheet1': more than 50 rows or 200 columns. Too big to total" in ask.prompts[0]
 
 
 # ============================================================================ 6: half-done edits
@@ -577,11 +619,10 @@ def test_a_file_excel_has_calculated_is_sorted_by_its_stored_results(tmp_path, m
     # The results moved with their rows, so a second sort in the same job still has them.
     b.apply({"op": "sort", "by": "Shown", "descending": True})
     assert [r[0] for r in b.wb["Data"].iter_rows(min_row=2, values_only=True)] == ["a", "c", "b"]
-    # Rows deleted since: what was stored no longer lines up, and is not guessed at.
-    b.apply({"op": "delete_rows", "from": 4})
-    monkeypatch.setattr(ledger, "_worked_out", lambda wb, suffix: None)
-    with pytest.raises(LedgerError, match="hasn't been worked out yet"):
-        b.apply({"op": "sort", "by": "Shown"})
+    # And they go with their rows when a row above them is deleted, too.
+    b.apply({"op": "delete_rows", "from": 2})
+    b.apply({"op": "sort", "by": "Shown", "descending": True})
+    assert [r[0] for r in b.wb["Data"].iter_rows(min_row=2, values_only=True)] == ["c", "b"]
 
 
 # ============================================================================ 8: rows that move
@@ -760,7 +801,7 @@ async def test_a_read_that_fails_after_an_edit_landed_is_not_a_failed_edit():
     the model was asked to do it again. Now the read belongs to the next edit that needs it:
     that one fails, is asked for again, and the first is not repeated."""
     g = Sheets(Tab("Sheet1", 0, SALES))
-    g.fail_meta_on = 2
+    g.fail_read_on = 2  # the tab's cells, read again before the total
     cell = {"file": 0, "op": "set_cells", "cells": {"E1": "Checked"}}
     total = {"file": 0, "op": "totals_row"}
     r, ask = await on_google(g, [cell, total], [cell, total])
@@ -885,3 +926,389 @@ async def test_a_tab_name_is_quoted_and_encoded_the_way_google_asks():
     url, params = stub.asked[1]
     assert both == [[[1]], []] and url.endswith("/ID/values:batchGet")
     assert params == {"ranges": ["'A'!A1:B2", "'B'!A1:B2"], "valueRenderOption": "FORMATTED_VALUE"}
+
+
+# ============================================================================ found by the review
+# An independent review of the fixes above found twelve things they had broken. Each is here.
+DATED = [
+    ["Date", "Region", "Product", "Units", "Sales"],
+    ["2026-01-05", "North", "Widget", 10, 1200],
+    ["2026-01-06", "North", "Gadget", 7, 850],
+    ["2026-01-07", "South", "Widget", 8, 950],
+    ["2026-01-08", "South", "Gadget", 5, 700],
+    ["2026-01-09", "East", "Widget", 9, 1100],
+    ["2026-01-10", "East", "Gadget", 4, 600],
+]
+WEST = {"file": 0, "op": "append_row", "values": ["2026-01-11", "West", "Widget", 3, 400]}
+BY_REGION = {"file": 0, "op": "pivot", "group_by": "Region", "value": "Sales"}
+SAMPLE_JOB = [
+    {"file": 0, "op": "add_sheet", "name": "Sample Sales", "rows": DATED},
+    {"file": 0, "op": "pivot", "sheet": "Sample Sales", "group_by": "Region", "value": "Sales"},
+    {"file": 0, "op": "chart", "sheet": "Sample Sales", "labels": "Region", "values": "Sales"},
+]
+
+
+def pivot_of(value: int = 4, fn: str = "SUM", sheet: int = 0) -> dict[str, Any]:
+    return {
+        "source": {"sheetId": sheet, "startRowIndex": 0, "endRowIndex": 7},
+        "rows": [{"sourceColumnOffset": 1}],
+        "values": [{"summarizeFunction": fn, "sourceColumnOffset": value}],
+    }
+
+
+def beside(fn: str = "SUM") -> Sheets:
+    """The dated sales with a pivot of Sales by Region beside them, from G1."""
+    g = Sheets(Tab("Sheet1", 0, DATED))
+    g.show_pivot(g.tab("Sheet1"), 0, 6, pivot_of(fn=fn))
+    return g
+
+
+def on_pivot_tab() -> Sheets:
+    """The dated sales, and their pivot on a tab called Pivot."""
+    g = Sheets(Tab("Sheet1", 0, DATED), Tab("Pivot", 901))
+    g.next_id = 901
+    g.show_pivot(g.tab("Pivot"), 0, 0, pivot_of())
+    return g
+
+
+def shows(g: Sheets, title: str) -> list[list[Any]]:
+    return g._grid(f"'{title}'!A1:Z1000", False)
+
+
+def drawn(g: Sheets, title: str = "Sheet1") -> tuple[int, int, int, int]:
+    """The last chart on a tab: its first row, one past its last, its label and value columns."""
+    spec = g.tab(title).charts[-1]["spec"]["basicChart"]
+    labels = spec["domains"][0]["domain"]["sourceRange"]["sources"][0]
+    values = spec["series"][0]["series"]["sourceRange"]["sources"][0]
+    return labels["startRowIndex"], labels["endRowIndex"], labels["startColumnIndex"], values["startColumnIndex"]
+
+
+async def test_a_pivot_asked_for_again_is_written_again_with_the_rows_there_now():
+    """"That pivot is already there" was decided from the pivot's top row alone. A row was
+    added and the pivot asked for again in one plan: it was skipped, and stayed without the
+    row. Q1 and Q2 with the same headings: Q2's pivot was skipped because Q1's was on the tab.
+    The same pivot is now written again where it is, from the rows and the tab asked for."""
+    g = beside()
+    r, _ = await on_google(g, [WEST, BY_REGION])
+    assert r.changes[1] == "Updated the pivot beside the data on Sheet1, from G1: sum of Sales by Region"
+    assert [row[6] for row in shows(g, "Sheet1")[:6]] == ["Region", "East", "North", "South", "West", "Grand Total"]
+    assert len(g.pivots()) == 1 and g.pivots()[0]["updateCells"]["start"]["columnIndex"] == 6
+
+    g = on_pivot_tab()
+    r, _ = await on_google(g, [WEST, {**BY_REGION, "target": "Pivot"}])
+    assert r.changes[1] == "Updated the pivot on tab Pivot: sum of Sales by Region"
+    assert [t.title for t in g.tabs] == ["Sheet1", "Pivot"] and shows(g, "Pivot")[4] == ["West", "400.0"]
+
+    q2 = [DATED[0]] + [[d, region, p, u * 3, s * 3] for d, region, p, u, s in DATED[1:]]
+    g = Sheets(Tab("Q1", 0, DATED), Tab("Q2", 1, q2), Tab("Pivot", 901))
+    g.show_pivot(g.tab("Pivot"), 0, 0, pivot_of())
+    r, _ = await on_google(g, [{**BY_REGION, "sheet": "Q2", "target": "Pivot"}])
+    assert r.changes == ["Updated the pivot on tab Pivot: sum of Sales by Region"]
+    assert g.pivots()[0]["updateCells"]["rows"][0]["values"][0]["pivotTable"]["source"]["sheetId"] == 1
+    assert shows(g, "Pivot")[1] == ["East", "5100.0"]  # Q2's numbers, three times Q1's
+
+
+async def test_a_chart_after_an_average_pivot_draws_that_pivot_and_makes_no_second_one():
+    """"Average sales by region, and chart it": the chart only took a pivot headed "SUM of
+    Sales", so it made a second pivot beside the first and drew sums under the title
+    "Average sales by region". Any summary of the column will do; a sum is taken first."""
+    g = Sheets(Tab("Sheet1", 0, DATED))
+    r, _ = await on_google(
+        g,
+        [
+            {**BY_REGION, "agg": "average"},
+            {"file": 0, "op": "chart", "labels": "Region", "values": "Sales", "title": "Average sales by region"},
+        ],
+    )
+    assert not r.problems and len(g.pivots()) == 1
+    assert shows(g, "Sheet1")[0][6:] == ["Region", "AVERAGE of Sales"] and drawn(g) == (0, 4, 6, 7)
+
+    g = beside("AVERAGE")  # an average at G, a sum at J: the sum is the one a plain chart means
+    g.show_pivot(g.tab("Sheet1"), 0, 9, pivot_of())
+    await on_google(g, [{"file": 0, "op": "chart", "labels": "Region", "values": "Sales"}])
+    assert drawn(g) == (0, 4, 9, 10) and not g.pivots()
+
+
+async def test_a_chart_of_the_pivots_own_cells_draws_its_groups_and_no_grand_total():
+    """The outline now lists a pivot's cells and says "chart them". Asked for by its own
+    heading, the chart ended "There's no column called 'SUM of Sales'" (it went to make a
+    pivot of a column of that name). Asked for by its letters, G and H, it drew every row down
+    to the end of the data: the three regions, a Grand Total bar, and blanks."""
+    g = beside()
+    r, ask = await on_google(g, [{"file": 0, "op": "chart", "labels": "Region", "values": "SUM of Sales"}])
+    assert r.changes == ["Added a bar chart of SUM of Sales by Region on Sheet1"] and len(ask.prompts) == 1
+    assert drawn(g) == (0, 4, 6, 7) and not g.pivots()
+
+    g = beside()
+    r, _ = await on_google(g, [{"file": 0, "op": "chart", "labels": "G", "values": "H"}])
+    assert not r.problems and drawn(g) == (0, 4, 6, 7)
+
+
+async def test_pivot_and_chart_do_not_hang_on_the_words_sum_of():
+    """Google words a pivot's headings in the spreadsheet's language. Where "SUM of Sales"
+    reads "SUM von Sales", the chart didn't know the pivot made a moment before, made a
+    second one, didn't know that one either, and drew a bar for every row of the data. And
+    the same pivot asked for twice went in twice, side by side."""
+    g = Sheets(Tab("Sheet1", 0))
+    g.heading, g.total = (lambda fn, name: f"{fn} von {name}"), "Gesamtergebnis"
+    r, _ = await on_google(g, SAMPLE_JOB)
+    assert not r.problems and len(g.pivots()) == 1
+    assert drawn(g) == (0, 4, 6, 7)  # the three regions: not the data's rows, not the total
+    r, _ = await on_google(g, [BY_REGION])
+    assert r.changes == ["Updated the pivot beside the data on Sheet1, from G1: sum of Sales by Region"]
+    assert shows(g, "Sheet1")[0][5:] == ["", "Region", "SUM von Sales"]  # still the one pivot
+
+    # A wording that doesn't even end in the column's name. The pivot this job wrote is at a
+    # cell Ledger knows; one from an earlier job is not, so the chart makes its own and uses it.
+    g = Sheets(Tab("Sheet1", 0))
+    g.heading, g.total = (lambda fn, name: f"{name} ({fn.title()})"), "Gesamt"
+    r, _ = await on_google(g, SAMPLE_JOB)
+    assert not r.problems and len(g.pivots()) == 1 and drawn(g) == (0, 4, 6, 7)
+    await on_google(g, [{"file": 0, "op": "chart", "labels": "Region", "values": "Sales"}])
+    assert len(g.pivots()) == 2 and drawn(g) == (0, 4, 9, 10)
+
+
+async def test_an_edit_that_names_no_tab_follows_a_rename_and_a_delete():
+    """The tabs were read again only before some kinds of edit. After "rename the tab to
+    Sales", cells set with no tab named were sent to 'Sheet1'!D1: "Unable to parse range", and
+    a second model call. After the first tab was deleted, they were sent to the deleted tab."""
+    cell = {"file": 0, "op": "set_cells", "cells": {"D1": "Notes"}}
+    g = Sheets(Tab("Sheet1", 0, SALES))
+    r, ask = await on_google(g, [{"file": 0, "op": "rename_sheet", "name": "Sales"}, cell])
+    assert r.changes == ["Renamed the tab Sheet1 to Sales", "Set 1 cells on Sales"]
+    assert not r.problems and len(ask.prompts) == 1 and g.wrote[0]["range"] == "'Sales'!D1"
+
+    g = Sheets(Tab("Old", 0, SALES), Tab("Keep", 5, SALES))
+    r, ask = await on_google(g, [{"file": 0, "op": "delete_sheet", "sheet": "Old"}, cell])
+    assert r.changes == ["Deleted the tab Old", "Set 1 cells on Keep"] and len(ask.prompts) == 1
+
+    g = Sheets(Tab("Sheet1", 0, SALES))  # the old name is no longer a tab, and is said not to be
+    r, _ = await on_google(g, [{"file": 0, "op": "rename_sheet", "name": "Sales"}, {**cell, "sheet": "Sheet1"}], [])
+    assert r.problems == ["There's no sheet called 'Sheet1'."] and not g.wrote
+    r, _ = await on_google(g, [{"file": 0, "op": "totals_row"}])  # what was read moved with the name
+    assert r.changes == ["Added a Total row (row 8) on Sales: Sales 5,400"]
+
+
+async def test_a_different_pivot_aimed_at_a_taken_tab_gets_a_tab_named_for_itself():
+    """A pivot of Units asked for on "Pivot", which held the pivot of Sales: an error, and a
+    second model call (before that: "Pivot 2"). It goes on a tab named for what it is, and
+    asked for again it is written again there, not on a "Units by Region 2"."""
+    units = {**BY_REGION, "value": "Units", "target": "Pivot"}
+    g = on_pivot_tab()
+    r, ask = await on_google(g, [units])
+    assert r.changes == ["Made a pivot table on tab Units by Region: sum of Units by Region"]
+    assert len(ask.prompts) == 1 and [t.title for t in g.tabs] == ["Sheet1", "Pivot", "Units by Region"]
+    assert shows(g, "Pivot")[0] == ["Region", "SUM of Sales"]  # the one that was there is untouched
+    r, _ = await on_google(g, [units])
+    assert r.changes == ["Updated the pivot on tab Units by Region: sum of Units by Region"]
+    assert len(g.tabs) == 3
+
+
+async def test_a_workbook_with_a_picture_is_still_saved_after_libreoffice_worked_it_out(tmp_path, monkeypatch):
+    """With LibreOffice installed, a sort by a formula column saved the workbook to a temp
+    file for it. openpyxl can write a picture it loaded only once: the job's own save, at the
+    end, died with "I/O operation on closed file" and nothing was saved. And LibreOffice ran
+    on the event loop, so all of Pyxi stood still for 6 to 14 seconds."""
+    import threading
+
+    from openpyxl.drawing.image import Image
+    from PIL import Image as Png
+
+    def with_logo(wb, ws):
+        Png.new("RGB", (20, 20), (200, 30, 30)).save(tmp_path / "logo.png")
+        ws.add_image(Image(str(tmp_path / "logo.png")), "H2")
+
+    ran_on = []
+
+    def convert(soffice, src, out, to="xlsx"):
+        ran_on.append(threading.current_thread())
+        out.mkdir(parents=True, exist_ok=True)
+        multiplied(load_workbook(src), "").save(out / "book.xlsx")
+
+    monkeypatch.setattr(ledger, "_soffice", lambda: "soffice.exe")
+    monkeypatch.setattr(ledger, "_convert", convert)
+    path = book(tmp_path / "logo.xlsx", UNITS, with_logo)
+    r = await run_ledger(
+        "x", files=[str(path)], ask=answers([TOTAL, {"file": 0, "op": "sort", "by": "Total", "descending": True}])
+    )
+    assert not r.problems and len(r.outputs) == 1
+    saved = load_workbook(r.outputs[0])["Data"]
+    assert [saved.cell(i, 1).value for i in range(2, 6)] == ["South", "West", "North", "East"]
+    assert len(saved._images) == 1  # the logo is in the copy
+    assert ran_on and ran_on[0] is not threading.main_thread()  # and Pyxi was never held up
+
+
+def test_only_one_libreoffice_runs_at_a_time(tmp_path, monkeypatch):
+    """Two runs of LibreOffice share Pyxi's one profile: the second hands its file to the
+    first and exits before anything is written. Pixel takes a lock round each run; Ledger's
+    runs (working formulas out, opening an old .xls) took none."""
+    import subprocess
+
+    from pyxi.agents import libreoffice
+
+    held = []
+
+    def run(cmd, **kw):
+        held.append(libreoffice.CONVERTING.locked())
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    ledger._convert("soffice.exe", tmp_path / "a.xlsx", tmp_path / "out")
+    assert held == [True] and not libreoffice.CONVERTING.locked()
+
+
+FIGURES = [
+    ["Region", "Rep", "Units", "Price", "Total"],
+    ["North", "Ana", 10, 5, "=C2*D2"],
+    ["South", "Bo", 2, 100, "=C3*D3"],
+    ["East", "Cy", 30, 1, "=C4*D4"],
+    ["West", "Di", 4, 20, "=C5*D5"],
+    ["North", "Ed", 6, 10, "=C6*D6"],
+    ["South", "Bo", 2, 100, "=C7*D7"],
+    ["Total", None, None, None, "=SUM(E2:E7)"],
+]
+
+
+def calculated(path) -> Workbook:
+    """The figures as Excel leaves a file: every formula with its result stored."""
+    b = Workbook(book(path, FIGURES))
+    results = NewBook()
+    results.active.title = "Data"
+    for row in FIGURES:
+        results.active.append([620 if row[0] == "Total" and c == 4 else row[2] * row[3] if c == 4 and row[0] != "Region" else v for c, v in enumerate(row)])
+    b.values, b._calculated = results, True
+    return b
+
+
+def reps(b: Workbook) -> list[Any]:
+    return [r[1] for r in b.wb["Data"].iter_rows(values_only=True) if r[1] not in (None, "Rep")]
+
+
+def test_stored_results_go_with_their_cells_when_rows_move(tmp_path, monkeypatch):
+    """Without LibreOffice, any row put in or taken out threw away every stored result on the
+    sheet. "Add a title row, then sort by Total" on a file Excel had calculated was refused:
+    "E3 is a formula that hasn't been worked out yet". The results now move with their cells.
+    One whose formula read a row that was deleted is not kept: its sum is another number."""
+    monkeypatch.setattr(ledger, "_worked_out", lambda wb, suffix: None)
+    b = calculated(tmp_path / "a.xlsx")
+    b.apply({"op": "insert_rows", "at": 1})
+    assert b.apply({"op": "sort", "by": "Total", "descending": True}) == "Sorted Data by Total, largest first"
+    assert reps(b) == ["Bo", "Bo", "Di", "Ed", "Ana", "Cy"]  # 200, 200, 80, 60, 50, 30
+
+    b = calculated(tmp_path / "b.xlsx")
+    assert b.apply({"op": "remove_duplicates", "columns": ["Rep"]}) == "Removed 1 duplicate row on Data"
+    b.apply({"op": "sort", "by": "Total", "descending": True})
+    assert reps(b) == ["Bo", "Di", "Ed", "Ana", "Cy"]
+    ws = b.wb["Data"]
+    assert ws["E7"].value == "=SUM(E2:E6)" and b.result(ws, 2, 5) == 200
+    with pytest.raises(LedgerError, match="hasn't been worked out yet"):
+        b.result(ws, 7, 5)  # the total was 620 with the row that's gone: not said again
+
+
+def test_removing_duplicates_does_not_need_results_nobody_asked_about(tmp_path, monkeypatch):
+    """On a file with no stored results, "remove duplicates" used to say "Removed 0" and then
+    said a formula hadn't been worked out. Two rows are the same when their cells are and
+    their formulas are the same one; only a formula column named as the thing to compare by
+    needs its results."""
+    monkeypatch.setattr(ledger, "_worked_out", lambda wb, suffix: None)
+    b = Workbook(book(tmp_path / "p.xlsx", FIGURES))
+    assert b.apply({"op": "remove_duplicates"}) == "Removed 1 duplicate row on Data"
+    assert reps(b) == ["Ana", "Bo", "Cy", "Di", "Ed"]
+    with pytest.raises(LedgerError, match="hasn't been worked out yet"):
+        b.apply({"op": "remove_duplicates", "columns": ["Total"]})
+
+
+async def test_a_column_of_hours_is_still_totalled():
+    """A timesheet: hours as 7:30:00. Telling dates from numbers by what a cell shows took
+    the colon for a date's, and the Hours column was left out of the total row."""
+    rows = [["Day", "Task", "Hours"], ["Mon", "Build", "7:30:00"], ["Tue", "Test", "6:00:00"], ["Wed", "Ship", "4:30:00"]]
+    g = Sheets(Tab("Sheet1", 0, rows))
+    r, _ = await on_google(g, [{"file": 0, "op": "totals_row"}])
+    assert r.changes == ["Added a Total row (row 5) on Sheet1: Hours 18:00"]
+    assert g.wrote[0]["values"] == [["Total", "", "=SUM(C2:C4)"]]
+
+
+def big(n_rows: int, n_cols: int) -> list[list[Any]]:
+    head = ["Region"] + [f"Col{i}" for i in range(n_cols - 1)]
+    return [head] + [[("North", "South", "East", "West")[r % 4]] + [r % 97 + c for c in range(n_cols - 1)] for r in range(n_rows - 1)]
+
+
+async def test_a_big_tab_is_read_whole_once_by_the_edit_that_needs_it_and_not_before():
+    """Every tab was read whole, as typed and as shown, at the start and again before every
+    edit that works from the cells: 4.8 million cells for a pivot, a chart and a total on a
+    20,000-row tab. The first read now stops at row 2,000 (the outline shows 40). An edit that
+    needs the data reads its own tab to the end, once; after a pivot goes in beside the
+    data only what shows is read again; a tab no edit works from is never read further."""
+    data, other = Tab("Sheet1", 0, big(20000, 6)), Tab("Other", 7, big(5000, 3))
+    data.size, other.size = (20000, 26), (5000, 26)
+    g = Sheets(data, other)
+    r, ask = await on_google(
+        g,
+        [
+            {"file": 0, "op": "pivot", "group_by": "Region", "value": "Col0"},
+            {"file": 0, "op": "chart", "labels": "Region", "values": "Col0"},
+            {"file": 0, "op": "totals_row"},
+        ],
+    )
+    assert not r.problems and r.changes[2].startswith("Added a Total row (row 20001) on Sheet1: Col0 ")
+    reads = [d for n, d in g.calls if n == "read"]
+    assert [(ranges, typed) for ranges, typed in reads] == [
+        (("'Sheet1'!A1:Z2000", "'Other'!A1:Z2000"), True),  # the outline
+        (("'Sheet1'!A1:Z2000", "'Other'!A1:Z2000"), False),
+        (("'Sheet1'!A1:Z20000",), True),  # the pivot's tab, whole
+        (("'Sheet1'!A1:Z20000",), False),
+        (("'Sheet1'!A1:Z20000",), False),  # the chart: what shows, now the pivot is in
+    ]
+    assert g.cells_read < 420_000  # it was over a million
+    assert "Tab 'Sheet1': its first 2,000 rows (it has more)." in ask.prompts[0]
+    assert drawn(g) == (0, 5, 7, 8) and data.size == (20001, 26)  # a row was added for the total
+
+    g = Sheets(Tab("Sheet1", 0, big(20000, 6)))  # an edit that needs no cells reads no more
+    g.tabs[0].size = (20000, 26)
+    await on_google(g, [{"file": 0, "op": "format", "range": "A1:F1", "bold": True}])
+    assert g.count("read") == 2 and g.cells_read == 2 * 2000 * 6
+
+
+async def test_the_blank_sheet_job_is_six_round_trips():
+    """Sample data, a pivot and a chart on a blank sheet, the job this all started from: ten
+    round trips before the audit, nine after it, six now. What Ledger has just written it
+    doesn't read back, and the tabs are not listed again when no tab changed."""
+    g = Sheets(Tab("Sheet1", 0))
+    r, _ = await on_google(g, SAMPLE_JOB)
+    assert len(r.changes) == 3 and not r.problems and drawn(g) == (0, 4, 6, 7)
+    # The two reads at the start go together (as typed, as shown): one round trip's wait.
+    assert [n for n, _ in g.calls] == ["meta", "read", "read", "write", "batch", "read", "batch"]
+
+
+async def test_an_edit_refused_before_it_wrote_anything_does_not_reopen_the_file(tmp_path, monkeypatch):
+    """So that half an edit is never saved, the file was opened again after any failed edit
+    at all: four seconds more on a big workbook for "There's no column called 'Nope'", which
+    wrote nothing. Only an edit that can have got part-way has anything to undo."""
+    opened = []
+    real = ledger.open_local
+    monkeypatch.setattr(ledger, "open_local", lambda p: opened.append(p) or real(p))
+    path = book(tmp_path / "o.xlsx", SALES, lambda wb, ws: ws.merge_cells("E1:F1"))
+    plan = [
+        {"file": 0, "op": "format", "range": "A1:C1", "bold": True},
+        {"file": 0, "op": "sort", "by": "Nope"},
+        {"file": 0, "op": "freeze", "rows": 1},
+    ]
+    r = await run_ledger("x", files=[str(path)], ask=answers(plan, []))
+    assert len(r.changes) == 2 and r.problems == ["There's no column called 'Nope'."]
+    assert len(opened) == 1
+
+    opened.clear()  # one that died part-way: opened again, once, and the half is gone
+    plan[1] = {"file": 0, "op": "set_cells", "cells": {"A2": "WRONG", "F1": "x"}}
+    r = await run_ledger("x", files=[str(path)], ask=answers(plan, []))
+    assert len(opened) == 2 and cells(r.outputs[0])[1][0] == "North"
+
+
+async def test_the_problem_dropped_after_the_second_pass_is_the_one_it_mended():
+    """Two edits failed, and the second reply mended the second of them. The problem that
+    was dropped was the first on the list, so the card told them about the wrong one."""
+    g = Sheets(Tab("Sheet1", 0, SALES))
+    chart = {"file": 0, "op": "chart", "sheet": "Nope", "values": "Sales"}
+    colour = {"file": 0, "op": "format", "range": "A1:C1", "color": "sort of teal"}
+    r, _ = await on_google(g, [chart, colour], [{"file": 0, "op": "format", "range": "A1:C1", "color": "teal"}])
+    assert r.changes == ["Formatted A1:C1 on Sheet1"]
+    assert r.problems == ["There's no sheet called 'Nope'."]

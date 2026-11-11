@@ -382,3 +382,153 @@ async def test_a_flight_that_moved_lists_its_old_reminders_as_stale(settings, mo
     keys = [r["key"] for r in job.data["reminders"]]
     assert "atlas:SK 489:2026-11-23T19:05:go" in keys
     assert not set(keys) & set(job.data["stale_reminders"])
+
+
+# ================================================================ after the review of the fix
+
+
+def booking(ref: str = "MLQXVT") -> dict[str, Any]:
+    return mail(
+        "Skyward Air - Booking Confirmation",
+        f"Booking Reference: {ref}\n\nThu, Nov 19\n"
+        "SK 870  Vancouver (YVR) 6:45 PM -> Toronto (YYZ) 10:05 PM\n",
+        day=2,
+        month=11,
+    )
+
+
+def test_a_cancellation_that_does_not_name_the_booking_still_cancels_it():
+    """After the first fix a cancellation had to say "flight" or "booking" in its own
+    sentence. "Cancellation confirmed" over the same reference, and "Your purchase was
+    cancelled and your refund is being processed", left the flight in the trip, with its
+    reminders."""
+    confirmed = mail(
+        "Cancellation confirmed",
+        "Hi Alex,\n\nYour cancellation confirmation is below. Keep this email for your "
+        "records.\n\nBooking Reference: MLQXVT\n\nThu, Nov 19\n"
+        "SK 870  Vancouver (YVR) 6:45 PM -> Toronto (YYZ) 10:05 PM\n",
+        day=5,
+        month=11,
+    )
+    refund = mail(
+        "Your refund request has been received",
+        "Booking Reference: MLQXVT\n\nYour purchase was cancelled and your refund is being "
+        "processed.\n",
+        day=5,
+        month=11,
+    )
+    is_confirmed = mail(
+        "Your cancellation is confirmed",
+        "Booking Reference: MLQXVT\n\nHi Alex,\n\nAs requested, your itinerary below has been "
+        "cancelled and a refund issued.\n",
+        day=5,
+        month=11,
+    )
+    for notice in (confirmed, refund, is_confirmed):
+        replaced: list[atlas.Flight] = []
+        flights, _stays, _ = atlas.read_mail([booking(), notice], replaced)
+        assert flights == [] and [f.flight for f in replaced] == ["SK 870"], notice["subject"]
+
+
+def test_a_hotel_cancelled_by_its_number_alone_is_gone():
+    booked = mail(
+        "Your Harbour Inn reservation is confirmed",
+        "Confirmation: 3412345678\n\nHarbour Inn Toronto\n"
+        "Check-in: Thu, Nov 19, 2026 3:00 PM\nCheck-out: Sun, Nov 22, 2026 11:00 AM\n",
+        day=2,
+        month=11,
+    )
+    cancelled = mail(
+        "Cancellation confirmed",
+        "Cancellation number: 99887766\nConfirmation: 3412345678\n\n"
+        "We're sorry your plans changed. We hope to see you soon.\n",
+        day=6,
+        month=11,
+    )
+    assert [s.ref for s in read(booked)[1]] == ["3412345678"]
+    assert read(booked, cancelled)[1] == []
+
+
+def test_a_seat_cancelled_under_a_booking_reference_line_keeps_the_flight():
+    """Before the first fix this removed the flight, and after it too: "Booking Reference:"
+    on the line above was read as part of the sentence, so the seat was "a booking"."""
+    seat = mail(
+        "Update to your seat",
+        "Booking Reference: MLQXVT\nYour seat selection has been cancelled due to an aircraft "
+        "change. Please choose a new seat.\n",
+        day=5,
+        month=11,
+    )
+    small_print = mail(
+        "Travel tips for your trip",
+        "Booking Reference: MLQXVT\nIf your flight is cancelled, we will rebook you at no "
+        "charge. Your meal order was cancelled at your request.\n",
+        day=6,
+        month=11,
+    )
+    flights, _, _ = read(booking(), seat, small_print)
+    assert flown(flights) == [("SK 870", "19 Nov 18:45", "MLQXVT")]
+
+
+def flight(no: str, a: str, b: str, month: int, day: int, hour: int, ref: str = "") -> atlas.Flight:
+    return atlas.Flight(
+        flight=no,
+        airline="Skyward",
+        origin=a,
+        dest=b,
+        depart=datetime(2026, month, day, hour, 0),
+        arrive=datetime(2026, month, day, hour + 2, 30),
+        origin_city=a,
+        dest_city=b,
+        ref=ref,
+    )
+
+
+def legs(found: list[atlas.Trip]) -> list[str]:
+    return [" + ".join(f"{f.origin}-{f.dest} {f.depart:%d %b}" for f in t.flights) for t in found]
+
+
+def test_two_trips_to_the_same_city_in_a_month_are_two_trips():
+    """After the first fix an outbound was joined to the last way back within 45 days, not
+    the nearest: two round trips to Toronto three weeks apart were one trip of four flights,
+    and a weekly commuter's six flights one trip of three weeks."""
+    for refs in (("AAA111", "AAA111", "BBB222", "BBB222"), ("A1AAAA", "B2BBBB", "C3CCCC", "D4DDDD")):
+        twice = [
+            flight("SK 259", "YVR", "YYZ", 11, 12, 8, refs[0]),
+            flight("SK 260", "YYZ", "YVR", 11, 16, 17, refs[1]),
+            flight("SK 259", "YVR", "YYZ", 12, 3, 8, refs[2]),
+            flight("SK 260", "YYZ", "YVR", 12, 7, 17, refs[3]),
+        ]
+        assert legs(atlas.trips(twice, [], NOW)) == [
+            "YVR-YYZ 12 Nov + YYZ-YVR 16 Nov",
+            "YVR-YYZ 03 Dec + YYZ-YVR 07 Dec",
+        ]
+    commute = [
+        flight(no, a, b, 11, day, hour)
+        for day in (12, 19, 26)
+        for no, a, b, day, hour in (("SK 1", "YVR", "YYC", day, 8), ("SK 2", "YYC", "YVR", day + 3, 17))
+    ]
+    assert legs(atlas.trips(commute, [], NOW)) == [
+        "YVR-YYC 12 Nov + YYC-YVR 15 Nov",
+        "YVR-YYC 19 Nov + YYC-YVR 22 Nov",
+        "YVR-YYC 26 Nov + YYC-YVR 29 Nov",
+    ]
+    # One return ticket with eleven days between is still one trip.
+    ticket = [flight("SK 259", "YVR", "YYZ", 11, 12, 8, "AAA111"), flight("SK 260", "YYZ", "YVR", 11, 23, 17, "AAA111")]
+    assert legs(atlas.trips(ticket, [], NOW)) == ["YVR-YYZ 12 Nov + YYZ-YVR 23 Nov"]
+
+
+def test_six_letters_after_the_word_confirmation_are_the_booking_reference():
+    """After the first fix a code after the bare word "Confirmation" needed a digit, so
+    "eTicket Itinerary and Receipt for Confirmation KLMNOP" lost its reference (and with it
+    the online check-in)."""
+    united = mail(
+        "eTicket Itinerary and Receipt for Confirmation KLMNOP",
+        "Confirmation:\nKLMNOP\n\nThu, Nov 19\nSK 482  Vancouver (YVR) 6:45 AM -> Denver (DEN) 8:05 AM\n",
+    )
+    assert atlas.read_flights(united)[0].ref == "KLMNOP"
+    assert atlas._refs("Confirmation:\nKLMNOP") == ["KLMNOP"]
+    # The fault before that one stays fixed: headings in capitals are not codes.
+    assert atlas._refs("E-TICKET CONFIRMATION\nPASSENGER: ALEX TESTER") == []
+    assert atlas._refs("BOOKING CONFIRMATION FLIGHT DETAILS") == []
+    assert atlas._refs("CONFIRMATION NUMBER\nTICKET") == []

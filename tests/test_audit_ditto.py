@@ -175,6 +175,59 @@ async def test_a_card_number_typed_while_watching_is_never_kept(tmp_path):
     assert not ditto.private("Name", "2026-10-03 Northwind Supplies.pdf")
 
 
+async def test_a_field_that_only_mentions_a_card_or_a_pin_is_still_learned(tmp_path):
+    """Review: any field with "card" or "pin" in its name had its text hidden, so a Trello
+    card's title or a Pinterest board's name, the very thing being shown, was never seen."""
+    learned = [
+        "Enter a title for this card",
+        "Card title",
+        "Add a card",
+        "Pinterest board name",
+        "Pin title",
+        "Shipping address",
+        "Business card holder",
+        "Spinner size",
+        "Name on card",
+        "Single sign-on name",
+    ]
+    hidden = [
+        "Card number",
+        "Credit card",
+        "Debit card",
+        "Card no.",
+        "CVV",
+        "CVC2",
+        "Security code",
+        "Expiry date",
+        "Expiration (MM/YY)",
+        "PIN",
+        " pin ",
+        "PIN code",
+        "PIN number",
+        "SSN",
+        "Social Security number",
+        "SIN",
+        "Password",
+        "Confirm password",
+        "Passcode",
+    ]
+    assert [n for n in learned if ditto.private(n, "Q3 launch plan")] == []
+    assert [n for n in hidden if not ditto.private(n, "x")] == []
+    # What was typed is still checked, whatever the field is called.
+    assert ditto.private("Enter a title for this card", "4111 1111 1111 1111")
+    seen = iter(
+        [
+            ditto.Focus("chrome.exe", "Board | Trello", "Enter a title for this card", "Edit", "Q3 launch plan"),
+            ditto.Focus("chrome.exe", "Board | Trello", "Add card", "Button"),
+        ]
+    )  # fmt: skip
+    r = ditto.Recorder("add a card per row", "", out_dir=tmp_path / "watch", reader=lambda: next(seen, None))
+    for _ in range(2):
+        await r.tick()
+    recording = await r.stop()
+    assert 'typed "Q3 launch plan" into edit "Enter a title for this card"' in recording.text()
+
+
 # ------------------------------------------------------------------ plans it refuses
 async def test_a_job_with_no_recording_says_what_it_needs(settings):
     """Audit: handed a task directly (delegate), Ditto failed with a KeyError and Pyxi said

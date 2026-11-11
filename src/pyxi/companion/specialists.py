@@ -586,6 +586,12 @@ async def _study(brain: Brain, args: dict[str, Any]) -> str:
                     "quiz: there are no flashcards yet and no topic was named. Ask what to be "
                     "quizzed on, or offer to make cards from their slides or notes."
                 )
+            if not other and sage.made_up(brain.settings.data_dir, deck):
+                # None of their decks is about it: they should know these aren't their notes.
+                other = (
+                    " (None of their own decks is about this, so these cards are from "
+                    "general knowledge, not their notes. Say so in the line that starts it.)"
+                )
             quiz = sage.Quiz.start(deck, sage.as_count(args.get("questions"), 10))
             brain.study_quiz = quiz
             return (

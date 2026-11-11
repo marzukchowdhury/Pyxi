@@ -352,6 +352,8 @@ def test_with_the_mouse_on_bare_desktop_the_window_read_is_on_the_mouses_screen(
     monkeypatch.setattr(uia, "screen_at", lambda x, y: (0, 0, 1920, 1080))
     monkeypatch.setattr(uia, "desktop_window", lambda: 99)
     monkeypatch.setattr(uia, "top_window_on", lambda screen: 77)
+    monkeypatch.setattr(uia, "_real_windows", lambda: [(77, (0, 0, 1920, 1040)), (88, (1920, -840, 3000, 1080))])
+    monkeypatch.setattr(uia, "_front_window", lambda: 88)  # in front, but on the second screen
     assert uia.window_to_read(True, None) == (77, None)  # the top window of that screen
     monkeypatch.setattr(uia, "top_window_on", lambda screen: None)
     assert uia.window_to_read(True, None) == (99, (0, 0, 1920, 1080))  # its desktop
@@ -359,6 +361,65 @@ def test_with_the_mouse_on_bare_desktop_the_window_read_is_on_the_mouses_screen(
     assert uia.window_to_read(True, None) == (12, None)  # a window under the mouse, as ever
     assert uia.window_to_read(True, 5) == (5, None)  # the one the request named
     assert uia.window_to_read(False, None) == (0, None)  # the one in front, when Pyxi drives
+
+
+def test_the_window_in_front_is_read_not_one_that_floats_on_top_of_it(monkeypatch):
+    """The mouse rests on the taskbar. Word is in front, full screen; a small always-on-top
+    window (a video in a corner) is first in the pile. The first fix took the top of the
+    pile, so the model got the video window's title and buttons under a picture of Word."""
+    word, video = 100, 200
+    pile = [(video, (1500, 700, 1900, 925)), (word, (-8, -8, 1928, 1048))]  # topmost first
+    monkeypatch.setattr(uia, "_real_windows", lambda: pile)
+    monkeypatch.setattr(uia, "cursor_pos", lambda: (900, 1060))  # on the taskbar
+    monkeypatch.setattr(uia, "screen_at", lambda x, y: (0, 0, 1920, 1080))
+    monkeypatch.setattr(uia, "desktop_window", lambda: 99)
+    monkeypatch.setattr(uia, "_front_window", lambda: word)
+    assert uia.window_to_read(True, None) == (word, None)
+    # In front but on another screen: then the top window of the mouse's screen, as before.
+    monkeypatch.setattr(uia, "_real_windows", lambda: [(video, (1500, 700, 1900, 925)), (word, (1920, -840, 3000, 1080))])
+    assert uia.window_to_read(True, None) == (video, None)
+    # The taskbar itself has the keyboard (they clicked it): not a window to read either.
+    monkeypatch.setattr(uia, "_real_windows", lambda: pile)
+    monkeypatch.setattr(uia, "_front_window", lambda: 555)
+    assert uia.window_to_read(True, None) == (video, None)
+    monkeypatch.setattr(uia, "_real_windows", lambda: [])
+    assert uia.window_to_read(True, None) == (99, (0, 0, 1920, 1080))  # nothing there: the desktop
+
+
+class _TouchyControl(_Control):
+    """A control whose id cannot be read (the app throws), like the error of that evening."""
+
+    @property
+    def AutomationId(self):
+        raise OSError(-2147220991, "An event was unable to invoke any of the subscribers")
+
+
+class _OneBadId(_Auto):
+    def __init__(self):
+        self.walks = 0
+
+    def WalkControl(self, top, includeTop=False, maxDepth=25):
+        self.walks += 1
+        for i in range(6):
+            yield (_TouchyControl() if i == 4 else _Control()), 1
+
+
+def test_one_control_whose_id_throws_does_not_cost_the_whole_walk(monkeypatch):
+    """AutomationId was read outside the guarded block: one control that threw there ended
+    the walk, the second try walked everything again to the same end, and the read came back
+    twice as slow (1.54 s for 0.70 s) with no elements at all."""
+    monkeypatch.setattr(uia, "process_name", lambda pid: "app.exe")
+    auto = _OneBadId()
+    window, elements = uia._walk(auto, 1.5, 400, 25, follow_mouse=False, named=1234)
+    assert window.tree == "ok" and len(elements) == 6
+    assert [e.automation_id for e in elements] == [""] * 6
+    # Through the front door: one walk, not two.
+    _pretend_uiautomation(monkeypatch)
+    auto = _OneBadId()
+    for name in ("ControlFromHandle", "WalkControl", "PropertyId"):
+        setattr(sys.modules["uiautomation"], name, getattr(auto, name))
+    window, elements = uia.read_foreground(hwnd=1234)
+    assert auto.walks == 1 and len(elements) == 6 and window.title == "Settings"
 
 
 # ------------------------------------------------------------------ cut off by an edge
@@ -380,3 +441,74 @@ def test_a_row_cut_off_by_the_edge_is_said_to_be(settings):
     over = UIElement(50, "Next", "Button", (1700, 1000, 200, 120), 1, 1)
     ctx.elements.append(over)
     assert ctx.cut_off()[50] == "bottom"
+    # With no list read around it, the window's own edge says the same (its frame hangs
+    # 8 px past what a maximised window shows).
+    loose = [UIElement(e.id, e.name, e.role, e.rect, 1, None) for e in els if e.role == "ListItem"]
+    bare = ScreenContext(time.time(), ctx.window, loose, shot)
+    assert bare.cut_off() == {30: "bottom"}
+
+
+def test_short_fields_in_plain_view_are_not_called_cut_off():
+    """Two one-line fields over a tall message box, all of it on screen: "Name" was listed as
+    "(cut off at the top edge: only part of it shows)". Any three controls of one kind in a
+    column did it when the first or last was under 60% of the usual height. Short is not
+    cut: it has to sit on the edge that would do the cutting."""
+    form = [
+        UIElement(1, "Contact us", "Pane", (200, 100, 900, 700), 0),
+        UIElement(2, "Name", "Edit", (260, 180, 600, 36), 1, 1),
+        UIElement(3, "Email", "Edit", (260, 236, 600, 36), 1, 1),
+        UIElement(4, "Message", "Edit", (260, 292, 600, 280), 1, 1),
+        UIElement(5, "Send", "Button", (260, 600, 120, 40), 1, 1),
+    ]
+    shot = Image.new("RGB", (1600, 900))
+    ctx = ScreenContext(time.time(), WindowInfo("Contact - Chrome", "chrome.exe", (0, 0, 1600, 900), 7), form, shot)
+    assert ctx.cut_off() == {} and "cut off" not in ctx.render()
+    # The same for a short last row in the middle of the window: a "Show more" under a list.
+    rows = [UIElement(10 + i, f"Row {i}", "ListItem", (300, 200 + 60 * i, 500, 60), 1, 1) for i in range(4)]
+    rows.append(UIElement(20, "Show more", "ListItem", (300, 440, 500, 24), 1, 1))
+    ctx = ScreenContext(time.time(), ctx.window, [form[0], *rows], shot)
+    assert ctx.cut_off() == {}
+
+
+# ------------------------------------------------------------------ several marks, one read
+class _SlowWords:
+    """A screen whose words can be read again (as ScreenReader.text_now does), and counts."""
+
+    def __init__(self, base, lines):
+        self.base, self.lines, self.reads = base, lines, 0
+
+    def __getattr__(self, name):
+        return getattr(self.base, name)
+
+    async def capture(self, pixels: bool = True, **_):
+        ctx = fake_context()
+        ctx.text = list(self.lines)
+        ctx.captured_at = time.time() - 4.0  # they pressed talk, spoke, and the model answered
+        return ctx
+
+    def text_now(self, ctx):
+        self.reads += 1
+        return list(self.lines)
+
+
+async def test_three_marks_in_one_reply_read_the_screen_once(settings):
+    """Every point, circle and highlight read the whole screen again, one after the other:
+    three marks were three reads (155 ms each at 1080p, 630 ms at 4K), each one blanking
+    Pyxi's drawings when screen shares can see them."""
+    words = [line("Dark mode", (150, 176, 81, 18), 50), line("Export", (730, 660, 54, 18), 51), line("General", (130, 145, 63, 18), 52)]
+    marks = [
+        ("say", {"text": "Three things to look at."}),
+        ("highlight", {"quote": "Dark mode", "label": "theme"}),
+        ("circle", {"quote": "Export", "label": "export"}),
+        ("point", {"quote": "General", "label": "here"}),
+    ]
+    brain, rec = make_brain(settings, llm=Scripted(marks))
+    brain.screen = _SlowWords(brain.screen, words)
+    await brain.turn("where are these?")
+    assert len(rec.of("annotate")) == 3 and brain.screen.reads == 1
+    # Kept for about a second only: a mark drawn later is checked against the screen then.
+    brain, rec = make_brain(settings, llm=Scripted(marks))
+    brain.screen = _SlowWords(brain.screen, words)
+    brain.REREAD_KEEPS_S = 0.0
+    await brain.turn("where are these?")
+    assert len(rec.of("annotate")) == 3 and brain.screen.reads == 3

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -353,6 +354,41 @@ def test_ledgers_find_and_replace_keeps_the_formatting_too():
         ("Put it in Spanish", "translate"),
         ("fix the tone", "rewrite"),
         ("Rewrite Meeting Summary.docx so it is shorter", "rewrite"),
+        # An instruction in quotes is the instruction, not a file's name to take out.
+        ('The user said: "make it more formal"', "rewrite"),
+        ("User asked: 'summarize this for me'", "summarize"),
+        ("Apply this to resume.docx: “translate into French”", "translate"),
+        ('Translate the document into "French"', "translate"),
+        ('Fix the grammar in "Meeting Summary"', "fix"),
+        # A summary asked for by the noun, where a sentence starts.
+        ("write summaries of each section", "summarize"),
+        ("summary of the errors in this report", "summarize"),
+        ("an overview and fix typos", "summarize"),
+        ("fix typos, then the gist in two lines", "summarize"),
+        ("check spelling; overview at the top please", "summarize"),
+        ("what are the main points, and is the math correct?", "summarize"),
+        ("Give Me A Summary Of Report.pdf", "summarize"),
+        ("what does this say", "summarize"),
+        ("what is this document about", "summarize"),
+        ("give me the highlights", "summarize"),
+        ("what's in this file", "summarize"),
+        ("Fix the typos in the summary section", "fix"),
+        ("Fix typos in Translation Of Poem.docx", "fix"),
+        # A translation asked for without the word.
+        ("French version of my cover letter", "translate"),
+        ("convert to Spanish", "translate"),
+        ("English to French", "translate"),
+        ("can you make this German", "translate"),
+        ("proofread, and I also need it in French", "translate"),
+        ("correct my French homework", "fix"),
+        # A rewrite asked for in other words.
+        ("make it shorter", "rewrite"),
+        ("cut this down to one page", "rewrite"),
+        ("condense this", "rewrite"),
+        ("paraphrase this paragraph", "rewrite"),
+        ("correct the tone", "rewrite"),
+        ("fix the tone, it's too casual", "rewrite"),
+        ("don't make it shorter, just fix the typos", "fix"),
         # What already worked.
         ("fix the typos, keep the tone", "fix"),
         ("proofread it without shortening anything", "fix"),
@@ -503,6 +539,142 @@ async def test_an_answer_cut_off_is_asked_again_in_halves_then_it_is_a_failure(t
     assert Document(str(result.path)).paragraphs[0].text == "They're going."
 
 
+async def test_an_answer_in_words_is_nothing_to_change_not_a_failure(tmp_path):
+    """A clean file, and the model says so in a sentence instead of JSON: "came back cut off,
+    so nothing was saved". An answer with no JSON in it at all is no edits."""
+    doc = Document()
+    doc.add_paragraph("This sentence is fine.")
+    doc.add_paragraph("So is this one.")
+    src = tmp_path / "clean.docx"
+    doc.save(str(src))
+    model = Model("Everything here is already correct.", "No changes needed.")
+    result = await fix_document(src, "proofread this", model)
+    assert result.changed == 0 and result.notes == [] and len(model.asked) == 2
+    assert [p.text for p in Document(str(result.path)).paragraphs] == [
+        "This sentence is fine.",
+        "So is this one.",
+    ]
+
+
+async def test_one_part_that_cannot_be_read_does_not_lose_the_rest(tmp_path):
+    """A 40-paragraph file, one chunk of four cut off twice: everything was thrown away after
+    six calls. The other chunks are saved, and a note says which part was left as it was."""
+    doc = Document()
+    for i in range(40):
+        doc.add_paragraph(f"Paragraph {i} have a error in it. " + "A filler sentence to fill the chunk. " * 16)
+    src = tmp_path / "long.docx"
+    doc.save(str(src))
+    texts, _ = docs._read(src)
+    chunks = docs._chunks(texts)
+    assert len(chunks) >= 3
+    bad = set(chunks[1])
+
+    class Flaky:
+        calls = 0
+
+        async def complete(self, system, messages, max_tokens=0, **_):
+            Flaky.calls += 1
+            ask = messages[-1].parts[0].text
+            ids = [int(x) for x in re.findall(r"^\[(\d+)\]", ask, re.M)]
+            if ask.startswith("Review this"):
+                reply = '{"edits": []}'
+            elif bad & set(ids):
+                reply = '{"edits": [{"i": ' + str(ids[0]) + ', "text": "Paragraph has an err'
+            else:
+                fixes = [{"i": i, "text": texts[i].replace("have a error", "has an error")} for i in ids]
+                reply = json.dumps({"edits": fixes})
+            return SimpleNamespace(text=reply, usage=SimpleNamespace(cost_usd=0.0))
+
+    result = await fix_document(src, "fix the grammar", Flaky())
+    saved = [p.text for p in Document(str(result.path)).paragraphs]
+    assert result.changed == 40 - len(bad)
+    assert all(("has an error" in saved[i]) == (i not in bad) for i in range(40))
+    [note] = [n for n in result.notes if "couldn't be read" in n]
+    first, last = min(bad), max(bad)
+    assert note.startswith(f"{len(bad)} paragraphs were left as they were")
+    assert f"'Paragraph {first} have a error" in note and f"to 'Paragraph {last} have a error" in note
+
+    # Nothing readable at all is still a failure, with nothing saved.
+    cut = '{"edits": [{"i": 0, "text": "Paragr'
+    short = Document()
+    short.add_paragraph("Their going.")
+    short.add_paragraph("It are far.")
+    short.save(str(tmp_path / "short.docx"))
+    with pytest.raises(RuntimeError, match="cut off, so nothing was saved"):
+        await fix_document(tmp_path / "short.docx", "fix", Model(cut, cut, cut))
+    assert not list(tmp_path.glob("short (*"))
+
+
+async def test_a_paragraph_the_model_only_retyped_is_not_counted_as_changed(tmp_path):
+    """The model sends back lines it didn't change (a tab typed as spaces, or word for word):
+    "fixed 3 of 3 paragraphs" when one word in one of them had changed."""
+    doc = Document()
+    p = doc.add_paragraph()
+    p.add_run("Software Developer")
+    p.add_run().add_tab()
+    p.add_run("Jan 2019 – Mar 2021")
+    doc.add_paragraph("Managed a team of 5 people.")
+    doc.add_paragraph("He go to school.")
+    src = tmp_path / "retyped.docx"
+    doc.save(str(src))
+    reply = {
+        "edits": [
+            {"i": 0, "text": "Software Developer    Jan 2019 – Mar 2021"},
+            {"i": 1, "text": "Managed a team of 5 people."},
+            {"i": 2, "text": "He goes to school."},
+        ]
+    }
+    result = await fix_document(src, "fix the grammar", Model(reply))
+    assert result.changed == 1 and result.total == 3
+    assert result.changes == ["'go' → 'goes'"]
+    assert Document(str(result.path)).paragraphs[0].text == "Software Developer\tJan 2019 – Mar 2021"
+
+
+def _linked_notice(tmp_path: Path) -> Path:
+    doc = Document()
+    p = doc.add_paragraph()
+    p.add_run("For more information, please visit ")
+    link(p, "https://example.com", "our website")
+    p.add_run(" or contact us by email.")
+    q = doc.add_paragraph()
+    q.add_run("Deadline: ").bold = True
+    q.add_run("applications close on Friday.")
+    q.add_run().add_picture(picture(), width=Inches(1))
+    src = tmp_path / "notice.docx"
+    doc.save(str(src))
+    return src
+
+
+async def test_a_translated_line_with_a_link_is_never_left_in_the_first_language(tmp_path):
+    """Chinese has no spaces to line words up by, so the change "ran across the link": the
+    paragraph stayed in English in a file called "(translated by Pyxi)", and the job said
+    "translated 1 of 2". In a translation every word changes: the text goes in whole."""
+    src = _linked_notice(tmp_path)
+    chinese = ["欲了解更多信息，请访问我们的网站或通过电子邮件联系我们。", "截止日期：申请于周五截止。"]
+    model = Model({"edits": [{"i": i, "text": t} for i, t in enumerate(chinese)]})
+    result = await fix_document(src, "translate into Chinese", model, mode="translate")
+    out = Document(str(result.path))
+    assert [p.text for p in out.paragraphs] == chinese and result.changed == 2
+    [url] = out.paragraphs[0].hyperlinks  # still a link, on some of the words
+    assert url.text and url.text in chinese[0] and url.address == "https://example.com"
+    assert any("link" in n and "check it" in n for n in result.notes)
+    # The bold label is still a bold start, not the whole line; the picture is still there.
+    assert runs(out.paragraphs[1])[:2] == [("截止日期：", True), ("申请于周五截止。", None)]
+    assert len(out.inline_shapes) == 1
+
+    # A language with spaces: the words are placed one by one, and the link is still a link.
+    german = ["Weitere Informationen finden Sie auf unserer Website oder per E-Mail.", "Frist: Bewerbungen enden am Freitag."]
+    model = Model({"edits": [{"i": i, "text": t} for i, t in enumerate(german)]})
+    result = await fix_document(src, "translate into German", model, mode="translate")
+    out = Document(str(result.path))
+    assert [p.text for p in out.paragraphs] == german
+    assert out.paragraphs[0].hyperlinks[0].text == "unserer Website"
+    assert runs(out.paragraphs[1])[0] == ("Frist: ", True)
+    # A grammar fix is still careful: a change across the link's edge is not made.
+    result = await fix_document(src, "fix", Model(edit(0, "For more information, please contact us by email.")))
+    assert Document(str(result.path)).paragraphs[0].text.startswith("For more information, please visit our website")
+
+
 async def test_a_translation_that_skips_a_paragraph_is_asked_for_it_then_fails(tmp_path):
     src = _two_lines(tmp_path)
     model = Model(edit(0, "Hello world."), edit(1, "Thank you very much."))
@@ -541,9 +713,79 @@ async def test_a_pdfs_corrections_are_worked_out_when_the_model_does_not_list_th
     assert "Nothing to correct" not in said
 
 
+@pytest.mark.parametrize(
+    ("was", "asked", "saved", "left"),
+    [
+        # The same number, written another way: the fix is made.
+        ("This is my 2nd job since 2019.", "This is my second job since 2019.", None, ""),
+        ("The budget is 1,200 dollar.", "The budget is 1200 dollars.", None, ""),
+        ("It was a 12 % cut for 3 years experience.", "It was a 12% cut for three years of experience.", None, ""),
+        ("I worked their for 3 years and lead 2 team.", "I worked there for three years and led two teams.", None, ""),
+        ("The price are $1,200.00 for each units.", "The price is $1,200 for each unit.", None, ""),
+        ("Call me at 204 555 1234 anytime you wants.", "Call me at 204-555-1234 anytime you want.", None, ""),
+        ("On 05/03/2024 we was done.", "On 5/3/2024 we were done.", None, ""),
+        ("We has twenty-one staffs.", "We have 21 staff.", None, ""),
+        # A date in another form loses a digit ("3" becomes "March"): that one edit is left
+        # out, and the rest of the line is still fixed.
+        (
+            "We meet on 3/5/2024 at 10am.",
+            "We met on March 5, 2024 at 10 a.m.",
+            "We met on 3/5/2024 at 10 a.m.",
+            "Left '3/5/2024' as it was",
+        ),
+        # A number really changed is never made; the grammar beside it is.
+        (
+            "Mr. Rahman owe $1,200 by March 3, 2026.",
+            "Mr. Rahman owes $1,300 by March 5, 2026.",
+            "Mr. Rahman owes $1,200 by March 3, 2026.",
+            "Left '$1,200' as it was",
+        ),
+        (
+            "Their are 3 team working since 2019.",
+            "There are 4 teams working since 2019.",
+            "There are 3 teams working since 2019.",
+            "Left '3' as it was",
+        ),
+        # Nor is one brought in that wasn't there.
+        (
+            "The fee are 50 dollars.",
+            "The fee is 50 dollars, due in 2027.",
+            "The fee is 50 dollars.",
+            "'dollars, due in 2027.' would change a number",
+        ),
+        ("We was late again.", "We were late in 2024 again.", "We were late again.", "Did not add 'in 2024'"),
+    ],
+)
+async def test_a_number_fix_drops_only_the_edit_that_changes_the_number(
+    tmp_path, was, asked, saved, left
+):
+    """One changed number used to throw away the whole paragraph's fixes: "worked their for 3
+    years and lead 2 team" to "there ... three ... led two teams" was left untouched, their
+    and lead still wrong, and so was "2nd" to "second" and "$1,200.00" to "$1,200"."""
+    doc = Document()
+    doc.add_paragraph(was)
+    src = tmp_path / "numbers.docx"
+    doc.save(str(src))
+    result = await fix_document(src, "fix the grammar", Model(edit(0, asked)))
+    assert Document(str(result.path)).paragraphs[0].text == (saved or asked)
+    assert result.changed == 1
+    if left:
+        assert any(left in n for n in result.notes), result.notes
+    else:
+        assert result.notes == []
+
+
+def test_numbers_are_compared_by_what_they_are_worth():
+    same = docs._same_numbers
+    assert same("05/03/2024", "5/3/2024") and same("$1,200.00", "1200") and same("10am", "10 a.m.")
+    assert same("2nd", "second") and same("3 years", "three years") and same("one of them", "ones")
+    assert not same("$1,200", "$1,300") and not same("March 3", "March 5")
+    assert not same("3/5/2024", "March 5, 2024") and not same("3 years", "four years")
+
+
 async def test_a_grammar_fix_that_changes_a_number_is_not_made(tmp_path):
-    """A fix keeps amounts and dates. One that doesn't is dropped for that paragraph, with a
-    note, and the other paragraphs are still fixed."""
+    """A fix keeps amounts and dates. An edit that changes one is left out, with a note; the
+    grammar in the same paragraph, and the other paragraphs, are still fixed."""
     doc = Document()
     doc.add_paragraph("Mr. Rahman owe $1,200 by March 3, 2026.")
     doc.add_paragraph("He have paid $1,200.00 before.")
@@ -566,13 +808,15 @@ async def test_a_grammar_fix_that_changes_a_number_is_not_made(tmp_path):
     result = await fix_document(src, "fix the grammar only", model)
     out = [p.text for p in Document(str(result.path)).paragraphs]
     assert out == [
-        "Mr. Rahman owe $1,200 by March 3, 2026.",  # as it was
+        "Mr. Rahman owes $1,200 by March 3, 2026.",  # the verb fixed, the amount and date kept
         "He has paid $1,200.00 before.",
         "Call 555-0100 tomorrow.",  # the same digits, written differently: fine
     ]
-    assert result.changed == 2
-    assert any("changed a number" in n and "Mr. Rahman owe" in n for n in result.notes)
-    assert not any("1,300" in c for c in result.changes) and "'have' → 'has'" in result.changes
+    assert result.changed == 3
+    assert any("Left '$1,200' as it was" in n for n in result.notes)
+    assert any("Left '3,' as it was" in n for n in result.notes)
+    assert not any("1,300" in c for c in result.changes)
+    assert "'owe' → 'owes'" in result.changes and "'have' → 'has'" in result.changes
     # A rewrite may be asked to do more: this guard is the grammar fix's.
     result = await fix_document(src, "make it formal", Model(edit(2, "Call 555 0199.")), mode="rewrite")
     assert Document(str(result.path)).paragraphs[2].text == "Call 555 0199."

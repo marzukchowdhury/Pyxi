@@ -192,10 +192,11 @@ def window_to_read(
 ) -> tuple[int, tuple[int, int, int, int] | None]:
     """Which window a look at the screen reads, and (when it is the bare desktop) the screen
     it is read on. The request's own window; else the one under the mouse; else, with the
-    mouse over no window (the desktop, the taskbar), the top window on the mouse's screen,
-    or the desktop of that screen. Never the window in front when it is on another screen:
-    live, with three screens, the model was given the buttons of a window on the second
-    screen under a picture of the first. 0 when the window in front is the one to read."""
+    mouse over no window (the desktop, the taskbar), the window in front when it is on the
+    mouse's screen, else the top window on that screen, or its desktop. Never the window in
+    front when it is on another screen: live, with three screens, the model was given the
+    buttons of a window on the second screen under a picture of the first. 0 when the window
+    in front is the one to read."""
     if named:
         return named, None
     pos = cursor_pos() if follow_mouse else None
@@ -207,6 +208,15 @@ def window_to_read(
     screen = screen_at(*pos)
     if screen is None:
         return 0, None
+    # The one they are working in comes before whatever floats on top of it: a small
+    # always-on-top window (a video in a corner, a sticky note) is first in the pile, and
+    # with the mouse on the taskbar the model got its title and buttons under a picture of Word.
+    front = _front_window()
+    sx, sy, sw, sh = screen
+    for real, (left, top, right, bottom) in _real_windows():
+        cx, cy = (left + right) // 2, (top + bottom) // 2
+        if real == front and sx <= cx < sx + sw and sy <= cy < sy + sh:
+            return front, None
     hwnd = top_window_on(screen)
     if hwnd:
         return hwnd, None
@@ -404,6 +414,14 @@ def _walk(
             is_password = bool(control.GetPropertyValue(auto.PropertyId.IsPasswordProperty))
         except Exception:
             pass
+        # Guarded like every other property: read bare, one control that threw here took the
+        # whole walk with it, and the second try (read_foreground) walked it all again for
+        # the same end, twice as slow with nothing kept.
+        automation_id = ""
+        try:
+            automation_id = (control.AutomationId or "")[:80]
+        except Exception:
+            pass
         out.append(
             RawElement(
                 name=name[:160],
@@ -412,7 +430,7 @@ def _walk(
                 depth=depth,
                 parent=parent,
                 is_password=is_password,
-                automation_id=(control.AutomationId or "")[:80],
+                automation_id=automation_id,
             )
         )
         stack.append((depth, len(out) - 1))

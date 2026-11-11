@@ -15,6 +15,7 @@ from __future__ import annotations
 import difflib
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -69,18 +70,38 @@ _LANGUAGE = (
     r"mandarin|japanese|korean|russian|turkish|dutch|polish|vietnamese|tagalog|punjabi|tamil|farsi|"
     r"persian)"
 )
-_SUMMARY = r"(summary|gist|overview|digest|rundown|recap|key points|main points)"
+_SUMMARY = (
+    r"(summar(?:y|ies)|gist|overview|digest|rundown|recap|highlights|takeaways|key points|main points)"
+)
+_IT = r"(?:it|this|that|them|these|everything)"
 
-# What a Quill document job does, from the words of the task. These ask for it outright (a
-# verb): "summarize it", "give me the gist", "translate into French", "make it more formal".
+# What a Quill document job does, from the words of the task. These ask for it outright:
+# "summarize it", "give me the gist", "what does this say", "a summary of the errors" (the
+# noun where a sentence starts, but not the name of a part, "summary section", or a thing to
+# keep, "the gist should stay"); "translate into French", "French version", "make this
+# German"; "make it shorter", "cut this down", "correct the tone".
 MODES = {
     "summarize": r"\b(summari[sz]|sum (it |this |that |them )?up|tl;?dr|brief me|"
-    r"(give|get|write|send|make|create|prepare|need|want|like)\s+(me\s+|us\s+)?(an?|the|some)\s+"
-    rf"(\w+\s+){{0,2}}{_SUMMARY}\b)",
+    r"(give|get|write|send|make|create|prepare|need|want|like)\s+(me\s+|us\s+)?"
+    rf"(?:(?:an?|the|some)\s+(?:\w+\s+){{0,2}})?{_SUMMARY}\b|"
+    rf"what(?:'s| is| are)\s+(?:the\s+)?(?:\w+\s+)?{_SUMMARY}\b|"
+    r"what\s+do(?:es)?\s+(?:it|this|that|they|the\s+\w+)\s+say\b|"
+    r"what(?:'s| is)\s+(?:it|this|that|the)\b[^.?!]{0,30}?\babout\b|"
+    r"what(?:'s| is)\s+in\s+(?:it|this|that|the)\b|"
+    r"explain\s+(?:it|this|that|the)\b)|"
+    r"(?:^\W*|[.;:!?]\s*|\b(?:then|also|plus)\s+)(?:(?:an?|the|short|quick|brief|one[- ]page)\s+)*"
+    rf"{_SUMMARY}\b(?!\s+(?:section|part|paragraph|page|heading|title|should|must|is|was|stays?|remains?)\b)",
     "translate": rf"\b(translat|into {_LANGUAGE}\b|"
-    rf"(put|turn|render|convert|write)\s+(it|this|that|them|everything)\s+(in|to)\s+{_LANGUAGE}\b)",
-    "rewrite": r"\b(rewrite|re-write|rephrase|reword|simplif|shorten|make it (more|less|sound)|more (formal|"
-    r"professional|friendly|casual|concise)|friendlier|plain english)",
+    rf"(put|turn|render|convert|write|make|get|have|need|want|like)\s+{_IT}\s+(?:to be\s+)?"
+    rf"(?:in|into|to)\s+{_LANGUAGE}\b|"
+    rf"make\s+{_IT}\s+{_LANGUAGE}\b|convert\s+(?:{_IT}\s+)?(?:in)?to\s+{_LANGUAGE}\b|"
+    rf"{_LANGUAGE}\s+version\b|{_LANGUAGE}\s+to\s+{_LANGUAGE}\b)",
+    "rewrite": r"\b(rewrite|re-write|rephrase|reword|paraphras|simplif|shorten|condens|tighten|"
+    rf"cut\s+(?:{_IT}\s+)?down|"
+    r"make\s+(?:it|this|that|them|(?:my|the)\s+\w+)\s+(?:\w+\s+)?"
+    r"(?:shorter|longer|simpler|clearer|tighter|friendlier|more|less|sound)\b|"
+    r"more (formal|professional|friendly|casual|concise)|friendlier|plain english|"
+    r"(?:fix|correct|improve|change|adjust|soften)\s+(?:the|its|my)\s+tone\b)",
 }
 # These only name the thing ("the summary", "in French", "the tone"). They choose the job when
 # nothing in the task asks for a proofread, and never against one: "proofread the summary on
@@ -114,11 +135,27 @@ _VERBS = {
 }  # fmt: skip
 
 
+def _quoted(m: re.Match[str]) -> str:
+    """What stands in for a quoted string: nothing for a file's name ('Key Points.docx') or a
+    title, the words themselves when they are the instruction (The user said: "make it more
+    formal"), which taking every quote out had deleted."""
+    inner = m.group(0)[1:-1].strip()
+    low = inner.lower()
+    if _FILE_NAME.fullmatch(inner) or not (
+        _PROOFREAD.search(low) or any(re.search(p, low) for p in (*MODES.values(), *HINTS.values()))
+    ):
+        return " "
+    return f" {inner} "
+
+
 def _without_names(task: str) -> str:
-    """The task without the files it names: full paths, anything in quotes, and a name ending
-    in a document extension together with the capitalised words that lead up to it."""
-    task = _QUOTED.sub(" ", _FILE_PATH.sub(" ", task))
+    """The task without the files it names: full paths, a name or title in quotes, and a name
+    ending in a document extension together with the capitalised words that lead up to it."""
+    task = _QUOTED.sub(_quoted, _FILE_PATH.sub(" ", task))
     words = task.split()
+    # "Give Me A Summary Of Report.pdf": when every word has a capital, capitals say nothing
+    # about where the file's name starts, so only the last word of it goes.
+    titled = all(w[:1].isupper() or not w[:1].isalpha() for w in words)
     drop: set[int] = set()
     for k, word in enumerate(words):
         if not _FILE_NAME.fullmatch(word.strip(".,;:!?()")):
@@ -129,6 +166,7 @@ def _without_names(task: str) -> str:
         # of the task or of a sentence, and never the verb itself ("Summarize Report.pdf").
         while (
             j > 0
+            and not titled
             and (words[j][:1].isupper() or words[j][:1].isdigit() or words[j] in ("-", "&", "–"))
             and words[j].lower() not in _VERBS
             and not words[j - 1].endswith((".", "!", "?", ":", ";"))
@@ -402,6 +440,70 @@ def _patch(p: Any, new: str, *, keep_edges: bool = True) -> bool:
     return True
 
 
+# Scripts written without spaces between words: Thai, Lao, Burmese, Khmer, Japanese, Chinese.
+_NO_SPACES = re.compile(
+    "["
+    + "".join(
+        f"{chr(a)}-{chr(b)}"
+        for a, b in ((0x0E00, 0x0EFF), (0x1000, 0x109F), (0x1780, 0x17FF), (0x3040, 0x30FF), (0x3400, 0x9FFF))
+    )
+    + "]"
+)
+
+
+def _spaceless(text: str) -> bool:
+    """Is this mostly in a script with no spaces to line words up by?"""
+    letters = [c for c in text if c.isalnum()]
+    return sum(bool(_NO_SPACES.match(c)) for c in letters) * 3 > len(letters)
+
+
+def _replace_whole(p: Any, new: str) -> bool | None:
+    """Make a paragraph read ``new`` when every word of it has changed (a translation, a
+    rewrite) and the changes can't be placed one by one. The words go into the paragraph's
+    own runs, each run keeping its share of the line by position: a bold label at the start
+    is still a bold start, and a link is still a link, though it may sit on different words
+    than before (True says so). Pictures, tabs, breaks and fields all stay. None: there was
+    nowhere to put text, and nothing was changed.
+
+    Live in review: a paragraph with a link, translated into Chinese (no spaces to line words
+    up by), was refused by the patch and left in English in a "translated" file."""
+    atoms = _atoms(p)
+    plain = [x for x in atoms if x.plain]
+    if not plain:
+        return None
+    old = "".join(x.text for x in atoms)
+    new = old[: len(old) - len(old.lstrip())] + new.strip() + old[len(old.rstrip()) :]
+    total = sum(len(x.text) for x in plain) or 1
+    # Where a run may end: between words, or anywhere in a script written without spaces.
+    # After punctuation or a space is best ("Deadline:" in bold stays a whole label).
+    cuts, clean = [0], {0}
+    for k in range(1, len(new)):
+        inside_word = new[k - 1].isalnum() and new[k].isalnum()
+        if not new[k - 1].isalnum() and new[k].isalnum():
+            clean.add(k)
+        if not inside_word or _NO_SPACES.match(new[k - 1]) or _NO_SPACES.match(new[k]):
+            cuts.append(k)
+    cuts.append(len(new))
+    at, done = 0, 0
+    space = "{http://www.w3.org/XML/1998/namespace}space"
+    for n, x in enumerate(plain):
+        done += len(x.text)
+        want = len(new) * done / total
+        if n == len(plain) - 1:
+            end = len(new)
+        elif not x.text:
+            end = at
+        else:
+            ahead = [c for c in cuts if c >= at]
+            near = [c for c in ahead if c in clean and abs(c - want) <= 3]
+            end = min(near or ahead, key=lambda c: abs(c - want))
+        x.el.text = new[at:end]
+        x.el.set(space, "preserve")
+        at = end
+    zones = {id(x.zone) for x in plain}
+    return len(zones) > 1
+
+
 def _set_text(paragraph, text: str) -> None:
     """Make a paragraph read ``text``, keeping each run's formatting wherever the change can be
     placed (see ``_patch``). When it can't, the old way: its style and its first run's
@@ -441,8 +543,12 @@ def _chunks(texts: list[str]) -> list[list[int]]:
 
 
 def _parse(text: str) -> dict | None:
-    """The model's JSON, or None when there is none to read (cut off, or not JSON at all)."""
-    m = re.search(r"\{.*\}", text or "", re.S)
+    """The model's JSON. An answer in words, with no JSON in it ("Everything here is already
+    correct."), is no edits. None is JSON that can't be read: cut off, most often."""
+    text = text or ""
+    if "{" not in text:
+        return {}
+    m = re.search(r"\{.*\}", text, re.S)
     if not m:
         return None
     try:
@@ -452,10 +558,98 @@ def _parse(text: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _numbers(text: str) -> list[str]:
-    """The numbers in a piece of text, however they are grouped: "$1,200" and "1200" are the
-    same one, "March 3" and "March 5" are not."""
-    return sorted(re.findall(r"\d+", re.sub(r"(?<=\d)[,.](?=\d)", "", text)))
+_UNITS = [
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+    "nineteen",
+]  # fmt: skip
+_TENS = ["twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+_ORDINALS = [
+    "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth",
+    "tenth", "eleventh", "twelfth",
+]  # fmt: skip
+_NUMBER_WORDS: dict[str, float] = {
+    **{w: float(n) for n, w in enumerate(_UNITS)},
+    **{w: float(20 + 10 * n) for n, w in enumerate(_TENS)},
+    **{w: float(n) for n, w in enumerate(_ORDINALS, 1)},
+    "hundred": 100.0,
+    "thousand": 1000.0,
+}
+
+
+def _digit_numbers(text: str) -> Counter[float]:
+    """The numbers written in digits, by value: "$1,200.00", "1,200" and "1200" are one number,
+    "05" is 5, and "3/5/2024" is 3, 5 and 2024."""
+    found = re.findall(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?", text)
+    return Counter(float(n.replace(",", "")) for n in found)
+
+
+def _word_numbers(text: str) -> Counter[float]:
+    """The numbers written as words: "three", "second", "twenty-one"."""
+    low = text.lower()
+    tens = "|".join(_TENS)
+    out: Counter[float] = Counter()
+    for ten, unit in re.findall(rf"\b({tens})[- ]({'|'.join(_UNITS[1:10])})\b", low):
+        out[_NUMBER_WORDS[ten] + _NUMBER_WORDS[unit]] += 1
+    low = re.sub(rf"\b({tens})[- ]({'|'.join(_UNITS[1:10])})\b", " ", low)
+    out.update(_NUMBER_WORDS[w] for w in re.findall(r"[a-z]+", low) if w in _NUMBER_WORDS)
+    return out
+
+
+def _same_numbers(old: str, new: str) -> bool:
+    """Do two wordings say the same numbers? Compared by value, and a number spelt out counts
+    as that number ("2nd" and "second", "3 years" and "three years"). Words alone never fail
+    it: "one" and "second" are not always numbers."""
+    was, now = _digit_numbers(old), _digit_numbers(new)
+    if was == now:
+        return True
+    gone, came = was - now, now - was
+    words_was, words_now = _word_numbers(old), _word_numbers(new)
+    return not (gone - (words_now - words_was)) and not (came - (words_was - words_now))
+
+
+def _keep_numbers(old: str, new: str) -> tuple[str, list[str]]:
+    """``new`` without the edits that change a number, and a note for each one left out. The
+    rest of the paragraph's fixes are still made: "I worked their for 3 years, since 2019" to
+    "there for 4 years" keeps "their" to "there" and leaves the 3. (Dropping the paragraph's
+    every fix for one number left their/there wrong, and "2nd" to "second" undone.)"""
+    if _same_numbers(old, new):
+        return new, []
+    a, b = list(re.finditer(r"\S+", old)), list(re.finditer(r"\S+", new))
+    wa, wb = [m.group() for m in a], [m.group() for m in b]
+
+    def pieces(text: str, words: list[re.Match[str]], lo: int, hi: int) -> list[tuple[str, str]]:
+        """(word, the white space after it) for words lo to hi."""
+        ends = [m.start() for m in words[1:]] + [len(text)]
+        return [(words[k].group(), text[words[k].end() : ends[k]]) for k in range(lo, hi)]
+
+    out: list[tuple[str, str]] = []
+    notes: list[str] = []
+    matcher = difflib.SequenceMatcher(a=wa, b=wb, autojunk=False)
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        if op == "equal":
+            out += pieces(new, b, j1, j2)
+            continue
+        # Word for word where the counts match, so one changed number doesn't take the fix
+        # next to it ("owe $1,200" to "owes $1,300": "owes" is made, the amount is not).
+        if op == "replace" and i2 - i1 == j2 - j1:
+            spans = [((i1 + k, i1 + k + 1), (j1 + k, j1 + k + 1)) for k in range(i2 - i1)]
+        else:
+            spans = [((i1, i2), (j1, j2))]
+        for (x1, x2), (y1, y2) in spans:
+            was, now = " ".join(wa[x1:x2]), " ".join(wb[y1:y2])
+            if _same_numbers(was, now):
+                out += pieces(new, b, y1, y2)
+                continue
+            out += pieces(old, a, x1, x2)
+            if was and now:
+                notes.append(f"Left '{_clip(was)}' as it was: '{_clip(now)}' would change a number.")
+            elif was:
+                notes.append(f"Left '{_clip(was)}' in: taking it out would drop a number.")
+            else:
+                notes.append(f"Did not add '{_clip(now)}': it has a number that wasn't there.")
+    text = "".join(w + (gap or " ") for w, gap in out)
+    return text.strip(), notes
 
 
 def _has_words(text: str) -> bool:
@@ -490,9 +684,13 @@ async def fix_document(
     save a copy beside the original: "<name> (fixed by Pyxi)", "(translated by Pyxi)"...
 
     What the model sends back is checked before anything is saved. An answer that can't be
-    read is asked for again in two halves, then it is a failure, never a copy with nothing
-    done to it. A translation that skips paragraphs is a failure. And a grammar fix that
-    changes a number is not made: that paragraph stays as it was, with a note."""
+    read is asked for again in two halves; if that part still can't be read it is left as it
+    was, with a note, and the rest is saved (nothing readable at all is a failure, never a
+    copy with nothing done to it). A translation that skips paragraphs is a failure. And in a
+    grammar fix, an edit that changes a number is left out, with a note; the paragraph's other
+    fixes are still made."""
+    from pyxi.agents.pixel_common import word_text
+
     if path.suffix.lower() not in SUPPORTED:
         raise ValueError(f"I can work on {', '.join(sorted(SUPPORTED))} files, not {path.suffix}.")
     system = {"translate": TRANSLATOR, "rewrite": REWRITER}.get(mode, EDITOR)
@@ -506,12 +704,16 @@ async def fix_document(
     cost = 0.0
     notes: list[str] = []
     held: list[str] = []  # edits that were not made, and why: these notes come first
+    order = [i for chunk in _chunks(texts) for i in chunk]
+    lost: list[int] = []  # paragraphs whose answer couldn't be read, twice
+    read_some = False
     queue = [(chunk, False) for chunk in _chunks(texts)]
     while queue:
         chunk, second_try = queue.pop(0)
         # Two passes: edit with a checklist, then review the result for anything still wrong.
         current = {i: texts[i] for i in chunk}
         said: list[str] = []
+        unlisted: list[str] = []  # changes the model listed that would change a number
         answered: set[int] = set()
         unread = False
         for attempt in range(passes):
@@ -530,6 +732,7 @@ async def fix_document(
             if data is None:
                 unread = attempt == 0  # a review that can't be read leaves the first pass standing
                 break
+            read_some = True
             found = data.get("edits")
             for e in found if isinstance(found, list) else []:
                 try:
@@ -545,11 +748,11 @@ async def fix_document(
                 if (
                     mode == "fix"
                     and isinstance(c, dict)
-                    and _numbers(str(c.get("from", ""))) != _numbers(str(c.get("to", "")))
+                    and not _same_numbers(str(c.get("from", "")), str(c.get("to", "")))
                 ):
-                    held.append(
-                        f"Not made, because it would change a number: '{_clip(str(c.get('from', '')))}'"
-                        f" to '{_clip(str(c.get('to', '')))}'."
+                    unlisted.append(
+                        f"Left '{_clip(str(c.get('from', '')))}' as it was: "
+                        f"'{_clip(str(c.get('to', '')))}' would change a number."
                     )
                 elif _describe(c):
                     said.append(_describe(c))
@@ -560,29 +763,57 @@ async def fix_document(
                 half = len(chunk) // 2  # a shorter answer may fit where the long one was cut off
                 queue[:0] = [(chunk[:half], True), (chunk[half:], True)]
                 continue
-            raise RuntimeError(
-                f"The answer for {path.name} came back cut off, so nothing was saved. Ask again."
-            )
+            if mode == "translate":  # a translation with a part left out is not a translation
+                raise RuntimeError(
+                    f"The answer for {path.name} came back cut off, so nothing was saved. Ask again."
+                )
+            lost += chunk  # this part stays as it was, said in a note; the rest is still done
+            continue
         fresh: list[int] = []
-        left = 0  # paragraphs whose edit was not made
+        left = 0  # paragraphs with an edit that was not made
         for i in chunk:
-            if current[i].strip() == texts[i].strip():
+            new = current[i].strip()
+            if new == texts[i].strip():
                 continue
-            if mode == "fix" and _numbers(current[i]) != _numbers(texts[i]):
-                held.append(
-                    f"Left as it was, because the edit changed a number: '{_clip(texts[i].strip())}'"
-                )
-                left += 1
-                continue
-            if handle is not None and not _patch(handle[1][i], current[i]):
-                held.append(
-                    "Left as it was, because the change runs across a link or a field that can't "
-                    f"be edited safely: '{_clip(texts[i].strip())}'"
-                )
-                left += 1
-                continue
-            edits[i] = current[i]
+            if mode == "fix":
+                new, kept = _keep_numbers(texts[i].strip(), new)
+                held += kept
+                left += bool(kept)
+                if new == texts[i].strip():
+                    continue
+            if handle is not None:
+                el = handle[1][i]
+                # A translation into or out of a script without spaces has no words to line
+                # up: placed word by word, the whole line landed in the first run (all bold).
+                by_word = mode == "fix" or not (_spaceless(new) or _spaceless(texts[i]))
+                if not (by_word and _patch(el, new)):
+                    quoted = _clip(texts[i].strip())
+                    if mode == "fix":
+                        held.append(
+                            "Left as it was, because the change runs across a link or a field "
+                            f"that can't be edited safely: '{quoted}'"
+                        )
+                        left += 1
+                        continue
+                    # Every word has changed anyway: the text goes in whole.
+                    moved = _replace_whole(el, new)
+                    if moved is None:
+                        held.append(f"Left as it was, because it has no text to change: '{quoted}'")
+                        continue
+                    if moved:
+                        held.append(
+                            f"A link in this line may sit on different words now, check it: '{_clip(new)}'"
+                        )
+                new = word_text(el)  # what the paragraph reads now
+                if new == texts[i]:
+                    continue  # only retyped (a tab as spaces): nothing changed, so not counted
+            else:  # a line of text keeps its indent
+                was = texts[i]
+                new = was[: len(was) - len(was.lstrip())] + new + was[len(was.rstrip()) :]
+            edits[i] = new
             fresh.append(i)
+        if not left:
+            held += unlisted
         if mode == "translate":
             missing = [i for i in chunk if i not in answered and _has_words(texts[i])]
             if missing and not second_try:
@@ -592,13 +823,37 @@ async def fix_document(
                     f"The translation of {path.name} came back with {len(missing)} "
                     f"paragraph{'s' if len(missing) != 1 else ''} missing, so nothing was saved. Ask again."
                 )
-        if mode == "fix" and (not said or (left and path.suffix.lower() != ".pdf")):
+        if mode == "fix" and (not said or left):
             # The model changed paragraphs without saying what, or its list names an edit that
             # was not made: work the list out from the words. (A PDF's corrections are this
             # list; empty, the file said "Nothing to correct.")
             said = [c for i in fresh for c in _diff_changes(texts[i].strip(), edits[i].strip())]
         changes += said
 
+    if lost and not read_some:
+        raise RuntimeError(
+            f"The answer for {path.name} came back cut off, so nothing was saved. Ask again."
+        )
+    if lost:
+        # Said by where it starts and ends: "paragraphs 21 to 30" means little in Word.
+        place = {i: k for k, i in enumerate(order)}
+        lost.sort(key=place.__getitem__)
+        runs: list[list[int]] = []
+        for i in lost:
+            if runs and place[i] == place[runs[-1][-1]] + 1:
+                runs[-1].append(i)
+            else:
+                runs.append([i])
+        for run in runs:
+            n = len(run)
+            span = f"'{_clip(texts[run[0]].strip(), 40)}'" + (
+                f" to '{_clip(texts[run[-1]].strip(), 40)}'" if n > 1 else ""
+            )
+            held.append(
+                f"{n} paragraph{'s were' if n != 1 else ' was'} left as {'they were' if n != 1 else 'it was'}"
+                f", because the answer for {'them' if n != 1 else 'it'} couldn't be read: {span}. "
+                "Ask again for that part."
+            )
     notes = list(dict.fromkeys(held + notes))
     label = {"translate": "translated by Pyxi", "rewrite": "rewritten by Pyxi"}.get(mode, "fixed by Pyxi")
     listed = mode == "fix" and path.suffix.lower() == ".pdf"

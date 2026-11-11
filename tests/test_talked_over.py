@@ -333,7 +333,9 @@ async def test_a_sentence_that_stops_mid_way_waits_for_its_other_half(settings, 
     monkeypatch.setattr(brain_mod, "HALF_SAID_WAIT_S", 0.3)
     llm = Script([("say", {"text": "Both."})], [("say", {"text": "Half."})], [("say", {"text": "Whole."})])
     brain, _ = make_brain(settings, llm=llm)
-    heard = iter(["Can you open another tab on", "Chrome with YouTube in it.", "Open another tab on", "Turn it on."])
+    heard = iter(
+        ["Can you open another tab on", "Chrome with YouTube in it.", "Please open another tab on", "Turn it on.", "Turn it on"]
+    )
 
     async def transcribe(audio, language="en"):
         return next(heard), 0.1, "en"
@@ -348,7 +350,10 @@ async def test_a_sentence_that_stops_mid_way_waits_for_its_other_half(settings, 
     assert asked(llm) == "Can you open another tab on Chrome with YouTube in it."
     # They don't go on: the half is the request after all.
     await brain.hear(b"clip")
-    assert asked(llm) == "Open another tab on"
-    # A whole sentence that happens to end on such a word is not held up.
+    assert asked(llm) == "Please open another tab on"
+    # A whole sentence that happens to end on such a word is not held up, full stop or not.
     await brain.hear(b"clip")
     assert asked(llm) == "Turn it on."
+    started = asyncio.get_running_loop().time()
+    await brain.hear(b"clip")
+    assert asked(llm) == "Turn it on" and asyncio.get_running_loop().time() - started < 0.25

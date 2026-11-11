@@ -353,7 +353,9 @@ class Brain:
         # A sentence that stops mid-way ("Can you open another tab on"): they let go of the key
         # to think, and are about to go on. Live, Pyxi acted on the half at once. It waits a
         # moment, and when the key goes down again the rest is heard before anything is done.
-        if _HALF_SAID.search(text.strip()):
+        # (Five words or more: "turn it on", "zoom in" and "carry on" are whole requests,
+        # and a review found them waiting too whenever the listener left the full stop off.)
+        if len(text.split()) >= 5 and _HALF_SAID.search(text.strip()):
             presses = getattr(self, "_talk_presses", 0)
             for _ in range(int(HALF_SAID_WAIT_S / 0.05)):
                 await asyncio.sleep(0.05)
@@ -2065,9 +2067,12 @@ class Brain:
                 "Say carry on when you want the next step.",
             )
             return
-        if how in ("elsewhere", "moved"):
+        if how in ("elsewhere", "moved", "seen"):
             # Turns Pyxi starts by itself, with no step done in between: two at most. A third
-            # is Pyxi talking to someone who has gone their own way.
+            # is Pyxi talking to someone who has gone their own way. "The screen changed, so
+            # I think they did it" is Pyxi's own guess and counts like the others: left out,
+            # a row's hover tint started thirteen turns in forty seconds. Only a click on
+            # the mark or Done (or their own words) starts the count again.
             self._guide_autos = getattr(self, "_guide_autos", 0) + 1
             if self._guide_autos > 2:
                 await self._end_guide(
@@ -2109,7 +2114,13 @@ class Brain:
 
     async def _view_of(self, rect: tuple[int, int, int, int] | None) -> Image.Image | None:
         """What one part of the screen looks like now, to compare with how it looked: pixels
-        only, kept nowhere. Without Pyxi's own drawings in it, like every look Pyxi takes."""
+        only. Without Pyxi's own drawings in it, like every look Pyxi takes.
+
+        These are the raw pixels: a key or token on screen is in them (a look for the model
+        has it blacked out; that takes OCR). So a view is only ever compared with another
+        view taken the same way, held in memory until the next one, and never sent to a
+        model, written to disk or logged. Compared with a blacked-out look, every page with
+        a key on it "had changed", and a stray click there started a turn."""
         if rect is None:
             return None
         glance = getattr(self.screen, "glance", None)
@@ -2172,22 +2183,32 @@ class Brain:
         await self.say_line(line, record=False)
 
     STALE_LOOK_S = 2.0  # older than this, a look is checked again before anything is drawn on it
+    REREAD_KEEPS_S = 1.0  # ...and how long that second reading of the words is good for
 
     async def _text_now(self, ctx: ScreenContext) -> list[Any] | None:
         """The words on the screen ``ctx`` was a look at, read again now (pixels and OCR, no
         tree: a fraction of a second). None when it can't be read."""
+        # One read serves every mark of a reply: three marks were three reads of the whole
+        # screen, one after the other (155 ms each at 1080p, 630 ms at 4K), each blanking
+        # Pyxi's drawings when screen shares can see them.
+        kept = getattr(self, "_reread", None)
+        if kept is not None and kept[0] is ctx and time.monotonic() - kept[1] < self.REREAD_KEEPS_S:
+            return kept[2]
         reread = getattr(self.screen, "text_now", None)
         if reread is None:  # a screen that only looks whole
             fresh = await self.screen.capture(pixels=True)
-            return None if fresh.excluded or fresh.screenshot is None else list(fresh.text)
-        if not self.overlay_in_capture:
-            return await asyncio.to_thread(reread, ctx)
-        await self.hub.emit("capture_hide")  # Pyxi's own caption has the same words in it
-        await asyncio.sleep(0.09)
-        try:
-            return await asyncio.to_thread(reread, ctx)
-        finally:
-            await self.hub.emit("capture_show")
+            lines = None if fresh.excluded or fresh.screenshot is None else list(fresh.text)
+        elif not self.overlay_in_capture:
+            lines = await asyncio.to_thread(reread, ctx)
+        else:
+            await self.hub.emit("capture_hide")  # Pyxi's own caption has the same words in it
+            await asyncio.sleep(0.09)
+            try:
+                lines = await asyncio.to_thread(reread, ctx)
+            finally:
+                await self.hub.emit("capture_show")
+        self._reread = (ctx, time.monotonic(), lines)
+        return lines
 
     async def _as_it_is_now(
         self, ctx: ScreenContext, args: dict[str, Any], rect: tuple[int, int, int, int]
@@ -2241,6 +2262,11 @@ class Brain:
         def waiting() -> bool:
             return self._guide is guide and getattr(self, "_guide_advanced", None) is not guide
 
+        def changed(was: Image.Image, now: Image.Image) -> bool:
+            # For a scroll, only a scroll counts: a hovered row's tint, a tooltip or a video
+            # frame is a change too, and each one used to start a turn.
+            return view_scrolled(was, now) if guide.action == "scroll" else not _same_view(was, now)
+
         async def watch() -> None:
             await asyncio.sleep(1.2)  # the mark draws itself and the app settles
             while self._lock.locked() and waiting():
@@ -2270,7 +2296,7 @@ class Brain:
                     touched = False
                 looked = time.monotonic()
                 now = await self._view_of(view)
-                if now is None or _same_view(before, now):
+                if now is None or not changed(before, now):
                     continue
                 if age is None:  # no clock to go by: wait until it holds still
                     await asyncio.sleep(quiet)
@@ -3134,6 +3160,7 @@ class Brain:
                 for c in calls
             )
             pick_opened = answers.opened_note(self, calls) if opened else ""
+            second = _SECOND_PART.search(self._user_text or "")
             if (
                 opened
                 and all(c.name in ("say", "quick_action") for c in calls)
@@ -3142,6 +3169,7 @@ class Brain:
                 # was told to mark the pick on that page, whatever words asked for it.
                 and (
                     pick_opened
+                    or second
                     or (
                         not _JUST_OPEN.match(self._user_text or "")
                         and _WANTS_ANSWER.search(self._user_text or "")
@@ -3155,6 +3183,16 @@ class Brain:
                 needs_more = True
                 notes.append(
                     pick_opened
+                    # "Go to techlandbd.com and look for earphones": live, the site was opened,
+                    # the search forgotten, and they had to ask for it again.
+                    or (
+                        "It's open on their screen now (you're looking at it). That was only the "
+                        "first half of what they asked: do the rest on it now (use_tab when their "
+                        "browser is connected, else use_computer with the site's own search box "
+                        "or buttons). Don't open it again, and don't stop at having opened it."
+                        if second
+                        else ""
+                    )
                     or "It's open on their screen now (you're looking at it). Answer their question "
                     "from it: mark the best options with explain_on_screen and say your pick. "
                     "Don't open it again."
@@ -3392,7 +3430,7 @@ class Brain:
             if (
                 going is not None
                 and getattr(self, "_synthetic", False)
-                and getattr(self, "_guide_how", "") in ("elsewhere", "moved")
+                and getattr(self, "_guide_how", "") in ("elsewhere", "moved", "seen")
                 and going.label.lower() == label.lower()
                 and going.action == action
             ):
@@ -3442,9 +3480,12 @@ class Brain:
             )
             # How this part of the screen looks now, to tell later whether anything changed:
             # the window, or the whole picture when no window was read (its tree failed).
+            # Taken the way it will be taken again when they click (_view_of), not cut from
+            # the look the model got: that one has keys and tokens blacked out, the later one
+            # has not, so on a page showing a key every stray click "changed the screen".
             view = ctx.view_rect() if ctx else None
             self._guide_view = view
-            self._guide_glance = ((ctx.crop(view) if view else None) or ctx.screenshot) if ctx else None
+            self._guide_glance = await self._view_of(view)
             # What was open already: going to one of these later is leaving, a new one is not.
             self._guide_known = (
                 {h for h, _, _ in windows.open_windows(minimized=True)}
@@ -4604,7 +4645,7 @@ _CARRY_S = 90.0
 _LINK_TAIL = re.compile(
     r"\s*(?:Edited in Google \([^)]*\)|It's a new file in your Google Drive):\s*(?:https?://\S+\s*)+"
 )
-HALF_SAID_WAIT_S = 1.5  # how long a sentence that stops mid-way waits for its other half
+HALF_SAID_WAIT_S = 1.2  # how long a sentence that stops mid-way waits for its other half
 # Ends on a word that cannot end a request, with nothing to close the sentence.
 _HALF_SAID = re.compile(
     r"(?i)\b(?:on|in|to|at|of|for|with|from|into|onto|about|by|and|or|but|so|because|then|"
@@ -4693,6 +4734,11 @@ CAN_REFUSE = {
 }
 # "Find coffee near me": opening Maps isn't the answer, so Pyxi looks at what opened and
 # answers from it. "I said open Gmail, not GL" asks nothing: one model call, not two.
+# "Go there AND look for earphones": something to do on the page once it is open.
+_SECOND_PART = re.compile(
+    r"(?i)\b(?:and|then)\s+(?:then\s+)?(?:look for|look up|search|find|add|click|check|buy|"
+    r"order|book|play|sort|filter|type|fill|sign|log|pick|choose|select|scroll|download)\b"
+)
 _WANTS_ANSWER = re.compile(
     r"\b(find|best|which|what|where|who|when|how|show me|tell me|near me|nearby|cheapest|"
     r"compare|reviews?|open now|rating|price|look up|search|check)\b",
@@ -5106,6 +5152,69 @@ def _same_view(a: Image.Image, b: Image.Image) -> bool:
 
     size = (480, 270)
     return _same(a.convert("L").resize(size), b.convert("L").resize(size))
+
+
+def view_scrolled(before: Image.Image, after: Image.Image) -> bool:
+    """Did this part of the screen scroll (and not merely change)? `_same_view` calls six
+    pixels a change, which is right for "did that click do anything" and wrong here: a row's
+    hover tint, a tooltip or a video frame is a change, and each one started a turn. A scroll
+    is the same content moved: what changed runs through a good part of the view, top to
+    bottom, and sliding one picture along the other makes most of the difference go away.
+    A view that is mostly new (a page down, a jump to the end) counts too."""
+    import numpy as np
+
+    size = (320, 180)
+    a = np.asarray(before.convert("L").resize(size, Image.BOX), dtype=np.int16)
+    b = np.asarray(after.convert("L").resize(size, Image.BOX), dtype=np.int16)
+    moved = np.abs(a - b) > 20
+    share = float(moved.mean())
+    if share >= 0.25:
+        return True
+    if share < 0.004:
+        return False
+    for axis in (0, 1):  # up and down, then sideways
+        m = moved if axis == 0 else moved.T
+        lines = np.where(m.any(axis=1))[0]
+        lo, hi = int(lines[0]), int(lines[-1]) + 1
+        if hi - lo < 0.25 * m.shape[0]:
+            continue  # one row lit up, a tooltip: too little of the view for a scroll
+        bands = [m[i : i + 9].any() for i in range(lo, hi, 9)]
+        if sum(bands) < 0.7 * len(bands):
+            continue  # two spots far apart (the highlight went from one row to another)
+        across = np.where(m.any(axis=0))[0]
+        # The slide is tried line by line at (nearly) full size along the way it scrolls,
+        # so a move of any number of pixels lines up exactly; across, 32 strips will do.
+        x, y = (_strips(p, axis) for p in (before, after))
+        n, strips = x.shape
+        top, end = lo * n // m.shape[0], max(hi * n // m.shape[0], 1)
+        left = int(across[0]) * strips // m.shape[1]
+        right = max((int(across[-1]) + 1) * strips // m.shape[1], left + 1)
+        x, y = x[top:end, left:right], y[top:end, left:right]
+        still = float(np.abs(x - y).mean())
+        best = still
+        for d in range(1, int(len(x) * 0.8)):
+            best = min(
+                best,
+                float(np.abs(x[d:] - y[:-d]).mean()),
+                float(np.abs(x[:-d] - y[d:]).mean()),
+            )
+        if best < 0.4 * still:
+            return True
+    return False
+
+
+def _strips(picture: Image.Image, axis: int) -> Any:
+    """A picture as lines of 32 grey strips: its rows (axis 0) or its columns (axis 1), at
+    full size along that way (halved, and halved again, past about a thousand lines)."""
+    import numpy as np
+
+    grey = picture.convert("L")
+    w, h = grey.size
+    lines = h if axis == 0 else w
+    lines //= -(-lines // 1100)  # a whole-number step down, so lines stay lines
+    small = grey.resize((32, lines) if axis == 0 else (lines, 32), Image.BOX)
+    out = np.asarray(small, dtype=np.int16)
+    return out if axis == 0 else out.T
 
 
 def ctypes_foreground() -> int:

@@ -148,6 +148,45 @@ def _shift_text(formula: str, owner: str, moved: str, axis: str, at: int, delta:
     return "=" + "".join(t.value for t in tokens) if changed else formula
 
 
+def _reads(
+    formula: Any, owner: str, moved: str, axis: str, lo: int, hi: int, own: int | None = None
+) -> bool:
+    """Does this formula (written on sheet ``owner``) read rows or columns ``lo`` to ``hi`` of
+    sheet ``moved``? Then what it came to before those were deleted or reordered may no
+    longer hold. A reference to just ``own`` (the formula's own row, which moves with it)
+    doesn't count, and neither does a range that takes in all of ``lo`` to ``hi`` when rows
+    were only reordered (a total is the same whatever the order)."""
+    from openpyxl.formula.tokenizer import Token, Tokenizer
+
+    try:
+        tokens = Tokenizer(str(formula)).items
+    except Exception:
+        return True
+    for t in tokens:
+        if t.type != Token.OPERAND or t.subtype != Token.RANGE:
+            continue
+        prefix, bang, ref = t.value.rpartition("!")
+        if (prefix.strip("'").replace("''", "'") if bang else owner) != moved:
+            continue
+        places = []
+        for part in ref.split(":"):
+            if m := _CELL.fullmatch(part):
+                places.append(int(m.group(4)) if axis == "row" else col_number(m.group(2)))
+            elif axis == "col" and (m := _COLS.fullmatch(part)):
+                places.append(col_number(m.group(2)))
+            elif axis == "row" and (m := _ROWS.fullmatch(part)):
+                places.append(int(m.group(2)))
+            else:  # a whole column, a name, a table: it may well
+                return True
+        first, last = min(places), max(places)
+        if last < lo or first > hi or (own is not None and first == last == own):
+            continue
+        if own is not None and first <= lo and last >= hi:
+            continue
+        return True
+    return False
+
+
 def shift_formulas(wb, ws, axis: str, at: int, delta: int) -> None:
     """After rows or columns were inserted or deleted on ``ws``: every formula in the workbook
     that points at cells which moved now points at where they went. (openpyxl moves the cells
@@ -437,15 +476,24 @@ class WorkbookExtras:
             r: [(ws.cell(r, c).value, copy(ws.cell(r, c)._style)) for c in range(1, width + 1)]
             for r in rows
         }
-        known: dict[tuple[int, int], Any] = {}  # what each formula came to, before it moves
-        for r in rows:
-            for c, (v, _) in enumerate(saved[r], 1):
-                if isinstance(v, str) and v.startswith("="):
-                    try:
-                        known[r, c] = self.result(ws, r, c, work_out=False)
-                    except LedgerError:
-                        pass
-        carried: dict[tuple[int, int], tuple[str, Any]] = {}
+        # What each formula on the sheet came to, before its row moves. A formula that reads
+        # only its own row comes to the same in its new place; one that reads other rows of
+        # the block (a running total) doesn't, and neither does one outside the block that
+        # reads a single row of it. A total over the whole block is unchanged.
+        known = {
+            at: v
+            for at, v in self._results(ws).items()
+            if not _reads(
+                ws.cell(*at).value,
+                ws.title,
+                ws.title,
+                "row",
+                rows[0],
+                rows[-1],
+                own=at[0] if rows[0] <= at[0] <= rows[-1] and at[1] <= width else 0,
+            )
+        }
+        to = dict(zip(order, rows, strict=True))  # where each row goes
         for dest, src in zip(rows, order, strict=True):
             for c, (v, style) in enumerate(saved[src], 1):
                 cell = ws.cell(dest, c)
@@ -454,13 +502,10 @@ class WorkbookExtras:
                     v = Translator(v, origin=origin).translate_formula(f"{col_letter(c)}{dest}")
                 cell.value = v
                 cell._style = style
-                if (src, c) in known:
-                    carried[dest, c] = (v, known[src, c])
-        # Excel's stored results belong to the rows as they were: only the ones that just
-        # moved with their rows are still known (so a second sort, or a look for duplicates,
-        # in the same job still has them).
-        self._moved.add(id(ws))
-        self._carried[id(ws)] = carried
+        # Excel's stored results belong to the rows as they were: the ones that moved with
+        # their rows go with them (so a second sort, or a look for duplicates, in the same
+        # job still has them).
+        self._carry(ws, known, lambda r, c: (to[r], c) if r in to and c <= width else (r, c))
         names = " then ".join(str(op[k]) for k in ("by", "then_by") if op.get(k) not in (None, ""))
         return f"Sorted {ws.title} by {names}, {'largest' if keys[0][1] else 'smallest'} first"
 
@@ -502,6 +547,18 @@ class WorkbookExtras:
         colour rules, dropdowns, the filter, tables and charts."""
         axis = "col" if columns else "row"
         edge, delta = (at, count) if count > 0 else (at - count, count)
+        # What every formula in the workbook is known to come to, to go with the cells that
+        # move. Without this, a sort by a formula column after a title row went in was
+        # refused even on a file Excel had calculated. A formula that read what is being
+        # deleted is not kept: its total is a different number now.
+        known = {}
+        for sheet in self.wb.worksheets:
+            known[id(sheet)] = {
+                cell: v
+                for cell, v in self._results(sheet).items()
+                if count > 0
+                or not _reads(sheet.cell(*cell).value, sheet.title, ws.title, axis, at, edge - 1)
+            }
         # Merged ranges are taken off first and put back where they belong: openpyxl would
         # leave them covering whatever slid into their old place.
         merged = [str(m) for m in ws.merged_cells.ranges]
@@ -518,8 +575,40 @@ class WorkbookExtras:
                 ws.merge_cells(new)
         shift_formulas(self.wb, ws, axis, edge, delta)
         shift_ranges(self.wb, ws, axis, edge, delta)
-        self._moved.add(id(ws))  # Excel's stored results belong to the rows as they were
-        self._carried.pop(id(ws), None)
+
+        def moved_to(r: int, c: int) -> tuple[int, int] | None:
+            n = c if columns else r
+            if count < 0 and at <= n < edge:
+                return None  # the cell itself went
+            n = n + delta if n >= edge else n
+            return (r, n) if columns else (n, c)
+
+        for sheet in self.wb.worksheets:
+            self._carry(sheet, known[id(sheet)], moved_to if sheet is ws else lambda r, c: (r, c))
+
+    def _results(self, ws) -> dict[tuple[int, int], Any]:
+        """What each formula on a sheet is known to come to right now, by cell: stored by
+        Excel, carried along by an earlier move, or worked out a moment ago."""
+        out = {}
+        for at, cell in list(ws._cells.items()):
+            if cell.data_type == "f" and isinstance(cell.value, str):
+                try:
+                    out[at] = self.result(ws, at[0], at[1], work_out=False)
+                except LedgerError:
+                    pass
+        return out
+
+    def _carry(self, ws, known: dict[tuple[int, int], Any], where) -> None:
+        """After cells moved on a sheet: Excel's stored results no longer line up with it, and
+        what is still known is these results, at the cells' new places (``where(r, c)``)."""
+        carried = {}
+        for (r, c), value in known.items():
+            new = where(r, c)
+            text = ws.cell(*new).value if new else None
+            if isinstance(text, str) and text.startswith("="):
+                carried[new] = (text, value)
+        self._moved.add(id(ws))
+        self._carried[id(ws)] = carried
 
     def _insert(self, op: dict[str, Any], columns: bool) -> str:
         ws = self.sheet(op.get("sheet"))
@@ -828,10 +917,30 @@ class WorkbookExtras:
             if op.get("columns")
             else list(range(1, width + 1))
         )
+        from openpyxl.formula.translate import Translator
+
+        def part(r: int, c: int) -> Any:
+            v = ws.cell(r, c).value
+            if not (isinstance(v, str) and v.startswith("=")):
+                return str(v or "").strip().lower()
+            try:
+                return str(self.result(ws, r, c) or "").strip().lower()
+            except LedgerError:
+                # A formula nobody has calculated. Named as a column to compare by, its
+                # result is what's asked for and isn't known. Among all the columns, two
+                # rows are the same when their other cells are and the formula is the same
+                # one (read as from its own row), which is how it used to be counted.
+                if op.get("columns"):
+                    raise
+                at = f"{col_letter(c)}{r}"
+                return ("=", Translator(v, origin=at).translate_formula(f"{col_letter(c)}{head + 1}"))
+
         seen: set[tuple] = set()
         gone = []
         for r in range(head + 1, last + 1):
-            key = tuple(str(self.result(ws, r, c) or "").strip().lower() for c in cols)
+            key = tuple(part(r, c) for c in cols)
+            if all(isinstance(k, tuple) for k in key):  # nothing but formulas to go by
+                self.result(ws, r, cols[0])
             if key in seen:
                 gone.append(r)
             seen.add(key)

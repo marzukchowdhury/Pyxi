@@ -34,19 +34,26 @@ async def test_one_ordinary_word_on_a_screen_is_not_found_it(settings, monkeypat
 
 
 def test_what_a_screen_must_have_on_it(settings, tmp_path):
-    """The words for what kind of thing it was don't have to be on it; the rest do: all of
-    one or two, at least half of more."""
+    """The words for what kind of thing it was don't have to be on it; of the rest, one has
+    to be, at least half of three or more, and of two, both or one that tells."""
     assert trace.named(["pricing", "page"]) == ["pricing"]
     assert trace.named(["page"]) == ["page"]  # nothing else to go by
     assert trace.named(["ab", "李雷"]) == ["李雷"]
-    assert [trace.enough(w, h) for w, h in ((1, 1), (2, 1), (2, 2), (3, 1), (3, 2), (4, 2))] == [
-        True,
-        False,
-        True,
-        False,
-        True,
-        True,
+    seen, heading = "pricing | acme analytics chrome starter talk to sales", "pricing | acme analytics"
+    on = [
+        trace.on_it(want, seen, heading)
+        for want in (
+            ["pricing"],
+            ["zephyr"],
+            ["acme", "pricing"],
+            ["acme", "zephyr"],  # one of two, in the title, and it tells
+            ["starter", "zephyr"],  # one of two, but only somewhere on the page
+            ["acme", "zephyr", "invoice"],  # one of three
+            ["acme", "starter", "zephyr"],  # two of three
+            ["acme", "sales", "zephyr", "invoice"],  # two of four
+        )
     ]
+    assert on == [1, 0, 2, 1, 0, 0, 2, 2]
     from pyxi.memory.spatial import SpatialMemory
 
     spatial = SpatialMemory(tmp_path / "s.db")
@@ -57,7 +64,49 @@ def test_what_a_screen_must_have_on_it(settings, tmp_path):
     # Two of the three words are in what was on the screen (not all in its title).
     [hit] = trace.from_screen(spatial, ["acme", "starter", "zephyr"], None)
     assert hit.title == "Pricing | Acme Analytics"
-    assert trace.from_screen(spatial, ["acme", "zephyr"], None) == []  # one of two is not it
+    assert trace.from_screen(spatial, ["starter", "zephyr"], None) == []  # one of two, off the title
+
+
+def test_a_word_of_their_own_beside_the_windows_word_still_finds_it(tmp_path):
+    """Review: asking for both of two words lost what people really say. "That stripe
+    dashboard" (the window is "Payments - Stripe"), "that sourdough recipe video", "the
+    kitchenaid blender" (it was a mixer) and "the budget spreadsheet with Q3 numbers" (q3
+    was dropped as too short) all became "I couldn't find it"."""
+    from pyxi.memory.spatial import SpatialMemory
+
+    spatial = SpatialMemory(tmp_path / "s.db")
+    for title, app, names, hour in (
+        ("Payments - Stripe - Google Chrome", "chrome.exe", ["Payments", "Balances"], 9),
+        ("KitchenAid Artisan Stand Mixer - Amazon.ca - Google Chrome", "chrome.exe", ["Add to Cart"], 10),
+        ("Q3 numbers.xlsx - Excel", "excel.exe", ["Revenue", "Costs", "Margin"], 11),
+        ("How to Make Sourdough Bread - YouTube - Google Chrome", "chrome.exe", ["Subscribe"], 12),
+        ("Wikipedia, the free encyclopedia - Google Chrome", "chrome.exe", ["Main Page", "Log in"], 13),
+    ):  # fmt: skip
+        spatial.record(screen(title, app, names, at(11, 5, hour)))
+
+    def found(said: str) -> list[str]:
+        return [h.title for h in trace.from_screen(spatial, trace.words(said), None)]
+
+    assert found("that stripe dashboard") == ["Payments - Stripe"]
+    assert found("that sourdough recipe video") == ["How to Make Sourdough Bread - YouTube"]
+    assert found("the kitchenaid blender") == ["KitchenAid Artisan Stand Mixer - Amazon.ca"]
+    assert trace.named(trace.words("the budget spreadsheet with Q3 numbers")) == [
+        "budget",
+        "q3",
+        "numbers",
+    ]
+    assert found("the budget spreadsheet with Q3 numbers") == ["Q3 numbers.xlsx"]
+    # A scrap with a digit counts as a word of its own, not as letters inside another.
+    assert trace.on_it(["q3", "forecast"], "q3 numbers.xlsx excel", "q3 numbers.xlsx excel") == 1
+    assert trace.on_it(["q3", "forecast"], "faq32 answers", "faq32 answers") == 0
+    # What the stricter rule was for still holds: one everyday word doesn't find a screen,
+    assert found("the Zephyr invoice pricing page") == []
+    assert found("the zephyr main page") == []  # "main" is on it, and on everything
+    assert found("that google invoice") == []  # every Chrome window says Google Chrome
+    assert found("the free zephyr") == []  # in the title, but an everyday word
+    assert not trace.telling("main") and not trace.telling("tax") and trace.telling("q3")
+    # and a word that is only somewhere on the page, not in its title, isn't enough of two.
+    assert found("the balances zephyr") == []
 
 
 async def test_a_window_looked_at_five_times_is_one_hit(settings, monkeypatch):

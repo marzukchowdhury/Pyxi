@@ -15,14 +15,16 @@ import time
 
 import pytest
 from otto.types import LLMResponse, ToolCall, Usage
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from conftest import FakeScreen, fake_context
 from pyxi import windows
 from pyxi.agents.jobs import Job
-from pyxi.companion.brain import Brain, card_talks, opener_only
+from pyxi.companion.brain import Brain, card_talks, opener_only, view_scrolled
 from pyxi.companion.notes import guide_left, scroll_area, where_they_were
 from pyxi.screen import ScreenContext, UIElement, WindowInfo
+from pyxi.screen.context import ScreenReader
+from pyxi.screen.ocr import TextLine
 from test_answer_card import settle
 from test_brain_and_server import make_brain
 from test_streaming import Streamed
@@ -351,12 +353,14 @@ async def test_it_looks_only_once_they_have_touched_something_and_gone_quiet(set
     brain.screen.capture = counted
     await brain.turn("guide me there")
     await asyncio.sleep(2.6)
-    assert len(looks) == 2  # the turn's own look, and how the window looked when the mark went up
+    # The turn's own look, how the window looked as the mark went up (for a click off the
+    # mark), and how it looked once the mark had settled (for this).
+    assert len(looks) == 3
     idle["s"] = 0.1  # they are at the keyboard
     screen_changes(brain)
     brain.screen.capture = counted
     await asyncio.sleep(1.4)
-    assert len(looks) == 2 and len(llm.prompts) == 1  # not while they are still at it
+    assert len(looks) == 3 and len(llm.prompts) == 1  # not while they are still at it
     idle["s"] = 1.5  # and now they have stopped
     for _ in range(60):
         if len(llm.prompts) > 1:
@@ -364,6 +368,186 @@ async def test_it_looks_only_once_they_have_touched_something_and_gone_quiet(set
         await asyncio.sleep(0.1)
     assert "so I think I did it" in llm.prompts[1]
     await settle(brain)
+    quiet(brain)
+
+
+def drawn_list(scroll: int = 0, lit: int | None = None, tint: int = 60, tip: bool = False) -> Image.Image:
+    """A made-up settings window: a side list that stays put, and rows of "words" (bars of
+    different lengths) that scroll. ``lit``: the row the mouse rests on."""
+    img = Image.new("RGB", (1600, 900), (32, 32, 32))
+    d = ImageDraw.Draw(img)
+    for i in range(12):
+        d.rectangle([40, 120 + 36 * i, 40 + 60 + 13 * (i % 5), 132 + 36 * i], fill=(220, 220, 220))
+    for i in range(24):
+        y = 150 + 72 * i - scroll
+        if y < 100 or y > 900:
+            continue
+        shade = 44 + (tint if lit == i else 0)
+        d.rectangle([420, y, 1400, y + 66], fill=(shade, shade, shade))
+        d.rectangle([470, y + 14, 470 + 90 + 37 * (i * 7 % 6), y + 28], fill=(250, 250, 250))
+        d.rectangle([470, y + 40, 470 + 200 + 53 * (i * 5 % 7), y + 50], fill=(170, 170, 170))
+    if tip:
+        d.rectangle([800, 400, 980, 428], fill=(70, 70, 70))
+        d.rectangle([808, 408, 960, 420], fill=(240, 240, 240))
+    return img
+
+
+def test_a_hover_tint_a_tooltip_or_a_video_frame_is_not_a_scroll():
+    """`_same_view` calls six pixels of 480 x 270 a change. For a scroll step that made a
+    row's hover colour "the screen changed, so I think I did it": thirteen turns by itself
+    in forty seconds, and "Scroll down to Recovery." fourteen times."""
+    plain = drawn_list()
+    assert not view_scrolled(plain, drawn_list())
+    assert not view_scrolled(plain, drawn_list(lit=3))  # the row under the mouse lights up
+    assert not view_scrolled(plain, drawn_list(lit=3, tint=12))
+    assert not view_scrolled(drawn_list(lit=1), drawn_list(lit=2))  # the mouse moved a row down
+    assert not view_scrolled(drawn_list(lit=0), drawn_list(lit=8))  # ...or to the far end
+    assert not view_scrolled(plain, drawn_list(tip=True))
+    noise = drawn_list()
+    ImageDraw.Draw(noise).rectangle([700, 300, 1000, 500], fill=(200, 60, 60))  # a video frame
+    assert not view_scrolled(plain, noise)
+    # A scroll is the same content, moved: by a wheel notch, a few pixels, or most of a page.
+    for by in (144, 37, 100, 360):
+        assert view_scrolled(plain, drawn_list(by)), by
+    assert view_scrolled(plain, Image.new("RGB", (1600, 900), (250, 250, 250)))  # a jump: all new
+    sideways = [p.rotate(90, expand=True) for p in (plain, drawn_list(144))]
+    assert view_scrolled(*sideways)
+
+
+async def test_resting_the_mouse_on_a_row_does_not_start_a_turn(settings):
+    scroll = [("say", {"text": "Scroll down to Recovery."}), ("guide", {"goal": GOAL, "action": "scroll", "direction": "down", "label": "Recovery"})]
+    llm = Scripted(default=scroll)
+    brain, rec = make_brain(settings, llm=llm)
+    brain.screen.foreground_title = lambda: "Settings - App"
+    brain.screen.ctx.screenshot = drawn_list()
+    idle = {"s": 30.0}
+    brain.screen.input_idle_s = lambda: idle["s"]
+    await brain.turn("guide me there")
+    await asyncio.sleep(1.8)
+    for row in (2, 5):  # they move the mouse and rest it, twice: a row lights up each time
+        idle["s"] = 0.1
+        now = fake_context()
+        now.screenshot = drawn_list(lit=row)
+        brain.screen.ctx = now
+        await asyncio.sleep(0.8)
+        idle["s"] = 1.5
+        await asyncio.sleep(1.6)
+    assert len(llm.prompts) == 1 and brain._guide is not None and brain._guide.step == 1
+    assert sum("Scroll down" in s for s in said(rec)) == 1
+    # And when they do scroll, it is seen.
+    idle["s"] = 0.1
+    now = fake_context()
+    now.screenshot = drawn_list(144)
+    brain.screen.ctx = now
+    await asyncio.sleep(0.8)
+    idle["s"] = 1.5
+    for _ in range(60):
+        if len(llm.prompts) > 1:
+            break
+        await asyncio.sleep(0.1)
+    assert len(llm.prompts) > 1 and "so I think I did it" in llm.prompts[1]
+    await settle(brain)
+    quiet(brain)
+
+
+async def test_a_turn_from_seeing_the_screen_change_counts_like_any_other_by_itself(settings):
+    """"Seen" set the count of automatic turns back to nought, so there was no end to them."""
+    labels = iter(["Dark mode", "Settings", "General", "Export"])
+    ids = {"Dark mode": 3, "Settings": 1, "General": 2, "Export": 4}
+
+    class Wandering(Scripted):
+        async def complete(self, **kw):
+            label = next(labels)
+            self.default = step(label, ids[label])
+            return await super().complete(**kw)
+
+    llm = Wandering()
+    brain, rec = make_brain(settings, llm=llm)
+    brain.screen.foreground_title = lambda: "Settings - App"
+    await brain.turn("guide me there")
+    await brain.guide_clicked("seen")
+    screen_changes(brain, 60)
+    await brain.guide_clicked("elsewhere")
+    assert brain._guide_autos == 2 and len(llm.prompts) == 3
+    await brain.guide_clicked("seen")  # the third in a row: not taken
+    assert len(llm.prompts) == 3 and brain._guide is None
+    assert "I've lost track of where you are" in " ".join(said(rec))
+
+
+async def test_the_same_step_after_only_seeing_a_change_is_refused(settings):
+    """It was left out of the refusal, so "Scroll down to Recovery." came again and again."""
+    scroll = [("say", {"text": "Scroll down to Recovery."}), ("guide", {"goal": GOAL, "action": "scroll", "direction": "down", "label": "Recovery"})]
+    llm = Scripted(scroll, scroll, [("say", {"text": "Still below. Want to keep going?"})])
+    brain, rec = make_brain(settings, llm=llm)
+    brain.screen.foreground_title = lambda: "Settings - App"
+    await brain.turn("guide me there")
+    await brain.guide_clicked("seen")
+    assert "'Recovery' is the step you just gave" in llm.prompts[2]
+    assert [g["step"] for g in rec.of("guide") if g["active"]] == [1]
+    assert brain._guide is None and rec.of("guide")[-1]["active"] is False
+
+
+# ------------------------------------------------------------------ a key on screen
+KEY = "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz012345"
+
+
+def page_with_a_key() -> Image.Image:
+    img = Image.new("RGB", (1600, 900), (240, 240, 250))
+    d = ImageDraw.Draw(img)
+    for i in range(0, 700, 9):  # stands in for the key's letters
+        d.rectangle([300 + i, 304, 304 + i, 320], fill=(30, 30, 30))
+    return img
+
+
+class KeyOnScreen(FakeScreen):
+    """Does what ScreenReader does: a look for the model has secrets blacked out of its
+    pixels; a glance (to see whether anything changed) is the pixels as they are."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.glances = 0
+        self.ctx = self.look()
+
+    def look(self) -> ScreenContext:
+        ctx = fake_context()
+        ctx.screenshot = page_with_a_key()
+        ctx.text = [TextLine(KEY, (300, 300, 700, 24), [(KEY, (300, 300, 700, 24))], id=50)]
+        ctx.text = ScreenReader._hide_secrets(ctx.screenshot, ctx.origin, ctx.elements, ctx.text)
+        return ctx
+
+    async def capture(self, pixels: bool = True, **_) -> ScreenContext:
+        self.ctx = self.look()
+        return self.ctx
+
+    def glance(self, rect):
+        self.glances += 1
+        x, y, w, h = rect
+        return page_with_a_key().crop((x, y, x + w, y + h))
+
+
+async def test_a_stray_click_on_a_page_showing_a_key_starts_nothing(settings):
+    """How the window looked was cut from the look the model got (the key blacked out) and
+    compared with a plain glance (the key in it): on such a page every click that changed
+    nothing "changed the screen", and Pyxi started a turn."""
+    llm = Scripted(default=step())
+    brain, _ = make_brain(settings, llm=llm)
+    brain.screen = KeyOnScreen()
+    await brain.turn("guide me there")
+    assert brain.screen.glances == 1  # how it looks, taken the way it will be taken again
+    for _ in range(3):
+        await brain.guide_clicked("elsewhere")  # a click that changed nothing at all
+    assert len(llm.prompts) == 1 and brain._guide is not None and brain._guide.step == 1
+    assert brain.screen.glances == 4
+    # The glance has the key in it, so it goes nowhere: the model got the look with the key
+    # blacked out and nothing else, and nothing of the glance is kept with the turn.
+    assert len(brain._images) == 1
+    turn = brain.turns.recent(1)[0]
+    assert "sk-proj" not in str(turn["screen_text"]) and "sk-proj" not in str(turn["tool_calls"])
+    # A click that does change the page is still heard.
+    brain.screen.glance = lambda rect: Image.new("RGB", (rect[2], rect[3]), (20, 20, 20))
+    llm.default = step("Dark mode", 3)
+    await brain.guide_clicked("elsewhere")
+    assert len(llm.prompts) == 2
     quiet(brain)
 
 

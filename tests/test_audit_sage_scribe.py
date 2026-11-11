@@ -83,6 +83,97 @@ def test_which_deck_they_mean(settings):
     )
 
 
+def biology_decks(settings) -> None:
+    sage.save_deck(
+        settings.data_dir,
+        sage.Deck(
+            "The Cardiovascular System",
+            "C:/notes/Lecture 5.pptx",
+            [
+                sage.Card("How many chambers does the heart have?", "Four."),
+                sage.Card("What does the mitral valve stop?", "Blood flowing back in the heart."),
+            ],
+        ),
+    )
+    sage.save_deck(
+        settings.data_dir,
+        sage.Deck(
+            "Cell Structure and Function",
+            "C:/notes/BIO101 week3.pdf",
+            [
+                sage.Card("Which organelle makes ATP?", "The mitochondrion."),
+                sage.Card("What do ribosomes make?", "Proteins."),
+            ],
+        ),
+    )
+
+
+def test_their_own_deck_is_found_by_another_form_of_the_word(settings):
+    """Review: with a deck called "Cell Structure and Function" from BIO101 week3.pdf,
+    "quiz me on cells" (and on biology, organelles, the heart) matched nothing, so their own
+    notes were passed over and a deck was made up from general knowledge."""
+    biology_decks(settings)
+    cells, heart = "Cell Structure and Function", "The Cardiovascular System"
+    for said, title in (
+        ("cells", cells),  # the plural of a word in the title
+        ("cell", cells),
+        ("biology", cells),  # the subject the course code BIO101 stands for
+        ("my biology notes", cells),
+        ("organelles", cells),  # what its cards are about
+        ("ribosome", cells),
+        ("the heart", heart),  # in its cards, in neither its title nor its file
+        ("cardio", heart),
+        ("the cardiovascular stuff", heart),
+        ("the circulatory system", heart),
+        ("lecture 5", heart),
+        ("week 3", cells),
+    ):
+        found = sage.find_deck(settings.data_dir, said, strict=True)
+        assert found is not None and found.title == title, said
+    # Nothing of theirs is about these: no deck, so one can be made (and said to be made up).
+    for said in ("anatomy", "the french revolution", "history", "celery", "生物学"):
+        assert sage.find_deck(settings.data_dir, said, strict=True) is None, said
+    assert sage.singular("cells") == "cell" and sage.singular("theories") == "theory"
+    assert sage.singular("classes") == "class" and sage.singular("class") == "class"
+    assert sage.about("biological", ["biology"]) and not sage.about("history", ["histology"])
+    assert sage.about("chemistry", ["chem200"]) and not sage.about("weekend", ["week3"])
+
+
+async def test_a_quiz_uses_their_notes_and_says_when_the_cards_are_not_theirs(settings):
+    """Review, the same fault end to end: "quiz me on cells" built a general-knowledge deck
+    beside their own. Now their deck is used, and a topic none of their decks covers says
+    the cards are from general knowledge, not their notes."""
+    biology_decks(settings)
+    # A deck made up for "cells" by the build that had the fault is still on the PC, newer.
+    sage.save_deck(
+        settings.data_dir, sage.Deck("Cells", "cells.topic", [sage.Card("A made-up card?", "Yes.")])
+    )
+    llm = Script('{"title": "Anatomy", "cards": [{"q": "How many bones?", "a": "206."}]}')
+    brain, _rec, _ = connected(settings, [], llm=llm)
+    out = await specialists.handle(brain, "quiz", {"action": "start", "deck": "cells"})
+    assert out.startswith("quiz: on Cell Structure and Function, 2 questions.")
+    assert "general knowledge" not in out and llm.prompts == []  # their notes, no model call
+    out = await specialists.handle(brain, "quiz", {"action": "start", "deck": "the heart"})
+    assert out.startswith("quiz: on The Cardiovascular System") and llm.prompts == []
+    out = await specialists.handle(brain, "quiz", {"action": "start", "deck": "anatomy"})
+    assert out.startswith("quiz: on Anatomy, 1 questions.") and len(llm.prompts) == 1
+    assert "from general knowledge, not their notes" in out
+    again = await specialists.handle(brain, "quiz", {"action": "start", "deck": "anatomy"})
+    assert "from general knowledge, not their notes" in again and len(llm.prompts) == 1
+
+
+async def test_a_topic_deck_with_no_notes_at_all_needs_no_caveat(settings):
+    """Nothing of theirs to mistake it for, and the French Revolution case still holds."""
+    llm = Script(HEART, HEART)
+    brain, _rec, _ = connected(settings, [], llm=llm)
+    out = await specialists.handle(brain, "quiz", {"action": "start", "deck": "the heart"})
+    assert out.startswith("quiz: on The heart") and "general knowledge" not in out
+    history_deck(settings)
+    out = await specialists.handle(brain, "quiz", {"action": "start", "deck": "the heart"})
+    assert out.startswith("quiz: on The heart") and "French Revolution" not in out
+    assert "from general knowledge, not their notes" in out  # now they have notes of their own
+
+
 async def test_when_no_topic_deck_can_be_made_their_latest_is_named_as_such(settings):
     history_deck(settings)
     brain, _rec, _ = connected(settings, [], llm=Script("Sorry, I can't."))
@@ -146,7 +237,12 @@ async def test_a_count_said_in_words_is_a_count(settings, tmp_path, monkeypatch)
     await until(rec, "job_ready")
     assert next(iter(brain.jobs.jobs.values())).params["count"] == 12
     assert brain.llm.prompts[0].startswith("About 12 cards")
-    sage.save_deck(settings.data_dir, sage.Deck("T", "t.txt", [sage.Card(f"q{i}", "a") for i in range(9)]))
+    saved = sage.save_deck(settings.data_dir, sage.Deck("T", "t.txt", [sage.Card(f"q{i}", "a") for i in range(9)]))
+    # Clearly the newest deck (two files written in the same instant have no order of their own).
+    import os
+    import time
+
+    os.utime(saved, (time.time() + 5, time.time() + 5))
     out = await specialists.handle(brain, "quiz", {"action": "start", "questions": "three"})
     assert "3 questions" in out
 

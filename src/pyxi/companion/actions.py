@@ -85,6 +85,7 @@ def safe_url(value: str) -> str | None:
 
 # ---------------------------------------------------------------------- is there such a site
 _KNOWN_SITE = "www.google.com"  # resolves whenever the internet is there at all
+_NO_SUCH_NAME = {11001, getattr(socket, "EAI_NONAME", 11001)}  # Windows' and the standard code
 _STUCK_WORDS = ("open", "goto", "visit", "on", "to", "in", "at", "go")
 
 
@@ -93,9 +94,12 @@ async def _resolves(host: str) -> bool | None:
     try:
         await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(host, 443), 2.5)
         return True
-    except socket.gaierror:
-        return False
-    except (TimeoutError, OSError):
+    except socket.gaierror as exc:
+        # Only "there is no such name" is a no. A lookup that failed for now, a name with no
+        # address of that kind, or one this PC's DNS won't answer (the browser's own secure
+        # DNS, a VPN or a proxy may still reach it) can't be told, and the address is opened.
+        return False if exc.errno in _NO_SUCH_NAME else None
+    except (TimeoutError, OSError, UnicodeError):  # (a label too long to be a name at all)
         return None
 
 

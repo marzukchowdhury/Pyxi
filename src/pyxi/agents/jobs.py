@@ -162,20 +162,21 @@ BROWSER_RULES = """How to work:
 - Start your summary with the result itself in one plain sentence (the pick and its price,
   the fact, what was done): it is read aloud. Then the details, a list one item per line."""
 
-# The first thing a result says is that there is none, whatever flag came with it.
+# The first thing a result says is that the job could not be done, whatever flag came with
+# it. Only that: "No recalls were found for the 2019 Civic" and "I didn't find any unpaid
+# tickets" are answers, and a review caught the first version of this calling them failures.
 _NOT_FOUND = re.compile(
     r"(?i)^\W*(?:i\s+|sorry,?\s+i\s+)?(?:couldn'?t|could not|wasn'?t able to|was not able to|"
-    r"was unable to|am unable to|didn'?t|did not)\s+(?:find|locate|get|reach|open|complete|"
-    r"finish|do|confirm)\b|^\W*unable to\b|^\W*(?:no|nothing)\b[^.!?]*\b(?:found|came up|turned up)\b"
+    r"was unable to|am unable to)\s+(?:reach|open|load|access|get (?:to|into|past)|complete|"
+    r"finish|do (?:that|this|it))\b|^\W*unable to (?:reach|open|load|access|complete|finish)\b"
 )
 # ...unless it goes on to give the next best thing.
 _NEXT_BEST = re.compile(r"(?i)\b(?:but|however|instead|closest|nearest|the best (?:i|match))\b")
 # Words that say the answer is not certain.
 _UNSURE = re.compile(
     r"(?i)\b(?:not (?:sure|certain|confirmed|verified)|unsure|uncertain|unconfirmed|unverified|"
-    r"couldn'?t (?:confirm|verify|find)|could not (?:confirm|verify|find)|unable to (?:confirm|"
-    r"verify|find)|didn'?t find|did not find|may be|might be|appears to be|seems to be|probably|"
-    r"closest (?:match|i could)|i (?:think|believe|assume|guess))\b"
+    r"couldn'?t (?:confirm|verify)|could not (?:confirm|verify)|unable to (?:confirm|verify)|"
+    r"appears to be|seems to be|closest (?:match|i could)|i (?:assume|guess))\b"
 )
 
 
@@ -187,10 +188,12 @@ def honest_result(summary: str, success: bool) -> tuple[str, bool]:
     text = (summary or "").strip()
     if not success or not text:
         return text, success
-    opening = re.split(r"(?<=[.!?])\s+", text, maxsplit=2)[:2]
-    if _NOT_FOUND.search(opening[0]) and not _NEXT_BEST.search(text):
+    first = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0]
+    if _NOT_FOUND.search(first) and not _NEXT_BEST.search(text):
         return text, False
-    if _UNSURE.search(" ".join(opening)) and not re.match(r"(?i)\W*best guess", text):
+    # Only when the answer itself is hedged: a firm answer with an aside after it ("$298 at
+    # Amazon. I couldn't find it lower elsewhere.") is not a guess.
+    if _UNSURE.search(first) and not re.match(r"(?i)\W*best guess", text):
         return f"Best guess: {text}", True
     return text, True
 

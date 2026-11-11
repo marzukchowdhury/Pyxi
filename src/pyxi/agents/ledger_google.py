@@ -711,6 +711,19 @@ class SheetExtras:
                 }
             }
         )
+        # What Ledger knows about the tab goes under its new name at once. The next edit
+        # used to be sent to the old one ("Unable to parse range: 'Sheet1'!D1").
+        for s in self.meta.get("sheets", []):
+            if s["properties"].get("sheetId") == sid:
+                s["properties"]["title"] = new
+        for kept in (self.grids, self.shown):
+            if title in kept:
+                kept[new] = kept.pop(title)
+        for names in (self.whole, self.dirty, self.reshown, self.cut, self.wanted):
+            if title in names:
+                names.discard(title)
+                names.add(new)
+        self.aliases = {k: (new if v == title else v) for k, v in self.aliases.items()}
         return f"Renamed the tab {title} to {new}"
 
     async def x_delete_sheet(self, op: dict[str, Any]) -> str:
@@ -720,7 +733,11 @@ class SheetExtras:
         if len(self.meta.get("sheets", [])) < 2:
             raise LedgerError(f"{title} is the only tab, and a spreadsheet needs one.")
         await self._batch({"deleteSheet": {"sheetId": sid}})
+        self.meta["sheets"] = [
+            s for s in self.meta.get("sheets", []) if s["properties"].get("sheetId") != sid
+        ]
         self.grids.pop(title, None)
+        self.shown.pop(title, None)
         return f"Deleted the tab {title}"
 
     async def x_duplicate_sheet(self, op: dict[str, Any]) -> str:

@@ -24,18 +24,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pyxi.mailwatch import (
-    CHARGED,
+    MONEY,
     ORDER_NO,
-    PROMO,
     RECURRING,
     US_DOLLARS,
-    is_receipt,
+    charge_in,
     merchant,
+    money_of,
+    not_read,
     not_spending,
     own_dollar,
-    paid_amount,
     read_back_to,
     said_day,
+    via_processor,
 )
 from pyxi.mailwatch import money as _money
 
@@ -49,25 +50,23 @@ NOT_A_CHARGE = re.compile(
     r"arriving|your package|ready for pickup|price drop|wish ?list|cart|left something)\b",
     re.I,
 )
-# Receipts that don't use the usual words: "Thanks for riding", "Total: CA$18.75".
-PAID = re.compile(
-    r"\bthanks? (?:you )?for (?:riding|ordering|shopping|dining)\b|"
-    r"\btotal\b\s*:?\s*(?:CA|US|C|A|AU|NZ)?\$\s?\d",
-    re.I,
-)
-# Money coming back. Read in the subject only: live, an order whose footer explained "your
-# refund goes to the card you paid with" was booked as a refund of the whole order.
+# Money coming back: the subject says "refund", or it says "return" and a line of the mail
+# gives the refund ("Refund total: $23.09"). Never the text alone: live, an order whose footer
+# explained "your refund goes to the card you paid with" was booked as a refund of the order.
 REFUND = re.compile(r"\brefund(?:ed|s)?\b", re.I)
+RETURN = re.compile(r"\breturn(?:s|ed)?\b", re.I)
 # How long after a charge the same merchant's same amount is still that charge mailed again
 # (a confirmation, then an invoice). Two coffees at 8 and at 3 are two charges.
 SAME_CHARGE = timedelta(hours=2)
+# PayPal's receipt and the shop's own for the same amount can be hours or a day apart.
+VIA_PROCESSOR = timedelta(days=3)
 # First match wins: a phone bill is a bill even though it repeats, Uber Eats is food not a ride.
 # Whole words only: "lessons" is not Esso and "retargeting" is not Target.
 CATEGORIES: list[tuple[str, re.Pattern[str]]] = [
     (
         "Bills and utilities",
         re.compile(
-            r"\b(?:hydro|electric\w*|energy|power|water bill|internet|wireless|mobile|telus|"
+            r"\b(?:hydro\w*|electric\w*|energy|power|water bill|internet|wireless\w*|mobile|telus|"
             r"rogers|bell|fido|koodo|freedom mobile|verizon|at&t|t-mobile|comcast|xfinity|shaw|"
             r"insurance|rent|property tax|utilit(?:y|ies)|maplewave)\b",
             re.I,
@@ -95,7 +94,7 @@ CATEGORIES: list[tuple[str, re.Pattern[str]]] = [
     (
         "Transport",
         re.compile(
-            r"\b(?:uber|lyft|transit|presto|compass card|gas|fuel|shell|esso|petro\w*|chevron|"
+            r"\b(?:uber|lyft|transit|presto\w*|compass card|gas|fuel|shell|esso|petro\w*|chevron|"
             r"parking|evo car|modo|translink|ttc)\b",
             re.I,
         ),
@@ -200,10 +199,10 @@ def category_named(said: str) -> str | None:
         return None
     aliases = {
         "groceries|grocery": "Groceries",
-        "food|eating out|takeout|take-out|restaurants?|dining|coffee": "Eating out",
+        "foods?|eating out|takeout|take-out|restaurants?|dining|coffee": "Eating out",
         "bills?|utilit(?:y|ies)|rent|phone|internet|insurance": "Bills and utilities",
         "subscriptions?": "Subscriptions",
-        "transport|transportation|transit|rides?|gas|fuel": "Transport",
+        "transport|transportation|transit|rides?|ride ?shares?|gas|fuel": "Transport",
         "travel|trips?|flights?|hotels?": "Travel",
         "shopping": "Shopping",
         "health|pharmacy": "Health",
@@ -318,18 +317,33 @@ def _date(mail: dict[str, Any]) -> datetime | None:
         return None
 
 
+def refund_amount(body: str) -> tuple[float, str] | None:
+    """What a mail says came back: the amount on its "Refund total" or "refunded" line (or on
+    the line under that label)."""
+    label = False
+    for ln in body.splitlines():
+        if not ln.strip():
+            continue
+        m = MONEY.search(ln)
+        if m and (REFUND.search(ln) or label):
+            return money_of(m)
+        label = bool(REFUND.search(ln)) and not m and len(ln.strip()) <= 40
+    return None
+
+
 def receipts(
     mails: list[dict[str, Any]], start: datetime | None = None, end: datetime | None = None
 ) -> list[Receipt]:
     """Real charges (and refunds) in these emails, one per order, oldest first.
 
-    A mail counts when it is a receipt (its sender, subject or first lines say so: the gate
-    the subscription finder uses, :func:`pyxi.mailwatch.is_receipt`) and its amount is on a
-    line that says it was paid. Live, a free newsletter that mentioned an invoice and
-    "$485 million" was $485.00 of spending."""
+    A mail counts when it is a receipt and an amount on it was paid: the gate the
+    subscription finder uses, :func:`pyxi.mailwatch.charge_in`. Live, a free newsletter that
+    mentioned an invoice and "$485 million" was $485.00 of spending; and when the gate then
+    read subjects only, "You Got Tickets To..." with "Total: $141.60" was no spending at
+    all."""
     out: list[Receipt] = []
     seen: set[tuple[str, str]] = set()
-    last_at: dict[tuple[str, str], datetime] = {}
+    seen_at: dict[tuple[str, str], list[tuple[datetime, bool]]] = {}
     for mail in sorted(mails, key=lambda m: d.timestamp() if (d := _date(m)) else 0.0):
         when = _date(mail)
         if when is None:
@@ -342,16 +356,17 @@ def receipts(
         subject, body = str(mail.get("subject") or ""), str(mail.get("text") or "")
         sender = str(mail.get("from") or "")
         text = f"{subject}\n{body}"
-        refund = bool(REFUND.search(subject))
-        paid = is_receipt(sender, subject, body) and (CHARGED.search(text) or PAID.search(text))
-        if not refund and (not paid or NOT_A_CHARGE.search(subject)):
+        back_amount = refund_amount(body)
+        refund = bool(REFUND.search(subject)) or bool(RETURN.search(subject) and back_amount)
+        charge = charge_in(sender, subject, body)
+        if refund:
+            got = back_amount or ((charge.amount, charge.currency) if charge else None)
+        else:
+            if charge is None or NOT_A_CHARGE.search(subject):
+                continue
+            got = (charge.amount, charge.currency)
+        if not got or got[0] <= 0:
             continue
-        if PROMO.search(text) and not re.search(r"\b(?:receipt|invoice)", text, re.I):
-            continue
-        found = paid_amount(body) or paid_amount(subject)
-        if not found or found[0] <= 0:
-            continue
-        got = found[:2]
         if not_spending(sender, text, got[0]):
             continue  # a job alert's salary, or a big number nobody paid
         if got[1] == "$" and US_DOLLARS.search(text):
@@ -362,20 +377,23 @@ def receipts(
         m = ORDER_NO.search(text)
         order = m.group("n") if m else ""
         back = ":r" if refund else ""
+        via = via_processor(sender)
+        earlier = seen_at.setdefault((name.lower(), f"{got[0]:.2f}{back}"), [])
+        mine = [t for t, v in earlier if v == via]
+        theirs = [t for t, v in earlier if v != via]
+        earlier.append((local, via))
+        if any(local - t <= VIA_PROCESSOR for t in theirs):
+            continue  # PayPal's receipt and the shop's own: one payment, mailed by both
         if order:
             key = (name.lower(), order + back)
             if key in seen:
                 continue  # the same order's confirmation and invoice
             seen.add(key)
-        else:
+        elif any(local - t < SAME_CHARGE for t in mine):
             # No order number to tell by: the same amount from the same place within a couple
             # of hours is one charge mailed twice. (It used to be "on the same day", and two
             # coffees for the same price counted once.)
-            same = (name.lower(), f"{got[0]:.2f}{back}")
-            before = last_at.get(same)
-            last_at[same] = local
-            if before is not None and local - before < SAME_CHARGE:
-                continue
+            continue
         out.append(
             Receipt(
                 day=local.date().isoformat(),
@@ -672,12 +690,18 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         if since
         else ""
     )
+    unread = not_read(mails)  # some mails could not be fetched: the total may be short
+    if unread:
+        missing += f" {unread}"
     rs = receipts(mails, start, end)
     budgets = {
         k: float(v) for k, v in (load(manager.settings.data_dir).get("budgets") or {}).items()
     }
     if action == "summary":
         rep = summarise(rs, budgets, start, now, end, since)
+        if unread:
+            rep["body"] = f"{rep['body']} {unread}"
+            rep["summary"] = f"{rep['summary']} {unread}"
         job.summary = rep["summary"]
         job.data = {k: rep[k] for k in ("title", "body", "changes", "card")}
         job.data["receipts"] = [asdict(r) for r in rs]
