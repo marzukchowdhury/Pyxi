@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -175,6 +176,24 @@ def create_app(
         await brain.emit_pins(app)
         await pricecheck.on_window(brain, app)  # tags go with their page; auto price checks
 
+    def _prepare_eyes() -> None:
+        """Load the parts a look at the screen is made of (Windows' UI Automation and its text
+        reader), without looking at anything: no window is read and nothing is captured."""
+        if sys.platform != "win32":
+            return
+        try:
+            import comtypes.client
+
+            # Windows' UI Automation, as uiautomation loads it on its first use (the slow part).
+            comtypes.client.GetModule("UIAutomationCore.dll")
+
+            from pyxi.screen import ocr
+
+            if settings.screen.ocr:
+                ocr.available()
+        except Exception as exc:  # never in the way of starting
+            log.debug("couldn't prepare screen reading: %s", exc)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal ambient
@@ -195,7 +214,11 @@ def create_app(
         warm = asyncio.create_task(_prepare_ears()) if settings.voice.tts != "client" else None
         idle = asyncio.create_task(_let_go_when_idle())
         voice = asyncio.create_task(_fetch_voice()) if settings.voice.tts == "kokoro" else None
+        # Load what a look at the screen needs now, so the first question doesn't wait for it.
+        eyes = asyncio.create_task(asyncio.to_thread(_prepare_eyes)) if not demo else None
         yield
+        if eyes:
+            eyes.cancel()
         if warm:
             warm.cancel()
         if voice:

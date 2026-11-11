@@ -487,6 +487,36 @@ def check_bundle() -> None:
         subprocess.run([str(BUNDLE / "python.exe"), "-c", CHECK], check=True, cwd=packs, env=env)
 
 
+# Run in the bundle: makes the wrappers Windows' automation and file search are used through.
+WRAPPERS = """
+import comtypes.client
+comtypes.client.GetModule("UIAutomationCore.dll")  # UI Automation: how the screen is read
+try:
+    comtypes.client.CreateObject("ADODB.Connection")  # Windows Search: how files are found
+    comtypes.client.CreateObject("ADODB.Recordset")
+except Exception as exc:  # no such component on this PC: made on first use instead
+    print("note: no file-search wrappers:", exc)
+import os; os._exit(0)
+"""
+
+
+def make_wrappers() -> None:
+    """comtypes writes a Python module for each Windows component the first time it is used,
+    into comtypes/gen inside the app's own folder. An update replaces that folder, so the
+    first look at the screen after every install made them again: 28 seconds before the first
+    answer, live, every time. They are made here once and shipped."""
+    gen = BUNDLE / "Lib" / "site-packages" / "comtypes" / "gen"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "VIRTUAL_ENV"))}
+    with tempfile.TemporaryDirectory() as cwd:
+        subprocess.run([str(BUNDLE / "python.exe"), "-c", WRAPPERS], check=True, cwd=cwd, env=env)
+    for cache in gen.rglob("__pycache__"):
+        shutil.rmtree(cache, ignore_errors=True)
+    made = sorted(p.name for p in gen.glob("*.py") if p.name != "__init__.py")
+    if "UIAutomationClient.py" not in made:
+        raise SystemExit(f"STOP: the automation wrappers weren't made in {gen} (found {made}).")
+    print(f"automation wrappers shipped: {len(made)} modules")
+
+
 def ship_google_client() -> None:
     """Beta testers connect Gmail, Calendar and Docs with Pyxi's own Google OAuth client, so they
     only press Connect. The client JSON lives in desktop/build-secrets (git-ignored) and goes in
@@ -534,6 +564,7 @@ def main() -> None:
     if "--skip-python" not in sys.argv:
         slim(version)
         check_bundle()
+        make_wrappers()
     ship_google_client()
     ship_browser_extension()
     npm = shutil.which("npm") or "npm"
