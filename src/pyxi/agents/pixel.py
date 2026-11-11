@@ -35,10 +35,12 @@ from pyxi.agents.pixel_common import (
     PixelError,
     PixelResult,
     flat_rgb,
+    image_pages,
     need,
     open_image,
     out_dir_for,
     parse_ranges,
+    plain_name,
     pyxi_folder,
     size_text,
     unique_path,
@@ -119,6 +121,17 @@ BUILT_IN = {
     ".csv",
 }
 TO_PDF = OFFICE | BUILT_IN
+# What to save an older or OpenDocument file as when there's no LibreOffice to read it. (The
+# advice used to be the extension plus an "x": right for .doc, but ".rtfx" is no format.)
+NEWER_FORMAT = {
+    ".doc": ".docx",
+    ".odt": ".docx",
+    ".rtf": ".docx",
+    ".xls": ".xlsx",
+    ".ods": ".xlsx",
+    ".ppt": ".pptx",
+    ".odp": ".pptx",
+}
 
 
 # ---------------------------------------------------------------------------- images
@@ -126,12 +139,18 @@ def images_to_pdf(
     files: list[Path], name: str | None = None, out: Path | None = None
 ) -> PixelResult:
     files = need(files, IMAGE_EXTS, "image", many=True)
-    pages = [flat_rgb(open_image(p)) for p in files]
-    target = unique_path(out or out_dir_for(files[0]), f"{name or files[0].stem}.pdf")
+    # Every page of a fax or scanner TIFF, not just its first.
+    pages = [flat_rgb(img) for p in files for img in image_pages(p)]
+    target = unique_path(
+        out or out_dir_for(files[0]), f"{plain_name(name, '.pdf') or files[0].stem}.pdf"
+    )
     pages[0].save(target, "PDF", save_all=True, append_images=pages[1:], resolution=150)
-    n = len(pages)
+    n, count = len(pages), len(files)
+    more = f" ({n} pages)" if n != count else ""
     return PixelResult(
-        [target], f"Made {target.name} from {n} image{'s' if n != 1 else ''}.", {"pages": n}
+        [target],
+        f"Made {target.name} from {count} image{'s' if count != 1 else ''}{more}.",
+        {"pages": n},
     )
 
 
@@ -269,7 +288,8 @@ def merge_pdfs(files: list[Path], name: str | None = None, out: Path | None = No
     for p in files:
         pixel_pdf._reader(p)  # a clear message for a locked or broken one
         writer.append(str(p))
-    target = unique_path(out or out_dir_for(files[0]), f"{name or files[0].stem + ' (merged)'}.pdf")
+    wanted = plain_name(name, ".pdf") or files[0].stem + " (merged)"
+    target = unique_path(out or out_dir_for(files[0]), f"{wanted}.pdf")
     with target.open("wb") as fh:
         writer.write(fh)
     pages = len(writer.pages)
@@ -323,9 +343,19 @@ def compress_pdf(
                 pic = img.image
                 if pic is None:
                     continue
+                # Only plain photos are re-saved. A logo with a see-through background, a
+                # stencil or a black-and-white scan is left alone: as a JPEG it loses what makes
+                # it see-through (a logo on a blue page came back in a white box) and a scan
+                # gets bigger.
+                ref = img.indirect_reference
+                xobj = ref.get_object() if ref is not None else {}
+                if pic.mode not in ("RGB", "L", "CMYK") or any(
+                    k in xobj for k in ("/SMask", "/Mask", "/ImageMask")
+                ):
+                    continue
                 if max(pic.size) > max_px:
                     pic.thumbnail((max_px, max_px), Image.LANCZOS)
-                img.replace(flat_rgb(pic), quality=quality)
+                img.replace(pic if pic.mode == "L" else flat_rgb(pic), quality=quality)
             except Exception:  # an image pypdf can't re-encode stays as it is
                 continue
         page.compress_content_streams()
@@ -414,20 +444,33 @@ def to_pdf(files: list[Path], out: Path | None = None, *, sheet: str = "") -> Pi
     files = need(files, TO_PDF, "document Pixel can turn into PDF", many=True)
     soffice = libreoffice()
     outputs, used_builtin = [], False
+    failed: list[str] = []
     for src in files:
         ext = src.suffix.lower()
         target = unique_path(out or out_dir_for(src), f"{src.stem}.pdf")
-        if soffice and ext in OFFICE:
-            _soffice_pdf(soffice, src, target)
-        elif ext in BUILT_IN:
-            pixel_render.to_pdf(src, target, sheet=sheet)
-            used_builtin = used_builtin or ext in OFFICE
-        else:
-            raise PixelError(
-                f"{ext} files need LibreOffice to turn into PDF; save it as {ext}x, or install LibreOffice."
-            )
+        try:
+            if soffice and ext in OFFICE:
+                _soffice_pdf(soffice, src, target)
+            elif ext in BUILT_IN:
+                pixel_render.to_pdf(src, target, sheet=sheet)
+                used_builtin = used_builtin or ext in OFFICE
+            else:
+                newer = NEWER_FORMAT.get(ext, ".docx")
+                raise PixelError(
+                    f"{ext} files need LibreOffice to turn into PDF; save {src.name} as "
+                    f"{newer}, or install LibreOffice."
+                )
+        except PixelError as exc:
+            if len(files) == 1:
+                raise
+            failed.append(str(exc))  # the others are still made, and this one is said
+            continue
         outputs.append(target)
+    if not outputs:
+        raise PixelError(" ".join(failed))
     note = BUILT_IN_NOTE if used_builtin else ""
+    if failed:
+        note += " But " + " ".join(failed)
     pages = []
     for o in outputs:
         try:
@@ -444,16 +487,19 @@ def to_pdf(files: list[Path], out: Path | None = None, *, sheet: str = "") -> Pi
 
 def _soffice_pdf(soffice: str, src: Path, target: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        from pyxi.agents.libreoffice import command
+        from pyxi.agents.libreoffice import CONVERTING, command
 
         try:
-            subprocess.run(
-                command(soffice, "--convert-to", "pdf", "--outdir", tmp, str(src)),
-                check=True,
-                capture_output=True,
-                timeout=180,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            # One conversion at a time: two LibreOffices sharing Pyxi's profile get in each
+            # other's way, and one of two jobs started together failed every time.
+            with CONVERTING:
+                subprocess.run(
+                    command(soffice, "--convert-to", "pdf", "--outdir", tmp, str(src)),
+                    check=True,
+                    capture_output=True,
+                    timeout=180,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
         except subprocess.TimeoutExpired:
             raise PixelError(f"LibreOffice took too long with {src.name}.") from None
         except subprocess.CalledProcessError:  # never the command line on the card
@@ -470,6 +516,10 @@ def _soffice_pdf(soffice: str, src: Path, target: Path) -> None:
 # ---------------------------------------------------------------------------- CSV and Excel
 def _cell(value: str) -> Any:
     v = value.strip()
+    if sum(c.isdigit() for c in v) > 15:
+        # A card, tracking or account number. Excel keeps 15 digits of a number and turns the
+        # rest into zeros, so a long one stays text, every digit of it.
+        return value
     if re.fullmatch(r"-?\d+", v) and not (len(v) > 1 and v.lstrip("-").startswith("0")):
         return int(v)
     if re.fullmatch(r"-?\d*\.\d+|-?\d{1,3}(,\d{3})+(\.\d+)?", v):
@@ -517,6 +567,21 @@ def csv_to_excel(files: list[Path], out: Path | None = None) -> PixelResult:
     return PixelResult(outputs, f"Made {', '.join(o.name for o in outputs)}.")
 
 
+def _csv_value(v: Any) -> Any:
+    """A cell for a CSV: a date as a date (not "2026-03-05 00:00:00"), and a sum as the number
+    Excel shows (0.3, not 0.30000000000000004)."""
+    import datetime as dt
+
+    if v is None:
+        return ""
+    if isinstance(v, dt.datetime):
+        midnight = not (v.hour or v.minute or v.second or v.microsecond)
+        return v.date().isoformat() if midnight else v.isoformat(sep=" ", timespec="seconds")
+    if isinstance(v, float):
+        return float(f"{v:.15g}")
+    return v
+
+
 def excel_to_csv(files: list[Path], sheet: str = "", out: Path | None = None) -> PixelResult:
     from openpyxl import load_workbook
 
@@ -532,10 +597,14 @@ def excel_to_csv(files: list[Path], sheet: str = "", out: Path | None = None) ->
         for name in names:
             label = src.stem if len(wb.sheetnames) == 1 else f"{src.stem} ({name})"
             target = unique_path(out or out_dir_for(src), f"{label}.csv")
+            ws = wb[name]
+            # Some exports say the sheet is one cell big (<dimension ref="A1"/>); believed,
+            # the CSV had that one cell. Reading the rows themselves finds them all.
+            ws.reset_dimensions()
             with target.open("w", newline="", encoding="utf-8-sig") as fh:
                 w = csv.writer(fh)
-                for row in wb[name].iter_rows(values_only=True):
-                    w.writerow(["" if v is None else v for v in row])
+                for row in ws.iter_rows(values_only=True):
+                    w.writerow([_csv_value(v) for v in row])
             outputs.append(target)
         count = len(wb.sheetnames)
     finally:
@@ -575,10 +644,23 @@ def run(
             p = Path(str(f)).expanduser()
             if not p.is_file():
                 need([p], {p.suffix.lower()}, "file")
-        results = [_run_one(operation, [f], options) for f in files]
+        results: list[PixelResult] = []
+        failed: list[str] = []
+        for f in files:
+            try:
+                results.append(_run_one(operation, [f], options))
+            except PixelError as exc:
+                # The files already done are on the disk: they are reported, with this one's
+                # trouble said after them, not lost behind a "failed".
+                failed.append(str(exc))
+        if not results:
+            raise PixelError(" ".join(failed))
         outputs = [o for r in results for o in r.outputs]
+        summary = " ".join(r.summary for r in results)
+        if failed:
+            summary += " But " + " ".join(failed)
         return PixelResult(
-            outputs, " ".join(r.summary for r in results), {"each": [r.details for r in results]}
+            outputs, summary, {"each": [r.details for r in results], "failed": failed}
         )
     return _run_one(operation, files, options)
 
@@ -677,18 +759,24 @@ def guess_operation(task: str, files: list[str]) -> str | None:
     exts = {Path(f).suffix.lower() for f in files}
     pdf = ".pdf" in exts
     images = bool(exts & IMAGE_EXTS)
+    into_something = bool(
+        re.search(r"\b(in)?to\b.*\b(jpe?gs?|pngs?|images?|pictures?|photos?|word|docx|text)\b", t)
+    )
     rules: list[tuple[bool, str]] = [
         (
             len(files) == 2 and bool(re.search(r"compare|differen|what changed|diff\b", t)),
             "compare_documents",
         ),
         (pdf and bool(re.search(r"unlock|remove (the )?password|decrypt", t)), "unlock_pdf"),
-        (pdf and bool(re.search(r"password|protect|lock|encrypt", t)), "protect_pdf"),
-        (pdf and bool(re.search(r"\bfill\b|form", t)), "fill_form"),
+        (pdf and bool(re.search(r"password|protect|\block|encrypt", t)), "protect_pdf"),
+        # The word "form", not the letters: "to Word format" and "reformat" asked for no form.
+        (pdf and bool(re.search(r"\bfill\b|\bforms?\b", t)), "fill_form"),
         (pdf and bool(re.search(r"page numbers?|number the pages", t)), "add_page_numbers"),
         (pdf and "watermark" in t, "add_watermark"),
         (
-            pdf and bool(re.search(r"rotate|turn .*(page|sideways|upside)|sideways", t)),
+            # "Turn each page into a JPG" turns nothing around.
+            pdf and bool(re.search(r"rotate|turn .*(page|sideways|upside)|sideways", t))
+            and not (re.search(r"\bturn\b", t) and into_something),
             "rotate_pages",
         ),
         (pdf and bool(re.search(r"reorder|re-order|move page|order of", t)), "reorder_pages"),
@@ -709,7 +797,12 @@ def guess_operation(task: str, files: list[str]) -> str | None:
             bool(re.search(r"merge|combine|join", t)),
             "merge_pdfs" if exts <= {".pdf"} else "images_to_pdf",
         ),
-        (pdf and bool(re.search(r"split|separate|each page", t)) and "image" not in t, "split_pdf"),
+        (
+            pdf
+            and bool(re.search(r"split|separate|each page", t))
+            and not re.search(r"image|png|jpe?g|picture", t),  # "each page as a JPG" is images
+            "split_pdf",
+        ),
         (images and "pdf" in t, "images_to_pdf"),
         (bool(exts & (TO_PDF - {".csv"})) and "pdf" in t, "to_pdf"),
         (pdf and bool(re.search(r"image|png|jpe?g|picture", t)), "pdf_to_images"),

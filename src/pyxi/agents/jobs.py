@@ -150,13 +150,49 @@ BROWSER_RULES = """How to work:
 - Be quick: most jobs take 3-10 steps, and the user is waiting.
 - One good search, open the best result, read or extract the answer, finish.
 - Never repeat a search with small rewordings. After two searches that don't turn up anything
-  better, finish with the best answer you have.
+  better, finish with what you have, and say plainly how sure it is.
 - A reputable source (the maker's own site, Wikipedia, a major newspaper or reference site)
   counts as reliable unless the user asked for something stricter. Name it in your summary.
-- Finish with success=true whenever you found the answer, adding a short caveat if it
-  matters. Use success=false only when you really could not find or do it.
+- Finish with success=true only when you found the answer or did the task. If you did not
+  find it, finish with success=false and say what you did find: a guess is never passed off
+  as the result.
+- If your answer is the best you could find but not certain (the page didn't say it outright,
+  sources disagree, it may be out of date), start the summary with "Best guess:" and say why
+  in a few words.
 - Start your summary with the result itself in one plain sentence (the pick and its price,
   the fact, what was done): it is read aloud. Then the details, a list one item per line."""
+
+# The first thing a result says is that there is none, whatever flag came with it.
+_NOT_FOUND = re.compile(
+    r"(?i)^\W*(?:i\s+|sorry,?\s+i\s+)?(?:couldn'?t|could not|wasn'?t able to|was not able to|"
+    r"was unable to|am unable to|didn'?t|did not)\s+(?:find|locate|get|reach|open|complete|"
+    r"finish|do|confirm)\b|^\W*unable to\b|^\W*(?:no|nothing)\b[^.!?]*\b(?:found|came up|turned up)\b"
+)
+# ...unless it goes on to give the next best thing.
+_NEXT_BEST = re.compile(r"(?i)\b(?:but|however|instead|closest|nearest|the best (?:i|match))\b")
+# Words that say the answer is not certain.
+_UNSURE = re.compile(
+    r"(?i)\b(?:not (?:sure|certain|confirmed|verified)|unsure|uncertain|unconfirmed|unverified|"
+    r"couldn'?t (?:confirm|verify|find)|could not (?:confirm|verify|find)|unable to (?:confirm|"
+    r"verify|find)|didn'?t find|did not find|may be|might be|appears to be|seems to be|probably|"
+    r"closest (?:match|i could)|i (?:think|believe|assume|guess))\b"
+)
+
+
+def honest_result(summary: str, success: bool) -> tuple[str, bool]:
+    """A browser teammate's own word for how its job went, held to what its summary says.
+    "I couldn't find it" is not a success because the flag said so, and an answer it is not
+    sure of is called a best guess up front, where it is read aloud: the caveat used to sit
+    in a later sentence that nobody heard."""
+    text = (summary or "").strip()
+    if not success or not text:
+        return text, success
+    opening = re.split(r"(?<=[.!?])\s+", text, maxsplit=2)[:2]
+    if _NOT_FOUND.search(opening[0]) and not _NEXT_BEST.search(text):
+        return text, False
+    if _UNSURE.search(" ".join(opening)) and not re.match(r"(?i)\W*best guess", text):
+        return f"Best guess: {text}", True
+    return text, True
 
 
 def plain_card(
@@ -479,19 +515,32 @@ class JobManager:
             )
         finally:
             self._controls.pop(job.id, None)
-        job.run_id, job.summary, job.data = result.run_id, result.summary, result.data
-        job.outputs, job.cost_usd, job.steps = result.outputs, result.usage.cost_usd, result.steps
-        job.status = (
-            "done"
-            if result.success
-            else ("stopped" if result.status.value == "stopped" else "failed")
+        # Bookings and check-ins answer for themselves (a confirmation, a card to approve).
+        summary, found = (
+            (result.summary, result.success)
+            if booking or checkin
+            else honest_result(result.summary, result.success)
         )
+        job.run_id, job.summary, job.data = result.run_id, summary, result.data
+        job.outputs, job.cost_usd, job.steps = result.outputs, result.usage.cost_usd, result.steps
+        job.status = "done" if found else ("stopped" if result.status.value == "stopped" else "failed")
 
     async def _run_writer(self, job: Job, agent: AgentProfile) -> None:
         llm = self.llm_factory(agent)
         mode = document_mode(job.task)  # fix, translate, rewrite or summarize
         exts = SUMMARY_EXTS if mode == "summarize" else SUPPORTED
         docs = [Path(f) for f in job.files if Path(f).suffix.lower() in exts]
+        if job.files and not docs:
+            # Handed a file it can't open (an old .doc, a .rtf), Quill used to go on to write
+            # a draft from the task alone: "Your draft is ready", and the file never read.
+            names = ", ".join(Path(f).name for f in job.files[:3])
+            verb = "summarize" if mode == "summarize" else "work on"
+            raise ValueError(
+                f"I can {verb} {', '.join(sorted(exts))} files, not {names}. Save it as one of "
+                "those and ask again."
+            )
+        if gone := [d.name for d in docs if not d.is_file()]:
+            raise ValueError(f"I can't find {', '.join(gone[:3])}. Where is it?")
         if docs and mode == "summarize":
             await self._summarize_documents(job, docs, llm)
             return
@@ -545,6 +594,9 @@ class JobManager:
         """Fix, translate or rewrite each document and save a copy beside it; the originals are
         never touched."""
         lines, outputs, cost = [], [], 0.0
+        failed: list[str] = []
+        last: Exception | None = None
+        count = 0
         all_changes: list[str] = []
         all_notes: list[str] = []
         for doc in docs:
@@ -555,8 +607,16 @@ class JobManager:
                 event="status",
                 data={"message": f"{'Translating' if mode == 'translate' else 'Editing'} {doc.name}"},
             )
-            result = await fix_document(doc, job.task, llm, mode=mode)
+            try:
+                result = await fix_document(doc, job.task, llm, mode=mode)
+            except Exception as exc:
+                # One document of several that can't be done doesn't hide the ones that were:
+                # the job used to end "failed" with the first document's saved copy unmentioned.
+                failed.append(f"{doc.name}: {describe_failure(exc)}")
+                last = exc
+                continue
             cost += result.cost_usd
+            count += result.changed
             outputs.append(str(result.path))
             all_changes += result.changes
             all_notes += result.notes
@@ -574,9 +634,16 @@ class JobManager:
                 f"{doc.name}: {verb} {result.changed} of {result.total} paragraphs, saved as {result.path}"
                 + (f". Notable: {notes}" if notes else "")
             )
-        job.summary = " ".join(lines)
+        if last is not None and not outputs:
+            raise last  # nothing was made: the job fails as it did before
+        job.summary = " ".join(lines) + (" But " + "; ".join(failed) if failed else "")
         key = "fixed" if mode == "fix" else "outputs"  # "fixed" makes it a "Your document is fixed" card
-        job.data = {key: outputs, "changes": all_changes[:12], "notes": all_notes[:5]}
+        job.data = {
+            key: outputs,
+            "changes": all_changes[:12],
+            "notes": [*failed, *all_notes][:5],
+            "count": count,  # every fix, where the list of them is cut at twelve
+        }
         job.outputs, job.cost_usd, job.status = outputs, cost, "done"
 
     async def _run_explainer(self, job: Job, agent: AgentProfile) -> None:

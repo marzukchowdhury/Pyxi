@@ -391,7 +391,7 @@ async def test_sorting_filtering_freezing_and_colouring_a_sheet():
     g.sent.clear()
     assert await s.apply({"op": "freeze", "columns": 1}) == "Froze the first 1 column on Data"
     grid = g.sent[0]["updateSheetProperties"]["properties"]["gridProperties"]
-    assert grid == {"frozenRowCount": 0, "frozenColumnCount": 1}
+    assert grid == {"frozenColumnCount": 1}  # rows are left as they were, not unfrozen
     g.sent.clear()
     await s.apply(
         {

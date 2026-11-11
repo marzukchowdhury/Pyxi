@@ -589,10 +589,12 @@ def for_later(job: Any) -> str:
 
 
 # Teammates whose work is a change the user can see where they asked for it (a sheet edited,
-# files converted, a folder tidied). When it works, "done" is all there is to say: the founder,
-# live, after hearing each edit read back to him: "It's all the same thing again and again.
-# When you're done with the work, just tell that you're done. That's all."
-DOERS = {"documents", "files", "automation"}
+# files converted). When it works, "done" is all there is to say: the founder, live, after
+# hearing each edit read back to him: "It's all the same thing again and again. When you're
+# done with the work, just tell that you're done. That's all."
+# (Not Ditto: its job ends with a plan waiting on a card, and "Ditto's done." was said while
+# nothing had been renamed yet. It says its own title, "Ready to do 3 more.")
+DOERS = {"documents", "files"}
 # A result that worked, with something they need to hear all the same.
 _CAVEAT = re.compile(
     r"(?i)\b(but|not|no|none|nothing|couldn'?t|can'?t|didn'?t|doesn'?t|won'?t|wasn'?t|isn'?t|instead|"

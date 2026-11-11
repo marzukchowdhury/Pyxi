@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,8 @@ from pyxi import safety
 if TYPE_CHECKING:
     from pyxi.agents.jobs import Job, JobManager
     from pyxi.agents.registry import AgentProfile
+
+log = logging.getLogger(__name__)
 
 AUDIO = {
     ".wav", ".mp3", ".m4a", ".mp4", ".webm", ".ogg", ".oga", ".opus", ".mkv", ".mov", ".aac",
@@ -225,6 +228,13 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         return
     minutes = max(1, round(segments[-1].end / 60))
     lines = [s.line() for s in segments]
+    # The transcript is saved now, before the notes are asked for: when that call failed
+    # (the model busy, a reply that wasn't notes) an hour of listening was thrown away.
+    folder = Path(job.params.get("folder") or out_dir())
+    folder.mkdir(parents=True, exist_ok=True)
+    script_path = unique(folder, f"{path.stem} transcript.txt")
+    script_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    job.outputs = [str(script_path)]
     await manager._status(job, "Writing the notes")
     llm = manager.llm_factory(agent)
     cost = 0.0
@@ -243,24 +253,42 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     if job.params.get("about"):
         context += f" The user says it's about: {job.params['about']}."
     chunks = parts(lines)
-    if len(chunks) == 1:
-        notes = await ask(SYSTEM, f"{context}\n\nTranscript:\n{chunks[0]}")
-    else:
-        found = [
-            await ask(SYSTEM, f"{context} Part {i + 1} of {len(chunks)}.\n\nTranscript:\n{c}")
-            for i, c in enumerate(chunks)
-        ]
-        merged = json.dumps([n.__dict__ for n in found if n], ensure_ascii=False)
-        notes = await ask(SYSTEM + "\n\n" + MERGE, merged[: PART_CHARS * 2])
+    notes, problem = None, "The notes didn't come out right."
+    try:
+        if len(chunks) == 1:
+            notes = await ask(SYSTEM, f"{context}\n\nTranscript:\n{chunks[0]}")
+        else:
+            found = [
+                await ask(SYSTEM, f"{context} Part {i + 1} of {len(chunks)}.\n\nTranscript:\n{c}")
+                for i, c in enumerate(chunks)
+            ]
+            merged = json.dumps([n.__dict__ for n in found if n], ensure_ascii=False)
+            notes = await ask(SYSTEM + "\n\n" + MERGE, merged[: PART_CHARS * 2])
+    except Exception as exc:  # the transcript is kept, and they're told why there are no notes
+        from pyxi.agents.jobs import describe_failure
+
+        log.exception("scribe: the notes for %s failed", path.name)
+        problem = describe_failure(exc)
     job.cost_usd = cost
     if notes is None:
-        raise RuntimeError("The notes didn't come out right. Try again in a moment.")
-    folder = Path(job.params.get("folder") or out_dir())
-    folder.mkdir(parents=True, exist_ok=True)
+        from pyxi import made
+
+        made.record(manager.settings.data_dir, job.outputs)  # so the app will open it
+        job.status = "failed"
+        job.summary = (
+            f"{problem.rstrip('.')}. The transcript of {path.name} is saved, so the "
+            f"listening isn't lost: {script_path}. Ask again for the notes in a moment."
+        )
+        job.data = {
+            "title": "Transcript saved, no notes yet",
+            "body": f"{problem.rstrip('.')}. The transcript is saved as {script_path.name}. "
+            "Ask again for the notes in a moment.",
+            "actions": ["open", "folder"],
+            "outputs": job.outputs,
+        }
+        return
     note_path = unique(folder, f"{path.stem} notes.md")
     note_path.write_text(notes.markdown(path.name, minutes), encoding="utf-8")
-    script_path = unique(folder, f"{path.stem} transcript.txt")
-    script_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     job.outputs = [str(note_path), str(script_path)]
     n_d, n_a = len(notes.decisions), len(notes.actions)
     body = (

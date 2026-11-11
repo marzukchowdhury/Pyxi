@@ -162,7 +162,7 @@ def test_work_they_can_see_is_only_said_to_be_done():
     cells on Sheet1; made a pivot table beside the data..."), while the notification showed
     the same words. "When you're done with the work, just tell that you're done. That's all." """
     result = "Set 21 cells on Sheet1; made a pivot table beside the data on Sheet1, from E1: sum of Sales by Region."
-    for role in ("documents", "files", "automation"):
+    for role in ("documents", "files"):  # not Ditto: its job ends with a plan on a card
         for on_card in (False, True):
             line = answers.spoken_line("Ledger", ok=True, title="Ledger finished", summary=result, on_card=on_card, role=role)
             assert line == "Ledger's done."

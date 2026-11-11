@@ -16,6 +16,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -67,12 +68,14 @@ class UIElement:
         x, y, w, h = self.rect
         return x + w // 2, y + h // 2
 
-    def describe(self, to_image=None) -> str:
+    def describe(self, to_image=None, cut: str = "") -> str:
+        """``cut``: the edge that hides part of it ("bottom"), when one does."""
         x, y, w, h = to_image(self.rect) if to_image else self.rect
         name = (
             "(password field)" if self.is_password else f'"{self.name[:70]}"' if self.name else ""
         )
-        return f"[{self.id}] {self.role} {name} @({x},{y},{w}x{h})".replace("  ", " ")
+        line = f"[{self.id}] {self.role} {name} @({x},{y},{w}x{h})".replace("  ", " ")
+        return f"{line} (cut off at the {cut} edge: only part of it shows)" if cut else line
 
 
 @dataclass
@@ -85,6 +88,9 @@ class ScreenContext:
     excluded: str | None = None  # reason, when the foreground app is private
     model_scale: float = 1.0  # model-image px * model_scale = screen px
     text: list[TextLine] = field(default_factory=list)  # OCR lines, ids continue after elements
+    # How the window's accessibility tree was read: "ok"; "partial" (it stopped part-way);
+    # "failed" (none of it); "none" (no window of this screen was read at all).
+    tree: str = "ok"
 
     # ------------------------------------------------------------------ lookups
     def element(self, element_id: int) -> UIElement | None:
@@ -93,9 +99,81 @@ class ScreenContext:
             found = UIElement(line.id, line.text, "ScreenText", line.rect)
         return found
 
-    def find_text(self, quote: str, within: tuple[int, int, int, int] | None = None):
-        """Where a phrase is on screen, word-exact (from OCR). None if it isn't there."""
-        return ocr.find_text(self.text, quote, within)
+    def find_text(
+        self,
+        quote: str,
+        within: tuple[int, int, int, int] | None = None,
+        near: tuple[float, float] | None = None,
+    ):
+        """Where a phrase is on screen, word-exact (from OCR). None if it isn't there.
+        ``near``: where it was thought to be, to pick among several places that say it."""
+        return ocr.find_text(self.text, quote, within, near)
+
+    def view_rect(self) -> tuple[int, int, int, int] | None:
+        """The part of the window that is in the picture (all of the picture when no window
+        was read), in screen px: what "did the view change" is asked of."""
+        if self.screenshot is None:
+            return None
+        sx, sy = self.origin
+        sw, sh = self.screenshot.width, self.screenshot.height
+        x, y, w, h = self.window.rect
+        if w <= 0 or h <= 0:
+            return sx, sy, sw, sh
+        x0, y0 = max(x, sx), max(y, sy)
+        x1, y1 = min(x + w, sx + sw), min(y + h, sy + sh)
+        return (x0, y0, x1 - x0, y1 - y0) if x1 > x0 and y1 > y0 else (sx, sy, sw, sh)
+
+    def cut_off(self) -> dict[int, str]:
+        """Controls that an edge hides part of, by id: "top" or "bottom" (and "left" or
+        "right" for ones that run past the window). A row half under the bottom of a list
+        looks, in numbers, like a row that is simply short; live the model had to work out
+        from "@(432,721,716x14)" that Recovery needed scrolling to. Two signs: it runs past
+        the window, or it is the last (first) of its kind in its list and much shorter than
+        the others, which is what a list does to the row its edge cuts."""
+        bounds = self.view_rect() or self.window.rect
+        bx, by, bw, bh = bounds
+        if bw <= 0 or bh <= 0:
+            return {}
+        mine = [
+            e
+            for e in self.elements
+            if e.role != "TaskbarButton"
+            and e.role != "Document"
+            and (e.role + "Control" in uia.INTERACTIVE or e.role in ("Text", "Image"))
+        ]
+        out: dict[int, str] = {}
+        rows: dict[tuple[int | None, str], list[UIElement]] = {}
+        for e in mine:
+            x, y, w, h = e.rect
+            seen_w = min(x + w, bx + bw) - max(x, bx)
+            seen_h = min(y + h, by + bh) - max(y, by)
+            if seen_w > 0 and seen_h > 0 and seen_w * seen_h < 0.75 * w * h:
+                over = {
+                    "bottom": y + h - (by + bh),
+                    "top": by - y,
+                    "right": x + w - (bx + bw),
+                    "left": bx - x,
+                }
+                out[e.id] = max(over, key=lambda k: over[k])
+            rows.setdefault((e.parent, e.role), []).append(e)
+        for same in rows.values():
+            for e in same:
+                # Its column: the rows of one list start at the same x and are as wide.
+                col = [
+                    s
+                    for s in same
+                    if abs(s.rect[0] - e.rect[0]) <= 4 and abs(s.rect[2] - e.rect[2]) <= 4
+                ]
+                if len(col) < 3 or e.id in out:
+                    continue
+                others = sorted(s.rect[3] for s in col if s is not e)
+                if e.rect[3] >= 0.6 * others[len(others) // 2]:
+                    continue
+                if all(s.rect[1] <= e.rect[1] for s in col):
+                    out[e.id] = "bottom"
+                elif all(s.rect[1] >= e.rect[1] for s in col):
+                    out[e.id] = "top"
+        return out
 
     def children(self, element_id: int) -> list[UIElement]:
         return [e for e in self.elements if e.parent == element_id]
@@ -123,6 +201,13 @@ class ScreenContext:
             return f"The user is in a private app ({self.excluded}). You cannot see it, and you must not ask what is in it."
         w = self.window
         lines = [f"Foreground app: {w.app} | window: {w.title[:120]!r}"]
+        if not w.title and not w.process:
+            # Said plainly: "window: ''" read as "they are back at the desktop", which it
+            # may or may not be.
+            lines = [
+                "No window was read on this screen (the bare desktop, or a window that could "
+                "not be read): go by the screenshot for what is open."
+            ]
         s = self.model_scale or 1.0
 
         def img(r: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
@@ -144,11 +229,23 @@ class ScreenContext:
             lines.append(
                 f"UI elements ({min(len(self.elements), max_elements)} of {len(self.elements)}, from the accessibility tree):"
             )
+            cut = self.cut_off()
             lines.extend(
-                "  " * min(e.depth, 6) + e.describe(img) for e in self.elements[:max_elements]
+                "  " * min(e.depth, 6) + e.describe(img, cut.get(e.id, ""))
+                for e in self.elements[:max_elements]
             )
         else:
             lines.append("(No accessibility tree available: rely on the screenshot.)")
+        if self.tree == "failed" and self.elements:
+            lines.append(
+                "(This window's accessibility tree could not be read this time, so nothing of "
+                "the window is listed above: rely on the screenshot for what is in it.)"
+            )
+        elif self.tree == "partial":
+            lines.append(
+                "(The accessibility tree stopped part-way: things that are on screen may be "
+                "missing from the list above. The screenshot has them.)"
+            )
         if self.text:
             lines.append(
                 "Text read from the pixels (OCR, top to bottom; includes text inside images, "
@@ -318,10 +415,31 @@ class ScreenReader:
         if reason := self.is_excluded(window):
             return ScreenContext(captured_at=now, window=window, excluded=reason)
 
-        elements = self._number(raw)
+        tree = raw_window.tree if raw_window else "ok"
         shot, origin = (
             self._grab(window.rect, follow_mouse and not hwnd) if pixels else (None, (0, 0))
         )
+        on_screen = None
+        if shot is not None:
+            # One screen's picture goes with that screen's controls only. Live, on three
+            # screens, the model got the buttons of a window on the second screen (at
+            # x=2037, y=-598 of a 1366 px picture) under a screenshot of the first.
+            screen = (origin[0], origin[1], shot.width, shot.height)
+            wx, wy, ww, wh = window.rect
+            apart = (
+                wx >= screen[0] + screen[2]
+                or wx + ww <= screen[0]
+                or wy >= screen[1] + screen[3]
+                or wy + wh <= screen[1]
+            )
+            if ww > 0 and wh > 0 and apart:
+                raw, window, tree = [], WindowInfo(rect=screen), "none"
+            else:
+
+                def on_screen(r: uia.RawElement) -> bool:
+                    return _contains(screen, r.rect)
+
+        elements = self._number(raw, on_screen)
         if shot is not None:
             self._black_out(shot, origin, self.private_rects(skip=window.hwnd))
         if shot is not None:
@@ -344,7 +462,40 @@ class ScreenReader:
             screenshot=shot,
             origin=origin,
             text=text,
+            tree=tree,
         )
+
+    def glance(self, rect: tuple[int, int, int, int]) -> Image.Image | None:
+        """Only the pixels of one part of the screen, to tell whether it changed since the
+        last look: no tree, no OCR, nothing kept or sent anywhere. None while sharing is
+        paused, or when that part can't be grabbed."""
+        x, y, w, h = rect
+        if self.paused or w <= 0 or h <= 0:
+            return None
+        try:
+            import mss
+
+            with (getattr(mss, "MSS", None) or mss.mss)() as sct:
+                raw = sct.grab({"left": x, "top": y, "width": w, "height": h})
+                img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+        except Exception:
+            return None
+        self._black_out(img, (x, y), self.private_rects())
+        return img
+
+    def text_now(self, ctx: ScreenContext) -> list[TextLine] | None:
+        """The words on the screen ``ctx`` was a look at, read again now: pixels and OCR, no
+        tree (a fraction of a second), to check that something is still where it was before
+        drawing on it. None when it can't be read."""
+        if ctx.screenshot is None or not self.config.ocr:
+            return None
+        shot = self.glance((ctx.origin[0], ctx.origin[1], ctx.screenshot.width, ctx.screenshot.height))
+        return ocr.read_lines(shot, ctx.origin) if shot is not None else None
+
+    @staticmethod
+    def input_idle_s() -> float | None:
+        """Seconds since the mouse or keyboard was last touched (when, never what)."""
+        return uia.input_idle_s()
 
     @staticmethod
     def _black_out(
@@ -409,10 +560,12 @@ class ScreenReader:
             self._next_id += 1
         return lines
 
-    def _number(self, raw: list[uia.RawElement]) -> list[UIElement]:
+    def _number(self, raw: list[uia.RawElement], keep: Any = None) -> list[UIElement]:
+        """``keep``: which of them are in the picture (a window can lie across two screens,
+        and the desktop lies across all of them)."""
         # Prefer interactive and named elements when trimming to the budget.
         ranked = sorted(
-            range(len(raw)),
+            (i for i in range(len(raw)) if keep is None or keep(raw[i])),
             key=lambda i: (raw[i].role + "Control" not in uia.INTERACTIVE, not raw[i].name, i),
         )
         keep = sorted(ranked[: self.config.max_elements])

@@ -44,6 +44,23 @@ MAX_ITEMS = 60
 MAX_MOUSE_ITEMS = 10
 FILLED = {"Edit", "ComboBox", "Document", "Spinner"}
 BAD_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+SCOUTS_AT_ONCE = 3  # a web route of sixty items is sixty browsers otherwise
+# A card number or a security code is typed into an ordinary field, not a password one, so
+# the field's name is checked too (and what was typed, by memory_guard).
+HIDDEN = "(hidden)"
+PRIVATE_FIELD = re.compile(
+    r"\b(card|cvv|cvc|cvn|security code|ssn|sin|pin|passwords?|passcode|pass phrase|otp|"
+    r"one[- ]time code|iban|routing|account (number|no)|social (security|insurance))\b",
+    re.I,
+)
+
+
+def private(name: str, value: str) -> bool:
+    """Is what they typed into this field something Ditto must not keep: a card number, a
+    security code, an ID number, a password or a key?"""
+    from pyxi.memory_guard import why_sensitive
+
+    return bool(PRIVATE_FIELD.search(name or "") or why_sensitive(value or ""))
 
 
 @dataclass
@@ -60,6 +77,8 @@ class Step:
     def line(self) -> str:
         if self.kind == "window":
             return f"switched to {self.app}: {self.title[:80]}"
+        if self.kind == "typed" and self.value == HIDDEN:
+            return f'typed something private (not kept) into {self.role.lower()} "{self.name[:60]}"'
         if self.kind == "typed":
             return f'typed "{self.value[:120]}" into {self.role.lower()} "{self.name[:60]}"'
         if self.kind == "file":
@@ -223,6 +242,13 @@ class Recorder:
         if self.log:
             self.log(step)
 
+    def _typed(self, last: Focus) -> None:
+        """What they left in a field. A card number or a code is hidden here, before the step
+        is kept, logged or shown to the model (audit: a checkout shown once put the card
+        number in the recording, the activity log and the prompt)."""
+        value = HIDDEN if private(last.name, last.value) else last.value
+        self._add(Step(time.time(), "typed", last.app, last.title, last.name, last.role, value))
+
     async def tick(self) -> None:
         f = await asyncio.to_thread(self.reader)
         if f is None or f.app.lower() in self.own_apps or self.excluded(f.app, f.title):
@@ -236,9 +262,7 @@ class Recorder:
             and last.value
             and ((f.app, f.name, f.role) != (last.app, last.name, last.role))
         ):
-            self._add(
-                Step(time.time(), "typed", last.app, last.title, last.name, last.role, last.value)
-            )
+            self._typed(last)
         if (f.app, f.title) != self._window:
             self._window = (f.app, f.title)
             shot = ""
@@ -264,9 +288,7 @@ class Recorder:
             await asyncio.gather(self._task, return_exceptions=True)
         last = self._last
         if last and last.role in FILLED and last.value and not last.password:
-            self._add(
-                Step(time.time(), "typed", last.app, last.title, last.name, last.role, last.value)
-            )
+            self._typed(last)
         if self.rec.folder and Path(self.rec.folder).is_dir():
             self.rec.changes = folder_changes(self._before, listing(Path(self.rec.folder)))
             for c in self.rec.changes:
@@ -346,17 +368,40 @@ def remaining(rec: Recording, items: list[str] | None = None) -> list[str]:
         return [str(i).strip() for i in items if str(i).strip()][:MAX_ITEMS]
     if not rec.folder or not Path(rec.folder).is_dir():
         return []
+    folder = Path(rec.folder)
     touched = {c.get("to") for c in rec.changes} | {c.get("from") for c in rec.changes}
     exts = {
         Path(str(c.get("from") or c.get("to"))).suffix.lower()
         for c in rec.changes
         if c.get("from") or c.get("to")
     }
+    # They made a new file from one that is still there (a.docx saved as a.pdf): the items
+    # are the other files of the kind it was made from, not other files of the kind it
+    # became (audit: "old scan.pdf" was offered, and b.docx and c.docx never were).
+    made = [Path(str(c["to"])) for c in rec.changes if c.get("op") == "created" and c.get("to")]
+    new_kinds = {m.suffix.lower() for m in made}
+    sources = {
+        p.name
+        for m in made
+        for p in folder.iterdir()
+        if p.is_file()
+        and p.name not in touched
+        and p.stem.lower() == m.stem.lower()
+        and p.suffix.lower() != m.suffix.lower()
+    }
+    if sources and len(made) == len(rec.changes):
+        exts = {Path(s).suffix.lower() for s in sources}
+        touched |= sources
+    else:
+        new_kinds = set()
     out = []
-    for p in sorted(Path(rec.folder).iterdir()):
+    for p in sorted(folder.iterdir()):
         fresh = p.is_file() and p.name not in touched and not p.name.startswith((".", "~$"))
-        if fresh and (not exts or p.suffix.lower() in exts):
-            out.append(p.name)
+        if not fresh or (exts and p.suffix.lower() not in exts):
+            continue
+        if any((folder / (p.stem + k)).exists() for k in new_kinds):
+            continue  # already has its new file beside it
+        out.append(p.name)
     return out[:MAX_ITEMS]
 
 
@@ -373,8 +418,10 @@ def check_files(plan: Plan, folder: Path) -> list[tuple[Path, Path]]:
         if not parts or any(p == ".." or BAD_NAME.search(p) for p in parts):
             continue
         dst = folder.joinpath(*parts)
-        if Path(parts[-1]).suffix == "" and src.suffix:
-            dst = dst.with_name(dst.name + src.suffix)  # they kept the extension
+        # They kept the extension. Compared with the file's own, not "has a dot": a name like
+        # "2026.10.09 Contoso Ltd" or "Acme Inc. invoice" lost its .pdf (audit).
+        if src.suffix and Path(parts[-1]).suffix.lower() != src.suffix.lower():
+            dst = dst.with_name(dst.name + src.suffix)
         key = str(dst).lower()
         if dst == src or dst.exists() or key in taken:
             continue
@@ -386,7 +433,11 @@ def check_files(plan: Plan, folder: Path) -> list[tuple[Path, Path]]:
 def do_files(moves: list[tuple[Path, Path]], log_dir: Path) -> tuple[int, Path]:
     """Rename and move, writing an undo log first."""
     log_dir.mkdir(parents=True, exist_ok=True)
-    undo = log_dir / f"ditto-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    # One log per batch, in the order they were made: two batches in the same second shared
+    # a name, and the first could no longer be undone (audit).
+    stamp, n = time.strftime("%Y%m%d-%H%M%S"), 0
+    while (undo := log_dir / f"ditto-{stamp}-{n:02d}.json").exists():
+        n += 1
     undo.write_text(json.dumps([[str(d), str(s)] for s, d in moves], indent=1), encoding="utf-8")
     done = 0
     for src, dst in moves:
@@ -421,18 +472,29 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     from pyxi import files_access
     from pyxi.agents.pixel import OPERATIONS
 
-    rec = Recording.load(Path(job.params["recording"]))
+    def stop(title: str, why: str) -> None:
+        job.status, job.summary = "failed", why
+        job.data = {"title": title, "body": why}
+
+    # Started without a recording (the model handed Ditto a task directly): said plainly,
+    # not "Ditto couldn't finish that. 'recording'." (audit).
+    try:
+        rec = Recording.load(Path(str(job.params.get("recording") or "")))
+    except (OSError, ValueError, TypeError):
+        stop(
+            "Show me once first",
+            "I need to watch you do it once first. Say 'watch me', do one, then say 'done'.",
+        )
+        return
     items = remaining(rec, job.params.get("items"))
     if not rec.steps:
-        job.status, job.summary = "failed", "I didn't see anything happen while I was watching."
-        job.data = {"title": "Nothing to repeat", "body": job.summary}
+        stop("Nothing to repeat", "I didn't see anything happen while I was watching.")
         return
     if not items:
-        job.status = "failed"
-        job.summary = (
-            "I saw what you did, but not what to do it to next. Tell me the folder or the list."
+        stop(
+            "What should I do it to?",
+            "I saw what you did, but not what to do it to next. Tell me the folder or the list.",
         )
-        job.data = {"title": "What should I do it to?", "body": job.summary}
         return
     await manager._status(job, f"Working out the pattern, {len(items)} to go")
     folder = Path(rec.folder) if rec.folder else None
@@ -472,6 +534,28 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     resp = await llm.complete(system=SYSTEM + safety.RULE, messages=[Message.user(prompt)], max_tokens=3000)
     job.cost_usd = resp.usage.cost_usd
     plan = parse_plan(resp.text, items)
+    # A plan that can't be carried out never reaches the card (audit: each of these was
+    # approved and then did nothing, or the wrong thing).
+    if plan is not None and plan.route in ("files", "convert", "sheet") and folder is None:
+        # With no folder the files were looked for in Pyxi's own working folder.
+        stop(
+            "Which folder are they in?",
+            "I saw what you did, but not which folder the files are in. Tell me the folder "
+            "and show me once more.",
+        )
+        return
+    if plan is not None and plan.route in ("web", "mouse") and not plan.steps:
+        stop(
+            "I didn't get the steps",
+            "I couldn't work out the steps to repeat. Show me once more, a little slower?",
+        )
+        return
+    if plan is not None and plan.route == "convert" and plan.operation not in OPERATIONS:
+        stop(
+            "I can't repeat that conversion",
+            "That's a conversion Pixel can't do yet, so I can't repeat it for the rest.",
+        )
+        return
     if plan is not None and plan.route == "files" and folder is not None:
         # The card shows (and counts) only what will really happen: a name that clashes, or
         # one outside the folder, is left out now, and "Initech" shows as "Initech.pdf".

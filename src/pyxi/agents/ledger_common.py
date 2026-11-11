@@ -109,6 +109,24 @@ def a1_grid(a1: str, sheet_id: int) -> dict[str, Any]:
     return grid
 
 
+def a1_tab(title: Any) -> str:
+    """A tab's name the way a range needs it: in single quotes, an apostrophe in it doubled
+    ('Mom''s budget'), or Google can't read the range."""
+    return "'" + str(title).replace("'", "''") + "'"
+
+
+def split_tab(a1: Any) -> tuple[str | None, str]:
+    """'Summary'!A1:B4 -> ("Summary", "A1:B4"); a range with no tab -> (None, "A1:B4")."""
+    raw = str(a1 or "").strip()
+    if "!" not in raw:
+        return None, raw
+    tab, rest = raw.rsplit("!", 1)
+    tab = tab.strip()
+    if len(tab) >= 2 and tab[0] == tab[-1] == "'":
+        tab = tab[1:-1].replace("''", "'")
+    return tab, rest.strip()
+
+
 def cell_rc(ref: Any) -> tuple[int, int]:
     """'B3' -> (row 3, column 2), 1-based: a cell in a table."""
     c1, r1, c2, r2 = a1_bounds(str(ref))

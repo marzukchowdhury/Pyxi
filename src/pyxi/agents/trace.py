@@ -36,6 +36,11 @@ FILLER = {
     "my", "me", "i", "a", "an", "of", "in", "it", "at", "on", "to", "week", "month", "remember",
     "can", "could", "please", "place", "there", "somewhere", "back",
 }  # fmt: skip
+KINDS = {  # what kind of thing it was, which is rarely written on the thing itself
+    "page", "pages", "webpage", "site", "website", "tab", "window", "screen", "app", "email",
+    "emails", "mail", "message", "file", "files", "document", "doc", "pdf", "link", "video",
+    "article", "picture", "photo", "image", "spreadsheet", "sheet", "slide", "slides", "folder",
+}  # fmt: skip
 BROWSERS = {"chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "arc"}
 APP_NAMES = {  # what they call the app, not its process ("winword")
     "winword": "Word", "excel": "Excel", "powerpnt": "PowerPoint", "acrobat": "Adobe Acrobat",
@@ -124,41 +129,92 @@ def short(title: str) -> str:
 
 
 # ------------------------------------------------------------------------------ the three places
+def named(terms: list[str]) -> list[str]:
+    """The words a screen has to have on it: the ones the screen history can search on,
+    without the words for what kind of thing it was ("that pricing page" is about pricing;
+    the page itself is titled "Pricing | Acme")."""
+    real = [t for t in terms if len(t) > 2 or not t.isascii()]
+    return [t for t in real if t not in KINDS] or real
+
+
+def enough(want: int, have: int) -> bool:
+    """At least half of the words, and all of them when there are one or two."""
+    return have == want if want <= 2 else have * 2 >= want
+
+
 def from_screen(spatial: Any, terms: list[str], span: tuple[float, float] | None) -> list[Hit]:
-    if not any(len(t) > 2 or not t.isascii() for t in terms):
+    want = named(terms)
+    if not want:
         return []  # nothing it can search on: every recent screen would come back
     query = " ".join(terms)
     found = spatial.find_snapshots(
-        query, start=span[0] if span else None, end=span[1] if span else None, k=6
+        query, start=span[0] if span else None, end=span[1] if span else None, k=12
     )
     if not found and span:  # the right thing on the wrong day still helps
-        found = spatial.find_snapshots(query, k=4)
-    hits = []
+        found = spatial.find_snapshots(query, k=8)
+    best: dict[tuple[str, str], Hit] = {}
     for s in found:
         app = str(s.get("app") or "")
         title = short(str(s.get("title") or ""))
+        # The history matches any one word, so a screen comes back for "page" alone. It only
+        # counts when enough of what they named was really on it (audit: "the Zephyr invoice
+        # pricing page" was "Found it: Wikipedia", for its Main Page).
+        snap = spatial.snapshot(int(s["id"])) or {}
+        names = [str(e.get("name") or "") for e in snap.get("elements") or []]
+        seen = " ".join([str(s.get("title") or ""), app, *names]).lower()
+        have = sum(1 for w in want if w in seen)
+        if not enough(len(want), have):
+            continue
         exe = app.lower().removesuffix(".exe")
         what = "your browser" if exe in BROWSERS else APP_NAMES.get(exe, app) or "a window"
-        score = 0.8 + overlap(terms, title) + (0.3 if span and span[0] <= s["ts"] <= span[1] else 0)
-        hits.append(
-            Hit(
-                "screen",
-                title or app,
-                f'On screen in {what}: "{title}"',
-                float(s["ts"]),
-                score,
-                snapshot_id=int(s["id"]),
-            )
+        score = (
+            0.2
+            + 0.6 * have / len(want)
+            + overlap(terms, title)
+            + (0.3 if span and span[0] <= s["ts"] <= span[1] else 0)
         )
-    return hits
+        hit = Hit(
+            "screen",
+            title or app,
+            f'On screen in {what}: "{title}"',
+            float(s["ts"]),
+            score,
+            snapshot_id=int(s["id"]),
+        )
+        # One hit for one window, the last time it was in front: the same page looked at
+        # five times was the whole list, and pushed the files and the mail off it.
+        key = (app.lower(), title)
+        if key not in best or hit.ts > best[key].ts:
+            best[key] = hit
+    return sorted(best.values(), key=lambda h: (-h.score, -h.ts))[:6]
 
 
-def from_files(found: list[Any], terms: list[str], span: tuple[float, float] | None) -> list[Hit]:
+def find_files(query: str, access: Any, limit: int = 8) -> tuple[list[Any], bool]:
+    """Their files, and whether Windows Search found them (it looks inside them as well, and
+    a file it returns has every word, in its name or in its text)."""
+    from pyxi import files_access
+
+    indexed = files_access.search_index(query, access.folders, limit * 3) or []
+    indexed = [h for h in indexed if files_access.allowed(Path(h.path), access)]
+    if indexed:
+        return indexed[:limit], True
+    return files_access.search(query, access, "", limit, use_index=False), False
+
+
+def from_files(
+    found: list[Any],
+    terms: list[str],
+    span: tuple[float, float] | None,
+    indexed: bool = False,
+) -> list[Hit]:
     hits = []
     for h in found:
         p = Path(h.path)
         in_span = bool(span and span[0] <= h.modified <= span[1] + 86400)
-        score = overlap(terms, p.stem) + (0.3 if in_span else 0) + 0.2
+        score = overlap(terms, p.stem) + 0.2
+        if indexed:  # found by what's in it: its name needn't say so (it scored 0.2, and
+            score = max(score, 0.5)  # "I couldn't find it" was said of a file that was found)
+        score += 0.3 if in_span else 0
         hits.append(
             Hit("file", p.name, f"In your files: {p}", float(h.modified), score, path=str(p))
         )
@@ -227,13 +283,30 @@ def best_first(hits: list[Hit]) -> list[Hit]:
     return sorted((h for h in hits if id(h) not in merged), key=lambda h: (-h.score, -h.ts))
 
 
-def report(hits: list[Hit], query: str, looked: list[str]) -> dict[str, Any]:
+def how_long(hours: float) -> str:
+    """72 -> "3 days", 24 -> "a day", 6 -> "6 hours"."""
+    if hours >= 48:
+        return f"{round(hours / 24)} days"
+    return "a day" if hours >= 24 else f"{max(1, round(hours))} hours"
+
+
+def report(
+    hits: list[Hit], query: str, looked: list[str], history_hours: float | None = None
+) -> dict[str, Any]:
     places = " and ".join([", ".join(looked[:-1]), looked[-1]] if len(looked) > 1 else looked)
     if not hits:
+        # How far back the screen history goes: "last week" can't be in three days of it,
+        # and "nothing in your screen history" read as if all of it had been looked through.
+        back = (
+            f" Screen history goes back {how_long(history_hours)}."
+            if history_hours and "screen history" in looked
+            else ""
+        )
         return {
             "title": "I couldn't find it",
-            "body": f"Nothing about {query!r} in your {places}. A word from its title helps most.",
-            "summary": f"Nothing found for {query!r} in {places}.",
+            "body": f"Nothing about {query!r} in your {places}. A word from its title helps "
+            f"most.{back}",
+            "summary": f"Nothing found for {query!r} in {places}.{back}",
         }
     top, rest = hits[0], hits[1:5]
     # The notification names the file; its full path is behind the Open button (and in the
@@ -291,8 +364,8 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     access = files_access.load(manager.settings.data_dir)
     if access.enabled and job.params.get("files", True):
         looked.append("files")
-        found = await asyncio.to_thread(files_access.search, " ".join(terms), access, "", 8)
-        hits += from_files(found, terms, span)
+        found, indexed = await asyncio.to_thread(find_files, " ".join(terms), access)
+        hits += from_files(found, terms, span, indexed)
     google = getattr(manager, "google", None)
     if google is not None and google.connected():
         looked.append("mail")
@@ -306,7 +379,8 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
             "There's nowhere to look yet: screen memory is off and nothing is connected."
         )
     ranked = best_first([h for h in hits if h.score >= 0.45])
-    rep = report(ranked, " ".join(terms), looked)
+    kept = getattr(getattr(manager.settings, "screen", None), "retention_hours", None)
+    rep = report(ranked, " ".join(terms), looked, kept)
     job.summary = rep.pop("summary")
     job.data = {**rep, "hits": [asdict(h) for h in ranked[:10]]}
     if ranked and ranked[0].path:

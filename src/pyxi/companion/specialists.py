@@ -289,6 +289,11 @@ async def _travel(brain: Brain, args: dict[str, Any]) -> str:
 async def after_trip(brain: Brain, job: Job) -> list[str]:
     """Save the trip's reminders (once each), and schedule check-ins if they asked."""
     data = job.data if isinstance(job.data, dict) else {}
+    # A flight that moved or was cancelled: the reminders an earlier run set for it go.
+    stale = set(data.get("stale_reminders") or [])
+    gone = [brain.routines.remove(r.id) for r in list(brain.routines.items) if r.key in stale]
+    if gone:
+        await brain.hub.emit("routines", routines=brain.routines.public())
     if job.status != "done":
         return []
     added = []
@@ -446,12 +451,23 @@ async def after_meeting(brain: Brain, job: Job) -> bool:
     if job.status != "done" or not draft.get("body") or not to:
         return False
     if not brain.connectors.google.connected():
+        # They asked for it to be sent: silence here read as "the card is coming" (audit).
+        await brain._notify(
+            job.id,
+            ok=False,
+            title="The follow-up needs Gmail connected",
+            body="I can't put the follow-up on a card to send until Gmail is connected in "
+            "Settings. The draft is in the notes.",
+            say=True,
+        )
         return False
     out = await brain.connectors.google.gmail_send(
         {"to": ", ".join(to), "subject": draft.get("subject") or "Follow-up", "body": draft["body"]}
     )
     if isinstance(out, str):  # a problem with the addresses: say so on the card's place
-        await brain._notify(job.id, ok=False, title="The follow-up wasn't sent", body=out[:200])
+        await brain._notify(
+            job.id, ok=False, title="The follow-up wasn't sent", body=out[:200], say=True
+        )
         return False
     if not await brain._within_limits(out.channel, out.action):  # the hourly email limit
         return False
@@ -471,10 +487,12 @@ async def after_meeting(brain: Brain, job: Job) -> bool:
     except Exception as exc:
         log.exception("follow-up email failed")
         await brain._notify(
-            job.id, ok=False, title="The follow-up didn't send", body=str(exc)[:200]
+            job.id, ok=False, title="The follow-up didn't send", body=str(exc)[:200], say=True
         )
         return False
-    await brain._notify(job.id, ok=True, title="Follow-up sent", body=line[:200])
+    # Said as well as shown (say=True): what came of a card they allowed was a ten second
+    # notice and nothing else.
+    await brain._notify(job.id, ok=True, title="Follow-up sent", body=line[:200], say=True)
     return True
 
 
@@ -534,7 +552,10 @@ async def _study(brain: Brain, args: dict[str, Any]) -> str:
             "sage",
             f"Flashcards: {', '.join(p.name for p in paths[:3])}",
             files=[str(p) for p in paths],
-            params={"count": int(args.get("count") or 20), "focus": str(args.get("focus") or "")},
+            params={
+                "count": sage.as_count(args.get("count"), 20),
+                "focus": str(args.get("focus") or ""),
+            },
         )
         return (
             f"Started {job.id}: {job.agent_name} is making the cards in the background. Say one "
@@ -545,17 +566,33 @@ async def _study(brain: Brain, args: dict[str, Any]) -> str:
             quiz = sage.Quiz.start(quiz.deck, len(quiz.missed), only=list(quiz.missed))
         else:
             topic = str(args.get("deck") or "").strip()
-            deck = sage.find_deck(brain.settings.data_dir, topic)
+            # A named topic gets its own deck or none: "quiz me on the heart" with only a
+            # French Revolution deck saved was a quiz on the French Revolution (audit).
+            deck = sage.find_deck(brain.settings.data_dir, topic, strict=True)
             if (deck is None or not deck.cards) and topic:
                 # "Quiz me on the heart" with no notes: a short deck from what's well known,
                 # made now, so they're quizzed instead of told to find their slides first.
-                deck = await _topic_deck(brain, topic, int(args.get("questions") or 5))
+                deck = await _topic_deck(brain, topic, sage.as_count(args.get("questions"), 5))
+            other = ""
+            if deck is None or not deck.cards:  # the topic deck didn't come: their latest one
+                deck = sage.find_deck(brain.settings.data_dir)
+                if topic and deck is not None and deck.cards:
+                    other = (
+                        f" (There are no cards on {topic!r} and none could be made just now: "
+                        "this is their latest deck. Say so in the line that starts it.)"
+                    )
             if deck is None or not deck.cards:
                 return (
                     "quiz: there are no flashcards yet and no topic was named. Ask what to be "
                     "quizzed on, or offer to make cards from their slides or notes."
                 )
-            quiz = sage.Quiz.start(deck, int(args.get("questions") or 10))
+            quiz = sage.Quiz.start(deck, sage.as_count(args.get("questions"), 10))
+            brain.study_quiz = quiz
+            return (
+                f"quiz: on {quiz.deck.title}, {len(quiz.order)} questions.{other} Say one short "
+                "line to start, then ask the first question out loud, word for word, and stop "
+                f"there.\n{quiz.ask()}"
+            )
         brain.study_quiz = quiz
         return (
             f"quiz: on {quiz.deck.title}, {len(quiz.order)} questions. Say one short line to "
@@ -611,7 +648,10 @@ async def _fix_code(brain: Brain, args: dict[str, Any]) -> str:
         path = Path(raw).expanduser()
         if not path.is_file():
             return f"fix_code: there's no file at {raw}. Find it with search_files, or ask them."
-        loc = patch.Location(str(path), int(args.get("line") or 0))
+        # The line they gave, else the one the error itself names for this file: with `file`
+        # and a traceback but no `line`, Patch was shown the top of the file, not line 300.
+        line = patch.as_line(args.get("line")) or patch.line_in(error, path)
+        loc = patch.Location(str(path), line)
     else:
         found = patch.locations(error)
         if not found:
@@ -650,7 +690,10 @@ async def after_fix(brain: Brain, job: Job) -> bool:
         job_id=job.id,
         agent=job.agent_name,
         action=f"Apply this fix to {name}?",
+        # Which file, in full: two projects can each have a utils.py, and the path may have
+        # come from an error read off the screen rather than from them.
         reason=(f"{fix.why}\n\n" if fix.why else "")
+        + f"File: {fix.path}\n\n"
         + fix.diff  # the whole change, exactly as it will be written (the card scrolls)
         + "\n\nA backup of the file is kept beside it.",
     )
@@ -666,14 +709,17 @@ async def after_fix(brain: Brain, job: Job) -> bool:
             undo={"type": "patch", "path": fix.path, "backup": str(backup)},
         )
     except (OSError, RuntimeError, UnicodeDecodeError) as exc:
-        await brain._notify(job.id, ok=False, title=f"{name} wasn't changed", body=str(exc)[:200])
+        await brain._notify(
+            job.id, ok=False, title=f"{name} wasn't changed", body=str(exc)[:200], say=True
+        )
         return False
-    await brain._notify(
+    await brain._notify(  # said too: the fix they allowed was a silent notice (audit)
         job.id,
         ok=True,
         title=f"Fixed {name}",
         body=f"Line {fix.line} changed. The old version is saved as {backup.name}.",
         files=[fix.path],
+        say=True,
     )
     brain.history = [
         *brain.history[-11:],
@@ -803,7 +849,26 @@ async def after_repeat(brain: Brain, job: Job) -> str:
     if job.status != "done" or not data.get("plan"):
         return "no plan"
     plan = ditto.Plan(**data["plan"])
-    folder = Path(data.get("folder") or ".")
+    where = str(data.get("folder") or "").strip()
+    # A plan that can't be carried out gets no card (ditto.run refuses these too; a plan can
+    # also come from a hand-off). With no folder, the files were looked for, and renamed, in
+    # Pyxi's own working folder.
+    problem = ""
+    if plan.route in ("files", "convert", "sheet") and not where:
+        problem = "I don't know which folder those files are in. Tell me and show me once more."
+    elif plan.route in ("web", "mouse") and not plan.steps:
+        problem = "I couldn't work out the steps to repeat. Show me once more, a little slower?"
+    elif plan.route == "convert":
+        from pyxi.agents.pixel import OPERATIONS
+
+        if plan.operation not in OPERATIONS:
+            problem = "That's a conversion Pixel can't do yet."
+    if problem:
+        await brain._notify(
+            job.id, ok=False, title="I couldn't repeat that", body=problem, say=True
+        )
+        return "bad plan"
+    folder = Path(where)
     preview = "\n".join(
         f"{it['item']}  ->  {it['to']}" if it.get("to") else it["item"] for it in plan.items[:6]
     )
@@ -844,25 +909,18 @@ async def after_repeat(brain: Brain, job: Job) -> str:
             body += f"{skipped} skipped (a name clash or a missing file). "
         if done:
             body += "Say 'undo that' to put them back."
+        # Said as well as shown: this is the result they were waiting for, and it used to be
+        # a ten second notice while "Ditto's done." had been said before the card (audit).
         await brain._notify(
             job.id,
             ok=done > 0,
             title=f"Done {done} more" if done else "Nothing was changed",
             body=body.strip(),
             changes=[f"{s.name} -> {d.relative_to(folder)}" for s, d in moves[:6]],
+            say=True,
         )
         return f"files:{done}"
     if plan.route == "convert":
-        from pyxi.agents.pixel import OPERATIONS
-
-        if plan.operation not in OPERATIONS:
-            await brain._notify(
-                job.id,
-                ok=False,
-                title="I couldn't repeat that",
-                body="Pixel can't do that conversion.",
-            )
-            return "bad operation"
         files = [str(folder / i) for i in items if (folder / i).is_file()]
         await brain.jobs.start(
             "pixel",
@@ -879,12 +937,12 @@ async def after_repeat(brain: Brain, job: Job) -> str:
         return "sheet"
     steps = "\n".join(f"{n + 1}. {s}" for n, s in enumerate(plan.steps))
     if plan.route == "web":
-        for item in items:
-            task = (
-                f"Repeat what the user did once, for this item: {item}\n"
-                f"Steps:\n{steps.replace('{item}', item)}"
-            )
-            await brain.jobs.start("scout", task, start_url=plan.url or None)
+        tasks = [
+            f"Repeat what the user did once, for this item: {item}\n"
+            f"Steps:\n{steps.replace('{item}', item)}"
+            for item in items
+        ]
+        brain._spawn(scouts_in_turn(brain, tasks, plan.url or None))
         return f"web:{len(items)}"
     # mouse: the last resort, one run of the hands for a few items at a time
     batch = items[: ditto.MAX_MOUSE_ITEMS]
@@ -894,6 +952,29 @@ async def after_repeat(brain: Brain, job: Job) -> str:
     )
     brain._spawn(brain._drive(task, None))
     return f"mouse:{len(batch)}"
+
+
+async def scouts_in_turn(brain: Brain, tasks: list[str], url: str | None) -> int:
+    """Ditto's web route: Scout does the items a few at a time, not all at once (sixty items
+    were sixty browsers started together). "Stop everything" ends the ones still waiting
+    too. Returns how many were started."""
+    from pyxi.agents import ditto
+
+    gate = asyncio.Semaphore(ditto.SCOUTS_AT_ONCE)
+    state = {"started": 0, "stopped": False}
+
+    async def one(task: str) -> None:
+        async with gate:
+            if state["stopped"]:
+                return
+            job = await brain.jobs.start("scout", task, start_url=url)
+            state["started"] += 1
+            done = await brain.jobs.wait(job.id)
+            if done.status == "stopped":  # they stopped it: the rest don't start
+                state["stopped"] = True
+
+    await asyncio.gather(*(one(t) for t in tasks))
+    return state["started"]
 
 
 # ---------------------------------------------------------------------------------- Trace

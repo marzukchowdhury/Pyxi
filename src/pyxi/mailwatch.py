@@ -17,19 +17,40 @@ from __future__ import annotations
 import itertools
 import json
 import re
+from collections.abc import Iterable, Set
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from email.utils import parseaddr
 from pathlib import Path
 from typing import Any
 
+
+class Fetched(list):  # type: ignore[type-arg]
+    """What a Gmail scan read. ``cut``: Gmail had more matching mail than was asked for, so
+    the oldest of it wasn't read (the result then says how far back it got)."""
+
+    cut: bool = False
+
+
+def read_back_to(mails: Any) -> datetime | None:
+    """The date of the oldest mail a scan read, when it was cut short; None when it read
+    everything there was."""
+    if not getattr(mails, "cut", False):
+        return None
+    dates = [m["date"] for m in mails if isinstance(m.get("date"), datetime)]
+    return min(dates) if dates else None
+
+
 # ------------------------------------------------------------------ reading money
 
 # European receipts write "19,99 €" and "1.234,56 €": a comma and exactly two digits, last.
 EU_NUMBER = r"\d{1,3}(?:\.\d{3})*,\d{2}(?![\d.,])"
+# "$485 million", "$1.2 billion", "$3.5M", "$20k": a size, not a price. (Live: a newsletter's
+# "$1.2 billion" deal was listed as a subscription of $1.00.)
+NOT_A_PRICE = r"(?![\d]|[.,]\d|\s?(?i:k|m|mm|b|bn|million|billion|trillion|thousand)\b)"
 MONEY = re.compile(
     r"(?P<cur>US\$|CA\$|C\$|A\$|AU\$|NZ\$|\$|€|£|USD|CAD|AUD|EUR|GBP)\s?"
-    rf"(?P<n>{EU_NUMBER}|\d{{1,5}}(?:,\d{{3}})*(?:\.\d{{2}})?)"
+    rf"(?P<n>{EU_NUMBER}|\d{{1,5}}(?:,\d{{3}})*(?:\.\d{{2}})?){NOT_A_PRICE}"
     rf"|(?P<n2>{EU_NUMBER}|\d{{1,5}}(?:,\d{{3}})*\.\d{{2}})\s?(?P<cur2>USD|CAD|AUD|EUR|GBP|€|£)(?![A-Za-z])"
 )
 
@@ -42,27 +63,65 @@ def parse_amount(text: str) -> float:
 # A plain "$" and "US$" are added up together: receipts mix them for the same dollars.
 CURRENCY = {"US$": "$", "USD": "$", "$": "$", "CA$": "CAD", "C$": "CAD", "A$": "AUD", "AU$": "AUD",
             "NZ$": "NZD", "€": "EUR", "£": "GBP"}  # fmt: skip
-SYMBOL = {"USD": "$", "CAD": "CA$", "AUD": "A$", "NZD": "NZ$", "EUR": "€", "GBP": "£", "$": "$"}
+# "USD" only shows next to another dollar (a Canadian's CA$ receipts), so it reads "US$".
+SYMBOL = {"USD": "US$", "CAD": "CA$", "AUD": "A$", "NZD": "NZ$", "EUR": "€", "GBP": "£", "$": "$"}
+# "US$0.99", "Total: 0.99 USD": a receipt that says it's in US dollars
+US_DOLLARS = re.compile(r"\bUS\s?\$|\$\s?\d[\d,.]*\s?USD\b|\bUSD\s?\$?\s?\d")
+
+
+def own_dollar(currencies: Iterable[str]) -> str | None:
+    """The user's own dollar, when exactly one of CA$, A$ or NZ$ shows up in their receipts: a
+    plain "$" beside it is the same money (Amazon.ca and Uber in Canada print just "$")."""
+    local = set(currencies) & {"CAD", "AUD", "NZD"}
+    return next(iter(local)) if len(local) == 1 else None
+
+
+# The patterns that read a mail's words match whole words. Live: "supercharged" in a
+# newsletter counted as "charged", and a plan that was "extended" would count as "ended".
 
 # A charge really happened (not an offer to subscribe).
 CHARGED = re.compile(
-    r"receipt|invoice|payment (?:received|confirmation|confirmed|successful|processed)|"
+    r"\b(?:e-?receipts?|receipts?|invoices?|invoiced|"
+    r"payment (?:was |has been |is )?(?:received|confirmation|confirmed|successful|processed)|"
     r"you(?:'ve| have)? (?:been )?(?:charged|paid|billed)|we (?:charged|billed)|charged|billed|"
     r"amount paid|total paid|thanks? (?:you )?for your (?:payment|purchase|order)|renewed|"
-    r"renewal (?:confirmation|receipt)|automatic payment|order total",
+    r"renewal (?:confirmation|receipt)|automatic payment|order total)\b",
     re.I,
 )
 RECURRING = re.compile(
-    r"subscription|subscribed|renew|recurring|membership|your plan|billing (?:period|cycle)|"
-    r"next (?:billing|payment|charge)|auto-?pay|automatic payment|per month|a month|/\s?mo\b|"
-    r"monthly|annual(?:ly)?|yearly|per year|/\s?yr\b|weekly",
+    r"\b(?:subscriptions?|subscribed|renew(?:s|ed|al|als|ing)?|recurring|memberships?|your plan|"
+    r"billing (?:period|cycle)|next (?:billing|payment|charge)|auto-?pay(?:ment)?|"
+    r"automatic payment|per month|a month|monthly|annual(?:ly)?|yearly|per year|a year|weekly)\b|"
+    r"/\s?(?:mo|month|yr|year)\b",
     re.I,
 )
 ENDED = re.compile(
-    r"(?:subscription|membership|plan)[^.\n]{0,40}(?:has been |was |is )?(?:cancell?ed|ended)|"
-    r"(?:cancell?ation|cancell?ed) (?:confirmed|confirmation)|we(?:'re| are) sorry to see you go",
+    r"\b(?:subscription|membership|plan)\b[^.\n]{0,40}?\b(?:has been |was |is )?(?:cancell?ed|ended)\b|"
+    r"\b(?:cancell?ation|cancell?ed) (?:confirmed|confirmation)\b|\bwe(?:'re| are) sorry to see you go\b",
     re.I,
 )
+# A mail about money that changed hands says so where a receipt does: in who sent it
+# ("Uber Receipts", billing@), in its subject, or in its opening line ("Thanks for riding").
+# A newsletter that mentions an invoice somewhere in its text does none of these.
+MONEY_MAIL = re.compile(
+    r"\b(?:e-?receipts?|receipts?|invoices?|payments?|paid|charged|billed|bills?|billing|"
+    r"statements?|renew(?:s|ed|al)?|subscriptions?|memberships?|orders?|purchases?|"
+    r"refund(?:s|ed)?)\b",
+    re.I,
+)
+THANKED = re.compile(
+    r"\bthanks?(?: you)? for (?:riding|ordering|shopping|dining|"
+    r"your (?:payment|purchase|order|business))\b",
+    re.I,
+)
+# A bill or a statement is money owed again and again, whatever else it says.
+BILL = re.compile(r"\b(?:bill|statement)\b", re.I)
+
+
+def is_receipt(sender: str, subject: str, body: str) -> bool:
+    """Is this mail a receipt, an invoice or a bill (and not a newsletter that talks about
+    money)? Its sender, subject or first lines have to say so."""
+    return bool(MONEY_MAIL.search(f"{sender}\n{subject}") or THANKED.search(body[:300]))
 PROMO = re.compile(
     r"\b(?:\d+% off|limited time|special offer|subscribe now|try .{0,20}free)\b", re.I
 )
@@ -132,7 +191,8 @@ JOB_TEXT = re.compile(
     re.I,
 )
 PAID_CLEARLY = re.compile(
-    r"(?:total|amount)\s+(?:paid|charged)|you (?:paid|were charged|have been charged)|payment of|charged (?:to|on) your",
+    r"\b(?:(?:total|amount)\s+(?:paid|charged)|you (?:paid|were charged|have been charged)|"
+    r"payment of|charged (?:to|on) your)\b",
     re.I,
 )
 
@@ -145,30 +205,47 @@ def not_spending(sender: str, text: str, amount: float) -> bool:
     return amount > 5000 and not PAID_CLEARLY.search(text)
 
 
-def amount_in(text: str) -> tuple[float, str] | None:
-    """The amount actually charged: a "Total" line beats a subtotal or tax line, a "charged"
-    line beats any other price, and the first price is the last resort."""
-    lines = [ln for ln in text.splitlines() if MONEY.search(ln)]
-    if not lines:
+# A line that says its amount was paid (or is owed): "Total: $34.20", "You paid $8.52",
+# "Amount due: $271.07". A price that is only mentioned ("Go Pro: $485/year") is not one.
+PAID_LINE = re.compile(
+    r"\b(?:total|amount|balance|due|charged|billed|paid|payments?|refund(?:ed)?|"
+    r"renew(?:s|ed|al)?)\b",
+    re.I,
+)
+
+
+def paid_amount(text: str) -> tuple[float, str, int] | None:
+    """The amount actually charged, its currency, and where its line ends in ``text``: a
+    "Total" line beats a subtotal or tax line, else the first line that says paid, charged,
+    billed or due. There is no "first price in the mail" any more: live, that made a
+    newsletter's "$485" a yearly subscription."""
+    rows: list[tuple[str, re.Match[str], int]] = []
+    pos = 0
+    label = ""  # "Total" alone on its line, with the amount on the next (mail laid out as a table)
+    for ln in text.splitlines(keepends=True):
+        pos += len(ln)
+        if not ln.strip():
+            continue
+        m = MONEY.search(ln)
+        said = bool(PAID_LINE.search(ln))
+        if m and (said or (label and len(ln.strip()) <= 24)):
+            whole = ln if said else f"{label} {ln}"
+            if not re.search(r"sub-?total", whole, re.I):
+                rows.append((whole, m, pos))
+        label = ln.strip() if said and not m and len(ln.strip()) <= 40 else ""
+    if not rows:
         return None
+    totals = [r for r in rows if re.search(r"\btotal\b", r[0], re.I)]
+    _, m, end = totals[-1] if totals else rows[0]
+    cur = m.group("cur") or m.group("cur2")
+    return parse_amount(m.group("n") or m.group("n2")), CURRENCY.get(cur, cur), end
 
-    def pick(line: str) -> tuple[float, str]:
-        m = MONEY.search(line)
-        assert m
-        cur = m.group("cur") or m.group("cur2")
-        return parse_amount(m.group("n") or m.group("n2")), CURRENCY.get(cur, cur)
 
-    totals = [
-        ln
-        for ln in lines
-        if re.search(r"\btotal\b", ln, re.I) and not re.search(r"sub-?total", ln, re.I)
-    ]
-    if totals:
-        return pick(totals[-1])
-    charged = [
-        ln for ln in lines if re.search(r"charged|billed|paid|amount|price|renew|payment", ln, re.I)
-    ]
-    return pick(charged[0] if charged else lines[0])
+def amount_in(text: str) -> tuple[float, str] | None:
+    """The amount actually charged (see :func:`paid_amount`), or None when the text names no
+    amount as paid."""
+    got = paid_amount(text)
+    return got[:2] if got else None
 
 
 def merchant(sender: str, subject: str = "", text: str = "") -> str:
@@ -207,11 +284,20 @@ def _key(name: str) -> str:
 
 
 def _cadence(text: str) -> str | None:
-    if re.search(r"annual|yearly|per year|a year|/\s?yr\b|12 months", text, re.I):
+    """How often, as the receipt itself says it ("billed yearly", "$7.99/month")."""
+    if re.search(
+        r"\b(?:annual(?:ly)?|yearly|per year|a year|every year|12 months)\b|/\s?(?:yr|year)\b",
+        text,
+        re.I,
+    ):
         return "yearly"
-    if re.search(r"weekly|per week|a week|/\s?wk\b", text, re.I):
+    if re.search(r"\b(?:weekly|per week|a week|every week)\b|/\s?(?:wk|week)\b", text, re.I):
         return "weekly"
-    if re.search(r"monthly|per month|a month|/\s?mo\b|every month|billing period", text, re.I):
+    if re.search(
+        r"\b(?:monthly|per month|a month|every month|billing period)\b|/\s?(?:mo|month)\b",
+        text,
+        re.I,
+    ):
         return "monthly"
     return None
 
@@ -245,12 +331,17 @@ class Subscription:
     email_subject: str
     cancel_url: str | None = None
     cancel_from: str | None = None  # "email" (a link in their receipt) or "known" (our list)
+    every_days: float = 0.0  # for "repeating": the usual gap between its charges
 
     @property
     def monthly(self) -> float:
-        return {"yearly": self.amount / 12, "weekly": self.amount * 52 / 12}.get(
-            self.cadence, self.amount
-        )
+        if self.cadence == "yearly":
+            return self.amount / 12
+        if self.cadence == "weekly":
+            return self.amount * 52 / 12
+        if self.cadence != "monthly" and self.every_days > 0:
+            return self.amount * 30.44 / self.every_days  # every three months is a third a month
+        return self.amount
 
     def price(self) -> str:
         per = {"monthly": "a month", "yearly": "a year", "weekly": "a week"}.get(
@@ -283,17 +374,47 @@ def _cancel_link(service: str, emails: list[dict[str, Any]]) -> tuple[str | None
     return None, None
 
 
-def find_subscriptions(emails: list[dict[str, Any]], now: datetime) -> list[Subscription]:
-    """Recurring charges, biggest monthly cost first. A charge counts when the email shows money
-    really changing hands; it's recurring when the email says so (subscription, renews,
-    monthly...) or when the same amount comes back at a steady rhythm. Ones that were cancelled
-    afterwards, or stopped coming, are left out."""
+class Found(list):  # type: ignore[type-arg]
+    """The subscriptions a scan found. ``read_back_to``: set when Gmail had more receipts than
+    the scan read, to the date of the oldest one it did read."""
+
+    read_back_to: datetime | None = None
+
+
+def said_day(d: datetime, now: datetime | None = None) -> str:
+    """ "28 Oct", with the year when it isn't this one."""
+    return f"{d.day} {d:%b}" + ("" if d.year == (now or datetime.now()).year else f" {d.year}")
+
+
+def find_subscriptions(
+    emails: list[dict[str, Any]], now: datetime, ignore: Set[str] = frozenset()
+) -> list[Subscription]:
+    """Recurring charges, biggest monthly cost first.
+
+    Only the receipt itself is read: who sent it, its subject, and its text down to the line
+    the amount is on. What comes under the total (an ad for a membership, "manage your
+    subscription") is not the receipt. Live, reading whole mails listed a free newsletter as
+    "$485.00 a year" and a single ride as a subscription.
+
+    * It's a charge when the mail is a receipt, invoice or bill (:func:`is_receipt`) and the
+      amount is on a line that says it was paid (:func:`paid_amount`).
+    * It recurs when the receipt says so (subscription, renews, monthly, a bill), or when about
+      the same amount comes back at a steady rhythm. One charge that doesn't say how often it
+      comes is never a subscription.
+
+    Ones that were cancelled afterwards, or stopped coming, are left out, and so is every
+    service in ``ignore`` (the ones the user said aren't subscriptions)."""
+    skip = {_key(name) for name in ignore}
     groups: dict[str, dict[str, Any]] = {}
     for e in emails:
         if not e.get("date"):
             continue
-        text = f"{e['subject']}\n{e['text']}"
-        service = merchant(e["from"], e["subject"], e["text"])
+        sender, subject = str(e.get("from") or ""), str(e.get("subject") or "")
+        body = str(e.get("text") or "")
+        text = f"{subject}\n{body}"
+        service = merchant(sender, subject, body)
+        if _key(service) in skip:
+            continue
         g = groups.setdefault(
             _key(service), {"name": service, "charges": [], "ended": None, "mails": []}
         )
@@ -301,33 +422,51 @@ def find_subscriptions(emails: list[dict[str, Any]], now: datetime) -> list[Subs
         if ENDED.search(text):
             g["ended"] = max(g["ended"] or e["date"], e["date"])
             continue
-        if not CHARGED.search(text) or (
-            PROMO.search(text) and not re.search(r"receipt|invoice", text, re.I)
+        if not is_receipt(sender, subject, body) or (
+            PROMO.search(text) and not re.search(r"\b(?:receipt|invoice)", text, re.I)
         ):
             continue
-        got = amount_in(e["text"]) or amount_in(e["subject"])
-        if got and not_spending(str(e.get("from") or ""), text, got[0]):
-            continue
+        in_body = paid_amount(body)
+        got = in_body or paid_amount(subject)
         if not got or got[0] <= 0:
             continue
-        g["charges"].append((e, got, bool(RECURRING.search(text)), _cadence(text)))
+        part = f"{subject}\n{body[: in_body[2]]}" if in_body else subject  # the receipt itself
+        bill = bool(BILL.search(subject))
+        if not (CHARGED.search(part) or bill) or not_spending(sender, text, got[0]):
+            continue
+        currency = "USD" if got[1] == "$" and US_DOLLARS.search(part) else got[1]
+        g["charges"].append(
+            (e, (got[0], currency), bool(RECURRING.search(part)) or bill, _cadence(part))
+        )
     subs = []
     for g in groups.values():
-        charges = sorted(g["charges"], key=lambda c: c[0]["date"], reverse=True)
+        charges, seen = [], set()
+        for c in sorted(g["charges"], key=lambda c: c[0]["date"], reverse=True):
+            once = (c[0]["date"].date(), round(c[1][0], 2))
+            if once not in seen:  # PayPal's receipt and the service's own are one charge
+                seen.add(once)
+                charges.append(c)
         if not charges:
             continue
         dates = [c[0]["date"] for c in charges]
         said = next((c[3] for c in charges if c[3]), None)
-        cadence = said or _from_gaps(dates)
-        recurring = any(c[2] for c in charges) or (cadence is not None and len(charges) >= 2)
-        if not recurring:
-            continue  # a one-off purchase
+        says_so = any(c[2] for c in charges)
+        rhythm = _from_gaps(dates)
+        amounts = [c[1][0] for c in charges]
+        if rhythm and not says_so and max(amounts) > 1.25 * min(amounts):
+            rhythm = None  # two rides a month apart: a subscription charges about the same again
+        if not (rhythm or (says_so and (said or len(charges) >= 2))):
+            continue  # a one-off purchase, or one charge that doesn't say how often it comes
+        cadence = rhythm or said  # what really happened beats "annual plan, billed monthly"
         latest, (amount, currency), *_ = charges[0]
         if g["ended"] and g["ended"] >= latest["date"]:
             continue  # cancelled since the last charge
         stale = {"weekly": 21, "monthly": 50, "yearly": 400}.get(cadence or "", 100)
         if (now - latest["date"]).days > stale:
             continue  # stopped coming: probably over already
+        every = 0.0
+        if cadence is None:  # it repeats, at no rhythm with a name: every 3 months, say
+            every = max((dates[0] - dates[-1]).days / (len(dates) - 1), 7.0)
         url, source = _cancel_link(g["name"], g["mails"])
         subs.append(
             Subscription(
@@ -337,21 +476,39 @@ def find_subscriptions(emails: list[dict[str, Any]], now: datetime) -> list[Subs
                 cadence=cadence or "repeating",
                 last_charged=latest["date"].date().isoformat(),
                 charges=len(charges),
-                email_id=latest["id"],
-                email_subject=latest["subject"],
+                email_id=str(latest.get("id") or ""),
+                email_subject=str(latest.get("subject") or ""),
                 cancel_url=url,
                 cancel_from=source,
+                every_days=round(every, 1),
             )
         )
-    return sorted(subs, key=lambda s: s.monthly, reverse=True)
+    # A Canadian's receipts print "$" and "CA$" for the same dollars: one currency, one total.
+    # Only a receipt that says US$ or USD stays apart from those.
+    own = own_dollar(s.currency for s in subs)
+    for s in subs:
+        if s.currency == "$" and own:
+            s.currency = own
+        elif s.currency == "USD" and not own:
+            s.currency = "$"
+    found = Found(sorted(subs, key=lambda s: s.monthly, reverse=True))
+    found.read_back_to = read_back_to(emails)
+    return found
 
 
 def subscriptions_report(subs: list[Subscription]) -> tuple[str, str, list[str]]:
-    """Title, body and lines for the notification card."""
+    """Title, body and lines for the notification card. The body says what the title's total
+    leaves out (another currency), and how far back the scan read when it couldn't read it all."""
+    since = getattr(subs, "read_back_to", None)
     if not subs:
         return (
             "No subscriptions found",
-            "I looked through a year of receipts and didn't find any recurring charges.",
+            (
+                f"I didn't find any recurring charges in your receipts since {said_day(since)}. "
+                "There was more mail than I could read, so older charges may be missing."
+                if since
+                else "I looked through a year of receipts and didn't find any recurring charges."
+            ),
             [],
         )
     by_currency: dict[str, float] = {}
@@ -359,11 +516,18 @@ def subscriptions_report(subs: list[Subscription]) -> tuple[str, str, list[str]]
         by_currency[s.currency] = by_currency.get(s.currency, 0.0) + s.monthly
     main = max(by_currency, key=by_currency.get)  # type: ignore[arg-type]
     total = money(by_currency[main], main)
+    others = [money(v, c) for c, v in by_currency.items() if c != main]
     n = len(subs)
     title = f"{total} a month in subscriptions"
     body = (
         f"{n} recurring charge{'s' if n != 1 else ''}, biggest first. "
-        'Say "cancel" and the name, and I\'ll open its cancel page.'
+        + (f"Not in that total: {' and '.join(others)} a month in other currencies. " if others else "")
+        + 'Say "cancel" and the name, and I\'ll open its cancel page.'
+        + (
+            f" I could only read back to {said_day(since)}, so older charges may be missing."
+            if since
+            else ""
+        )
     )
     return title, body, [s.line() for s in subs]
 
@@ -394,7 +558,9 @@ DATE = (
     rf"(?:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s+)?"
     rf"(?:(?:{MONTHS})[a-z]*\.?\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{4}})?"
     rf"|\d{{1,2}}(?:st|nd|rd|th)?\s+(?:{MONTHS})[a-z]*\.?(?:,?\s+\d{{4}})?"
-    rf"|\d{{4}}-\d{{2}}-\d{{2}}|\d{{1,2}}/\d{{1,2}}/\d{{2,4}})"
+    rf"|\d{{4}}-\d{{2}}-\d{{2}}|\d{{1,2}}/\d{{1,2}}/\d{{2,4}}"
+    # "19.11.2026", as much of Europe writes it (four-digit year only: "1.2.34" is a version)
+    rf"|(?<![\d.])\d{{1,2}}\.\d{{1,2}}\.\d{{4}}(?![\d.]))"
 )
 RETURN_BY = [
     re.compile(
@@ -433,9 +599,41 @@ RETURNED = re.compile(
 )
 
 
-def parse_date(text: str, ref: datetime) -> datetime | None:
-    """'Nov 30, 2026', '30 November', 'Monday, December 7', '2026-11-30', '11/30/2026', at
-    midnight in ref's zone. A date without a year is the one closest after ref minus a month."""
+def _numbers_date(text: str, ref: datetime, day_first: bool) -> datetime | None:
+    """'11/30/2026', '25/11/2026', '19.11.2026'. Dots are always day first. Slashes are month
+    first (as the stores here write them) unless that isn't a date, ``day_first`` says the
+    mail writes them the other way, or it would be long before the mail was sent while day
+    first is not: "05/12/2026" in an October mail is 5 December, not last May."""
+    m = re.fullmatch(r"(\d{1,2})([/.])(\d{1,2})\2(\d{2}|\d{4})", text)
+    if not m or (m.group(2) == "." and len(m.group(4)) == 2):  # "1.2.34" is a version
+        return None
+    a, b, year = int(m.group(1)), int(m.group(3)), int(m.group(4))
+    year += 2000 if year < 100 else 0
+
+    def on(day: int, month: int) -> datetime | None:
+        try:
+            return datetime(year, month, day, tzinfo=ref.tzinfo)
+        except ValueError:
+            return None
+
+    month_first, day_1st = on(b, a), on(a, b)
+    if m.group(2) == "." or month_first is None:
+        return day_1st
+    if day_1st is None:
+        return month_first
+    if day_first:
+        return day_1st
+    early = ref - timedelta(days=31)
+    return day_1st if month_first < early <= day_1st else month_first
+
+
+def parse_date(text: str, ref: datetime, day_first: bool = False) -> datetime | None:
+    """'Nov 30, 2026', '30 November', 'Monday, December 7', '2026-11-30', '11/30/2026',
+    '19.11.2026', at midnight in ref's zone. A date without a year is the one closest after ref
+    minus a month. ``day_first``: this mail writes 25/11/2026, so 05/12 is 5 December."""
+    numbers = _numbers_date(text.strip().rstrip(".,"), ref, day_first)
+    if numbers is not None:
+        return numbers
     t = re.sub(r"(?<=\d)(st|nd|rd|th)\b", "", text.strip().rstrip(".,"), flags=re.I)
     t = re.sub(r"^(mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s+", "", t, flags=re.I)
     t = re.sub(r"\bsept\b", "sep", t, flags=re.I).replace(".", "").replace(",", "")
@@ -633,6 +831,23 @@ class MailWatchStore:
     def set_subscriptions(self, subs: list[Subscription]) -> None:
         self.data["subscriptions"] = [asdict(s) for s in subs]
         self.save()
+
+    def ignored(self) -> set[str]:
+        """The services the user said aren't subscriptions; scans leave them out."""
+        return set(self.data.get("ignored", []))
+
+    def not_a_subscription(self, name: str) -> str | None:
+        """ "Lyft isn't a subscription": remember that, and take it off the last list. Returns
+        the service's name as saved, or None when nothing in the last list matches."""
+        sub = match_subscription(self.subscriptions(), name)
+        if sub is None:
+            return None
+        self.data["ignored"] = sorted(self.ignored() | {sub.service})
+        self.data["subscriptions"] = [
+            s for s in self.data.get("subscriptions", []) if s.get("service") != sub.service
+        ]
+        self.save()
+        return sub.service
 
     def seen_orders(self) -> set[str]:
         return set(self.data.get("orders_seen", []))

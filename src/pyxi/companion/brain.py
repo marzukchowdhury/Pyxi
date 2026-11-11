@@ -71,10 +71,14 @@ from pyxi.companion.notes import (
     Guide,
     build_card,
     card_size,
+    guide_left,
+    near_point,
     picture_rect,
     place_stage,
     result_card,
+    scroll_area,
     target_rect,
+    where_they_were,
 )
 from pyxi.companion.operator import Operator, Outcome
 from pyxi.companion.paperwork import PAPER_TOOLS
@@ -1362,6 +1366,11 @@ class Brain:
             title_of = getattr(self.screen, "foreground_title", None)
         if title_of is None:
             return
+        if not hwnd and not self._ctx.window.title:
+            # No window was read (its tree failed, or it was the bare desktop): there is no
+            # title to compare with. Live, the window in front ("Claude") was compared with
+            # '' and "the page changed" fired 0.6 s after the mark was drawn, by itself.
+            return
         if self._watcher and not self._watcher.done():
             self._watcher.cancel()
         drawn_on = self._ctx.window.title
@@ -1754,9 +1763,11 @@ class Brain:
         job = None
         try:
             job, mails = await self._scan(
-                "Looking for subscriptions in your receipts", subscriptions_query(), 80
+                "Looking for subscriptions in your receipts", subscriptions_query(), 300
             )
-            subs = find_subscriptions(mails, datetime.now().astimezone())
+            subs = find_subscriptions(
+                mails, datetime.now().astimezone(), ignore=self.mailwatch.ignored()
+            )
         except Exception as exc:
             log.exception("subscription scan failed")
             if job is not None:
@@ -1770,7 +1781,7 @@ class Brain:
             return
         self.mailwatch.set_subscriptions(subs)
         title, body, lines = subscriptions_report(subs)
-        await self.jobs.settle(job, ok=True, summary=f"{title}. " + "; ".join(lines))
+        await self.jobs.settle(job, ok=True, summary=f"{title}.\n" + "\n".join(lines))
         self.history = [
             *self.history[-11:],
             (
@@ -1779,6 +1790,10 @@ class Brain:
             ),
         ]
         await self._notify(job.id, ok=True, title=title, body=body, changes=lines)
+        # Said in one line and shown whole on a card, like any other teammate's result. Live:
+        # the list came as a ten second notice with room for three of its four lines, on one
+        # screen of three, and "What did Pyxi do? I didn't see anything."
+        self._announce(job, ok=True, title=title, body=body, own_card=False)
 
     async def _cancel_subscription(self, service: str) -> None:
         """Open the cancel page, after an approval card. Pyxi never presses Cancel itself."""
@@ -1919,7 +1934,15 @@ class Brain:
         changes: list[str] | None = None,
         notes: list[str] | None = None,
         actions: list[str] | None = None,
+        say: bool = False,
     ) -> None:
+        """A notice on the notch. ``say``: also said aloud, in one short line, once the floor
+        is free. For the result of something they asked for and then allowed on a card (the
+        files renamed, the fix applied, the follow-up sent): live, such a result was a ten
+        second notice and nothing else, and "I didn't see anything"."""
+        if say and title:
+            line = title if title[-1:] in ".!?" else f"{title}."
+            self._spawn(self._say_when_free(hide_secrets(line)))
         await self.hub.emit(
             "job_ready",
             job_id=job_id,
@@ -1969,7 +1992,13 @@ class Brain:
         button is worse than none)."""
         if ctx is None:
             return None
-        exact = target_rect(ctx, {"element_id": args.get("element_id"), "quote": args.get("quote")})
+        # The box is still only a guess, but it says which of two places with the same words
+        # was meant: "Settings" is on the pinned app and in the search box's hint.
+        exact = target_rect(
+            ctx,
+            {"element_id": args.get("element_id"), "quote": args.get("quote")},
+            near=near_point(ctx, args),
+        )
         if exact:
             return exact
         guess = resolve_rect(ctx, None, args.get("box"))
@@ -2014,9 +2043,8 @@ class Brain:
         if how == "elsewhere":
             # They clicked somewhere other than the mark. Only worth a new look if it changed
             # something (they found another way, or wandered off): a stray click changes nothing.
-            now = await self.screen.capture(pixels=True)
-            before = getattr(self, "_guide_glance", None)
-            after = now.crop(now.window.rect) if now.screenshot is not None else None
+            before, view = getattr(self, "_guide_glance", None), getattr(self, "_guide_view", None)
+            after = await self._view_of(view)
             if (
                 before is None
                 or after is None
@@ -2027,11 +2055,37 @@ class Brain:
             if getattr(self, "_guide_advanced", None) is guide:
                 return
             self._guide_advanced = guide
+        if how in ("elsewhere", "moved", "seen") and self._guide_left(guide):
+            # They closed it, tucked it away or went to something else. Live, after Settings
+            # was closed, Pyxi told them twice to start over from the Start button. Now it
+            # says so once and waits for their words: no look, no model, no next step.
+            await self._end_guide(
+                guide,
+                f"Looks like you've left {where_they_were(guide.title)}, so I'll stop here. "
+                "Say carry on when you want the next step.",
+            )
+            return
+        if how in ("elsewhere", "moved"):
+            # Turns Pyxi starts by itself, with no step done in between: two at most. A third
+            # is Pyxi talking to someone who has gone their own way.
+            self._guide_autos = getattr(self, "_guide_autos", 0) + 1
+            if self._guide_autos > 2:
+                await self._end_guide(
+                    guide,
+                    "I've lost track of where you are, so I'll stop pointing. Say next when "
+                    "you want the next step.",
+                )
+                return
+        else:
+            self._guide_autos = 0
+        self._guide_how = how  # what set this turn off: a step repeated after nothing was done is refused
         said = {
             "clicked": f"I did step {guide.step} ({guide.action} '{guide.label}').",
             "done": f"I did step {guide.step} ({guide.action} '{guide.label}') and pressed Done.",
             "elsewhere": f"Instead of '{guide.label}' I clicked something else, and the screen changed.",
             "moved": f"The page changed after step {guide.step}.",
+            "seen": f"The screen changed after step {guide.step} ({guide.action} '{guide.label}'), "
+            "so I think I did it.",
         }[how]
         last = (
             f" That was the last step you planned ({guide.step} of {guide.total}): unless the screen "
@@ -2039,13 +2093,195 @@ class Brain:
             if how != "elsewhere" and guide.total and guide.step >= guide.total
             else ""
         )
+        # One rule with the guide tool's own words: carry on inside the app, never guess or
+        # start over outside it. (It used to say "carry on from where I am", whatever was on
+        # screen, and the tool said to stop.)
         await self.turn(
             f"({said}{last} Look at the screen now and guide me to the next step toward: "
-            f"{guide.goal}. If I went a different way, carry on from where I am. If the goal is "
-            "reached, tell me and call guide with done=true.)",
+            f"{guide.goal}. If I went a different way in the same app, carry on from where I am. "
+            "If what you need isn't on screen any more (I closed it or switched away), don't "
+            "guess and don't start over: say one short line and don't call guide. Never give "
+            "the step you just gave again. If the goal is reached, tell me and call guide with "
+            "done=true.)",
             shown="Next step" if how != "clicked" else f"Clicked {guide.label}",
             synthetic=True,
         )
+
+    async def _view_of(self, rect: tuple[int, int, int, int] | None) -> Image.Image | None:
+        """What one part of the screen looks like now, to compare with how it looked: pixels
+        only, kept nowhere. Without Pyxi's own drawings in it, like every look Pyxi takes."""
+        if rect is None:
+            return None
+        glance = getattr(self.screen, "glance", None)
+        if glance is None:  # a screen that only looks whole
+            now = await self.screen.capture(pixels=True)
+            if now.screenshot is None:
+                return None
+            return now.crop(rect) or now.screenshot
+        if not self.overlay_in_capture:
+            return await asyncio.to_thread(glance, rect)
+        await self.hub.emit("capture_hide")
+        await asyncio.sleep(0.09)
+        try:
+            return await asyncio.to_thread(glance, rect)
+        finally:
+            await self.hub.emit("capture_show")
+
+    def _guide_left(self, guide: Guide) -> bool:
+        """Has the user left the window this step was drawn on? (notes.guide_left)"""
+        if not guide.hwnd or not getattr(self.screen, "reads_windows", False):
+            return False
+        if not windows.available():
+            return False
+        title_of = getattr(self.screen, "window_title", None)
+        exists = title_of is None or title_of(guide.hwnd) is not None
+        front = windows.foreground()
+        name = (title_of(front) if title_of and front else "") or ""
+        if name.startswith("Pyxi"):
+            return False  # Pyxi's own window has the keyboard (they are typing to it)
+        if not name.strip() or name == "Program Manager":
+            front = 0  # the desktop or the taskbar: nothing is in front
+        return guide_left(
+            guide.hwnd,
+            front,
+            getattr(self, "_guide_known", set()),
+            exists=exists,
+            minimized=exists and windows.is_minimized(guide.hwnd),
+            same_app=bool(front) and windows.same_app(front, guide.hwnd),
+        )
+
+    async def _end_guide(self, guide: Guide | None = None, line: str = "") -> None:
+        """Stop the walk-through and take its mark off the screen. With a line, say why, and
+        leave a note in the conversation so "carry on" knows what was being done."""
+        self._guide, self._guide_trail, self._guide_autos = None, [], 0
+        watcher = getattr(self, "_step_watcher", None)
+        if watcher and not watcher.done() and watcher is not asyncio.current_task():
+            watcher.cancel()
+        await self.hub.emit("guide", active=False, finished=False, at=None)
+        if not line:
+            return
+        if guide is not None:
+            self.history = [
+                *self.history[-11:],
+                (
+                    f"(The walk-through toward '{guide.goal}' stopped at step {guide.step}, "
+                    f"{guide.action} '{guide.label}', because I had left it.)",
+                    line,
+                ),
+            ]
+        await self.say_line(line, record=False)
+
+    STALE_LOOK_S = 2.0  # older than this, a look is checked again before anything is drawn on it
+
+    async def _text_now(self, ctx: ScreenContext) -> list[Any] | None:
+        """The words on the screen ``ctx`` was a look at, read again now (pixels and OCR, no
+        tree: a fraction of a second). None when it can't be read."""
+        reread = getattr(self.screen, "text_now", None)
+        if reread is None:  # a screen that only looks whole
+            fresh = await self.screen.capture(pixels=True)
+            return None if fresh.excluded or fresh.screenshot is None else list(fresh.text)
+        if not self.overlay_in_capture:
+            return await asyncio.to_thread(reread, ctx)
+        await self.hub.emit("capture_hide")  # Pyxi's own caption has the same words in it
+        await asyncio.sleep(0.09)
+        try:
+            return await asyncio.to_thread(reread, ctx)
+        finally:
+            await self.hub.emit("capture_show")
+
+    async def _as_it_is_now(
+        self, ctx: ScreenContext, args: dict[str, Any], rect: tuple[int, int, int, int]
+    ) -> tuple[bool, tuple[int, int, int, int] | None]:
+        """Is what a drawing is about still on screen, and where? (still there, its box now.)
+        Checked by its words (the quote, or the control's name) when the look is no longer
+        fresh. What has no words to find, or was never read as words, is taken as it was."""
+        from pyxi.screen.ocr import find_text
+
+        if not ctx.text or time.time() - ctx.captured_at <= self.STALE_LOOK_S:
+            return True, rect
+        words = str(args.get("quote") or "").strip()
+        if not words and str(args.get("element_id") or "").isdigit():
+            e = ctx.element(int(args["element_id"]))
+            words = e.name if e else ""
+        if len(re.sub(r"\W", "", words)) < 3:
+            return True, rect
+        mid = (rect[0] + rect[2] / 2, rect[1] + rect[3] / 2)
+        was = ctx.find_text(words, near=mid)
+        if was is None or not (
+            abs(was[0] + was[2] / 2 - mid[0]) <= rect[2] / 2 + 40
+            and abs(was[1] + was[3] / 2 - mid[1]) <= rect[3] / 2 + 40
+        ):
+            return True, rect  # its words were not read at that spot: nothing to check with
+        lines = await self._text_now(ctx)
+        if not lines:
+            return True, rect  # couldn't look again
+        now = find_text(lines, words, near=mid)
+        if now is None:
+            return False, None
+        dx, dy = now[0] - was[0], now[1] - was[1]
+        if abs(dx) <= 6 and abs(dy) <= 6:
+            return True, rect
+        return True, (rect[0] + dx, rect[1] + dy, rect[2], rect[3])  # it moved: so does the mark
+
+    def _watch_step(self, guide: Guide) -> None:
+        """A step that isn't a click (scroll, type, press a key, drag) has no click to wait
+        for. Live, "scroll down to Recovery" stayed framed at the bottom edge after they had
+        scrolled, with Recovery in plain view. So once they have touched the mouse or keys and
+        gone quiet again, Pyxi looks at that part of the screen: if it changed, the step is
+        taken as done and the next one comes."""
+        old = getattr(self, "_step_watcher", None)
+        if old and not old.done():
+            old.cancel()
+        view = getattr(self, "_guide_view", None)
+        if guide.action not in ("scroll", "type", "press", "drag") or view is None:
+            return
+        idle = getattr(self.screen, "input_idle_s", None)
+        quiet = 2.0 if guide.action == "type" else 0.9  # typing has pauses in it
+
+        def waiting() -> bool:
+            return self._guide is guide and getattr(self, "_guide_advanced", None) is not guide
+
+        async def watch() -> None:
+            await asyncio.sleep(1.2)  # the mark draws itself and the app settles
+            while self._lock.locked() and waiting():
+                await asyncio.sleep(0.3)  # Pyxi is still saying the step
+            before = await self._view_of(view) if waiting() else None
+            if before is None:
+                return
+            touched = False
+            looked = time.monotonic()
+            for _ in range(900):  # up to ~9 minutes
+                await asyncio.sleep(0.6)
+                if not waiting():
+                    return
+                if self._lock.locked():
+                    continue  # a turn is under way: its answer decides what comes next
+                age = idle() if idle else None
+                if age is not None:
+                    if age < quiet:
+                        touched = True  # still at it
+                        continue
+                    if not touched:
+                        continue  # nothing done since the last look
+                    # A look blanks Pyxi's drawings for an instant when screen shares can see
+                    # them: not after every pause of the mouse, then.
+                    if self.overlay_in_capture and time.monotonic() - looked < 2.5:
+                        continue
+                    touched = False
+                looked = time.monotonic()
+                now = await self._view_of(view)
+                if now is None or _same_view(before, now):
+                    continue
+                if age is None:  # no clock to go by: wait until it holds still
+                    await asyncio.sleep(quiet)
+                    again = await self._view_of(view)
+                    if again is None or not _same_view(now, again):
+                        continue
+                if waiting():
+                    self._spawn(self.guide_clicked("seen"))
+                return
+
+        self._step_watcher = asyncio.ensure_future(watch())
 
     # ------------------------------------------------------------------ memories (Settings)
     def _memory_stores(self) -> list[tuple[str, Any]]:
@@ -2390,11 +2626,15 @@ class Brain:
                 log.exception("turn failed")
                 error = f"{type(exc).__name__}: {exc}"
                 await self.say_line("Oops, my brain hiccupped. Mind trying that again?")
-            if self._guide is not None and not any(c.get("tool") == "guide" for c in self._calls):
+            if self._guide is not None and not any(
+                c.get("tool") == "guide" and c.get("outcome") not in ("refused", "failed")
+                for c in self._calls
+            ):
                 # A reply with no next step ends the coaching: an arrow and "3/3 Press Escape"
                 # left on screen for 15 minutes after "I can't confirm it from here" was worse.
-                self._guide, self._guide_trail = None, []
-                await self.hub.emit("guide", active=False, finished=False, at=None)
+                # A step that was refused (not found on screen, or the same one again) is no
+                # next step either: the old one stayed live and deaf to every click and Done.
+                await self._end_guide()
             said = " ".join(self._said)
             if not error and self._speech_gen != self._turn_gen and (not said or self._cut_short):
                 # They spoke again (or pressed talk) before the answer came: the answer was
@@ -2583,6 +2823,7 @@ class Brain:
 
             held = {"say": None}  # a later round's reply, waiting to go just before its card
             claim = {"say": None}  # a line that says work is under way, until we see what follows
+            rest = {"say": None}  # the opener past its first sentence, until we see what follows
 
             def unsaid_part(call: ToolCall) -> str:
                 """A `say` without the first sentence(s) already spoken as they arrived."""
@@ -2591,9 +2832,10 @@ class Brain:
                     return text[len(head["text"]) :].strip()
                 return text
 
-            async def speak_early(call: ToolCall, wait: bool = True) -> None:
+            async def speak_early(call: ToolCall, wait: bool = True, card: bool = False) -> None:
                 # Streamed: start talking the moment the spoken line is complete, while the cue
-                # card and drawings are still arriving.
+                # card and drawings are still arriving. ``card``: a cue card that talks through
+                # its own points follows, so only the opener's first sentence is said.
                 if call.name == "say" and not first_round:
                     held["say"] = call  # may be lookup chatter; only said if a card follows
                     return
@@ -2605,6 +2847,13 @@ class Brain:
                         # by five. Putting it in now.").
                         claim["say"] = call
                         return
+                    if wait:
+                        # What follows the first sentence waits until the next call shows what
+                        # it is. If it is a cue card whose points have their own sentences, the
+                        # points say it. Live, the opener gave the facts and then every point
+                        # gave them again ("8 AM Pacific", twice).
+                        rest["say"] = call
+                        return
                     early.add(call.id)
                     self._calls.append(
                         {
@@ -2614,6 +2863,10 @@ class Brain:
                         }
                     )
                     text = unsaid_part(call)  # the rest, after the first sentence
+                    if card:
+                        keep = opener_only(str(call.arguments.get("text", "")))
+                        said = head["text"]
+                        text = keep[len(said) :].strip() if keep.startswith(said) else ""
                     if text:
                         await self._act("say", {"text": text})
 
@@ -2622,8 +2875,17 @@ class Brain:
                     return
                 if claim["say"] is not None and name != "say":
                     waiting, claim["say"] = claim["say"], None
-                    if name not in CAN_REFUSE:
+                    if name in ("explain_on_screen", "explain_on_picture"):
+                        rest["say"] = waiting  # a cue card: how much of it is said is settled below
+                    elif name not in CAN_REFUSE:
                         await speak_early(waiting, wait=False)  # nothing here says no: say it now
+                if rest["say"] is not None and name != "say":
+                    if name not in ("explain_on_screen", "explain_on_picture"):
+                        waiting, rest["say"] = rest["say"], None
+                        await speak_early(waiting, wait=False)  # no card follows: say all of it
+                    elif points := complete_items(raw):  # its first point is in: we know now
+                        waiting, rest["say"] = rest["say"], None
+                        await speak_early(waiting, wait=False, card=card_talks(points))
                 if name == "say" and first_round and not early and not head["text"]:
                     # The first sentence goes to the voice as soon as it's written.
                     got = partial_string(raw, "text")
@@ -2644,8 +2906,10 @@ class Brain:
                         scene_preview["shown"] = True
                         await self.show_scene(scene)
                 elif name in ("explain_on_screen", "explain_on_picture"):
-                    if held["say"] is not None and held["say"].id not in early:
-                        # This round's reply came first: say it before the points.
+                    points = complete_items(raw)
+                    if held["say"] is not None and held["say"].id not in early and points:
+                        # This round's reply came first: say it before the points (its first
+                        # sentence only, when the points have sentences of their own).
                         call, held["say"] = held["say"], None
                         early.add(call.id)
                         self._calls.append(
@@ -2655,7 +2919,10 @@ class Brain:
                                 "arguments": call.arguments,
                             }
                         )
-                        await self._act("say", dict(call.arguments))
+                        words = str(call.arguments.get("text", ""))
+                        await self._act(
+                            "say", {"text": opener_only(words) if card_talks(points) else words}
+                        )
                     # A picture: start finding its parts the moment we know which picture.
                     head_args = picture_head(raw, on_picture=name == "explain_on_picture")
                     if head_args:
@@ -2798,6 +3065,15 @@ class Brain:
                 args = dict(call.arguments)
                 if call.name == "say":
                     args["text"] = unsaid_part(call)  # its start may be spoken already (a held claim)
+                    if any(
+                        c.name in ("explain_on_screen", "explain_on_picture")
+                        and card_talks(c.arguments.get("items"))
+                        for c in calls
+                    ):
+                        # A cue card that talks through its own points comes with it: the
+                        # opener is its first sentence, and the points say the rest once.
+                        keep, said = opener_only(str(call.arguments.get("text", ""))), head["text"]
+                        args["text"] = keep[len(said) :].strip() if keep.startswith(said) else ""
                 try:
                     note = await self._act(call.name, args)
                 except Exception as exc:
@@ -2840,6 +3116,10 @@ class Brain:
                 # A tool that couldn't do its job ("errand: no accounts are connected yet") goes
                 # back to the model, so the user hears what happened instead of silence.
                 if note and note.startswith(f"{call.name}:") and call.name not in QUIET_NOTES:
+                    needs_more = True
+                if note and call.name == "point" and note.startswith("point:"):
+                    # A pointer that was not drawn is heard too: the line that went with it
+                    # ("it's on the Pivot tab, here") promised something to look at.
                     needs_more = True
             self._narrate_card()
             answers.say_pick(self, said_from)  # a card shown with nothing said: the pick is said
@@ -2940,6 +3220,11 @@ class Brain:
                     c.get("tool") not in INFO_TOOLS | QUIET_NOTES | {"guide"} for c in self._calls
                 ):
                     self._speak("Done.")  # something was really done (a looked-at screen or a guide arrow isn't)
+                elif step := guide_step_words(self._calls):
+                    # A guide step marked on screen with no words (live: the next button was
+                    # framed, and Pyxi said "Hmm, I'm not sure what to say to that."): the
+                    # step is said as it stands.
+                    self._speak(step)
                 else:
                     self._speak("Hmm, I'm not sure what to say to that.")
             return {}
@@ -2997,6 +3282,21 @@ class Brain:
             else:
                 rect = target_rect(ctx, args)
                 ann = Annotation(kind=name, rect=rect, label=args.get("label")) if rect else None
+            if ann is not None and ctx is not None and ann.rect is not None:
+                # The look this was read from is seconds old by now (it is taken when they
+                # press talk). Live, the words pointed at were in a notification that had
+                # gone by the time the ring was drawn. So the words are read again first.
+                there, now = await self._as_it_is_now(ctx, args, ann.rect)
+                if not there:
+                    return (
+                        f"{name}: couldn't find that on screen: it was there when you looked, "
+                        "a few seconds ago, and it isn't now. Nothing was drawn. If you speak "
+                        "next, say in a few words where it is, or that it has gone."
+                    )
+                if now is not None and now != ann.rect:
+                    ann.rect = now
+                    if ann.kind == "point":
+                        ann.at = (now[0] + now[2] // 2, now[1] + now[3] // 2)
             if ann is None:
                 return f"{name}: couldn't find that on screen."
             await self.hub.emit("annotate", annotations=[ann.model_dump()])
@@ -3064,8 +3364,10 @@ class Brain:
             action = str(args.get("action") or "click")
             rect = await self._guide_target(ctx, args, label)
             if rect is None:
-                if action in ("press", "look") and ctx is not None:
-                    rect = ctx.window.rect  # keys and looks don't need a precise spot
+                if action in ("press", "look", "scroll") and ctx is not None:
+                    # Keys, looks and scrolling don't need a precise spot: the window will do
+                    # (the part of it on screen; the whole screen when no window was read).
+                    rect = ctx.view_rect() or ctx.window.rect
                 else:
                     return (
                         f"guide: couldn't find '{label}' on screen. Use an element id or the exact "
@@ -3082,7 +3384,25 @@ class Brain:
                     },
                 )
                 to = (dest[0] + dest[2] // 2, dest[1] + dest[3] // 2) if dest else None
+            if action == "scroll" and ctx is not None:
+                rect = scroll_area(ctx, args.get("element_id"), rect)  # the list, not the row
+            if getattr(self, "_guide_fresh", False):
+                self._guide_autos, self._guide_how = 0, ""  # they spoke: a fresh count
             going = self._guide if not getattr(self, "_guide_fresh", False) else None
+            if (
+                going is not None
+                and getattr(self, "_synthetic", False)
+                and getattr(self, "_guide_how", "") in ("elsewhere", "moved")
+                and going.label.lower() == label.lower()
+                and going.action == action
+            ):
+                # Nothing was done since that step, and here it is again. Live: "start over
+                # from the Start button", twice, to someone who had left the walk-through.
+                return (
+                    f"guide: '{label}' is the step you just gave, and they haven't done it. It "
+                    "isn't given again. Say one short line (ask if they want to carry on) and "
+                    "don't call guide: the walk-through waits for their words."
+                )
             self._guide_fresh = False
             step = going.step + 1 if going else 1  # one guide at a time: keep counting
             total = (
@@ -3093,8 +3413,15 @@ class Brain:
             total = max(total, step) if total else None
             trail = (getattr(self, "_guide_trail", []) if going else []) + [label.lower()]
             self._guide_trail = trail
-            if len(trail) >= 4 and trail[-1] == trail[-3] and trail[-2] == trail[-4]:
+            if (
+                len(trail) >= 4
+                and trail[-1] == trail[-3]
+                and trail[-2] == trail[-4]
+                and trail[-1] != trail[-2]
+            ):
                 # Round in circles (View, Word wrap, View, Word wrap): they've done it already.
+                # Two different steps, that is: one step four times over (Next, Next, Next,
+                # Next) is no circle, and saying "it's done" about it was simply untrue.
                 self._guide, self._guide_trail = None, []
                 await self.hub.emit("guide", active=False, finished=True, at=None)
                 return (
@@ -3109,8 +3436,21 @@ class Brain:
                 step=step,
                 action=action,
                 total=total,
+                hwnd=ctx.window.hwnd if ctx else 0,
+                app=ctx.window.app if ctx else "",
+                title=ctx.window.title if ctx else "",
             )
-            self._guide_glance = ctx.crop(ctx.window.rect) if ctx else None
+            # How this part of the screen looks now, to tell later whether anything changed:
+            # the window, or the whole picture when no window was read (its tree failed).
+            view = ctx.view_rect() if ctx else None
+            self._guide_view = view
+            self._guide_glance = ((ctx.crop(view) if view else None) or ctx.screenshot) if ctx else None
+            # What was open already: going to one of these later is leaving, a new one is not.
+            self._guide_known = (
+                {h for h, _, _ in windows.open_windows(minimized=True)}
+                if getattr(self.screen, "reads_windows", False) and windows.available()
+                else set()
+            )
             hint = str(args.get("text") or args.get("direction") or "")[:80] or None
             ann = Annotation(
                 kind="click",
@@ -3135,6 +3475,7 @@ class Brain:
                 action=action,
             )
             self._watch_window()
+            self._watch_step(self._guide)
             return None
         if name == "explain_in_3d":
             try:
@@ -3229,7 +3570,23 @@ class Brain:
                 if args.get("then_agent") and self.registry.get(str(args["then_agent"]))
                 else None
             )
-            files = [str(f) for f in args.get("files", []) or [] if Path(str(f)).is_file()]
+            # A file that isn't there is said, not dropped: with the path mistyped by one
+            # letter, Quill was started with no file at all, wrote a "draft" from the task
+            # line alone, and the card said "Your draft is ready".
+            given = [str(f).strip().strip('"') for f in args.get("files", []) or [] if str(f).strip()]
+            files = [str(Path(f).expanduser()) for f in given]
+            missing = [f for f in files if not Path(f).is_file()]
+            if missing:
+                return (
+                    f"delegate: I can't find {', '.join(Path(f).name for f in missing)}. Find the "
+                    "exact path with search_files first, or ask them."
+                )
+            if str(args["agent"]).strip().lower() == "ditto":
+                # Ditto repeats what it was shown; handed a task in words it has nothing to go on.
+                return (
+                    "delegate: Ditto repeats what it has watched them do once. Use watch_me so "
+                    "they can show it, or do the task another way."
+                )
             job = await self.jobs.start(
                 str(args["agent"]),
                 str(args["task"]),
@@ -3382,6 +3739,23 @@ class Brain:
                 self._spawn(self._watch_returns())
             elif args.get("action") == "cancel" and args.get("service"):
                 self._spawn(self._cancel_subscription(str(args["service"])))
+            elif args.get("action") == "not_one":
+                # "The Startup Club isn't something I pay for": remembered, so it stays off
+                # this list and every later one. Live, the only answer Pyxi had was to run
+                # the same search again and bring the same list back.
+                gone = self.mailwatch.not_a_subscription(str(args.get("service") or ""))
+                if gone is None:
+                    return (
+                        "subscriptions: nothing on the last list matches that name. Say so, "
+                        "and ask which one they mean."
+                    )
+                from pyxi.mailwatch import subscriptions_report
+
+                title, _, _ = subscriptions_report(self.mailwatch.subscriptions())
+                return (
+                    f"subscriptions: {gone} is off the list for good. What is left: {title}. "
+                    "Tell them in one short line."
+                )
             else:
                 self._spawn(self._watch_subscriptions())
             return None
@@ -3935,6 +4309,17 @@ class Brain:
             return
         fixed = data.get("fixed") or []
         files = [str(f) for f in (fixed or job.outputs)]
+        # A Google file Ledger edited: its address is a button on the notice, not part of the
+        # sentence. Live, the address in the sentence made the notice "too long", so the same
+        # words came up a second time on a card beside it.
+        link = data.get("link") if job.role in specialists.ROLES else None
+        shown = job.summary or ""
+        if job.role == "documents" and data.get("links"):
+            link = str(data["links"][0])
+            shown = _LINK_TAIL.sub(
+                lambda m: " It's a new file in your Google Drive." if "new file" in m.group(0) else "",
+                shown,
+            ).strip()
         if job.status == "done":
             for f in files:
                 self.audit.add("wrote", f"Saved {Path(f).name}", agent=job.agent_name, detail=f)
@@ -3960,13 +4345,22 @@ class Brain:
             actions = ["calendar"]
         elif job.status == "done" and fixed:
             names = ", ".join(Path(f).name for f in fixed)
-            n = len(data.get("changes") or [])
-            title = "Your document is fixed"
-            body = f"{n} fix{'es' if n != 1 else ''} in {names}. The original is untouched."
+            n = int(data.get("count") or len(data.get("changes") or []))
+            if all("(corrections by Pyxi)" in Path(f).name for f in fixed):
+                # A PDF can't be edited: what Quill made is the list of corrections, not a fixed file.
+                title = "Corrections for your PDF"
+                body = f"The corrections to make are listed in {names}. The PDF itself is unchanged."
+            else:
+                title = "Your document is fixed"
+                body = f"{n} fix{'es' if n != 1 else ''} in {names}. The original is untouched."
             actions = ["open", "folder", "send_back"]
         elif job.status == "done":
             title = f"{job.agent_name} finished"
-            body = " ".join(split_sentences(job.summary)[:2]) if job.summary else "Done."
+            # Two whole sentences (a line of a list is one), or as much of them as the notice
+            # holds. Not "speech chunks": those break one long sentence at a comma, so a
+            # result of a single sentence counted as cut, and the same words went up again
+            # on a card.
+            body = clip(" ".join(whole_sentences(shown)[:2]), 320) if shown.strip() else "Done."
             if job.role == "writer":
                 title, body = "Your draft is ready", clip(job.summary or "", 220)
             actions = (["open"] if files else []) + (
@@ -3979,18 +4373,23 @@ class Brain:
         if job.role in specialists.ROLES and data.get("title"):  # a specialist's own card
             title, body = str(data["title"])[:70], str(data.get("body") or body)[:300]
             actions = [str(a) for a in data.get("actions") or actions]
+        own_card = booked or bool(files) or (job.role in specialists.ROLES and bool(data.get("title")))
+        # One place for the words. When the whole result goes up on a card (_announce), the
+        # notice beside it is the title and the first sentence, not the same paragraph again.
+        first = next(iter(whole_sentences(shown)), "")
+        on_card = self._gets_card(job, body, shown, own_card)
         await self.hub.emit(
             "job_ready",
             job_id=job.id,
             agent=job.agent_name,
             ok=job.status == "done",
             title=title,
-            body=body,
+            body=clip(first, 160) if on_card and first else body,
             files=files,
             changes=(data.get("changes") or [])[:8],
             notes=(data.get("notes") or [])[:3],
-            actions=actions,
-            link=data.get("link") if job.role in specialists.ROLES else None,
+            actions=[*actions, "link"] if link and "link" not in actions else actions,
+            link=link,
             calendar=(
                 f"Add this booking to my Google Calendar, with a reminder the day before: {title}. {body}"
                 f" Address: {data.get('address') or data.get('where') or ''}"
@@ -4007,12 +4406,28 @@ class Brain:
                 "(notified the user: " + " ".join(f"{title}. {body}".split()) + ")",
             ),
         ]
-        own_card = booked or bool(files) or (job.role in specialists.ROLES and bool(data.get("title")))
-        self._announce(job, ok=job.status == "done", title=title, body=body, own_card=own_card)
+        self._announce(
+            job, ok=job.status == "done", title=title, body=body, own_card=own_card, whole=shown
+        )
         if job.role in specialists.ROLES:  # reminders, check-ins, the next monthly summary
             await specialists.after_job(self, job)
 
-    def _announce(self, job: Job, *, ok: bool, title: str, body: str, own_card: bool) -> None:
+    def _gets_card(self, job: Job, body: str, whole: str | None, own_card: bool) -> bool:
+        """Does a finished job's result go up on a card as well as on the notice? Only when
+        the notice really had to cut it (and it has no card of its own, wasn't stopped by
+        them, and hasn't been told already)."""
+        full = " ".join((job.summary if whole is None else whole or "").split())
+        return (
+            bool(full)
+            and full != " ".join(body.split())
+            and not own_card
+            and job.status != "stopped"
+            and job.id not in getattr(self, "_told_jobs", set())
+        )
+
+    def _announce(
+        self, job: Job, *, ok: bool, title: str, body: str, own_card: bool, whole: str | None = None
+    ) -> None:
         """A finished or failed job is told once: the whole result on a card whenever the
         notification had to cut it (a list of nine stays nine), and one short spoken line,
         held until neither Pyxi nor the user is talking. A job they stopped themselves needs
@@ -4023,7 +4438,7 @@ class Brain:
         if job.id in told or job.status == "stopped":
             return
         told.add(job.id)
-        whole = " ".join((job.summary or "").split())
+        whole = " ".join((job.summary if whole is None else whole or "").split())
         cut = bool(whole) and whole != " ".join(body.split())
         card = None
         if cut and not own_card:
@@ -4185,6 +4600,10 @@ _MULTI_SCREEN_NOTE = (
 
 # Words from a turn they talked over are carried into their next turn only this soon after.
 _CARRY_S = 90.0
+# The end of Ledger's summary for a Google file: where it is, as an address.
+_LINK_TAIL = re.compile(
+    r"\s*(?:Edited in Google \([^)]*\)|It's a new file in your Google Drive):\s*(?:https?://\S+\s*)+"
+)
 HALF_SAID_WAIT_S = 1.5  # how long a sentence that stops mid-way waits for its other half
 # Ends on a word that cannot end a request, with nothing to close the sentence.
 _HALF_SAID = re.compile(
@@ -4206,10 +4625,36 @@ _BACKGROUND_TOOLS = {
     "tidy_folder",
     "build_3d_model",
     "explain_in_3d",
+    "subscriptions",
+    "returns",
 }
 # Tools that can say no (a file that isn't there, an account that isn't connected, a card they
 # decline): a line said with one waits for its answer, and is dropped if the answer is no.
 _ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def guide_step_words(calls: list[dict[str, Any]]) -> str:
+    """A guide step said in words, from what the model marked, when it gave no words of its
+    own: "Click Advanced startup: Restart now." Empty when this turn marked no step."""
+    step = next((c.get("arguments") or {} for c in reversed(calls) if c.get("tool") == "guide"), None)
+    if not step:
+        return ""
+    if step.get("done"):
+        return "That's it, you're done."
+    label = re.sub(r"\s*\((?:scroll|click|press)[^)]*\)\s*$", "", str(step.get("label") or "").strip()).rstrip(".")
+    action = str(step.get("action") or "click")
+    text = str(step.get("text") or "").strip()
+    if action == "scroll":
+        way = str(step.get("direction") or "down")
+        return f"Scroll {way} to {label}." if label else f"Scroll {way} a little."
+    if action == "press" and text:
+        return f"Press {text}."
+    if not label:
+        return ""
+    if action == "type":
+        return f"Type {text} in {label}." if text else f"Type in {label}."
+    verb = {"double_click": "Double-click", "right_click": "Right-click", "drag": "Drag", "look": "Look at"}
+    return f"{verb.get(action, 'Click')} {label}."
 
 
 def same_errand(old: str, new: str) -> bool:
@@ -4696,6 +5141,42 @@ def make_chat_llm(settings: PyxiSettings) -> LLMProvider:
 def wants_3d(user_text: str, *, has_model: bool = False) -> bool:
     """Did they ask for something 3D? (Or, with a model on screen, ask to change it?)"""
     return bool(_ASKS_3D.search(user_text)) or (has_model and bool(_EDITS_3D.search(user_text)))
+
+
+def whole_sentences(text: str) -> list[str]:
+    """A result's sentences as written: never half of a long one (the voice's chunks break
+    those at a comma), and each line of a list on its own."""
+    return [
+        s
+        for ln in str(text or "").splitlines()
+        if ln.strip()
+        for s in split_sentences(ln, max_chars=10_000)
+    ]
+
+
+def card_talks(items: Any) -> bool:
+    """Do a cue card's points have spoken sentences of their own?"""
+    return any(
+        isinstance(it, dict) and str(it.get("say") or "").strip()
+        for it in (items if isinstance(items, list) else [])
+    )
+
+
+def opener_only(text: str) -> str:
+    """What Pyxi says before a cue card that talks through its own points: the first real
+    sentence (the verdict), with any "Sure." before it and the markers that belong to it.
+    The rest of the reply is what the points are about to say."""
+    out: list[str] = []
+    real = False
+    for chunk in split_sentences(text, max_chars=10_000):  # whole sentences, never half of one
+        words = split_markers(chunk)[0].strip()
+        if real and words:
+            if lead := LEADING_NOTES.match(chunk):  # "... twice. [note:1] Then ..."
+                out.append(lead.group(0).strip())
+            break
+        out.append(chunk)
+        real = real or bool(words and not (_FILLER.match(words) and len(words) < 40))
+    return " ".join(out) or text
 
 
 def visual_opener(text: str, limit: int = 200) -> str:

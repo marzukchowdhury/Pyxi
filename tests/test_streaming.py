@@ -82,8 +82,10 @@ async def test_first_sentence_and_points_are_said_as_they_arrive(settings):
     # The first sentence went out on its own, before the rest of the line was even finished.
     assert said[0] == "Short version: it's a repost."
     joined = " ".join(said)
+    # The points have sentences of their own, so the opener is its first sentence only: what
+    # followed it used to be said and then said again by the points (tests/test_audit_guide.py).
+    assert "Here's what to look at" not in joined
     for line in (
-        "Here's what to look at",
         "repost of a screenshot",
         "nobody links",
         "topic itself",

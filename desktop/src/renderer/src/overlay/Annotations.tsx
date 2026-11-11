@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { bridge, cursorToLocal, rectToLocal, toLocal } from "../shared/bridge";
 import { brain } from "../shared/socket";
+import { type Box, labelSize, labelSpot } from "./guideMarks";
 import { Interactive } from "./Interactive";
 import type { Pin } from "../shared/protocol";
 import { type LiveAnnotation, useOverlay } from "./store";
@@ -128,14 +129,14 @@ function Label({ a }: { a: LiveAnnotation }) {
     x = r.x + r.w + 16; // beside the frame, so it never covers the content below
     y = r.y + r.h / 2;
   } else if (a.rect) {
-    const r = rectToLocal(a.rect);
-    x = r.x + r.w / 2;
-    y = r.y + r.h + (a.kind === "circle" ? 22 : 14);
+    // Under the thing, or above it when under is off the screen (a row at the bottom edge).
+    const gap = a.kind === "click" ? 20 : a.kind === "circle" ? 22 : 14;
+    if (a.kind === "click") return <GuideLabel a={a} r={rectToLocal(a.rect)} gap={gap} />;
+    ({ x, y } = labelSpot(rectToLocal(a.rect), gap, labelSize(a.label ?? ""), { w: innerWidth, h: innerHeight }));
   } else if (a.at) {
-    [x, y] = toLocal(a.at[0], a.at[1]);
-    y += 22;
+    const [px, py] = toLocal(a.at[0], a.at[1]);
+    ({ x, y } = labelSpot({ x: px, y: py, w: 0, h: 0 }, 22, labelSize(a.label ?? ""), { w: innerWidth, h: innerHeight }));
   }
-  if (a.kind === "click") return <GuideLabel a={a} x={x} y={y + 6} />;
   return <div className={`ann-label ${side ? "side" : ""}`} style={{ left: x, top: y }}><i />{a.label}</div>;
 }
 
@@ -210,7 +211,7 @@ function GuideShape({ a }: { a: LiveAnnotation }) {
 }
 
 /** "2/5 · Type DATABASE_URL in Key", with a Done button for steps a click can't finish. */
-function GuideLabel({ a, x, y }: { a: LiveAnnotation; x: number; y: number }) {
+function GuideLabel({ a, r, gap }: { a: LiveAnnotation; r: Box; gap: number }) {
   const action = a.action ?? "click";
   const what = a.label && a.label !== "here" ? a.label : "";
   const text =
@@ -220,6 +221,8 @@ function GuideLabel({ a, x, y }: { a: LiveAnnotation; x: number; y: number }) {
     : action === "drag" ? `Drag ${what || "this"} to the arrow`
     : `${VERB[action] ?? "Click"} ${what || "here"}`;
   const needsDone = !action.endsWith("click");
+  // On screen, always: its Done button is the only way to finish a step that isn't a click.
+  const { x, y } = labelSpot(r, gap, labelSize(text, needsDone), { w: innerWidth, h: innerHeight });
   const done = () => {
     useOverlay.setState((s) => ({ annotations: s.annotations.filter((n) => !n.guide) }));
     brain.send({ type: "guide_clicked", how: "done" });

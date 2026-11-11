@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
@@ -40,6 +41,10 @@ SIGNER = "The Document Foundation"
 APPROX_MB = 380
 
 Progress = Callable[["Status"], Awaitable[None]]
+
+# Held for each run of soffice. Two at once share Pyxi's one profile, the second hands its file
+# to the first and exits before the PDF exists, and that job reads as "couldn't convert".
+CONVERTING = threading.Lock()
 
 
 def home() -> Path:
@@ -79,12 +84,13 @@ def warm_up(soffice: str | Path) -> bool:
             doc = Document()
             doc.add_paragraph("Pyxi")
             doc.save(str(src))
-            subprocess.run(
-                command(soffice, "--convert-to", "pdf", "--outdir", tmp, str(src)),
-                capture_output=True,
-                timeout=180,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            with CONVERTING:
+                subprocess.run(
+                    command(soffice, "--convert-to", "pdf", "--outdir", tmp, str(src)),
+                    capture_output=True,
+                    timeout=180,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
             return (Path(tmp) / "warm-up.pdf").is_file()
     except (OSError, subprocess.SubprocessError, ImportError):
         return False

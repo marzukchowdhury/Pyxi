@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 READABLE = {".pdf", ".pptx", ".docx", ".txt", ".md", ".markdown", ".rtf", ".html", ".htm", ".csv"}
 PART_CHARS = 18000
 MAX_PARTS = 4  # a 200-page textbook is a few decks, not one
+MAX_CHARS = 80000  # of one file; what is past it isn't read, and the result says so
 
 SYSTEM = """You make study material from course notes. Reply with JSON only:
 {"title": "the topic, a few words",
@@ -228,19 +229,64 @@ def load_decks(data_dir: Path) -> list[Deck]:
     return out
 
 
-def find_deck(data_dir: Path, said: str = "") -> Deck | None:
+NOT_A_NAME = {"quiz", "the", "deck", "flashcards", "cards", "about", "with"}
+# Words that point at a deck without naming its topic ("the chapter 3 slides", "my last one").
+VAGUE = {
+    "slides", "notes", "lecture", "chapter", "week", "unit", "module", "part", "section", "exam",
+    "test", "class", "course", "last", "latest", "new", "newest", "that", "this", "those", "one",
+    "ones", "from", "made", "just", "again", "same", "file", "pdf", "handout",
+}  # fmt: skip
+
+
+def find_deck(data_dir: Path, said: str = "", strict: bool = False) -> Deck | None:
+    """The deck they mean: one whose title or file has a word they said, else the newest.
+    ``strict``: a topic they named that no deck has gives None, not the newest deck (audit:
+    "quiz me on the heart" with only a French Revolution deck saved quizzed them on the
+    French Revolution). Words in any script count: 生物学 is a topic too."""
     decks = load_decks(data_dir)
     words = [
         w
-        for w in re.findall(r"[a-z0-9]{3,}", said.lower())
-        if w not in {"quiz", "the", "deck", "flashcards", "cards", "about", "with"}
+        for w in re.findall(r"[^\W_]+", said.lower())
+        if (len(w) >= 3 or not w.isascii()) and w not in NOT_A_NAME
     ]
-    if words:
+
+    def having(group: list[str]) -> Deck | None:
         for d in decks:
             hay = f"{d.title} {Path(d.source).stem}".lower()
-            if any(w in hay for w in words):
+            if any(w in hay for w in group):
                 return d
-    return decks[0] if decks else None
+        return None
+
+    topic = [w for w in words if w not in VAGUE]
+    if topic and ((deck := having(topic)) or strict):
+        return deck
+    return having([w for w in words if w in VAGUE]) or (decks[0] if decks else None)
+
+
+_NUMBERS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+    "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+    "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+    "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "hundred": 100, "dozen": 12, "couple": 2,
+}  # fmt: skip
+
+
+def as_count(value: Any, default: int) -> int:
+    """How many, however it was said: 12, "12", "twenty", "about 15 cards", "twenty five".
+    ``default`` when it says nothing ("a few": int() used to raise on "twenty")."""
+    if isinstance(value, bool) or value is None:
+        return default
+    if isinstance(value, int | float):
+        return int(value) if value > 0 else default
+    text = str(value).lower()
+    if m := re.search(r"\d+", text):
+        return int(m.group(0)) or default
+    found = [_NUMBERS[w] for w in re.findall(r"[a-z]+", text) if w in _NUMBERS]
+    if not found:
+        return default
+    # "twenty five" is 25; "a dozen" is 12
+    total = found[0] + (found[1] if len(found) > 1 and found[0] >= 20 > found[1] > 0 else 0)
+    return total or default
 
 
 # ------------------------------------------------------------------------------ the spoken quiz
@@ -324,11 +370,19 @@ def read_notes(path: Path, max_chars: int = 80000) -> str:
         text = f"PDF, {len(texts)} pages.\n" + "\n".join(
             f"[page {i}] {t}" for i, t in enumerate(texts, 1)
         )
+    elif ext == ".markdown":  # the same as .md, which files_access reads (it has no .markdown)
+        text = path.read_text(encoding="utf-8", errors="replace")
     else:
         from pyxi import files_access
 
         text = files_access.read_text(path, max_chars)
     return text[:max_chars]
+
+
+def read_up_to(text: str) -> str:
+    """Where a part of the notes ends, in their words: "page 31", "slide 12", or ""."""
+    marks = re.findall(r"\[(page|slide) (\d+)\]", text)
+    return f"{marks[-1][0]} {marks[-1][1]}" if marks else ""
 
 
 # ------------------------------------------------------------------------------ the job
@@ -340,7 +394,7 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     paths = [Path(f) for f in job.files if Path(f).is_file()]
     if not paths:
         raise RuntimeError("I couldn't find those notes.")
-    want = int(job.params.get("count") or 20)
+    want = as_count(job.params.get("count"), 20)
     focus = str(job.params.get("focus") or "").strip()
     llm = manager.llm_factory(agent)
     folder = Path(job.params.get("folder") or out_dir())
@@ -348,12 +402,18 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     outputs: list[str] = []
     decks: list[Deck] = []
     unread = 0  # files with notes in them that the model's reply had no cards for
+    short: list[str] = []  # files too long to read whole, and how far the cards go
     for path in paths:
         await manager._status(job, f"Reading {path.name}")
-        text = await asyncio.to_thread(read_notes, path, 80000)
-        chunks = parts(text)
+        text = await asyncio.to_thread(read_notes, path, MAX_CHARS + 1)
+        every = parts(text[:MAX_CHARS], most=len(text) + 1)
+        chunks = every[:MAX_PARTS]
         if not chunks or len(text.strip()) < 40:
             continue
+        # Only so much of a long file is read. They are told: a 200-chapter textbook got
+        # cards on its first 61 chapters and a notice that just said "4 cards" (audit).
+        cut = len(text) > MAX_CHARS or len(every) > len(chunks)
+        upto = read_up_to(chunks[-1])
         per = max(4, round(want / len(chunks)))
         title, cards, quiz = "", [], []
         for i, chunk in enumerate(chunks):
@@ -387,6 +447,8 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         outputs.append(str(write_csv(deck, folder)))
         save_deck(manager.settings.data_dir, deck)
         decks.append(deck)
+        if cut:
+            short.append(path.name + (f" (up to {upto})" if upto else ""))
     if not decks and unread:
         job.status = "failed"
         job.summary = "The flashcards didn't come out right. Try again in a moment."
@@ -401,12 +463,21 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     n_quiz = sum(len(d.quiz) for d in decks)
     title = decks[0].title if len(decks) == 1 else f"{len(decks)} decks"
     quiz = f" and a {n_quiz}-question quiz" if n_quiz else ""
-    job.summary = f"Made {n_cards} flashcards{quiz} on {title}, saved in {folder}. " + " ".join(
-        f"Q: {c.q} A: {c.a}" for c in decks[0].cards[:5]
+    partly = (
+        f"Only the first part of {', '.join(short)} was read: it is long, so the cards "
+        "cover the beginning. "
+        if short
+        else ""
+    )
+    job.summary = (
+        f"Made {n_cards} flashcards{quiz} on {title}, saved in {folder}. "
+        + partly
+        + " ".join(f"Q: {c.q} A: {c.a}" for c in decks[0].cards[:5])
     )
     job.data = {
         "title": f"Flashcards: {title}"[:70],
-        "body": f'{n_cards} cards{quiz}. Say "quiz me" and I\'ll ask you out loud.',
+        "body": f'{n_cards} cards{quiz}. {partly}Say "quiz me" and I\'ll ask you out loud.',
+        "notes": [partly.strip()] if partly else [],
         "changes": [c.q for c in decks[0].cards[:5]],
         "card": {
             "title": title,

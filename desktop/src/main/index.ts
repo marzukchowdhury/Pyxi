@@ -598,10 +598,9 @@ app.whenReady().then(async () => {
       win.focus();
       win.webContents.send("quick-type");
     },
-    click: (x, y) => {
-      const win = overlays.get(primaryId);
-      if (win && !win.isDestroyed()) win.webContents.send("global-click", { x, y });
-    },
+    // To every screen's overlay: each one holds only the marks on its own screen, so a guide
+    // step drawn on a second screen never heard its click when only the main one was told.
+    click: (x, y) => broadcast("global-click", { x, y }),
     move: () => wakeCursorFeed(),
   });
   registerHotkeys({

@@ -199,6 +199,9 @@ def render(
         Table,
         TableStyle,
     )
+    from reportlab.platypus.doctemplate import LayoutError
+
+    from pyxi.agents.pixel_common import PixelError
 
     size = ps.A4 if a4 else ps.letter
     if landscape:
@@ -207,77 +210,110 @@ def render(
     width = size[0] - 2 * margin
     st = _styles()
     regular, bold, _, _ = fonts()
-    story: list[Any] = []
-    for b in blocks:
-        if b.kind == "h":
-            story.append(
-                Paragraph(
-                    with_fallback(b.text),
-                    st["title"] if b.level == 0 else st[f"h{min(max(b.level, 1), 6)}"],
-                )
-            )
-        elif b.kind == "p":
-            story.append(Paragraph(with_fallback(b.text), st["p"]))
-        elif b.kind == "li":
-            marker = f"{b.number}." if b.number is not None else BULLET
-            indent = 14 * max(1, b.level)
-            # The bullet in the embedded font: reportlab's default (Helvetica) puts a glyph there
-            # that copies and searches as \x7f instead of a bullet.
-            style = st["p"].clone(
-                "li",
-                leftIndent=indent + 10,
-                bulletIndent=indent - 4,
-                spaceAfter=2,
-                bulletFontName=regular,
-            )
-            story.append(Paragraph(with_fallback(b.text), style, bulletText=marker))
-        elif b.kind == "pre":
-            story.append(Preformatted(b.text, st["pre"], maxLineLength=110))
-            story.append(Spacer(1, 6))
-        elif b.kind == "table" and b.rows:
-            cols = max(len(r) for r in b.rows)
-            rows = [
-                [Paragraph(with_fallback(c), st["cell"]) for c in r] + [""] * (cols - len(r))
-                for r in b.rows
-            ]
-            t = Table(rows, repeatRows=1, colWidths=[width / cols] * cols, hAlign="LEFT")
-            t.setStyle(
-                TableStyle(
-                    [
-                        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#b0b0b0")),
-                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eeeeee")),
-                        ("FONTNAME", (0, 0), (-1, 0), bold),
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ]
-                )
-            )
-            story += [t, Spacer(1, 8)]
-        elif b.kind == "img" and b.image:
-            try:
-                from PIL import Image as PILImage
 
-                with PILImage.open(io.BytesIO(b.image)) as im:
-                    w, h = im.size
-                scale = min(1.0, width / w, (size[1] - 2 * margin) * 0.6 / h)
+    def lay_out(stacked: bool) -> list[Any]:
+        """The blocks as reportlab flowables. ``stacked``: a table's cells one under the other
+        as plain paragraphs, for a table that can't be made to fit a page."""
+        story: list[Any] = []
+        for b in blocks:
+            if b.kind == "h":
                 story.append(
-                    KeepTogether([Image(io.BytesIO(b.image), w * scale, h * scale), Spacer(1, 6)])
+                    Paragraph(
+                        with_fallback(b.text),
+                        st["title"] if b.level == 0 else st[f"h{min(max(b.level, 1), 6)}"],
+                    )
                 )
-            except Exception:
-                continue  # an image format reportlab can't place (EMF, WMF) is skipped
-        elif b.kind == "br":
-            story.append(PageBreak())
-    if not story:
-        story.append(Spacer(1, 1))
+            elif b.kind == "p":
+                story.append(Paragraph(with_fallback(b.text), st["p"]))
+            elif b.kind == "li":
+                marker = f"{b.number}." if b.number is not None else BULLET
+                indent = 14 * max(1, b.level)
+                # The bullet in the embedded font: reportlab's default (Helvetica) puts a glyph
+                # there that copies and searches as \x7f instead of a bullet.
+                style = st["p"].clone(
+                    "li",
+                    leftIndent=indent + 10,
+                    bulletIndent=indent - 4,
+                    spaceAfter=2,
+                    bulletFontName=regular,
+                )
+                story.append(Paragraph(with_fallback(b.text), style, bulletText=marker))
+            elif b.kind == "pre":
+                story.append(Preformatted(b.text, st["pre"], maxLineLength=110))
+                story.append(Spacer(1, 6))
+            elif b.kind == "table" and b.rows and stacked:
+                for r in b.rows:
+                    story += [Paragraph(with_fallback(c), st["p"]) for c in r if c.strip()]
+                story.append(Spacer(1, 8))
+            elif b.kind == "table" and b.rows:
+                cols = max(len(r) for r in b.rows)
+                rows = [
+                    [Paragraph(with_fallback(c), st["cell"]) for c in r] + [""] * (cols - len(r))
+                    for r in b.rows
+                ]
+                # A row taller than a page (a resume laid out as one two-column table) is split
+                # across pages; a one-row table has no heading row to repeat.
+                t = Table(
+                    rows,
+                    repeatRows=1 if len(rows) > 1 else 0,
+                    colWidths=[width / cols] * cols,
+                    hAlign="LEFT",
+                    splitInRow=1,
+                )
+                t.setStyle(
+                    TableStyle(
+                        [
+                            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#b0b0b0")),
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eeeeee")),
+                            ("FONTNAME", (0, 0), (-1, 0), bold),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story += [t, Spacer(1, 8)]
+            elif b.kind == "img" and b.image:
+                try:
+                    from PIL import Image as PILImage
+
+                    with PILImage.open(io.BytesIO(b.image)) as im:
+                        w, h = im.size
+                    scale = min(1.0, width / w, (size[1] - 2 * margin) * 0.6 / h)
+                    story.append(
+                        KeepTogether(
+                            [Image(io.BytesIO(b.image), w * scale, h * scale), Spacer(1, 6)]
+                        )
+                    )
+                except Exception:
+                    continue  # an image format reportlab can't place (EMF, WMF) is skipped
+            elif b.kind == "br":
+                story.append(PageBreak())
+        return story or [Spacer(1, 1)]
+
     pages = {"n": 0}
 
     def count(canvas, doc) -> None:
         pages["n"] = doc.page
 
-    doc = SimpleDocTemplate(
-        str(target), pagesize=size, leftMargin=margin, rightMargin=margin,
-        topMargin=margin, bottomMargin=margin, title=title, author="Pyxi",
-    )  # fmt: skip
-    doc.build(story, onFirstPage=count, onLaterPages=count)
+    def build(stacked: bool) -> None:
+        doc = SimpleDocTemplate(
+            str(target), pagesize=size, leftMargin=margin, rightMargin=margin,
+            topMargin=margin, bottomMargin=margin, title=title, author="Pyxi",
+        )  # fmt: skip
+        doc.build(lay_out(stacked), onFirstPage=count, onLaterPages=count)
+
+    try:
+        build(False)
+    except LayoutError:
+        # Something still won't fit a page as a table: its words, at least, come through. The
+        # user never sees reportlab's own "Flowable <Table@0x...> too large".
+        try:
+            build(True)
+        except LayoutError:
+            target.unlink(missing_ok=True)
+            raise PixelError(
+                "Part of this document is too big to fit on a page, so I couldn't lay it out "
+                "as a PDF."
+            ) from None
     return pages["n"]
 
 
@@ -287,17 +323,44 @@ def docx_blocks(path: Path) -> tuple[list[Block], bool]:
     from docx import Document
     from docx.table import Table
     from docx.text.paragraph import Paragraph
+    from docx.text.run import Run
+
+    from pyxi.agents.pixel_common import W, word_runs, word_text
 
     doc = Document(str(path))
     sec = doc.sections[0] if doc.sections else None
     a4 = bool(sec is not None and sec.page_width and abs(sec.page_width.inches - 8.27) < 0.1)
     out: list[Block] = []
     counters: dict[int, int] = {}
+    current: dict[str, str] = {}  # which list the counters belong to
+    try:
+        numbering = doc.part.numbering_part.element
+    except Exception:  # a document with no lists has no numbering part
+        numbering = None
+    formats: dict[tuple[str, str], str] = {}
+
+    def list_format(num_id: str, level: str) -> str:
+        """'bullet', 'decimal', 'lowerLetter'... for a list paragraph, '' when it can't be told."""
+        key = (num_id, level)
+        if key not in formats:
+            found: list[str] = []
+            if numbering is not None and num_id.isdigit() and level.isdigit():
+                base = numbering.xpath(f"./w:num[@w:numId='{num_id}']/w:abstractNumId/@w:val")
+                if base and str(base[0]).isdigit():
+                    found = numbering.xpath(
+                        f"./w:abstractNum[@w:abstractNumId='{base[0]}']"
+                        f"/w:lvl[@w:ilvl='{level}']/w:numFmt/@w:val"
+                    )
+            formats[key] = str(found[0]) if found else ""
+        return formats[key]
 
     def rich(p: Paragraph) -> str:
         parts = []
-        for r in p.runs:
-            t = escape(r.text)
+        # Every run, a link's included: ``p.runs`` skips those, and "Email: jane@example.com"
+        # came out as "Email:".
+        for r_el, _ in word_runs(p._p):
+            r = Run(r_el, p)
+            t = escape(r.text).replace("\n", "<br/>")
             if not t:
                 continue
             if r.bold:
@@ -308,6 +371,10 @@ def docx_blocks(path: Path) -> tuple[list[Block], bool]:
                 t = f"<u>{t}</u>"
             parts.append(t)
         return "".join(parts) or escape(p.text)
+
+    def cell_text(tc: Any) -> str:
+        """All of a cell's words: its paragraphs, and those of a table or content control in it."""
+        return "\n".join(word_text(p) for p in tc.iter(W + "p")).strip("\n")
 
     def images(p: Paragraph) -> list[bytes]:
         found = []
@@ -320,53 +387,75 @@ def docx_blocks(path: Path) -> tuple[list[Block], bool]:
                 found.append(part.blob)
         return found
 
-    for child in doc.element.body.iterchildren():
-        tag = child.tag.rsplit("}", 1)[-1]
-        if tag == "p":
-            p = Paragraph(child, doc)
-            style = (p.style.name if p.style is not None else "") or ""
-            for blob in images(p):
-                out.append(Block("img", image=blob))
-            if child.xpath(".//w:br[@w:type='page']"):
-                out.append(Block("br"))
-            if not p.text.strip():
-                continue
-            numbered = "Number" in style
-            numpr = child.xpath("./w:pPr/w:numPr")
-            m = re.match(r"Heading (\d)", style)
-            if style == "Title":
-                out.append(Block("h", rich(p), 0))
-            elif m:
-                out.append(Block("h", rich(p), int(m.group(1))))
-            elif "List" in style or numpr:
-                depth = 1
-                if numpr:
-                    ilvl = child.xpath("./w:pPr/w:numPr/w:ilvl/@w:val")
-                    depth = int(ilvl[0]) + 1 if ilvl else 1
-                if m2 := re.search(r"(\d)$", style):
-                    depth = max(depth, int(m2.group(1)))
-                n = None
-                if numbered:
-                    counters[depth] = counters.get(depth, 0) + 1
-                    n = counters[depth]
-                out.append(Block("li", rich(p), depth, n))
-                continue
-            else:
-                out.append(Block("p", rich(p)))
-            counters.clear()
-        elif tag == "tbl":
-            table = Table(child, doc)
-            rows = []
-            for row in table.rows:
-                cells, seen = [], set()
-                for c in row.cells:
-                    if id(c._tc) in seen:  # merged cells repeat
-                        continue
-                    seen.add(id(c._tc))
-                    cells.append(safe_markup(c.text))
-                rows.append(cells)
-            out.append(Block("table", rows=rows))
-            counters.clear()
+    def paragraph(child: Any) -> None:
+        p = Paragraph(child, doc)
+        style = (p.style.name if p.style is not None else "") or ""
+        for blob in images(p):
+            out.append(Block("img", image=blob))
+        if child.xpath(".//w:br[@w:type='page']"):
+            out.append(Block("br"))
+        if not word_text(child).strip():
+            return
+        num_id = child.xpath("./w:pPr/w:numPr/w:numId/@w:val")
+        listed = bool(num_id) and str(num_id[0]) != "0"  # numId 0 switches a list off
+        m = re.match(r"Heading (\d)", style)
+        if style == "Title":
+            out.append(Block("h", rich(p), 0))
+        elif m:
+            out.append(Block("h", rich(p), int(m.group(1))))
+        elif "List" in style or listed:
+            depth = 1
+            level = "0"
+            if listed:
+                ilvl = child.xpath("./w:pPr/w:numPr/w:ilvl/@w:val")
+                level = str(ilvl[0]) if ilvl else "0"
+                depth = int(level) + 1 if level.isdigit() else 1
+            if m2 := re.search(r"(\d)$", style):
+                depth = max(depth, int(m2.group(1)))
+            # Numbered or bulleted is what the list itself says. Word's numbering button gives
+            # the style "List Paragraph", with no "Number" in its name, and those lists came
+            # out as bullets.
+            kind = list_format(str(num_id[0]), level) if listed else ""
+            numbered = kind not in ("bullet", "none") if kind else "Number" in style
+            which = str(num_id[0]) if listed else re.sub(r"\s*\d$", "", style)
+            if current.get("list") != which:  # another list right after this one starts at 1
+                counters.clear()
+                current["list"] = which
+            n = None
+            if numbered:
+                counters[depth] = counters.get(depth, 0) + 1
+                n = counters[depth]
+            out.append(Block("li", rich(p), depth, n))
+            return
+        else:
+            out.append(Block("p", rich(p)))
+        counters.clear()
+
+    def walk(container: Any) -> None:
+        for child in container.iterchildren():
+            tag = child.tag.rsplit("}", 1)[-1]
+            if tag == "p":
+                paragraph(child)
+            elif tag == "sdt":
+                # A content control (the boxes Word's resume and letter templates are made of):
+                # what's inside it is part of the document, and used to be left out.
+                for content in child.iterchildren(W + "sdtContent"):
+                    walk(content)
+            elif tag == "tbl":
+                table = Table(child, doc)
+                rows = []
+                for row in table.rows:
+                    cells, seen = [], set()
+                    for c in row.cells:
+                        if id(c._tc) in seen:  # merged cells repeat
+                            continue
+                        seen.add(id(c._tc))
+                        cells.append(safe_markup(cell_text(c._tc)))
+                    rows.append(cells)
+                out.append(Block("table", rows=rows))
+                counters.clear()
+
+    walk(doc.element.body)
     return out, a4
 
 
@@ -379,11 +468,14 @@ def xlsx_blocks(path: Path, sheet: str = "") -> tuple[list[Block], bool]:
     wide = False
     try:
         names = [sheet] if sheet else wb.sheetnames
-        for i, name in enumerate(names):
+        for name in names:
             ws = wb[name]
+            # Some exports say the sheet is one cell big (<dimension ref="A1"/>): believed, the
+            # PDF had that one cell. Reading the rows themselves finds them all.
+            ws.reset_dimensions()
             rows = []
-            for row in ws.iter_rows(values_only=True):
-                cells = ["" if v is None else _fmt(v) for v in row]
+            for row in ws.iter_rows():
+                cells = ["" if c.value is None else _fmt(c.value, c.number_format) for c in row]
                 while cells and cells[-1] == "":
                     cells.pop()
                 rows.append(cells)
@@ -395,7 +487,7 @@ def xlsx_blocks(path: Path, sheet: str = "") -> tuple[list[Block], bool]:
                 continue
             width = max(len(r) for r in rows)
             wide = wide or width > 6
-            if i:
+            if out:  # a new page per sheet, but no blank one in front when the first is empty
                 out.append(Block("br"))
             if len(names) > 1:
                 out.append(Block("h", safe_markup(name), 2))
@@ -410,9 +502,24 @@ def xlsx_blocks(path: Path, sheet: str = "") -> tuple[list[Block], bool]:
     return out, wide
 
 
-def _fmt(v: Any) -> str:
+def _fmt(v: Any, number_format: str = "General") -> str:
+    """A cell's value the way the sheet shows it, near enough: a percent as a percent, the
+    decimals its format asks for, and otherwise every digit it has. (Rounded to two decimals
+    whatever the cell, a 3.25% rate printed as 0.03 and a 0.004 price as 0.)"""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        fmt = (number_format or "General").split(";")[0]  # the part for positive numbers
+        shape = re.sub(r'"[^"]*"|\[[^\]]*\]|\\.', "", fmt)  # without quoted text and [$-409]
+        places = len(m.group(1)) if (m := re.search(r"\.(0+)", shape)) else 0
+        if "%" in shape:
+            return f"{v * 100:.{places}f}%"
+        if re.search(r"[0#]", shape) and not re.search(r"(?i)e\+|/|general", shape):
+            symbol = next((s for s in "$£€¥" if s in re.sub(r"\[\$-[^\]]*\]", "", fmt)), "")
+            number = f"{abs(v):,.{places}f}" if "," in shape else f"{abs(v):.{places}f}"
+            return ("-" if v < 0 else "") + symbol + number
     if isinstance(v, float):
-        return f"{v:,.2f}".rstrip("0").rstrip(".") if abs(v) < 1e15 else str(v)
+        if v.is_integer() and abs(v) >= 1e15:
+            return f"{v:.0f}"  # a long account number, not 1.2e+16
+        return f"{v:,.15g}"
     if hasattr(v, "strftime"):
         return v.strftime("%Y-%m-%d") if not getattr(v, "hour", 0) else v.strftime("%Y-%m-%d %H:%M")
     return str(v)
@@ -702,8 +809,22 @@ def text_blocks(text: str) -> list[Block]:
 
 
 def read_any_text(path: Path) -> str:
+    """A text file's words whatever it was saved as: UTF-8, UTF-16 (Notepad's "Unicode"), or
+    Windows-1252 (Notepad's "ANSI", and what Excel writes as "CSV (Comma delimited)")."""
     raw = path.read_bytes()
-    for enc in ("utf-8-sig", "utf-16"):
+    # UTF-16 only when the file says so. Tried on every file that wasn't UTF-8, it "read" any
+    # Windows-1252 file with an even number of bytes as Chinese: a CSV with one é in it came
+    # out as a workbook of one cell of nonsense, and the job said "Made it".
+    sample = raw[:4096]
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        utf16 = "utf-16"
+    elif sample.count(0) > len(sample) // 4:  # no mark, but every other byte is empty
+        utf16 = "utf-16-le" if sample[1::2].count(0) >= sample[0::2].count(0) else "utf-16-be"
+    else:
+        utf16 = ""
+    for enc in (utf16, "utf-8-sig"):
+        if not enc:
+            continue
         try:
             return raw.decode(enc)
         except UnicodeDecodeError:

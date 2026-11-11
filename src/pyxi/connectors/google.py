@@ -572,8 +572,26 @@ class GoogleConnector(Connector):
         return datetime.now(zone(await self.time_zone()))
 
     async def _list(self, q: str, n: int) -> list[str]:
-        listing = await self._api("GET", f"{GMAIL}/messages", params={"q": q, "maxResults": n})
-        return [m["id"] for m in listing.get("messages", [])]
+        """The newest ``n`` messages that match, page after page (Gmail gives at most 500 at
+        a time). The list's ``cut`` says Gmail had more than ``n``: a scan that stopped there
+        says how far back it read instead of passing for the whole mailbox."""
+        from pyxi.mailwatch import Fetched
+
+        ids = Fetched()
+        token = None
+        while len(ids) < n:
+            params: dict[str, Any] = {"q": q, "maxResults": min(n - len(ids), 500)}
+            if token:
+                params["pageToken"] = token
+            listing = await self._api("GET", f"{GMAIL}/messages", params=params)
+            page = [m["id"] for m in listing.get("messages", [])]
+            ids += page
+            token = listing.get("nextPageToken")
+            if not token or not page:
+                break
+        del ids[n:]
+        ids.cut = bool(token)
+        return ids
 
     async def gmail_search(self, args: dict[str, Any]) -> Result:
         """Search with plain fields (from, when, has_attachment...) or raw Gmail syntax. When
@@ -790,8 +808,11 @@ class GoogleConnector(Connector):
     async def gmail_fetch(self, query: str, n: int = 40) -> list[dict[str, Any]]:
         """Whole emails for Pyxi's own background checks (receipts, orders): sender, subject,
         date, plain text and every link with its words. Fetched 25 at a time, so a big scan
-        stays under Gmail's rate limit."""
-        ids = await self._list(query, min(n, 100))
+        stays under Gmail's rate limit. The list's ``cut`` is True when Gmail had more
+        matching mail than ``n`` (see ``pyxi.mailwatch.read_back_to``)."""
+        from pyxi.mailwatch import Fetched
+
+        ids = await self._list(query, min(n, 500))
         msgs: list[dict[str, Any]] = []
         for i in range(0, len(ids), 25):  # 25 at a time: well inside Gmail's per-second quota
             msgs += await asyncio.gather(
@@ -800,7 +821,8 @@ class GoogleConnector(Connector):
                     for m in ids[i : i + 25]
                 )
             )
-        out = []
+        out = Fetched()
+        out.cut = bool(getattr(ids, "cut", False))
         for msg in msgs:
             h = self._headers(msg)
             payload = msg.get("payload", {})
@@ -1123,16 +1145,44 @@ class GoogleConnector(Connector):
         data = await self._api("GET", f"{SHEETS}/{sheet_id}", params={"fields": "sheets.charts"})
         return [c for s in data.get("sheets", []) for c in s.get("charts") or []]
 
+    @staticmethod
+    def _render(formulas: bool) -> dict[str, str]:
+        """How cells come back. With formulas, a date still comes as it shows ("10/3/2026"),
+        not as its serial number: 46298 under "Order date" read as a number, and was totalled."""
+        if not formulas:
+            return {"valueRenderOption": "FORMATTED_VALUE"}
+        return {"valueRenderOption": "FORMULA", "dateTimeRenderOption": "FORMATTED_STRING"}
+
     async def sheets_values(
         self, sheet_id: str, a1: str, *, formulas: bool = False
     ) -> list[list[Any]]:
+        from urllib.parse import quote
+
         self._need_sheets()
+        # The range is part of the address, so every character of it is encoded: a tab called
+        # "Sheet #2" or "Income/Expenses" used to cut the address short at the # or the /.
         data = await self._api(
             "GET",
-            f"{SHEETS}/{sheet_id}/values/{a1}",
-            params={"valueRenderOption": "FORMULA" if formulas else "FORMATTED_VALUE"},
+            f"{SHEETS}/{sheet_id}/values/{quote(a1, safe='')}",
+            params=self._render(formulas),
         )
         return data.get("values", [])
+
+    async def sheets_values_batch(
+        self, sheet_id: str, ranges: list[str], *, formulas: bool = False
+    ) -> list[list[list[Any]]]:
+        """Several ranges in one round trip, in the order asked (every tab of a spreadsheet,
+        where reading them one at a time took a round trip each)."""
+        self._need_sheets()
+        if not ranges:
+            return []
+        data = await self._api(
+            "GET",
+            f"{SHEETS}/{sheet_id}/values:batchGet",
+            params={"ranges": list(ranges), **self._render(formulas)},
+        )
+        got = data.get("valueRanges", [])
+        return [got[i].get("values", []) if i < len(got) else [] for i in range(len(ranges))]
 
     async def sheets_write(self, sheet_id: str, data: list[dict[str, Any]]) -> Any:
         self._need_sheets()
@@ -1143,10 +1193,12 @@ class GoogleConnector(Connector):
         )
 
     async def sheets_append(self, sheet_id: str, a1: str, rows: list[list[Any]]) -> Any:
+        from urllib.parse import quote
+
         self._need_sheets()
         return await self._api(
             "POST",
-            f"{SHEETS}/{sheet_id}/values/{a1}:append",
+            f"{SHEETS}/{sheet_id}/values/{quote(a1, safe='')}:append",
             params={"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"},
             json={"values": rows},
         )
@@ -1235,7 +1287,10 @@ class GoogleConnector(Connector):
         ref = ref.strip()
         made_of = {"sheet": GoogleSheet, "doc": GoogleDoc, "slides": GoogleSlides}
         if m := re.search(r"/spreadsheets/d/([\w-]+)", ref):
-            return GoogleSheet(self, m.group(1))
+            # The link also says which tab they are looking at (gid): an edit that names no
+            # tab goes there, not to the first tab of the file.
+            tabs = re.findall(r"[#?&]gid=(\d+)", ref)
+            return GoogleSheet(self, m.group(1), gid=int(tabs[-1]) if tabs else None)
         if m := re.search(r"/document/d/([\w-]+)", ref):
             return GoogleDoc(self, m.group(1))
         if m := re.search(r"/presentation/d/([\w-]+)", ref):

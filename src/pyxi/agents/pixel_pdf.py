@@ -20,8 +20,8 @@ from pyxi.agents.pixel_common import (
     IMAGE_EXTS,
     PixelError,
     PixelResult,
+    image_pages,
     need,
-    open_image,
     out_dir_for,
     parse_ranges,
     unique_path,
@@ -75,6 +75,13 @@ def _label(pages: list[int]) -> str:
         if p is not None:
             start = prev = p
     return "pages " + ", ".join(runs)
+
+
+def _short_label(pages: list[int]) -> str:
+    """The same, for a file's name and a notification: a long list ("every other page" of a
+    300-page scan) is said as a count. Spelt out, the name was too long for Windows to save."""
+    label = _label(pages)
+    return label if len(label) <= 48 else f"{len(pages)} pages"
 
 
 # ============================================================================ pages
@@ -157,14 +164,13 @@ def delete_pages(files: list[Path], pages: str, out: Path | None = None) -> Pixe
     for i, page in enumerate(reader.pages, 1):
         if i not in gone:
             writer.add_page(page)
-    target = unique_path(
-        out or out_dir_for(src), f"{src.stem} (without {_label(sorted(gone))}).pdf"
-    )
+    which = _short_label(sorted(gone))
+    target = unique_path(out or out_dir_for(src), f"{src.stem} (without {which}).pdf")
     _write(writer, target)
     left = len(reader.pages) - len(gone)
     return PixelResult(
         [target],
-        f"Removed {_label(sorted(gone))}; {target.name} has {left} page{'s' if left != 1 else ''}.",
+        f"Removed {which}; {target.name} has {left} page{'s' if left != 1 else ''}.",
     )
 
 
@@ -177,9 +183,10 @@ def extract_pages(files: list[Path], pages: str, out: Path | None = None) -> Pix
     writer = PdfWriter()
     for p in keep:
         writer.add_page(reader.pages[p - 1])
-    target = unique_path(out or out_dir_for(src), f"{src.stem} ({_label(keep)}).pdf")
+    which = _short_label(keep)
+    target = unique_path(out or out_dir_for(src), f"{src.stem} ({which}).pdf")
     _write(writer, target)
-    return PixelResult([target], f"Saved {_label(keep)} as {target.name}.")
+    return PixelResult([target], f"Saved {which} as {target.name}.")
 
 
 # ============================================================================ stamps
@@ -205,7 +212,9 @@ def _stamp(
     total = len(writer.pages)
     for i, page in enumerate(writer.pages, 1):
         page.transfer_rotation_to_content()  # so "bottom" is the bottom as you read it
-        box = page.mediabox
+        # The part of the page that is shown and printed. A cropped PDF's full sheet (its
+        # media box) is bigger, and a number placed by that landed outside what anyone sees.
+        box = page.cropbox
         w, h = float(box.width), float(box.height)
         stamp = _overlay(w, h, lambda c, w_, h_, i=i: draw(c, w_, h_, i, total))
         # The stamp is drawn from (0, 0); shift it when the page's box doesn't start there.
@@ -443,14 +452,22 @@ def page_texts(src: Path, *, ocr: bool = True) -> tuple[list[str], list[int]]:
     """Text of each page, and which pages were read with OCR (scans)."""
     reader = _reader(src)
     texts, scanned = [], []
+    no_reader: PixelError | None = None
     for i, page in enumerate(reader.pages):
         text = (page.extract_text() or "").strip()
-        if len(re.sub(r"\s", "", text)) < 25 and ocr:
-            lines = _ocr_image(_render_page(src, i))
+        if len(re.sub(r"\s", "", text)) < 25 and ocr and no_reader is None:
+            try:
+                lines = _ocr_image(_render_page(src, i))
+            except PixelError as exc:  # no text reader on this PC
+                no_reader, lines = exc, []
             if lines:
                 text = "\n".join(ln.text for ln in lines)
                 scanned.append(i + 1)
         texts.append(text)
+    # A typed PDF with one near-empty page (a cover, a blank back) is still read without a
+    # text reader. Only a PDF with no words at all needs one.
+    if no_reader is not None and not any(texts):
+        raise no_reader
     return texts, scanned
 
 
@@ -459,19 +476,20 @@ def extract_text(files: list[Path], out: Path | None = None) -> PixelResult:
     (src,) = need(files, {".pdf", *IMAGE_EXTS}, "PDF or image")
     if src.suffix.lower() == ".pdf":
         texts, scanned = page_texts(src)
-        body = "\n\n".join(
-            f"--- Page {i} ---\n{t}" if len(texts) > 1 else t for i, t in enumerate(texts, 1)
-        )
-        how = f" (read {_label(scanned)} with OCR)" if scanned else ""
-    else:
-        lines = _ocr_image(open_image(src))
-        body = "\n".join(ln.text for ln in lines)
+        how = f" (read {_short_label(scanned)} with OCR)" if scanned else ""
+    else:  # a fax or a scanner's TIFF is several pages in one file
+        texts = ["\n".join(ln.text for ln in _ocr_image(img)) for img in image_pages(src)]
         how = " with OCR"
-    if not body.strip():
+    # Counted and checked before the "--- Page n ---" lines go in: with them, three pages
+    # nothing could be read from were "12 words" saved to a file.
+    words = sum(len(t.split()) for t in texts)
+    if not words:
         raise PixelError(f"I couldn't find any text in {src.name}.")
+    body = "\n\n".join(
+        f"--- Page {i} ---\n{t}" if len(texts) > 1 else t for i, t in enumerate(texts, 1)
+    )
     target = unique_path(out or out_dir_for(src), f"{src.stem} (text).txt")
     target.write_text(body, encoding="utf-8")
-    words = len(body.split())
     return PixelResult(
         [target],
         f"Pulled {words:,} words out of {src.name}{how}; saved as {target.name}.",
@@ -537,9 +555,12 @@ def make_searchable(files: list[Path], dpi: int = 200, out: Path | None = None) 
                 else:
                     writer.add_page(scanned_page(_render_page(src, i, dpi)))
         else:
-            writer.add_page(scanned_page(open_image(src)))
+            for img in image_pages(src):
+                writer.add_page(scanned_page(img))
     if not ocr_pages:
         raise PixelError(f"{files[0].name} already has text you can search; nothing to do.")
+    if not words_found:  # "now searchable" with no words in it would not be true
+        raise PixelError(f"I couldn't read any text in {files[0].name}, so it can't be searched.")
     target = unique_path(out or out_dir_for(files[0]), f"{files[0].stem} (searchable).pdf")
     _write(writer, target)
     return PixelResult(
@@ -561,17 +582,23 @@ def pdf_to_word(files: list[Path], out: Path | None = None) -> PixelResult:
     doc = Document()
     doc.styles["Normal"].font.size = Pt(11)
     scanned = []
+    made = 0  # paragraphs and pictures that went in
+    no_reader: PixelError | None = None
     for i, page in enumerate(reader.pages):
         if i:
             doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
         lines = _page_lines(page)
-        if sum(len(ln[0]) for ln in lines) < 25:
-            ocr_lines = _ocr_image(_render_page(src, i))
-            lines = [(ln.text, 11.0, False, -float(ln.rect[1])) for ln in ocr_lines]
-            if lines:
+        if sum(len(ln[0]) for ln in lines) < 25 and no_reader is None:
+            try:
+                ocr_lines = _ocr_image(_render_page(src, i))
+            except PixelError as exc:  # no text reader on this PC: keep what was typed
+                no_reader, ocr_lines = exc, []
+            if ocr_lines:  # a short typed page the reader made nothing of keeps its own words
+                lines = [(ln.text, 11.0, False, -float(ln.rect[1])) for ln in ocr_lines]
                 scanned.append(i + 1)
         body = _body_size(lines)
         for text, size, bold, kind in _paragraphs(lines, body):
+            made += 1
             if kind == "h":
                 level = 1 if size >= body * 1.5 else 2
                 doc.add_heading(text, level=level)
@@ -584,8 +611,14 @@ def pdf_to_word(files: list[Path], out: Path | None = None) -> PixelResult:
         for img in _page_images(page):
             try:
                 doc.add_picture(io.BytesIO(img), width=Inches(min(6.0, 6.0)))
+                made += 1
             except Exception:
                 continue
+    if not made:
+        # An empty Word file is not "Made X.docx from 3 pages".
+        if no_reader is not None:
+            raise no_reader
+        raise PixelError(f"I couldn't find any text or pictures in {src.name}.")
     target = unique_path(out or out_dir_for(src), f"{src.stem}.docx")
     doc.save(str(target))
     how = f" Read {_label(scanned)} with OCR." if scanned else ""
@@ -754,6 +787,7 @@ def document_lines(path: Path) -> list[str]:
         try:
             out = []
             for ws in wb.worksheets:
+                ws.reset_dimensions()  # the file's own word for its size can be wrong ("A1")
                 for r, row in enumerate(ws.iter_rows(values_only=True), 1):
                     if any(v is not None for v in row):
                         out.append(

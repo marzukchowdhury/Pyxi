@@ -960,6 +960,9 @@ async def test_use_tab_works_through_it_with_every_card_and_the_log(settings, qu
         act({"do": "type", "ref": to, "text": "dana@example.com"}, {"do": "type", "ref": secret, "text": "hunter2"}),
         act({"do": "click", "ref": send}),
         ("done", {"ok": True, "summary": "Sent."}),
+        # This pretend page reads the same after the click, so "done" is questioned once
+        # (tests/test_audit_tabwork.py); said again, it is taken.
+        ("done", {"ok": True, "summary": "Sent."}),
     )
     assert job.status == "done" and job.summary == "Sent."
     # One Allow for the site, for reading it and working in it; then only what sends.

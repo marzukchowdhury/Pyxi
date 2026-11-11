@@ -70,6 +70,9 @@ class RawWindow:
     process: str
     rect: tuple[int, int, int, int]
     hwnd: int
+    # "partial": the walk stopped early (an app threw part-way), "failed": none of the tree
+    # could be read. Either way the window itself is known, and Pyxi says so to the model.
+    tree: str = "ok"
 
 
 def available() -> bool:
@@ -99,16 +102,16 @@ def window_title(hwnd: int) -> str | None:
     return buf.value
 
 
-def window_at(x: int, y: int) -> int | None:
-    """The top-level window the user sees at a point: the first visible, real window in
-    z-order whose frame contains it. Pyxi's own (click-through) windows don't count."""
+def _real_windows() -> list[tuple[int, tuple[int, int, int, int]]]:
+    """Every visible, real top-level window, topmost first: (hwnd, (left, top, right, bottom)).
+    Pyxi's own (click-through) windows don't count."""
     if sys.platform != "win32":
-        return None
+        return []
     import ctypes.wintypes as wt
 
     user32 = ctypes.windll.user32
     dwm = ctypes.windll.dwmapi
-    found: list[int] = []
+    found: list[tuple[int, tuple[int, int, int, int]]] = []
 
     @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
     def visit(hwnd, _):
@@ -126,16 +129,147 @@ def window_at(x: int, y: int) -> int | None:
         r = wt.RECT()
         if not user32.GetWindowRect(hwnd, ctypes.byref(r)):
             return True
-        if not (r.left <= x < r.right and r.top <= y < r.bottom):
-            return True
         title = window_title(hwnd) or ""
         if not title.strip() or title.startswith("Pyxi"):
             return True
-        found.append(hwnd)
-        return False  # the topmost match is the one they see
+        found.append((int(hwnd), (r.left, r.top, r.right, r.bottom)))
+        return True
 
     user32.EnumWindows(visit, 0)
-    return found[0] if found else None
+    return found
+
+
+def window_at(x: int, y: int) -> int | None:
+    """The top-level window the user sees at a point: the first visible, real window in
+    z-order whose frame contains it. Pyxi's own (click-through) windows don't count."""
+    for hwnd, (left, top, right, bottom) in _real_windows():
+        if left <= x < right and top <= y < bottom:
+            return hwnd  # the topmost match is the one they see
+    return None
+
+
+def screen_at(x: int, y: int) -> tuple[int, int, int, int] | None:
+    """The monitor a point is on, as x, y, w, h in physical px."""
+    if sys.platform != "win32":
+        return None
+    import ctypes.wintypes as wt
+
+    class Info(ctypes.Structure):
+        _fields_ = [("cbSize", wt.DWORD), ("rcMonitor", wt.RECT), ("rcWork", wt.RECT), ("dwFlags", wt.DWORD)]
+
+    user32 = ctypes.WinDLL("user32")  # its own handle: the types set here are nobody else's
+    user32.MonitorFromPoint.restype = ctypes.c_void_p
+    user32.MonitorFromPoint.argtypes = [wt.POINT, wt.DWORD]
+    user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    mon = user32.MonitorFromPoint(wt.POINT(x, y), 2)  # MONITOR_DEFAULTTONEAREST
+    info = Info()
+    info.cbSize = ctypes.sizeof(Info)
+    if not mon or not user32.GetMonitorInfoW(mon, ctypes.byref(info)):
+        return None
+    m = info.rcMonitor
+    return m.left, m.top, m.right - m.left, m.bottom - m.top
+
+
+def top_window_on(screen: tuple[int, int, int, int]) -> int | None:
+    """The topmost real window that sits on a screen (its middle is on it)."""
+    sx, sy, sw, sh = screen
+    for hwnd, (left, top, right, bottom) in _real_windows():
+        cx, cy = (left + right) // 2, (top + bottom) // 2
+        if right - left > 80 and bottom - top > 80 and sx <= cx < sx + sw and sy <= cy < sy + sh:
+            return hwnd
+    return None
+
+
+def desktop_window() -> int:
+    """The desktop itself (its icons), which is what's there when no window is."""
+    if sys.platform != "win32":
+        return 0
+    return int(ctypes.windll.user32.GetShellWindow() or 0)
+
+
+def window_to_read(
+    follow_mouse: bool, named: int | None
+) -> tuple[int, tuple[int, int, int, int] | None]:
+    """Which window a look at the screen reads, and (when it is the bare desktop) the screen
+    it is read on. The request's own window; else the one under the mouse; else, with the
+    mouse over no window (the desktop, the taskbar), the top window on the mouse's screen,
+    or the desktop of that screen. Never the window in front when it is on another screen:
+    live, with three screens, the model was given the buttons of a window on the second
+    screen under a picture of the first. 0 when the window in front is the one to read."""
+    if named:
+        return named, None
+    pos = cursor_pos() if follow_mouse else None
+    if not pos:
+        return 0, None
+    hwnd = window_at(*pos)
+    if hwnd:
+        return hwnd, None
+    screen = screen_at(*pos)
+    if screen is None:
+        return 0, None
+    hwnd = top_window_on(screen)
+    if hwnd:
+        return hwnd, None
+    return desktop_window(), screen
+
+
+def input_idle_s() -> float | None:
+    """Seconds since the user last touched the mouse or keyboard (Windows' own clock: when,
+    never what)."""
+    if sys.platform != "win32":
+        return None
+
+    class LastInput(ctypes.Structure):
+        _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+
+    info = LastInput()
+    info.cbSize = ctypes.sizeof(LastInput)
+    if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+        return None
+    now = ctypes.windll.kernel32.GetTickCount()
+    return ((now - info.dwTime) & 0xFFFFFFFF) / 1000.0
+
+
+def _rect_of(hwnd: int) -> tuple[int, int, int, int]:
+    r = ctypes.wintypes.RECT()
+    if not ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(r)):
+        return 0, 0, 0, 0
+    return r.left, r.top, r.right - r.left, r.bottom - r.top
+
+
+def _pid_of(hwnd: int) -> int:
+    pid = ctypes.wintypes.DWORD()
+    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return int(pid.value)
+
+
+def _front_window() -> int:
+    user32 = ctypes.windll.user32
+    fg = int(user32.GetForegroundWindow() or 0)
+    return int(user32.GetAncestor(fg, 2) or 0) or fg if fg else 0  # GA_ROOT
+
+
+def unread_window(follow_mouse: bool = True, named: int | None = None) -> RawWindow | None:
+    """The window a look was for, when its tree could not be read: its title, program and
+    place, asked of Windows directly. Without it the model was told "window: ''" and took
+    that for an empty desktop, and nothing drawn could be tied to a window. Never raises."""
+    if sys.platform != "win32":
+        return None
+    try:
+        hwnd, screen = window_to_read(follow_mouse, named)
+        hwnd = hwnd or _front_window()
+        if not hwnd:
+            return None
+        return RawWindow(
+            title=window_title(hwnd) or "",
+            process=process_name(_pid_of(hwnd)),
+            rect=screen or _rect_of(hwnd),
+            hwnd=hwnd,
+            tree="failed",
+        )
+    except Exception as exc:
+        log.debug("couldn't name the window either: %s", exc)
+        return None
 
 
 def process_name(pid: int) -> str:
@@ -172,12 +306,17 @@ def read_foreground(
     except ImportError:
         return None, []
 
-    try:
-        with auto.UIAutomationInitializerInThread(debug=False):
-            return _walk(auto, budget_s, max_elements, max_depth, follow_mouse, hwnd)
-    except Exception as exc:  # UIA is best-effort: some apps throw COM errors mid-walk
-        log.warning("UI Automation failed: %s", exc)
-        return None, []
+    failure: Exception | None = None
+    for attempt in range(2):
+        try:
+            with auto.UIAutomationInitializerInThread(debug=False):
+                return _walk(auto, budget_s, max_elements, max_depth, follow_mouse, hwnd)
+        except Exception as exc:  # UIA is best-effort: some apps throw COM errors
+            failure = exc
+            if attempt == 0:
+                time.sleep(0.15)  # often an app that is just opening: a moment later it answers
+    log.warning("UI Automation failed: %s", failure)
+    return unread_window(follow_mouse, hwnd), []
 
 
 def _walk(
@@ -191,14 +330,14 @@ def _walk(
     # The window the user is looking at: the one under the mouse (on a second monitor the
     # foreground window is often somewhere else entirely), else the foreground window.
     top = None
-    pos = cursor_pos() if follow_mouse and not named else None
-    hwnd = named or (window_at(*pos) if pos else None)
+    hwnd, screen = window_to_read(follow_mouse, named)
     if hwnd:
         try:
             top = auto.ControlFromHandle(hwnd)
         except Exception:
             top = None
     if top is None:
+        screen = None
         # The foreground window's top-level ancestor, asked of Windows directly: uiautomation's
         # own GetTopLevelControl passes a c_long where an int belongs and throws ("argument 2:
         # TypeError"), which left Pyxi blind in the Start menu and in popups.
@@ -217,14 +356,27 @@ def _walk(
     window = RawWindow(
         title=top.Name or "",
         process=process_name(top.ProcessId),
-        rect=(r.left, r.top, r.width(), r.height()),
+        # The bare desktop is one window across every screen: here it is the mouse's screen.
+        rect=screen or (r.left, r.top, r.width(), r.height()),
         hwnd=top.NativeWindowHandle,
     )
 
     deadline = time.monotonic() + budget_s
     out: list[RawElement] = []
     stack: list[tuple[int, int | None]] = []  # depth -> index of last kept ancestor
-    for control, depth in auto.WalkControl(top, includeTop=False, maxDepth=max_depth):
+    walker = iter(auto.WalkControl(top, includeTop=False, maxDepth=max_depth))
+    while True:
+        try:
+            control, depth = next(walker)
+        except StopIteration:
+            break
+        except Exception as exc:
+            # The tree itself gave out part-way (live: "An event was unable to invoke any of
+            # the subscribers"). What was read so far is kept, and the window is still known:
+            # throwing it all away left the model with "window: ''" and nothing to point at.
+            log.warning("UI Automation stopped part-way through %r: %s", window.title, exc)
+            window.tree = "partial" if out else "failed"
+            break
         if time.monotonic() > deadline or len(out) >= max_elements:
             break
         try:

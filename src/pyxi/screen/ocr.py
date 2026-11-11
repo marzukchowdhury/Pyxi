@@ -117,35 +117,71 @@ def _norm(s: str) -> str:
     return re.sub(r"[\W_]+", "", s.casefold())
 
 
-def find_text(lines: list[TextLine], quote: str, within: Rect | None = None) -> Rect | None:
+def _letters(s: str) -> str:
+    """The letters and digits as written, capitals kept ("Pivot" is not "pivot,")."""
+    return re.sub(r"[\W_]+", "", s)
+
+
+def _apart(r: Rect, near: tuple[float, float] | None) -> float:
+    if near is None:
+        return 0.0
+    return ((r[0] + r[2] / 2 - near[0]) ** 2 + (r[1] + r[3] / 2 - near[1]) ** 2) ** 0.5
+
+
+def find_text(
+    lines: list[TextLine],
+    quote: str,
+    within: Rect | None = None,
+    near: tuple[float, float] | None = None,
+) -> Rect | None:
     """The exact box of a phrase on screen: the words themselves, not the whole line.
 
     Matches the run of words whose letters spell the quote (ignoring case, spacing and
     punctuation), across line breaks too. Falls back to the closest line if OCR misread a
     letter or two.
+
+    The words are often on screen more than once, and the first in reading order is rarely
+    the one meant: live, "Pivot" landed on "...and then a pivot, into the Google Sheet" in a
+    notification instead of the sheet tab "Pivot", and "Settings" on the Start menu's
+    "Search for apps, settings, and documents". So every match is weighed: one that is its
+    whole line (a tab, a button, a label) first, then one that starts its line, then one
+    written with the same capitals, then reading order. ``near`` (screen px, where the model
+    thought it was) settles a tie.
     """
     target = _norm(quote)
     if not target:
         return None
     pool = [ln for ln in lines if within is None or _inside(ln.rect, within)] or lines
-    words = [(w, r) for ln in pool for w, r in ln.words]
-    normed = [_norm(w) for w, _ in words]
+    words = [(w, r, li, wi) for li, ln in enumerate(pool) for wi, (w, r) in enumerate(ln.words)]
+    normed = [_norm(w[0]) for w in words]
+    as_written = _letters(quote)
+    found: list[tuple[tuple[bool, bool, bool, float, int], Rect]] = []
     for i in range(len(words)):
+        if not normed[i]:
+            continue  # a run starts on a word, not on a bullet or a dash before it
         acc = ""
         for j in range(i, min(len(words), i + 40)):
             acc += normed[j]
             if not target.startswith(acc):
                 break
             if acc == target:
-                rects = [r for _, r in words[i : j + 1]]
+                rects = [w[1] for w in words[i : j + 1]]
                 # A phrase that wraps onto the next line: keep the first line's part.
-                first = [r for r in rects if abs(r[1] - rects[0][1]) < rects[0][3]]
-                return _union(first)
+                rect = _union([r for r in rects if abs(r[1] - rects[0][1]) < rects[0][3]])
+                line, at = pool[words[i][2]], words[i][3]
+                whole = words[j][2] == words[i][2] and _norm(line.text) == target
+                starts = not any(_norm(w) for w, _ in line.words[:at])
+                same = _letters("".join(w[0] for w in words[i : j + 1])) == as_written
+                found.append(((not whole, not starts, not same, _apart(rect, near), len(found)), rect))
+                break
+    if found:
+        return min(found)[1]
     # Inside a longer word run ("inflation" inside "Cost of living and inflation").
-    for ln in pool:
-        if target in _norm(ln.text):
-            hits = [r for w, r in ln.words if _norm(w) and _norm(w) in target]
-            return _union(hits) if hits else ln.rect
+    inside = [ln for ln in pool if target in _norm(ln.text)]
+    if inside:
+        ln = min(inside, key=lambda c: _apart(c.rect, near))
+        hits = [r for w, r in ln.words if _norm(w) and _norm(w) in target]
+        return _union(hits) if hits else ln.rect
     best, score = None, 0.0
     for ln in pool:
         s = difflib.SequenceMatcher(None, target, _norm(ln.text)).ratio()

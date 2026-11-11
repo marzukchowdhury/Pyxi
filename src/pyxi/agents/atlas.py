@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from pyxi import safety
-from pyxi.mailwatch import DATE, merchant, parse_date
+from pyxi.mailwatch import DATE, merchant, parse_date, read_back_to, said_day
 
 if TYPE_CHECKING:
     from pyxi.agents.jobs import Job, JobManager
@@ -46,8 +46,35 @@ CANCELLED = re.compile(
 )
 REF = re.compile(
     r"(?i:booking (?:reference|ref|code|number)|confirmation (?:code|number|no\.?|#)|"
-    r"record locator|reservation (?:code|number|no\.?|#)|itinerary (?:number|no\.?|#)|\bPNR\b|booking id|confirmation)"
+    r"record locator|reservation (?:code|number|no\.?|#)|itinerary (?:number|no\.?|#)|\bPNR\b|booking id)"
     r"\s*(?i:is)?\s*[:#]?\s*#?\s*(?P<ref>[A-Z0-9]{5,14})\b"
+)
+# "Your booking confirmation TP9WQL": the word alone, so the code has to follow on the same
+# line and have a digit in it. Live shape: "E-TICKET CONFIRMATION" over "PASSENGER: ..." made
+# PASSENGER the booking reference, on the itinerary and for check-in.
+REF_BARE = re.compile(r"(?i:confirmation)[ \t]*[:#-]?[ \t]*#?[ \t]*(?P<ref>[A-Z0-9]{5,14})\b")
+# Words in capitals that follow a label in a table heading, not a code.
+NOT_A_REF = {
+    "FLIGHT", "FLIGHTS", "TICKET", "TICKETS", "NUMBER", "DETAIL", "DETAILS", "HOTEL", "HOTELS",
+    "GUEST", "GUESTS", "EMAIL", "THANK", "THANKS", "PLEASE", "STATUS", "SUMMARY", "TRAVEL",
+    "CHECK", "DATES", "BELOW", "ABOVE", "PRINT", "ADULT", "ADULTS", "NAMES", "TOTAL", "PRICE",
+    "ROOMS", "NIGHT", "NIGHTS", "DEPART", "ARRIVE", "ARRIVAL", "RETURN", "BOOKING", "RECEIPT",
+    "INVOICE", "PAYMENT", "ONLINE", "MANAGE", "CHANGE", "CHANGED", "UPDATE", "UPDATED",
+    "CONFIRM", "PENDING", "ACTIVE", "ISSUED", "HOLDER", "CLIENT", "MEMBER", "FIRST", "TITLE",
+    "WHERE", "WHICH", "ABOUT", "VALID", "ENTER", "CLICK", "HELLO",
+}  # fmt: skip
+# A notice that puts them on another flight, not one that only takes a booking away.
+REBOOKED = re.compile(
+    r"\b(?:re-?booked|re-?accommodated|new (?:flight|itinerary|booking|reservation)s?|"
+    r"alternative flight|replacement flight|moved you|now (?:booked|confirmed) on)\b",
+    re.I,
+)
+# What a cancellation has to be about to count: "your seat selection was cancelled" is not
+# the trip.
+BOOKED_THING = re.compile(
+    r"\b(?:flights?|bookings?|reservations?|trips?|itinerar(?:y|ies)|stays?|hotels?|rooms?|"
+    r"tickets?)\b",
+    re.I,
 )
 # "SK 482", "AC123", "WS 702", "U2 8421". Two characters (letters, or a letter and a digit),
 # then 1-4 digits, not part of a time or a longer word.
@@ -235,7 +262,8 @@ class Flight:
 
     @property
     def end(self) -> datetime:
-        return self.arrive or self.depart
+        # A flight home across the date line lands "before" it left, on the clock.
+        return max(self.arrive, self.depart) if self.arrive else self.depart
 
     def place(self, which: str) -> str:
         city, code = (
@@ -297,11 +325,28 @@ class Trip:
                     return " ".join(words)
         return ""
 
+    def far_flight(self) -> Flight | None:
+        """The flight that lands where the trip is going: the stop they stay at longest, or
+        the last landing when there's no way back yet. Never home, and not a connection: a
+        change of planes in Toronto on the way to Paris is a Paris trip."""
+        fs = sorted(self.flights, key=lambda f: f.depart)
+        if not fs:
+            return None
+        home = fs[0].origin
+        best, longest = fs[0], timedelta(days=-1)
+        for i, f in enumerate(fs):
+            if f.dest == home:
+                continue
+            stop = fs[i + 1].depart - f.end if i + 1 < len(fs) else timedelta(days=9999)
+            if stop > longest:
+                best, longest = f, stop
+        return best
+
     @property
     def destination(self) -> str:
         city = self.stay_city()
-        if self.flights:
-            f = self.flights[0]
+        f = self.far_flight()
+        if f is not None:
             name = re.sub(AIRPORT_WORDS, "", f.dest_city).strip() or f.dest_city
             if city and name[:4].lower() == city[:4].lower():
                 return city if len(city) < len(name) else name
@@ -342,12 +387,23 @@ def _time(m: re.Match[str]) -> tuple[int, int] | None:
     return h, mins
 
 
-def _date(text: str, ref: datetime) -> datetime | None:
+def _date(text: str, ref: datetime, day_first: bool = False) -> datetime | None:
     m = DATE_RE.search(text)
     if not m:
         return None
-    when = parse_date(m.group(0), ref)
+    when = parse_date(m.group(0), ref, day_first)
     return when.replace(tzinfo=None) if when else None
+
+
+def _day_first(text: str) -> bool:
+    """Does this mail write its dates day first? One "25/11/2026" in it says so, and then its
+    "05/12/2026" is 5 December too."""
+    for m in re.finditer(r"(?<![\d/])(\d{1,2})/(\d{1,2})/(?:\d{4}|\d{2})(?![\d/])", text):
+        if int(m.group(1)) > 12:
+            return True
+        if int(m.group(2)) > 12:
+            return False
+    return False
 
 
 def _city(text: str, code: str) -> str:
@@ -371,6 +427,11 @@ def _city(text: str, code: str) -> str:
         "landing",
         "in",
         "at",
+        # "1:00 PM Vancouver (YVR)": the end of the time is not the start of the city
+        "am",
+        "pm",
+        "a.m.",
+        "p.m.",
     }:
         words = words[1:]
     city = " ".join(words)
@@ -379,10 +440,34 @@ def _city(text: str, code: str) -> str:
 
 
 def _refs(text: str) -> list[str]:
+    """The booking references in a mail, in the order they appear, each once."""
+    found = [(m.start(), m.group("ref"), False) for m in REF.finditer(text)]
+    found += [(m.start(), m.group("ref"), True) for m in REF_BARE.finditer(text)]
+    out: list[str] = []
+    for _, ref, bare in sorted(found):
+        if ref.isdigit():
+            ok = len(ref) >= 6
+        elif ref.isalpha():  # an airline's code of letters, or a heading in capitals
+            ok = not bare and 5 <= len(ref) <= 7 and ref not in NOT_A_REF
+        else:
+            ok = True
+        if ok and ref not in out:
+            out.append(ref)
+    return out
+
+
+def _flight_numbers(text: str) -> list[re.Match[str]]:
+    """ "SK 482", "AC123": where a mail names a flight."""
     return [
-        m.group("ref")
-        for m in REF.finditer(text)
-        if not m.group("ref").isdigit() or len(m.group("ref")) >= 6
+        m
+        for m in FLIGHT_NO.finditer(text)
+        if m.group("code") not in {"AM", "PM", "NO", "ID", "TO", "AT", "ON", "BC", "QC"}
+        # a code that starts with a digit ("2E 51") only counts right after the word "flight",
+        # so a postcode like "M6J 1J3" never reads as one
+        and (
+            not m.group("code")[0].isdigit()
+            or re.search(r"flight\W{0,4}$", text[max(0, m.start() - 12) : m.start()], re.I)
+        )
     ]
 
 
@@ -403,22 +488,36 @@ def _mail_date(mail: dict[str, Any]) -> datetime:
         return datetime.now().astimezone()
 
 
+def _landing_day(
+    window: str,
+    dep_at: re.Match[str],
+    arr_at: re.Match[str],
+    sent: datetime,
+    day_first: bool,
+) -> datetime | None:
+    """The date printed with the arrival time: on its line, after the departure time when
+    that is on the same line. None when the mail gives the landing no date of its own."""
+    a = window.rfind("\n", 0, arr_at.start()) + 1
+    b = window.find("\n", arr_at.end())
+    b = len(window) if b < 0 else b
+    if a <= dep_at.start() < arr_at.start():
+        a = dep_at.end()
+    dates = list(DATE_RE.finditer(window, a, b))
+    if not dates:
+        return None
+    near = min(
+        dates, key=lambda d: min(abs(d.start() - arr_at.end()), abs(arr_at.start() - d.end()))
+    )
+    return _date(near.group(0), sent, day_first)
+
+
 def read_flights(mail: dict[str, Any]) -> list[Flight]:
     text = f"{mail.get('subject', '')}\n{mail.get('text', '')}"
     sent = _mail_date(mail)
     refs = _refs(text)
     airline = merchant(str(mail.get("from") or ""))
-    hits = [
-        m
-        for m in FLIGHT_NO.finditer(text)
-        if m.group("code") not in {"AM", "PM", "NO", "ID", "TO", "AT", "ON", "BC", "QC"}
-        # a code that starts with a digit ("2E 51") only counts right after the word "flight",
-        # so a postcode like "M6J 1J3" never reads as one
-        and (
-            not m.group("code")[0].isdigit()
-            or re.search(r"flight\W{0,4}$", text[max(0, m.start() - 12) : m.start()], re.I)
-        )
-    ]
+    day_first = _day_first(text)
+    hits = _flight_numbers(text)
     out: list[Flight] = []
     for i, m in enumerate(hits):
         stop = hits[i + 1].start() if i + 1 < len(hits) else len(text)
@@ -437,26 +536,34 @@ def read_flights(mail: dict[str, Any]) -> list[Flight]:
         if len(uniq) < 2:
             continue
         times: dict[str, tuple[int, int]] = {}
+        where: dict[str, re.Match[str]] = {}  # the same times, as found in the window
         order: list[tuple[int, int]] = []
+        marks: list[re.Match[str]] = []
         ends: list[int] = []  # where each time ends in the window
+        dated = [d.span() for d in DATE_RE.finditer(window)]
         for t in TIME.finditer(window):
             hm = _time(t)
-            if hm is None:
-                continue
+            if hm is None or any(a <= t.start() < b for a, b in dated):
+                continue  # not a time, or the "19.11" of "19.11.2026"
             before = window[max(0, t.start() - 28) : t.start()].lower()
             if (
                 re.search(r"depart|leav|takes? off|departure|boarding", before)
                 and "depart" not in times
             ):
-                times["depart"] = hm
+                times["depart"], where["depart"] = hm, t
             elif re.search(r"arriv|land", before) and "arrive" not in times:
-                times["arrive"] = hm
+                times["arrive"], where["arrive"] = hm, t
             order.append(hm)
+            marks.append(t)
             ends.append(t.end())
         dep = times.get("depart") or (order[0] if order else None)
         arr = times.get("arrive") or next((t for t in order if t != dep), None)
         if dep is None:
             continue
+        dep_at = where.get("depart") or marks[0]
+        arr_at = where.get("arrive") or next(
+            (t for t, hm in zip(marks, order, strict=True) if hm != dep), None
+        )
         # The date is on the flight's own lines, or on a heading line above the flight number
         # ("Thu, Nov 19" then "AC 870  YVR 6:45 PM -> CDG"). A date after this flight's times,
         # when it has such a heading, is the next flight's heading, not this one's.
@@ -468,16 +575,22 @@ def read_flights(mail: dict[str, Any]) -> list[Flight]:
             line = lead[lead.rfind("\n", 0, d.start()) + 1 : d.start()] + lead[d.end() :]
             if not any(_time(t) for t in TIME.finditer(line.split("\n")[0])):
                 own = None  # a heading line of its own, with no times on it
-        day = _date(own.group(0), sent) if own else None
+        day = _date(own.group(0), sent, day_first) if own else None
         if day is None:
-            day = _date(dates[-1].group(0), sent) if dates else None
+            day = _date(dates[-1].group(0), sent, day_first) if dates else None
         if day is None:
             continue
         depart = day.replace(hour=dep[0], minute=dep[1], second=0, microsecond=0)
         arrive = None
         if arr:
             arrive = day.replace(hour=arr[0], minute=arr[1], second=0, microsecond=0)
-            if arrive <= depart or re.search(r"\+1\b|next day", window[:200], re.I):
+            # The landing's own date, when the mail prints one, beats any guess. Live shapes:
+            # "Arrives: Fri, Nov 20 3:30 PM" was put on the 19th, and a flight home across
+            # the date line (leaves 5 PM, lands 9:30 AM the same day) on the day after.
+            landed = _landing_day(window, dep_at, arr_at, sent, day_first) if arr_at else None
+            if landed is not None and 0 <= (landed.date() - day.date()).days <= 2:
+                arrive = landed.replace(hour=arr[0], minute=arr[1], second=0, microsecond=0)
+            elif arrive <= depart or re.search(r"\+1\b|next day", window[:200], re.I):
                 arrive += timedelta(days=1)
         origin, dest = uniq[0], uniq[1]
         out.append(
@@ -500,14 +613,14 @@ def read_flights(mail: dict[str, Any]) -> list[Flight]:
 
 
 def _stay_date(
-    text: str, word: str, sent: datetime
+    text: str, word: str, sent: datetime, day_first: bool = False
 ) -> tuple[datetime | None, tuple[int, int] | None]:
     m = re.search(
         rf"{word}(?:\s*date)?\b[^\n\d]{{0,24}}?(?P<d>{DATE})(?P<rest>[^\n]{{0,60}})", text, re.I
     )
     if not m:
         return None, None
-    day = _date(m.group("d"), sent)
+    day = _date(m.group("d"), sent, day_first)
     hm = None
     for t in TIME.finditer(m.group("rest")):
         if (hm := _time(t)) is not None:
@@ -544,15 +657,17 @@ def _stay_name(mail: dict[str, Any], text: str) -> str:
 def read_stays(mail: dict[str, Any]) -> list[Stay]:
     text = f"{mail.get('subject', '')}\n{mail.get('text', '')}"
     sent = _mail_date(mail)
-    cin, tin = _stay_date(text, r"check[- ]?in", sent)
-    cout, tout = _stay_date(text, r"check[- ]?out", sent)
+    day_first = _day_first(text)
+    cin, tin = _stay_date(text, r"check[- ]?in", sent, day_first)
+    cout, tout = _stay_date(text, r"check[- ]?out", sent, day_first)
     if cin is None or cout is None:
         arr = re.search(rf"\b(?:arrival|arriving)\b[^\n\d]{{0,12}}(?P<d>{DATE})", text, re.I)
         dep = re.search(
             rf"\b(?:departure|departing|leaving)\b[^\n\d]{{0,12}}(?P<d>{DATE})", text, re.I
         )
         if arr and dep and re.search(r"hotel|stay|room|nights?", text, re.I):
-            cin, cout = _date(arr.group("d"), sent), _date(dep.group("d"), sent)
+            cin = _date(arr.group("d"), sent, day_first)
+            cout = _date(dep.group("d"), sent, day_first)
     if cin is None or cout is None or cout <= cin:
         return []
     name = _stay_name(mail, text)
@@ -597,42 +712,119 @@ def looks_like_travel(mail: dict[str, Any]) -> bool:
         or (re.search(r"check[- ]?in", text, re.I) and re.search(r"check[- ]?out", text, re.I))
         or re.search(r"e-?ticket|boarding pass|record locator|booking reference", text, re.I)
         # "Your reservation code is QX7T2M": a booking written as prose, with no airport codes
-        or REF.search(text)
+        or _refs(text)
     )
 
 
-def read_mail(mails: list[dict[str, Any]]) -> tuple[list[Flight], list[Stay], list[dict[str, Any]]]:
+def _flight_key(f: Flight) -> tuple[str, str]:
+    return f.flight, f.depart.date().isoformat()
+
+
+def _stay_key(s: Stay) -> str:
+    return s.ref or f"{s.name.lower()}:{s.check_in.date()}"
+
+
+def _cancelled(text: str, sent: datetime, day_first: bool) -> tuple[bool, set[str], set[str]]:
+    """What a mail cancels: (does it cancel a booking at all, the flight numbers its
+    cancellation sentence names, the days it names for them). No flight named means the whole
+    booking; "your seat selection was cancelled" is neither."""
+    about, named, days = False, set(), set()
+    for m in CANCELLED.finditer(text):
+        head = text[max(0, m.start() - 200) : m.start()]
+        cut = max((x.end() for x in re.finditer(r"[.!?]\s|\n\s*\n", head)), default=0)
+        tail = text[m.end() : m.end() + 120]
+        stop = re.search(r"[.!?]\s|\n\s*\n", tail)
+        sentence = head[cut:] + m.group(0) + (tail[: stop.start()] if stop else tail)
+        numbers = [f"{n.group('code')} {n.group('num')}" for n in _flight_numbers(sentence)]
+        if not numbers and not BOOKED_THING.search(sentence):
+            continue
+        about = True
+        named.update(numbers)
+        for d in DATE_RE.finditer(sentence):
+            when = _date(d.group(0), sent, day_first)
+            if when and numbers:
+                days.add(when.date().isoformat())
+    return about, named, days
+
+
+def read_mail(
+    mails: list[dict[str, Any]], replaced: list[Flight] | None = None
+) -> tuple[list[Flight], list[Stay], list[dict[str, Any]]]:
     """Every flight and stay in these emails, newest information winning, cancelled ones gone.
-    Also the travel-looking emails the code couldn't read (for the model to try)."""
+    Also the travel-looking emails the code couldn't read (for the model to try).
+
+    A cancellation takes away what was booked before it, and only what it names: the flight
+    in its sentence, or with no flight named the bookings under its reference. Live shape: "AC
+    870 has been cancelled, we have rebooked you on AC 872", same reference, used to remove
+    the new flight too, and the trip with it. ``replaced``: a list the flights that were
+    cancelled or moved are added to (their reminders are stale)."""
     flights: dict[tuple[str, str], Flight] = {}
     stays: dict[str, Stay] = {}
-    cancelled: set[str] = set()
+    gone: list[Flight] = replaced if replaced is not None else []
     unread: list[dict[str, Any]] = []
     for mail in sorted(mails, key=_mail_date):  # oldest first, so a schedule change wins
         text = f"{mail.get('subject', '')}\n{mail.get('text', '')}"
-        if CANCELLED.search(text):
-            cancelled.update(_refs(text))
-            continue
         fs = read_flights(mail)
         ss = read_stays(mail)  # a package deal has both
+        about, named, days = (
+            _cancelled(text, _mail_date(mail), _day_first(text))
+            if CANCELLED.search(text)
+            else (False, set(), set())
+        )
+        if about:
+            rebooked = bool(REBOOKED.search(text))
+            dropped: set[tuple[str, str]] = set()
+            refs = set() if named else set(_refs(text))
+            # A plain cancellation that names no flight spells out again what it cancels.
+            whole = not named and not rebooked
+            restated_f = {_flight_key(f) for f in fs} if whole else set()
+            restated_s = {_stay_key(s) for s in ss} if whole else set()
+            for k, old in list(flights.items()):
+                if (
+                    (old.flight in named and (not days or k[1] in days))
+                    or (old.ref and old.ref in refs)
+                    or k in restated_f
+                ):
+                    gone.append(flights.pop(k))
+                    dropped.add(k)
+            for key, kept in list(stays.items()):
+                if (kept.ref and kept.ref in refs) or key in restated_s:
+                    del stays[key]
+            if not rebooked:
+                continue  # it only says what is gone
+            # A rebooking: what it lists is the trip now, except the cancelled flight repeated.
+            fs = [
+                f
+                for f in fs
+                if not (
+                    f.flight in named
+                    and (_flight_key(f)[1] in days or (not days and _flight_key(f) in dropped))
+                )
+            ]
         for f in fs:
-            flights[(f.flight, f.depart.date().isoformat())] = f
+            key = _flight_key(f)
+            before = flights.get(key)
+            if before is not None and before.depart != f.depart:
+                gone.append(before)  # the same flight that day, at a new time
+            flights[key] = f
             if f.ref:  # a changed flight: the older times under the same booking go
                 for k, old in list(flights.items()):
                     if (
                         old.ref == f.ref
                         and old.flight == f.flight
-                        and k != (f.flight, f.depart.date().isoformat())
+                        and k != key
                         and old.email_id != f.email_id
                     ):
-                        del flights[k]
+                        gone.append(flights.pop(k))
         for s in ss:
-            stays[s.ref or f"{s.name.lower()}:{s.check_in.date()}"] = s
+            stays[_stay_key(s)] = s
         if not fs and not ss and looks_like_travel(mail):
             unread.append(mail)
-    keep_f = [f for f in flights.values() if not (f.ref and f.ref in cancelled)]
-    keep_s = [s for s in stays.values() if not (s.ref and s.ref in cancelled)]
-    return sorted(keep_f, key=lambda f: f.depart), sorted(keep_s, key=lambda s: s.check_in), unread
+    return (
+        sorted(flights.values(), key=lambda f: f.depart),
+        sorted(stays.values(), key=lambda s: s.check_in),
+        unread,
+    )
 
 
 # ------------------------------------------------------------------------------- the model, rarely
@@ -697,9 +889,34 @@ def from_model(raw: str, mails: list[dict[str, Any]]) -> tuple[list[Flight], lis
 
 
 # ------------------------------------------------------------------------------- trips
+RETURN_WITHIN = timedelta(days=45)  # a way back this soon after the way out is the same trip
+
+
+def _one_trip(out: Trip, back: Trip) -> bool:
+    """Is the later group the rest of the earlier one's trip? Flights on one booking are (a
+    return ticket), and so is a flight home from where the earlier one landed."""
+    refs = {f.ref for f in out.flights if f.ref}
+    if any(f.ref in refs for f in back.flights):
+        return True
+    if not out.flights or not back.flights:
+        return False
+    home, away = out.flights[0].origin, out.flights[-1].dest
+    first = back.flights[0]
+    return (
+        away != home
+        and first.origin == away
+        and back.flights[-1].dest == home
+        and first.depart - out.end <= RETURN_WITHIN
+    )
+
+
 def trips(flights: list[Flight], stays: list[Stay], now: datetime, gap_days: int = 2) -> list[Trip]:
-    """Bookings grouped into trips (a gap of more than ``gap_days`` starts a new one); only
-    trips that haven't ended yet, soonest first."""
+    """Bookings grouped into trips (a gap of more than ``gap_days`` starts a new one, unless
+    the flights on both sides of it are one return ticket); only trips that haven't ended
+    yet, soonest first.
+
+    Live shape: out on the 12th, back on the 23rd, staying with family so no hotel in the
+    mail. That was two trips, and the way home got no reminders."""
     items = sorted([*flights, *stays], key=lambda x: x.start)
     groups: list[Trip] = []
     end: datetime | None = None
@@ -709,6 +926,20 @@ def trips(flights: list[Flight], stays: list[Stay], now: datetime, gap_days: int
             end = x.end
         (groups[-1].flights if isinstance(x, Flight) else groups[-1].stays).append(x)
         end = max(end, x.end)
+    joined = True
+    while joined:
+        joined = False
+        for i in range(len(groups)):
+            j = next(
+                (j for j in range(len(groups) - 1, i, -1) if _one_trip(groups[i], groups[j])), 0
+            )
+            if j:  # everything between the way out and the way back happened on that trip
+                for g in groups[i + 1 : j + 1]:
+                    groups[i].flights += g.flights
+                    groups[i].stays += g.stays
+                del groups[i + 1 : j + 1]
+                joined = True
+                break
     return [t for t in groups if t.end >= now]
 
 
@@ -833,6 +1064,13 @@ def days(trip: Trip) -> list[dict[str, Any]]:
     return out
 
 
+def reminder_keys(f: Flight) -> list[str]:
+    """The keys of a flight's two reminders. The departure time is part of them, so a flight
+    that moved gets new ones (and its old ones are listed as stale: see ``run``)."""
+    stem = f"atlas:{f.flight}:{f.depart:%Y-%m-%dT%H:%M}"
+    return [f"{stem}:eve", f"{stem}:go"]
+
+
 def reminders(trip: Trip, now: datetime) -> list[dict[str, str]]:
     """Two reminders per flight still ahead: the evening before (when that's still ahead and
     not the same day) and three hours before take-off."""
@@ -844,7 +1082,7 @@ def reminders(trip: Trip, now: datetime) -> list[dict[str, str]]:
             check = " Online check-in should be open." if f.ref else ""
             out.append(
                 {
-                    "key": f"atlas:{f.flight}:{f.depart:%Y-%m-%dT%H:%M}:eve",
+                    "key": reminder_keys(f)[0],
                     "title": f"Tomorrow: {f.flight} to {to}",
                     "on": eve.date().isoformat(),
                     "time": eve.strftime("%H:%M"),
@@ -855,7 +1093,7 @@ def reminders(trip: Trip, now: datetime) -> list[dict[str, str]]:
         if go > now:
             out.append(
                 {
-                    "key": f"atlas:{f.flight}:{f.depart:%Y-%m-%dT%H:%M}:go",
+                    "key": reminder_keys(f)[1],
                     "title": f"Leave for {f.origin}: {f.flight}",
                     "on": go.date().isoformat(),
                     "time": go.strftime("%H:%M"),
@@ -917,6 +1155,7 @@ def flight_dict(f: Flight) -> dict[str, Any]:
 
 # ------------------------------------------------------------------------------- the job
 clock = datetime.now  # tests move time
+FETCH = 120  # travel mails read: half a year of bookings, and the mail that only sounds like one
 
 
 async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
@@ -925,8 +1164,19 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     if not google.connected():
         raise RuntimeError("Gmail isn't connected. Connect Google in Settings and ask again.")
     await manager._status(job, "Reading your travel confirmations")
-    mails = await google.gmail_fetch(QUERY, 40)
-    flights, stays, unread = read_mail(mails)
+    mails = await google.gmail_fetch(QUERY, FETCH)
+    # Newest first: when there was more than this, a booking made long ago may be what's missing,
+    # and the result says how far back it read (it used to stop at 40 without a word).
+    now = clock()
+    since = read_back_to(mails)
+    older = (
+        f" I could only read your travel mail back to {said_day(since, now)}, so an older "
+        "booking may be missing."
+        if since
+        else ""
+    )
+    replaced: list[Flight] = []
+    flights, stays, unread = read_mail(mails, replaced)
     if unread and job.params.get("model", True):
         await manager._status(job, f"Reading {min(len(unread), 4)} more confirmation(s)")
         llm = manager.llm_factory(agent)
@@ -949,10 +1199,12 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         have = {(f.flight, f.depart.date()) for f in flights}
         flights += [f for f in more_f if (f.flight, f.depart.date()) not in have]
         stays += [s for s in more_s if all(s.name != o.name for o in stays)]
-    now = clock()
     found = trips(
         sorted(flights, key=lambda f: f.depart), sorted(stays, key=lambda s: s.check_in), now
     )
+    # Reminders set on an earlier run for a flight that has since moved or been cancelled.
+    current = {key for f in flights for key in reminder_keys(f)}
+    stale = sorted({key for f in replaced for key in reminder_keys(f)} - current)
     want = str(job.params.get("trip") or "").strip()
     trip = pick(found, want, strict=True, now=now)
     missed = ""
@@ -961,18 +1213,23 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
         missed = f"I didn't find a trip matching {want!r} in your mail; this is your next one. "
     if trip is None:
         job.status = "failed"
-        job.summary = "I didn't find any upcoming flights or hotel bookings in your mail."
-        job.data = {"title": "No upcoming trips in your mail", "body": job.summary}
+        job.summary = f"I didn't find any upcoming flights or hotel bookings in your mail.{older}"
+        job.data = {
+            "title": "No upcoming trips in your mail",
+            "body": job.summary,
+            "stale_reminders": stale,
+        }
         return
     rem = reminders(trip, now)
     rep = report(trip, [t for t in found if t is not trip], len(rem))
-    job.summary = missed + rep["summary"]
+    job.summary = missed + rep["summary"] + older
     job.data = {
         "title": rep["title"],
-        "body": missed + rep["body"],
+        "body": missed + rep["body"] + older,
         "changes": rep["changes"],
         "card": rep["card"],
         "reminders": rem,
+        "stale_reminders": stale,
         "flights": [flight_dict(f) for f in trip.flights],
     }
     job.status = "done"

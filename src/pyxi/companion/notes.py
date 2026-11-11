@@ -141,16 +141,66 @@ def _union(rects: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int] 
     return x0, y0, x1 - x0, y1 - y0
 
 
-def target_rect(ctx: ScreenContext | None, raw: dict[str, Any]) -> tuple[int, int, int, int] | None:
+def near_point(ctx: ScreenContext | None, raw: dict[str, Any]) -> tuple[int, int] | None:
+    """Where the model thought the thing was, in screen px: the middle of its box, or its x
+    and y. Not exact, but enough to tell which of two places that say the same words it
+    meant (live, the right box came with "Settings" and was thrown away)."""
+    if ctx is None:
+        return None
+    try:
+        box = raw.get("box")
+        if isinstance(box, list | tuple) and len(box) == 4:
+            x, y, w, h = (float(v) for v in box)
+            return resolve_point(ctx, None, [x + w / 2, y + h / 2])
+        if raw.get("x") is not None and raw.get("y") is not None:
+            return resolve_point(ctx, None, [float(raw["x"]), float(raw["y"])])
+        return _point(ctx, raw.get("at"))
+    except (TypeError, ValueError):
+        return None
+
+
+def target_rect(
+    ctx: ScreenContext | None, raw: dict[str, Any], near: tuple[int, int] | None = None
+) -> tuple[int, int, int, int] | None:
     """What a point is about. Quoted words win: OCR finds those exact words on screen (inside
-    the element, if one was given), so an underline sits under the words themselves."""
+    the element, if one was given), so an underline sits under the words themselves. When
+    they are on screen in more than one place, ``near`` (else the model's own box or x, y)
+    says which was meant."""
     if ctx is None:
         return None
     elem = resolve_rect(ctx, raw.get("element_id"), None)
     quote = str(raw.get("quote") or "").strip()
-    if quote and (hit := ctx.find_text(quote, elem)):
+    if quote and (hit := ctx.find_text(quote, elem, near or near_point(ctx, raw))):
         return hit
     return elem or resolve_rect(ctx, None, raw.get("box"))
+
+
+_HOLDS_ROWS = {"List", "Pane", "Group", "Document", "Table", "Tree", "DataGrid", "Tab"}
+
+
+def scroll_area(
+    ctx: ScreenContext, element_id: Any, rect: tuple[int, int, int, int]
+) -> tuple[int, int, int, int]:
+    """Where a "scroll" step is marked: the list the thing is in (the nearest container well
+    bigger than it), else the part of the window on screen. Not the thing itself: it is the
+    row half under the edge, so a frame on it is a sliver at the bottom of the window, and
+    it stays there, on nothing, once they have scrolled."""
+    view = ctx.view_rect() or ctx.window.rect
+    e = ctx.element(int(element_id)) if str(element_id or "").lstrip("-").isdigit() else None
+    seen = 0
+    while e is not None and e.parent is not None and seen < 12:
+        e = ctx.element(e.parent)
+        seen += 1
+        if e is None:
+            break
+        x, y, w, h = e.rect
+        if e.role in _HOLDS_ROWS and h >= 3 * max(rect[3], 1) and w >= rect[2]:
+            # Only the part of it that is on screen.
+            x0, y0 = max(x, view[0]), max(y, view[1])
+            x1, y1 = min(x + w, view[0] + view[2]), min(y + h, view[1] + view[3])
+            if x1 - x0 > 40 and y1 - y0 > 40:
+                return x0, y0, x1 - x0, y1 - y0
+    return view if view[2] > 0 and view[3] > 0 else rect
 
 
 def picture_rect(
@@ -489,6 +539,49 @@ class Guide(BaseModel):
     step: int = 1
     action: str = "click"
     total: int | None = None
+    # The window the step was drawn on, so Pyxi can tell "they went another way in it" from
+    # "they left it" (closed it, tucked it away, went to something else).
+    hwnd: int = 0
+    app: str = ""
+    title: str = ""
+
+
+def guide_left(
+    hwnd: int,
+    front: int,
+    known: set[int],
+    *,
+    exists: bool,
+    minimized: bool,
+    same_app: bool,
+) -> bool:
+    """Has the user left the window a guide step was drawn on? ``front``: the window in
+    front now (0 for the bare desktop). ``known``: the windows that were already open when
+    the step was drawn.
+
+    They left when it is tucked away; when it is gone and nothing is in front but the
+    desktop; or when what is in front is another window that was already open: they went to
+    something else. A window that has opened since is the step's own doing (the Start menu
+    closes and Settings opens), and the walk-through carries on there. Nothing in front for
+    a moment, with the window still there, is a click on the desktop or the taskbar, not
+    leaving. With no window to go by (0), nobody can tell, so nobody has left."""
+    if not hwnd:
+        return False
+    if exists and minimized:
+        return True
+    if exists and (front == hwnd or same_app):
+        return False
+    if not front:
+        return not exists
+    return front in known
+
+
+def where_they_were(title: str) -> str:
+    """A window's name as said aloud: "Settings", "Google Chrome" (the app at the end of a
+    browser's title), or "that window" when it has no short name."""
+    dashes = "-|" + chr(0x2013) + chr(0x2014)  # a hyphen, a bar, and the two long dashes
+    name = re.split(rf"\s+[{dashes}]\s+", title.strip())[-1].strip()
+    return name if 0 < len(name) <= 28 else "that window"
 
 
 # ---------------------------------------------------------------------------- answer cards

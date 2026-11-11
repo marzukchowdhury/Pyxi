@@ -223,7 +223,7 @@ async def test_a_split_on_a_named_screen_is_two_windows_side_by_side(settings, m
     brain, _ = make_brain(settings)
     brain._ctx = type("C", (), {"window": type("W", (), {"hwnd": 7})()})()
     note = await brain._arrange_windows({"layout": "split", "current_side": "right", "open": "firefox", "screen": "left"})
-    left, top, width, height = THREE[0]["work"]
+    left, _top, width, height = THREE[0]["work"]
     assert note is None and snapped == []  # nothing was made full-screen
     assert placed[9][0] == left and placed[7][0] > left  # Firefox on the left, Chrome beside it
     assert placed[9][2] + placed[7][2] == width and placed[9][3] == placed[7][3] == height

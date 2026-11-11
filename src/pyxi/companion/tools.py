@@ -16,7 +16,9 @@ _QUOTE = {
     "quote": {
         "type": "string",
         "description": "The exact words on screen this is about, copied from the OCR text list (e.g. "
-        "'Iran War'). Pyxi finds those words and marks them precisely; best for text in images.",
+        "'Iran War'). Pyxi finds those words and marks them precisely; best for text in images. If those "
+        "words are on screen in more than one place, also give x and y (or a box) roughly where you "
+        "mean: Pyxi takes the match nearest to it.",
     }
 }
 _TARGET = {
@@ -131,7 +133,8 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "a block; the card places itself where it hides nothing. Give every point a `say`: one short sentence "
         "(under 15 words) you speak as it appears (its mark draws at that moment), in your voice, not reading "
         "the card. "
-        "Your separate `say` call is only the opener (the verdict and a hook, no [note:N] markers); Pyxi then "
+        "Your separate `say` call is only the opener: ONE sentence, the verdict (no [note:N] markers). "
+        "Anything after its first sentence is not spoken, because Pyxi then "
         "talks through the points in order. Answer their actual question in the points (the why, the catch). "
         "Finish with `closing`, so the explanation lands instead of stopping. "
         "PICTURES: when they ask about a diagram, photo, drawing, map or illustration on screen (a heart, an "
@@ -274,8 +277,8 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "guide",
         "Teach them to do it themselves, in any app or site (Vercel, CapCut, Excel, Settings), one step at a "
         "time until they're done: mark the one thing to act on next, with an arrow to it, and say what to do "
-        "and why in one short friendly sentence. Pyxi waits for them to do it (a click on the mark, or Done "
-        "for other steps), looks at the new screen, and you give the next step (call guide again), until "
+        "and why in one short friendly sentence. Pyxi waits for them to do it (a click on the mark; for a "
+        "scroll, typing, a key or a drag it sees the screen change, or they press Done), looks at the new screen, and you give the next step (call guide again), until "
         "the goal is reached (done=true, with a cheerful line). Use `use_computer` instead when they want "
         "you to do it for them. If you're not sure where things are in this version of the app, web_search "
         "the current steps first. Before a step that inserts or pastes something at the cursor, first "
@@ -285,6 +288,9 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "data. To select a range, they click the first cell, then Shift+click the last one (or type the "
         "range, like A1:C13, in the Name box at the top left). Call done=true only when the screen shows "
         "the finished result (a pivot with its rows and values filled in, not just the empty editor). "
+        "A control listed as '(cut off at the bottom edge: only part of it shows)' needs a scroll first: "
+        "action 'scroll' with its element_id and the direction, and Pyxi marks the list it is in. Never "
+        "give the step you just gave a second time: if they haven't done it, say one short line and wait. "
         "If the app isn't on screen any more (they switched away), don't guess: say one short line and "
         "stop calling guide, which ends the coaching.",
         {
@@ -552,12 +558,16 @@ COMPANION_TOOLS += [
         "for?', 'find subscriptions I forgot', 'how much do I spend on subscriptions?'. "
         "action=cancel with the service ('cancel Netflix', 'stop my Adobe plan') opens its cancel "
         "page after an approval card; Pyxi never cancels anything itself, the user presses the "
-        "final button. Say one short line that names the job; the result comes as a notification.",
+        "final button. Say one short line that names the job; the result is said and shown on a "
+        "card when it is ready. It has no options: a second find reads the same receipts and "
+        "gives the same list, so never promise a stricter or deeper recheck. When they say one "
+        "on the list isn't a subscription or isn't something they pay for, action=not_one with "
+        "its name takes it off for good; that answers at once, so say what it tells you.",
         {
-            "action": {"type": "string", "enum": ["find", "cancel"]},
+            "action": {"type": "string", "enum": ["find", "cancel", "not_one"]},
             "service": {
                 "type": "string",
-                "description": "For cancel: the service, as they said it.",
+                "description": "For cancel and not_one: the service, as they said it.",
             },
         },
     ),

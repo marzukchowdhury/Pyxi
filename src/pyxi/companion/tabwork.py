@@ -672,6 +672,8 @@ class TabOperator:
             self.tab = int(found["id"])
         repeats: dict[str, int] = {}
         last, still = "", 0
+        acted = False  # the last thing done could have changed the page (a click, a key, an address)
+        doubted = False  # "done" was questioned once already
         for n in range(1, self.max_steps + 1):
             if self.cancelled:
                 raise _Stopped
@@ -707,11 +709,26 @@ class TabOperator:
             if call is None:
                 return Outcome(False, "I lost my train of thought there. Want me to try again?", steps)
             if call.name == "done":
-                return Outcome(
-                    bool(call.arguments.get("ok", True)),
-                    str(call.arguments.get("summary") or "Done."),
-                    steps,
-                )
+                # Done is done only when it says so in so many words: "ok": "false", or no
+                # "ok" at all, used to count as success and was said aloud as one.
+                ok = call.arguments.get("ok") is True
+                if ok and acted and still >= 1 and not doubted:
+                    # It clicked (or pressed, or went somewhere) and the page reads exactly as
+                    # it did before: nothing on it shows the click did anything. Asked once;
+                    # if it says done again, that is its answer.
+                    doubted = True
+                    steps.append(
+                        Step(
+                            n,
+                            "(done?)",
+                            "Not taken as done yet: the page reads exactly as it did before "
+                            "your last action, so nothing on it shows that it worked. Look for "
+                            "the result. If it is there, call done again and say what shows "
+                            "it; if not, try another way, or call done with ok=false.",
+                        )
+                    )
+                    continue
+                return Outcome(ok, str(call.arguments.get("summary") or "Done."), steps)
             if call.name == "ask_user":
                 return Outcome(
                     False, str(call.arguments.get("question") or "What should I do next?"), steps
@@ -729,6 +746,7 @@ class TabOperator:
                 )
                 continue
             did, notes = [], []
+            acted = False
             for i, a in enumerate(actions):
                 line, note = await self._do(a, page, n)
                 did.append(line)
@@ -736,6 +754,7 @@ class TabOperator:
                     notes.append(note)
                 if note.startswith(("skipped", "failed", "declined")):
                     break  # the rest of the batch assumed this worked
+                acted = acted or _changes_page(a)
                 if _changes_page(a) and i + 1 < len(actions):
                     # What comes after a click, a key or a new address was decided on a page
                     # that may no longer be the one in the tab: it waits for the next look.

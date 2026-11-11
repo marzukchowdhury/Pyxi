@@ -5,6 +5,7 @@ import { bridge } from "../shared/bridge";
 import { brain } from "../shared/socket";
 import { Annotations } from "./Annotations";
 import { AnswerCard } from "./AnswerCard";
+import { guideClick } from "./guideMarks";
 import { NotesCard } from "./NotesCard";
 import { Notch } from "./Notch";
 import { ObjectPanel } from "./ObjectPanel";
@@ -140,16 +141,12 @@ export function Overlay() {
   useEffect(() => {
     let lastElsewhere = 0;
     return bridge.onGlobalClick(({ x, y }) => {
-      const target = useOverlay.getState().annotations.find((a) => a.guide && a.rect);
-      if (!target?.rect) return;
-      const [rx, ry, rw, rh] = target.rect;
-      const pad = 6;
-      const inside = x >= rx - pad && y >= ry - pad && x <= rx + rw + pad && y <= ry + rh + pad;
-      const clicky = !target.action || target.action.endsWith("click");
-      if (inside && clicky) {
+      // Every screen's overlay hears every click; only the one holding the mark answers.
+      const what = guideClick(useOverlay.getState().annotations.find((a) => a.guide && a.rect), x, y);
+      if (what === "clicked") {
         useOverlay.setState((s) => ({ annotations: s.annotations.filter((a) => !a.guide) }));
         brain.send({ type: "guide_clicked", how: "clicked" });
-      } else if (!inside && performance.now() - lastElsewhere > 1500) {
+      } else if (what === "elsewhere" && performance.now() - lastElsewhere > 1500) {
         lastElsewhere = performance.now();
         brain.send({ type: "guide_clicked", how: "elsewhere" });
       }
