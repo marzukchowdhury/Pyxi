@@ -128,6 +128,41 @@ async def real_site(url: str) -> str | None:
     return None
 
 
+# Endings as they are misheard, and what was said.
+_HEARD_ENDINGS = {"ka": "ca", "kom": "com", "con": "com", "cam": "com", "come": "com", "calm": "com", "nat": "net", "orc": "org"}
+
+
+async def near_site(url: str) -> str | None:
+    """A real address one mishearing away from one that does not exist, or None.
+
+    Live: "Amazon.ca" was written down as "amaazon.ka". A letter said long comes out doubled,
+    and ".ca" sounds like ".ka": the name is tried with its doubled letters single and its
+    ending as it is usually said, and the first that exists is offered. It is only offered:
+    the caller tells the model, which opens it when it is plainly the site they named."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").removeprefix("www.")
+    name, _, ending = host.partition(".")
+    if not name or not ending:
+        return None
+    # The name as it is, then with each run of a repeated letter one shorter ("amaazon" is
+    # amazon, "gooogle" is google), then with every such run single.
+    names = [name]
+    for run in re.finditer(r"(.)\1+", name):
+        names.append(name[: run.start()] + run.group(0)[1:] + name[run.end() :])
+    names.append(re.sub(r"(.)\1+", r"\1", name))
+    names = list(dict.fromkeys(names))
+    endings = [ending]
+    last = ending.rsplit(".", 1)[-1]
+    if last in _HEARD_ENDINGS:
+        endings.insert(0, ending[: len(ending) - len(last)] + _HEARD_ENDINGS[last])
+    for e in endings:
+        for n in names:
+            guess = f"{n}.{e}"
+            if guess != host and await _resolves(guess) is True:
+                return url.replace(parsed.hostname or host, guess, 1)
+    return None
+
+
 def app_target(name: str) -> str | None:
     key = re.sub(r"\s+", " ", name.lower().strip()).removesuffix(".exe")
     key = key.removeprefix("my ").removeprefix("the ").removesuffix(" folder").removesuffix(" app")

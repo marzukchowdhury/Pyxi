@@ -235,3 +235,27 @@ async def test_an_address_that_does_not_exist_is_not_opened(settings, monkeypatc
     assert rec.of("action")[-1]["value"] == "https://techlandbd.com"
     note = await brain._quick_action("open_url", "nosuchshopatall.com")
     assert note and note.startswith("open_url: there is no site at nosuchshopatall.com")
+
+
+async def test_a_misheard_site_is_answered_with_the_real_one_near_it(settings, monkeypatch):
+    """Live: "Amazon.ca" was written down as "amaazon.ka". Nothing is opened at a name that
+    does not exist; the real address one mishearing away is offered to the model, which opens
+    it when it is plainly the site they named."""
+    from pyxi.companion import actions
+    from test_brain_and_server import make_brain
+
+    real = {"amazon.ca", "www.google.com", "google.com"}
+
+    async def resolves(host):
+        return host in real
+
+    monkeypatch.setattr(actions, "_resolves", resolves)
+    assert await actions.near_site("https://amaazon.ka") == "https://amazon.ca"
+    assert await actions.near_site("https://www.amazon.ka/deals") == "https://amazon.ca/deals"
+    assert await actions.near_site("https://gooogle.kom") == "https://google.com"  # one "o" too many, not two
+    assert await actions.near_site("https://nosuchshopatall.com") is None
+    brain, rec = make_brain(settings)
+    brain._user_text = "open amaazon.ka"
+    note = await brain._quick_action("open_url", "amaazon.ka")
+    assert note and "there is no site at amaazon.ka" in note and "https://amazon.ca" in note
+    assert rec.of("action") == []  # and nothing was opened

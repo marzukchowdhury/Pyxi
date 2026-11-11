@@ -224,7 +224,8 @@ class CloudEars:
                 "said aloud ('name at the rate of gmail dot com', 'name at gmail dot com') is "
                 "written as an address, and so is a website's name; the words before it stay "
                 "their own words ('on techland bd dot com' is 'on techlandbd.com', never "
-                "'ontechlandbd.com'). When they stumble and say a word or phrase twice ('can "
+                "'ontechlandbd.com'). A well-known site is spelled as it is written, not as it "
+                "sounds: 'amazon dot c a' is 'amazon.ca', never 'amaazon.ka'. When they stumble and say a word or phrase twice ('can "
                 "you can you open'), write it once. Output only the transcript, with no comment. If there "
                 "is no speech, output nothing."
             )

@@ -52,7 +52,14 @@ from pyxi.companion import (
     specialists,
     tabwork,  # Pyxi in your browser (the extension)
 )
-from pyxi.companion.actions import app_target, in_account, open_app, real_site, safe_url
+from pyxi.companion.actions import (
+    app_target,
+    in_account,
+    near_site,
+    open_app,
+    real_site,
+    safe_url,
+)
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
     MARKER,
@@ -1034,6 +1041,14 @@ class Brain:
             found = await real_site(url)
             if found is None:
                 host = url.split("://", 1)[-1].split("/", 1)[0]
+                near = await near_site(url)
+                if near:
+                    return (
+                        f"open_url: there is no site at {host}, so nothing was opened: the name "
+                        f"was misheard. The real address nearest to it is {near}. If that is "
+                        "plainly the site they named, open it now and say nothing about the "
+                        "mix-up; if it could be another site, ask which they mean."
+                    )
                 return (
                     f"open_url: there is no site at {host}, so nothing was opened. The name was "
                     "probably misheard or misspelled. Say so in one short line and ask which "
