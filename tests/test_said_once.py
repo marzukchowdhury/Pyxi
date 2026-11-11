@@ -95,8 +95,10 @@ def test_the_result_of_a_job_is_not_a_repeat_of_the_line_that_started_it() -> No
 
 
 async def test_the_hands_say_what_came_of_it_however_it_is_worded(settings, monkeypatch):
-    """The hands' closing line is the result. Said after "Setting the brightness to 40
-    percent now.", it shares every word that matters with it, and was dropped unspoken."""
+    """The hands' closing line, when there is a catch to hear, is the result. Said after
+    "Setting the brightness to 40 percent now.", it shares every word that matters with it, and
+    was dropped unspoken. When it simply worked, the line is "Done." (the founder, live, to a
+    whole sentence read out over his next request: "Stop, stop. You're still talking too much")."""
     from otto.types import Usage
 
     from pyxi.companion import brain as brain_module
@@ -109,8 +111,10 @@ async def test_the_hands_say_what_came_of_it_however_it_is_worded(settings, monk
         def __init__(self, *a, **k) -> None:
             pass
 
+        result = "The brightness only goes down to 50 percent, so it is at 50 now. It was at 70."
+
         async def run(self, task, window, come_back):
-            return Outcome(True, "The brightness is at 40 percent now. It was at 70.")
+            return Outcome(True, self.result)
 
     monkeypatch.setattr(brain_module, "Operator", Hands)
     brain, rec = make_brain(settings)
@@ -121,6 +125,15 @@ async def test_the_hands_say_what_came_of_it_however_it_is_worded(settings, monk
     brain.hub.request = allow  # type: ignore[method-assign]
     brain._hands_llm = brain.llm
     brain._said = ["Setting the brightness to 40 percent now."]  # the turn's starting line
+    monkeypatch.setattr(brain_module.Brain, "QUIET_BEFORE_SPEAKING_S", 0.0)
     await brain._drive("set the brightness to 40 percent", None)
     await asyncio.sleep(0.05)
-    assert [s["text"] for s in rec.of("say")] == ["The brightness is at 40 percent now."]
+    assert [s["text"] for s in rec.of("say")] == ["The brightness only goes down to 50 percent, so it is at 50 now."]
+    # It simply worked, and they watched it happen: one word.
+    Hands.result = 'The "MY 2x RANK 1 RTTK CHAMPS REWARDS!" video by AuzioMF is open in Firefox and playing.'
+    await brain._drive("click the second video on the top row", None)
+    for _ in range(40):
+        await asyncio.sleep(0.02)
+        if len(rec.of("say")) > 1:
+            break
+    assert [s["text"] for s in rec.of("say")][1:] == ["Done."]

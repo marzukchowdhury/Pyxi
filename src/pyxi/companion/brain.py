@@ -716,9 +716,16 @@ class Brain:
         # One short line out loud; the whole story is in the tray and the notification. It is
         # what came of the job, so it is said even when it reads like the line that started it
         # ("The brightness is at 40 percent now." after "Setting the brightness to 40 percent.").
-        await self.say_line(
-            split_sentences(out.summary)[0][:140] if out.summary else "Done.", result=True
-        )
+        # When it worked and there is nothing they need to hear, that line is "Done.": they
+        # watched it happen. Live: 'The "MY 2x RANK 1 RTTK CHAMPS REWARDS!" video by AuzioMF is
+        # open in Firefox and playing', read out over the founder's next request. And it waits
+        # for a quiet moment like any other background line.
+        plain = out.ok and not answers._CAVEAT.search(out.summary or "")
+        line = "Done." if plain or not out.summary else split_sentences(out.summary)[0][:140]
+        if plain:
+            self._spawn(self._say_when_free(line))
+        else:
+            await self.say_line(line, result=True)
 
     def _screens_note(self) -> str:
         """With two or three monitors, what's on each, so 'my left screen' means something and
