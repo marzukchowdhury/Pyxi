@@ -523,6 +523,8 @@ def create_app(
             await brain.set_state("idle")
         elif kind == "interrupt":
             brain.interrupt()
+        elif kind == "object_closed":
+            brain.object_closed()
         elif kind == "stop_everything":
             await brain.stop_everything()
         elif kind == "answer":

@@ -2541,11 +2541,21 @@ class Brain:
             return user_text, failed
         return f"{left['text']} {user_text}", failed
 
+    def object_closed(self) -> None:
+        """They closed the 3D model themselves. Nothing more is said about it: the answer
+        under way about one of its parts stops, and the ones waiting behind it are dropped.
+        Live: "I crossed the 3D demonstration, even after that you..." kept explaining it."""
+        self._object_shut = True
+        if self._lock.locked() and _PART_CLICKED.match(self._user_text or ""):
+            self.interrupt()
+
     async def turn(
         self, user_text: str, *, shown: str | None = None, synthetic: bool = False
     ) -> None:
         """``synthetic``: a routine or a guide step, not words the user actually said (so an
         address in it never counts as the user naming that person)."""
+        if getattr(self, "_object_shut", False) and _PART_CLICKED.match(user_text or ""):
+            return  # a click on a model they have since closed
         self.warm_voice()  # the voice loads while the model thinks, if it was let go
         behind = self._turn_id if self._lock.locked() else ""  # sent while that turn still ran
         async with self._lock:
@@ -3633,7 +3643,17 @@ class Brain:
             if key in OBJECT_GALLERY:
                 await self.show_object(OBJECT_GALLERY[key](), restart=True)
             else:
-                await self.show_scene(get_scene(key))
+                try:
+                    scene = get_scene(key)
+                except (KeyError, ValueError, LookupError):
+                    # A scene the gallery doesn't have (live: "ejection_seat", made up for "show
+                    # me how a fighter jet ejects"): nothing came up, and the answer about the
+                    # model before it went on being spoken.
+                    return (
+                        f"show_scene: there is no ready-made scene called {key!r}. Build it "
+                        "with build_3d_model instead, in this same turn."
+                    )
+                await self.show_scene(scene)
             return None
         if name == "delegate":
             then = (
@@ -4208,6 +4228,7 @@ class Brain:
         a new audio key so old narration can't play over the new explanation. ``keep_place``:
         the same stage as last time (a model still assembling), without re-reading the screen."""
         self._object = model
+        self._object_shut = False  # showing again: clicks on its parts count once more
         if not background:  # a finished background build mustn't reshape the turn in progress
             self._visual_turn = True
         place = getattr(self, "_object_place", None) if keep_place else None

@@ -164,7 +164,9 @@ export function ObjectPanel() {
           <button className={`icon ${cutaway ? "primary" : ""}`} onClick={() => setCutaway(!cutaway)} title={cutaway ? "Put the casing back" : "Show the inside"}><Cube /></button>
         )}
         <button className="icon" onClick={() => seek(0)} title="Replay"><Replay /></button>
-        <button className="icon" onClick={closeObject} title="Close"><Close /></button>
+        {/* Their own close (not the model going away by itself when its story ends): the
+            brain is told, so nothing more is said about a model they have shut. */}
+        <button className="icon" onClick={() => { brain.send({ type: "object_closed" }); closeObject(); }} title="Close"><Close /></button>
       </div>
       <ObjectView scene={spec} clock={clock} beat={current} beatIndex={beat} cutaway={cutaway} width={width} height={height} onPick={ask} />
       {/* No card: the model floats on its own. A slim bar says where we are; the voice tells it. */}

@@ -548,4 +548,5 @@ export type ClientMessage =
   | { type: "connect"; id: string }
   | { type: "disconnect"; id: string }
   | { type: "guide_cancel" }
+  | { type: "object_closed" }
   | { type: "voice_preview"; engine: string; voice: string; speed?: number };

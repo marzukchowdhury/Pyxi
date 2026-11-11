@@ -241,3 +241,19 @@ def test_a_click_on_a_part_of_the_model_is_not_answered_on_the_page_behind_it(se
     brain._object = object()
     brain._user_text = "What does this page say about returns?"
     assert "explain_on_screen" in {t.name for t in brain._companion_tools()}
+
+
+async def test_closing_the_model_ends_what_was_being_said_about_it(settings):
+    """Live: "I crossed the 3D demonstration, even after that you..." kept explaining it. The
+    brain is told when they close the model: clicks on its parts that were still waiting are
+    dropped, and a model shown again is answered about once more."""
+    llm = Scripted([ToolCall(id="s", name="say", arguments={"text": "The case is the metal box."})])
+    brain, rec = make_brain(settings, llm=llm)
+    brain.object_closed()
+    await brain.turn("In the Inside a desktop PC tower model, tell me more about the case.")
+    assert llm.prompts == [] and rec.of("say") == []  # nothing is asked, nothing is said
+    await brain.turn("What time is it?")  # anything else is answered as usual
+    assert len(llm.prompts) == 1
+    brain._object_shut = False  # (what showing a model again does)
+    await brain.turn("In the Inside a desktop PC tower model, tell me more about the case.")
+    assert len(llm.prompts) == 2
