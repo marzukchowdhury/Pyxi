@@ -198,6 +198,13 @@ left of the formula bar and press enter (or click the first cell, then shift+cli
 Rename the file by clicking its title at the top left. A pivot table's editor opens from \
 the small green pencil (Edit) button just below the pivot; in it, "Add" beside Rows or Values \
 opens a list of the columns to pick from.
+- Any other spreadsheet app (GenOffice, Excel, LibreOffice): the Name box selects a range \
+the same way. A "Create PivotTable" dialog needs BOTH boxes filled before Create does anything: \
+the source range, and a Destination, an empty cell clear of the data (two columns to the right \
+of it, row 1, for example G1). After you format a selection (a colour, bold, a fill), its own \
+highlight can hide the change: click an empty cell and look again before you judge it, and \
+take a status line like "Applied to the current selection" as done. Never press ctrl+z on \
+your own step unless the task asks for an undo.
 - Google Docs: alt+/ searches menus; ctrl+b bold, ctrl+alt+1/2 headings, ctrl+shift+8 bullets.
 - File Explorer: ctrl+l then type a folder path and enter; F2 renames; ctrl+shift+n a new \
 folder; ctrl+x then ctrl+v moves files. Never delete files unless asked (then it's risky).
@@ -223,6 +230,9 @@ class Step:
     n: int
     actions: str
     note: str = ""
+
+
+_ASKS_UNDO = re.compile(r"(?i)\bundo\b|\brevert\b|\bput (?:it|that|them) back\b|\bctrl\s*\+\s*z\b")
 
 
 @dataclass
@@ -269,6 +279,7 @@ class Operator:
     async def run(self, task: str, window: int | None = None, come_back: bool = False) -> Outcome:
         """``window``: the one they were in. With ``come_back``, it's put back in front when the
         task is done (music playing behind it, a file saved), so they carry on where they were."""
+        self._task = task
         out = await self._run(task, window)
         if come_back and window and not out.stopped:
             await asyncio.to_thread(windows.focus, window)
@@ -568,6 +579,17 @@ class Operator:
             )
         if do == "press":
             keys = str(a.get("text") or "")
+            if keys.lower().replace(" ", "") == "ctrl+z" and not _ASKS_UNDO.search(
+                getattr(self, "_task", "")
+            ):
+                # Live: the headings were made red, undone, made red and undone again for a
+                # minute, because the selection's own highlight hid the colour.
+                return (
+                    f"press {keys}",
+                    "not pressed: that would undo your own step, and nobody asked for an undo. "
+                    "If you can't see that it worked, click an empty cell so the selection's "
+                    "highlight is gone and look again; if it did, you are done",
+                )
             closing = keys.lower().replace(" ", "") in CLOSING_KEYS
             if (closing or RISKY.search(label) or a.get("risky")) and not await self.confirm(
                 f"Press {keys} ({label})", "This may send or delete something."
