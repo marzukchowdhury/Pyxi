@@ -103,6 +103,34 @@ async def _resolves(host: str) -> bool | None:
         return None
 
 
+# Names everyone knows. A name one doubled letter away from one of these ("amaazon",
+# "gooogle") is that site misheard, never the look-alike address someone has registered.
+_WELL_KNOWN = frozenset(
+    ["amazon", "google", "youtube", "facebook", "instagram", "linkedin", "netflix", "reddit", "github", "twitter", "wikipedia", "ebay", "walmart", "bestbuy", "spotify", "whatsapp", "microsoft", "apple", "paypal", "gmail", "yahoo", "bing", "tiktok", "pinterest", "etsy", "ikea", "costco", "airbnb", "booking", "expedia", "stockx", "kijiji", "craigslist", "twitch", "discord", "zoom", "dropbox", "notion", "canva", "openai", "chatgpt", "claude", "anthropic", "outlook", "office", "adobe", "samsung", "nike", "adidas", "target", "homedepot", "lowes", "aliexpress", "temu", "shein", "uber", "lyft", "doordash"]
+)
+
+
+def _spellings(name: str) -> list[str]:
+    """A name as it is, then with each run of a repeated letter one shorter ("amaazon" is
+    amazon, "gooogle" is google), then with every such run single."""
+    out = [name]
+    for run in re.finditer(r"(.)\1+", name):
+        out.append(name[: run.start()] + run.group(0)[1:] + name[run.end() :])
+    out.append(re.sub(r"(.)\1+", r"\1", name))
+    return list(dict.fromkeys(out))
+
+
+def _as_well_known(host: str) -> str:
+    """The host with its name put right, when the name as heard is not one everyone knows and
+    one of its other spellings is; else the host as it was."""
+    www = "www." if host.startswith("www.") else ""
+    name, _, ending = host.removeprefix("www.").partition(".")
+    if not ending or name in _WELL_KNOWN:
+        return host
+    known = next((n for n in _spellings(name) if n in _WELL_KNOWN), "")
+    return f"{www}{known}.{ending}" if known else host
+
+
 async def real_site(url: str) -> str | None:
     """The address to open, or None when there is no such site.
 
@@ -116,6 +144,11 @@ async def real_site(url: str) -> str | None:
     host = parsed.hostname or ""
     if not host or "." not in host or host == "localhost" or re.fullmatch(r"[\d.:]+", host):
         return url
+    # "amaazon.ca" exists, and it is not Amazon: a well-known name with a letter doubled is
+    # put right before anything is looked up, so a mishearing never lands on a look-alike.
+    fixed = _as_well_known(host)
+    if fixed != host:
+        url, host = url.replace(host, fixed, 1), fixed
     if await _resolves(host) is not False:
         return url
     if await _resolves(_KNOWN_SITE) is not True:
@@ -144,13 +177,8 @@ async def near_site(url: str) -> str | None:
     name, _, ending = host.partition(".")
     if not name or not ending:
         return None
-    # The name as it is, then with each run of a repeated letter one shorter ("amaazon" is
-    # amazon, "gooogle" is google), then with every such run single.
-    names = [name]
-    for run in re.finditer(r"(.)\1+", name):
-        names.append(name[: run.start()] + run.group(0)[1:] + name[run.end() :])
-    names.append(re.sub(r"(.)\1+", r"\1", name))
-    names = list(dict.fromkeys(names))
+    # A spelling everyone knows first, then the name as it was heard, then its others.
+    names = sorted(_spellings(name), key=lambda n: n not in _WELL_KNOWN)
     endings = [ending]
     last = ending.rsplit(".", 1)[-1]
     if last in _HEARD_ENDINGS:

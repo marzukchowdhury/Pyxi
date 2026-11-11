@@ -244,13 +244,18 @@ async def test_a_misheard_site_is_answered_with_the_real_one_near_it(settings, m
     from pyxi.companion import actions
     from test_brain_and_server import make_brain
 
-    real = {"amazon.ca", "www.google.com", "google.com"}
+    # (amaazon.ca is there too, as it really is: someone has registered the look-alike.)
+    real = {"amazon.ca", "amaazon.ca", "www.google.com", "google.com"}
 
     async def resolves(host):
         return host in real
 
     monkeypatch.setattr(actions, "_resolves", resolves)
     assert await actions.near_site("https://amaazon.ka") == "https://amazon.ca"
+    # And a look-alike that exists is never opened in place of the site everyone knows.
+    assert await actions.real_site("https://amaazon.ca") == "https://amazon.ca"
+    assert await actions.real_site("https://www.gooogle.com/maps") == "https://www.google.com/maps"
+    assert await actions.real_site("https://amazon.ca") == "https://amazon.ca"
     assert await actions.near_site("https://www.amazon.ka/deals") == "https://amazon.ca/deals"
     assert await actions.near_site("https://gooogle.kom") == "https://google.com"  # one "o" too many, not two
     assert await actions.near_site("https://nosuchshopatall.com") is None
