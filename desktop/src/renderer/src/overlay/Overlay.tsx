@@ -35,7 +35,9 @@ export function Overlay() {
         return;
       }
       voice.stop();
-      brain.send({ type: "interrupt" });
+      // No "interrupt" here: ptt_start quiets Pyxi's voice and has her hands wait for the
+      // words. An interrupt sent first stopped the mouse for good, so every request spoken
+      // while she worked ended that work with "Stopped, as you asked".
       brain.send({ type: "ptt_start" });
       useOverlay.setState({ listening: true, state: "listening" });
       try {
@@ -66,8 +68,7 @@ export function Overlay() {
       if (rec.active) return;
       stopChime(); // talking to Pyxi is "I'm up"
       voice.stop();
-      brain.send({ type: "interrupt" });
-      brain.send({ type: "ptt_start" });
+      brain.send({ type: "ptt_start" }); // (no "interrupt": see the toggle key above)
       useOverlay.setState({ listening: true, state: "listening" });
       try {
         await rec.start((data, mime) => {

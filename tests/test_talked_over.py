@@ -357,3 +357,18 @@ async def test_a_sentence_that_stops_mid_way_waits_for_its_other_half(settings, 
     started = asyncio.get_running_loop().time()
     await brain.hear(b"clip")
     assert asked(llm) == "Turn it on" and asyncio.get_running_loop().time() - started < 0.25
+
+
+def test_the_talk_key_does_not_send_a_stop_before_it_listens():
+    """Live, twice in one trial: "Open AI Sheets" and then a pivot were under way with the
+    mouse, the founder pressed talk to say the next thing, and both ended "Stopped, as you
+    asked". The brain's ptt_start already has the hands wait for the words; the app sent a
+    plain "interrupt" just before it, which stops them for good."""
+    from pathlib import Path
+
+    overlay = (Path(__file__).parents[1] / "desktop/src/renderer/src/overlay/Overlay.tsx").read_text(encoding="utf-8")
+    lines = [ln.strip() for ln in overlay.splitlines()]
+    starts = [i for i, ln in enumerate(lines) if 'type: "ptt_start"' in ln]
+    assert len(starts) == 2  # the toggle key and the hold keys
+    for i in starts:
+        assert not any('type: "interrupt"' in ln for ln in lines[i - 4 : i])
