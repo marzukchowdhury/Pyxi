@@ -59,7 +59,7 @@ Everything is on your PC. Pyxi has no server of its own except the beta server, 
 - **Secrets on screen.** Password fields, password managers, banking apps, and text that looks like a key or token are blacked out of screenshots and removed from screen text before anything is sent or saved.
 - **Your sign-in tokens.** Google's and LinkedIn's tokens only go to Google and LinkedIn. The beta token only goes to the beta server.
 - **Your history.** The Memory Palace, your conversations and Ditto's recordings stay on your PC. Only the request you're making right now, with its screenshot, goes to the AI model.
-- **Your voice, except Bengali.** Speech is turned into text on your PC. Bengali speech goes to a cloud model, because no local model understands it well enough.
+- **Your voice, if you choose.** By default what you say to Pyxi goes to a cloud model to be turned into text (Pyxi and the beta server don't keep the sound). With "Turn my speech into text on this PC only" switched on in the Voice panel, or offline, speech is turned into text on your PC and nothing you say is sent. Meeting recordings are always transcribed on your PC.
 - **Your files, except what a job needs.** Pixel works entirely on your PC. Sage, Patch, Ledger and Scribe send only the text the job needs (see the privacy policy's table).
 - **Everything, in local mode.** With Ollama, nothing goes to any AI provider.
 

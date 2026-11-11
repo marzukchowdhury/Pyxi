@@ -319,6 +319,7 @@ class Brain:
         try:
             self.stt.hints = await asyncio.to_thread(self._names_in_reach)
             studio = self.studio
+            self.stt.on_this_pc = bool(studio and studio.prefs.listen_here)
             text, took, spoken = await self.stt.transcribe(
                 audio, studio.prefs.language if studio else "en"
             )

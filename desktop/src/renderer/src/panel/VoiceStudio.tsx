@@ -136,6 +136,17 @@ export function VoiceStudio() {
             : "Pyxi listens and answers in this language."}
       </p>
 
+      <h4>Listening</h4>
+      <label className="toggle-row">
+        <span>Turn my speech into text on this PC only</span>
+        <input type="checkbox" className="switch" checked={!!live.listen_here} onChange={(e) => set("listen_here", e.target.checked)} />
+      </label>
+      <p className="muted">
+        {live.listen_here
+          ? "Your voice never leaves this PC. Names and unusual words are misheard more often."
+          : "Pyxi hears you through its cloud model, which gets names and accents right. Your voice is sent to be written down, and Pyxi does not keep it. Offline, this PC listens instead."}
+      </p>
+
       <h4>Captions</h4>
       <label className="toggle-row">
         <span>Show what Pyxi says in the notch while it talks</span>

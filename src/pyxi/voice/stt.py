@@ -185,7 +185,9 @@ def hotwords(hints: list[str] | None) -> str:
     as "Jen Office", "TechLand" as "Deckland", "Gmail.com" as "Chimeel.com"."""
     out, seen = HOTWORDS, {w.strip().lower() for w in HOTWORDS.split(",")}
     for hint in hints or []:
-        word = " ".join(str(hint).split())[:40].strip(" ,.-")
+        # The name alone, not what a page adds to it: given "SAFAR (Official Video)" the cloud
+        # model wrote all of that when they had only said "Safar".
+        word = " ".join(re.split(r"[(\[|]", str(hint))[0].split())[:40].strip(" ,.-")
         if len(word) < 3 or word.lower() in seen or "," in word:
             continue
         if len(out) + len(word) + 2 > MAX_HINT_CHARS:
@@ -208,10 +210,21 @@ class CloudEars:
         return bool(os.environ.get("OPENROUTER_API_KEY"))
 
     @staticmethod
-    def prompt(language: str) -> str:
+    def prompt(language: str, hints: list[str] | None = None) -> str:
         who = (
             "Someone is talking to Pyxi (written পিক্সি in Bengali), an assistant on their computer"
         )
+        if language not in ("bn", "auto"):
+            names = hotwords(hints)
+            return (
+                f"{who}. Transcribe exactly what they say, word for word, in the language they "
+                "speak. They may say the names of programs, sites and people. This list is "
+                "only for spelling: when a word they say sounds like a word in it, spell that "
+                f"word as it is here, and never add a word they did not say: {names}. An email address "
+                "said aloud ('name at the rate of gmail dot com', 'name at gmail dot com') is "
+                "written as an address. Output only the transcript, with no comment. If there "
+                "is no speech, output nothing."
+            )
         if language == "bn":
             return (
                 f"{who}, in Bengali (Bangla), maybe with some English words. Transcribe exactly "
@@ -224,7 +237,7 @@ class CloudEars:
             "output nothing."
         )
 
-    async def transcribe(self, samples, language: str) -> str:
+    async def transcribe(self, samples, language: str, hints: list[str] | None = None) -> str:
         import httpx
 
         samples = samples[: MAX_CLOUD_SECONDS * 16000]
@@ -238,14 +251,17 @@ class CloudEars:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": self.prompt(language)},
+                        {"type": "text", "text": self.prompt(language, hints)},
                         {"type": "input_audio", "input_audio": {"data": audio, "format": "wav"}},
                     ],
                 }
             ],
         }
         base = os.environ.get("PYXI_OPENROUTER_URL", OPENROUTER_URL).rstrip("/")
-        async with httpx.AsyncClient(timeout=httpx.Timeout(25, connect=8)) as client:
+        # A short request should not hang on a bad connection for long before the PC takes
+        # over: the wait grows with the clip, and stops at 25 seconds.
+        wait = min(25.0, 8.0 + len(samples) / 16000)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(wait, connect=5)) as client:
             r = await client.post(
                 base + "/chat/completions",
                 json=body,
@@ -274,6 +290,12 @@ class Transcriber:
         self._warming: asyncio.Task | None = None
         self.ears = CloudEars(config.stt_cloud_model)
         self.hints: list[str] = []  # names likely to be said now; the brain sets them per request
+        self.on_this_pc = False  # their switch in the Voice panel: speech never leaves the PC
+
+    def listens_in_the_cloud(self) -> bool:
+        """Is speech turned into text by the cloud model: it is allowed (the setting, and their
+        switch) and it can be reached (the beta, or their own key)."""
+        return self.config.stt_cloud and not self.on_this_pc and self.ears.available()
 
     def _device(self) -> str:
         device = self.config.stt_device
@@ -324,7 +346,11 @@ class Transcriber:
             download_model(name)
 
     def warm(self, language: str = "en") -> None:
-        """The talk key went down: load the model now, while they speak. Never blocks."""
+        """The talk key went down: load the model now, while they speak. Never blocks.
+        Not when the cloud listens: the model on the PC is only its fallback then, and loading
+        it at every press would cost the PC for nothing."""
+        if language not in ("bn", "auto") and self.listens_in_the_cloud():
+            return
         if language == "bn" and (self.ears.available() or not self.bengali_offline()):
             return
         name = self.model_for(language)
@@ -439,7 +465,7 @@ class Transcriber:
     async def _bengali(self, samples) -> str:
         """Bengali: the cloud if it can be reached, else the Bengali model on this PC."""
         problem = ""
-        if self.ears.available():
+        if not self.on_this_pc and self.ears.available():  # their switch: nothing is sent
             try:
                 return await self.ears.transcribe(samples, "bn")
             except Exception as exc:  # offline, allowance used up, server down
@@ -469,7 +495,7 @@ class Transcriber:
             return await self._local(name, samples, "en")
         if guess in LOCAL_LANGUAGES and prob >= 0.6:
             return await self._local(name, samples, guess)
-        if self.ears.available():
+        if not self.on_this_pc and self.ears.available():  # their switch: nothing is sent
             try:
                 text = await self.ears.transcribe(samples, "auto")
                 return text, "bn" if _bengali_script(text) else guess
@@ -490,9 +516,21 @@ class Transcriber:
             else:
                 text, spoken = await self._automatic(samples)
             return text, time.monotonic() - started, spoken
+        samples = await asyncio.to_thread(decode_audio, audio)
+        # (Longer than the cloud takes in one piece, a long dictation say: the PC, which
+        # has no limit, rather than a transcript that stops partway.)
+        if self.listens_in_the_cloud() and len(samples) <= MAX_CLOUD_SECONDS * 16000:
+            # The small model on the PC mishears names and plain words alike (live, in one
+            # afternoon: "earphones" as "Airphones", "GenOffice" as "Jen Office", "Gmail.com"
+            # as "Chimeel.com", "SAFAR" as "Supper"). The model that listens gets it right,
+            # and is told the names in reach. Offline, or when it fails, the PC takes over.
+            try:
+                text = await self.ears.transcribe(samples, language, self.hints)
+                return text, time.monotonic() - started, language
+            except Exception as exc:
+                log.warning("cloud listening failed (%s); listening on this PC", str(exc) or type(exc).__name__)
         name = self.model_for(language)
         await self._get(name)
-        samples = await asyncio.to_thread(decode_audio, audio)
         lang = "en" if name.endswith(".en") else language
         text, spoken = await self._local(name, samples, lang)
         return text, time.monotonic() - started, spoken

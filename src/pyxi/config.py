@@ -40,6 +40,12 @@ class VoiceConfig(BaseModel):
         "base.en", description="faster-whisper model: tiny.en, base.en, small.en..."
     )
     stt_device: Literal["auto", "cpu", "cuda"] = "auto"
+    stt_cloud: bool = Field(
+        True,
+        description="Turn speech into text with the cloud model when it can be reached (far "
+        "fewer misheard words); the model on this PC takes over offline. False keeps speech "
+        "on this PC. The Voice panel has the same switch.",
+    )
     tts: TTSProvider = Field(
         "kokoro", description="kokoro (local CPU), chatterbox (local GPU), client (OS voice)."
     )

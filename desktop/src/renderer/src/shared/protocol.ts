@@ -314,6 +314,8 @@ export interface VoicePublic {
   speed: number;
   language: string;
   captions: boolean;
+  /** Speech is turned into text on this PC only (less accurate; nothing of the voice is sent). */
+  listen_here?: boolean;
   available: Record<"kokoro" | "elevenlabs" | "gemini", boolean> & { bengali?: boolean };
   languages: Record<string, string>;
   error: string | null;

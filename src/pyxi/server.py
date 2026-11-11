@@ -67,6 +67,7 @@ VOICE_KEYS = {
     "voice_speed": "speed",
     "voice_language": "language",
     "captions": "captions",
+    "listen_here": "listen_here",
 }
 
 

@@ -225,3 +225,16 @@ async def test_automatic_still_hears_spanish_locally(monkeypatch):
 def test_no_speech_replies_become_empty():
     assert stt_mod._tidy("(no speech)") == ""
     assert stt_mod._tidy('"হাই পিক্সি"') == "হাই পিক্সি"
+
+
+async def test_with_their_switch_on_nothing_they_say_is_sent(monkeypatch):
+    """Voice panel, "Turn my speech into text on this PC only": that means Bengali and speech
+    the PC can't place too, or the switch says more than it does."""
+    t, model, sent = _transcriber(monkeypatch, {"bn": 0.5}, cloud="আমার ফোল্ডারটা খোলো", offline=True)
+    t.on_this_pc = True
+    text, _, spoken = await t.transcribe(b"clip", "bn")
+    assert (text, spoken, sent, model.calls) == ("local words", "bn", [], ["bn"])
+    t, model, sent = _transcriber(monkeypatch, {"pl": 0.74, "en": 0.04}, cloud="অশোক স্যার")
+    t.on_this_pc = True
+    await t.transcribe(b"clip", "auto")
+    assert sent == []  # the cloud was reachable, and was not asked

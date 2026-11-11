@@ -14,7 +14,7 @@ Pyxi is a desktop assistant that can see your screen, read the files you point i
 - What Pyxi reads is **data, not instructions**. Text in an email, page or document can't make Pyxi act: every send, booking and file change still needs your Allow, and the card says when a recipient came from something Pyxi read.
 - What you ask, plus the screenshot, on-screen text and the parts of files or emails it needs to answer, goes to an AI model to work out the reply. **We don't sell it, and we don't use it to train models.**
 - Your history stays **on your computer**. Conversations are deleted after 30 days; Memory Palace history after 72 hours.
-- Your speech is turned into text **on your computer**. The one exception is Bengali, which is sent to a cloud model to be understood (see below).
+- What you say to Pyxi is sent to a cloud model to be turned into text, because it mishears far less than a model that fits on a PC. **Neither Pyxi nor the Pyxi beta server keeps the sound**; the model provider processes it under its own terms (see below). You can keep your voice on your computer instead: Voice panel, "Turn my speech into text on this PC only". Then nothing you say is sent. Offline, your computer listens by itself. Meeting recordings are always turned into text on your computer.
 - Pyxi uses your mouse and keyboard **only after you press Allow**. Anything that sends, books, buys, deletes or posts asks again. Pyxi never types passwords, card numbers or government ID numbers, and **never pays for anything**.
 
 ## What Pyxi looks at
@@ -78,7 +78,7 @@ Pyxi never sends an email, posts, messages, invites someone or cancels anything 
 | What | Where it goes | Why |
 |---|---|---|
 | Your request, the masked screenshot and on-screen text, recent conversation, and the parts of files or emails a job needs | The AI model, through OpenRouter (during the beta, through the Pyxi beta server), or the provider of your own key if you added one | To understand your screen and answer |
-| Bengali speech | Google's Gemini model, through OpenRouter (during the beta, through the Pyxi beta server) | To turn Bengali speech into text. Other languages stay on your computer |
+| What you say to Pyxi (the sound of each request, and dictation) | Google's Gemini model, through OpenRouter (during the beta, through the Pyxi beta server) | To turn your speech into text. With "Turn my speech into text on this PC only" switched on in the Voice panel, nothing you say is sent: your computer listens (Bengali then needs the offline Bengali model, which Pyxi offers to download) |
 | Web searches you ask for, and price checks | DuckDuckGo or Bing, then the store websites that come up | To look things up and compare prices |
 | Pages a teammate opens | Those websites, in a browser on your computer | To do the research, booking or form you asked for |
 | Emails, calendar events, documents and posts you ask Pyxi to send or change | Google, Discord or LinkedIn, only for accounts you connected | To do the errand, after an approval card |
@@ -87,7 +87,7 @@ Pyxi never sends an email, posts, messages, invites someone or cancels anything 
 | Update checks | GitHub | Pyxi checks for a new version when it starts and every four hours, and downloads updates from GitHub |
 | Voice and speech models | GitHub and Hugging Face | Downloaded once, the first time they're needed |
 
-**AI providers.** OpenRouter passes your request to the model provider: Anthropic's Claude for answers and teammates, and Google's Gemini for Bengali speech. They process it to produce the answer, under their own terms and privacy policies ([OpenRouter](https://openrouter.ai/privacy), [Anthropic](https://www.anthropic.com/legal/privacy), [Google](https://policies.google.com/privacy)). **[Before launch: confirm and state the data-retention and training settings on your OpenRouter account.]** In local mode (Ollama), nothing goes to any AI provider.
+**AI providers.** OpenRouter passes your request to the model provider: Anthropic's Claude for answers and teammates, and Google's Gemini for turning speech into text. They process it to produce the answer, under their own terms and privacy policies ([OpenRouter](https://openrouter.ai/privacy), [Anthropic](https://www.anthropic.com/legal/privacy), [Google](https://policies.google.com/privacy)). **[Before launch: confirm and state the data-retention and training settings on your OpenRouter account.]** In local mode (Ollama), nothing goes to any AI provider.
 
 **The Pyxi beta server** forwards your requests to OpenRouter with our key, so you don't need one. It **doesn't store what you ask, what's on your screen, or your voice**. It keeps only:
 

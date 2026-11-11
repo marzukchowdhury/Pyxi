@@ -276,6 +276,7 @@ class VoicePrefs(BaseModel):
     speed: float = Field(1.0, ge=0.5, le=1.6)
     language: str = "en"  # Automatic is opt-in: it downloads a bigger multilingual model
     captions: bool = True
+    listen_here: bool = False  # True: speech is turned into text on this PC only (less accurate)
 
 
 def _key(*names: str) -> str | None:
