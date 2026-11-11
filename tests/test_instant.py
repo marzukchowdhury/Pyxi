@@ -203,3 +203,35 @@ async def test_opening_a_program_pyxi_has_no_word_for(monkeypatch):
     assert started == ["shell:AppsFolder/com.genoffice.app"]
     note = await actions.open_app("Blorbo")
     assert note.startswith("open_app: there's no program called 'Blorbo'") and len(started) == 1
+
+
+async def test_an_address_that_does_not_exist_is_not_opened(settings, monkeypatch):
+    """Live: "on techlandbd.com, find earphones" was written down as "ontechlandbd.com", and
+    Pyxi opened it: "Server Not Found". The word stuck to the front is taken off when that
+    makes a real site; a name with no site at all is not opened, and the tool says so."""
+    from pyxi.companion import actions
+    from test_brain_and_server import make_brain
+
+    real = {"techlandbd.com", "www.google.com", "online.com"}
+
+    async def resolves(host):
+        return host in real
+
+    monkeypatch.setattr(actions, "_resolves", resolves)
+    assert await actions.real_site("https://ontechlandbd.com") == "https://techlandbd.com"
+    assert await actions.real_site("https://online.com/x") == "https://online.com/x"  # a real name is left alone
+    assert await actions.real_site("https://nosuchshopatall.com") is None
+    assert await actions.real_site("http://localhost:3000") == "http://localhost:3000"
+    assert await actions.real_site("http://192.168.0.1/") == "http://192.168.0.1/"
+    # Offline every name fails, which says nothing about this one: opened as it is.
+    real.clear()
+    assert await actions.real_site("https://ontechlandbd.com") == "https://ontechlandbd.com"
+
+    # And through the brain: the right site is opened, a missing one is refused.
+    real.update({"techlandbd.com", "www.google.com"})
+    brain, rec = make_brain(settings)
+    brain._user_text = "on techlandbd.com find earphones"
+    assert await brain._quick_action("open_url", "ontechlandbd.com") is None
+    assert rec.of("action")[-1]["value"] == "https://techlandbd.com"
+    note = await brain._quick_action("open_url", "nosuchshopatall.com")
+    assert note and note.startswith("open_url: there is no site at nosuchshopatall.com")

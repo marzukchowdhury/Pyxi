@@ -751,12 +751,22 @@ class GoogleConnector(Connector):
             self._attachments(p, out)
         return out
 
+    def _sent(self, msg: dict[str, Any], h: dict[str, str]) -> str:
+        """When a mail was sent, in their own time zone and in words, so the model never has
+        to convert an offset itself. Live: a mail's header said "+0000" and Pyxi told them
+        5:35, then 6:35, for a mail that came at neither."""
+        when = _when(msg, h)
+        if when is None:
+            return h.get("date", "")
+        when = when.astimezone(zone(self._tz or None))
+        return f"{when:%a %d %b %Y}, {_clock(when)} (their own time)"
+
     def _summary(self, msg: dict[str, Any]) -> str:
         h = self._headers(msg)
         self._remember(h.get("from", ""), h.get("to", ""))
         atts = self._attachments(msg.get("payload", {}), [])
         files = f" | attachments: {', '.join(a['filename'] for a in atts)}" if atts else ""
-        return f"- id={msg['id']} from {h.get('from', '?')} | {h.get('subject', '(no subject)')} | {h.get('date', '')}{files}\n  {msg.get('snippet', '')[:160]}"
+        return f"- id={msg['id']} from {h.get('from', '?')} | {h.get('subject', '(no subject)')} | {self._sent(msg, h)}{files}\n  {msg.get('snippet', '')[:160]}"
 
     def _body(self, part: dict[str, Any]) -> str:
         mime = part.get("mimeType", "")
@@ -822,7 +832,7 @@ class GoogleConnector(Connector):
         files = "\n".join(f"- {a['filename']} ({a['size'] // 1024} KB)" for a in atts) or "none"
         return (
             f"Email id={msg['id']} thread={msg.get('threadId')}\nFrom: {h.get('from')}\nTo: {h.get('to')}\n"
-            f"Subject: {h.get('subject')}\nDate: {h.get('date')}\nAttachments:\n{files}\n\n{body}"
+            f"Subject: {h.get('subject')}\nDate: {self._sent(msg, h)}\nAttachments:\n{files}\n\n{body}"
         )
 
     async def gmail_download(self, args: dict[str, Any]) -> Result:

@@ -203,6 +203,32 @@ async def test_put_a_window_on_another_screen(settings, monkeypatch):
     assert note and "they have: left, middle, right" in note
 
 
+async def test_a_split_on_a_named_screen_is_two_windows_side_by_side(settings, monkeypatch):
+    """Live, four times running: "split the screen, Chrome on the right, Firefox on the left"
+    with three screens made the window in front full-screen and called that a split."""
+    from test_brain_and_server import make_brain
+
+    placed: dict = {}
+    snapped: list = []
+    monkeypatch.setattr(windows, "available", lambda: True)
+    monkeypatch.setattr(windows, "screens", lambda: THREE)
+    monkeypatch.setattr(
+        windows,
+        "open_windows",
+        lambda minimized=False: [(7, "Untitled spreadsheet - Google Chrome", "chrome.exe"), (9, "Inbox - Mozilla Firefox", "firefox.exe")],
+    )
+    monkeypatch.setattr(windows, "place", lambda hwnd, *rect: placed.__setitem__(hwnd, rect))
+    monkeypatch.setattr(windows, "snap", lambda hwnd, where: snapped.append((hwnd, where)))
+    monkeypatch.setattr(windows, "focus", lambda hwnd: True)
+    brain, _ = make_brain(settings)
+    brain._ctx = type("C", (), {"window": type("W", (), {"hwnd": 7})()})()
+    note = await brain._arrange_windows({"layout": "split", "current_side": "right", "open": "firefox", "screen": "left"})
+    left, top, width, height = THREE[0]["work"]
+    assert note is None and snapped == []  # nothing was made full-screen
+    assert placed[9][0] == left and placed[7][0] > left  # Firefox on the left, Chrome beside it
+    assert placed[9][2] + placed[7][2] == width and placed[9][3] == placed[7][3] == height
+
+
 def test_a_song_on_a_screen_is_not_a_song_search():
     from pyxi.companion.instant import play_request
 

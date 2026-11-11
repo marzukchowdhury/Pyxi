@@ -270,3 +270,23 @@ async def test_a_sent_email_finishes_the_errand_without_another_model_round():
         approve=yes,
     )
     assert result.ok and result.title == "Email sent" and calls == 1
+
+
+def test_other_time_zones_are_measured_from_their_own_clock():
+    """Live: the model said 10 AM Eastern was 7 AM in Vancouver, from its memory of the zones;
+    British Columbia had stopped changing its clocks, and the answer was 8 AM. The differences
+    come from the zone data on the PC, whatever it says that year."""
+    from datetime import timedelta
+
+    from pyxi.timecontext import elsewhere
+
+    now = datetime(2026, 11, 10, 20, 0, tzinfo=ZoneInfo("America/Toronto"))
+    text = elsewhere(now)
+    assert "Eastern (New York, Toronto) the same time" in text
+    assert "UK 5h ahead" in text and "India 10h30 ahead" in text and "Central (Chicago) 1h behind" in text
+    # Whatever the data says for Vancouver is what the model is told (not what it remembers).
+    van = datetime(2026, 11, 10, 20, 0, tzinfo=ZoneInfo("America/Vancouver"))
+    gap = ZoneInfo("America/New_York").utcoffset(van.replace(tzinfo=None)) - van.utcoffset()
+    hours = int(gap / timedelta(hours=1))
+    assert f"Eastern (New York, Toronto) {hours}h ahead" in elsewhere(van)
+    assert "never your own memory" in now_block("America/Vancouver", van)

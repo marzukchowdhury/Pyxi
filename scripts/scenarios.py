@@ -38,6 +38,15 @@ from pyxi.screen.ocr import TextLine
 # A scenario never opens a real browser tab: addresses go out as the app's own "action".
 windows.browser_for = lambda words, like=None: ""  # type: ignore[assignment]
 
+
+async def _every_site_exists(host):  # the suite does not ask the internet about made-up sites
+    return True
+
+
+import pyxi.companion.actions as _actions  # noqa: E402
+
+_actions._resolves = _every_site_exists  # type: ignore[assignment]
+
 DB = ".pyxi/pyxi.db"
 MAPS_SCREEN = "turn_7252307e"  # Google Maps showing coffee places open now
 EL = re.compile(r'^\s*\[(\d+)\] (\w+)(?: "(.*)")? @\((-?\d+),(-?\d+),(\d+)x(\d+)\)')
@@ -433,6 +442,29 @@ TRYOUT_SCENARIOS = [
     ),
 ]
 SCENARIOS += TRYOUT_SCENARIOS
+
+# The founder's trial of 10 November, 8 PM (the screens are his own, from that evening).
+HASHES, GEN_SHEET, SHEET_CHROME = "turn_b655c00c", "turn_11642df5", "turn_179b33af"
+NIGHT_SCENARIOS = [
+    # Live: "those mean the column is too narrow... click A2 and I'll drop six dates in", and
+    # the dates pasted into the same narrow column showed as hashes again.
+    ("night hashes", HASHES, "Can you give some random dates instead of hashtags?", "widen"),
+    # Live: "I can't build a true pivot table in GenOffice from here... click cell H1 first".
+    ("night app pivot", GEN_SHEET, "Create a pivot table for the information we have on the screen.", "hands_no_cant"),
+    # Live, four times running on three screens: the window in front made full-screen.
+    (
+        "night split",
+        SHEET_CHROME,
+        "Split the screen into two parts. The right side should have Google Chrome, the left side "
+        "should have my Mozilla Firefox window that's open in the background.",
+        "arrange",
+    ),
+    # Live: the site was opened and the search forgotten, until they asked again.
+    ("night two parts", FIREFOX, "Go to techlandbd.com and look for earphones there.", "two_parts"),
+    # Live: "10 AM Eastern is 7 AM in Vancouver", from the model's memory of the zones.
+    ("night time zone", FIREFOX, "An interview is at 10 AM Eastern tomorrow. What time is that for me here?", "zone"),
+]
+SCENARIOS += NIGHT_SCENARIOS
 
 # What Pyxi must never sound like, in any scenario.
 STOCK = re.compile(r"\b(roger that|copy that|aye aye|leave it with me|on the case|say no more)\b", re.I)
@@ -845,6 +877,33 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             b.startswith("hands") for b in background
         ):
             problems.append("didn't look at the results")
+    hands_used = "use_computer" in tools or any(b.startswith("hands") for b in background)
+    if expect == "widen":
+        if not hands_used:
+            problems.append("didn't widen the column with the mouse")
+        if "paste_table" in tools:
+            problems.append("pasted the data again")
+    if expect == "hands_no_cant":
+        if not hands_used:
+            problems.append("didn't do it through the app's menus")
+        if re.search(r"(?i)\bcan't\b|\bcannot\b|click (cell|on) ", said):
+            problems.append("said it can't, or asked them to click")
+    if expect == "two_parts":
+        calls = [json.dumps(c["arguments"]).lower() for c in brain._calls if c["tool"] != "say"]
+        went = any("techlandbd" in c for c in calls)
+        looked = hands_used or "use_tab" in tools or any("earphone" in c for c in calls)
+        if not (went and looked):
+            problems.append(f"did only half: went={went} looked={looked}")
+    if expect == "zone":
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        there = (datetime.now(ZoneInfo("America/New_York")) + timedelta(days=1)).replace(hour=10, minute=0)
+        hour = there.astimezone().hour
+        names = ["twelve", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven"]
+        want = rf"(?i)\b({hour % 12 or 12}|{names[hour % 12]})(:00)?\s*(a\.?m\.?|p\.?m\.?|in the|o'clock)"
+        if not re.search(want, said):
+            problems.append(f"didn't say {hour}:00 their time")
     if expect == "open" and ("use_computer" in tools or "quick_action" not in tools):
         problems.append("didn't open it with quick_action")
     if expect in ("play", "play+volume"):

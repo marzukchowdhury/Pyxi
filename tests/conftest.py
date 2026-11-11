@@ -76,6 +76,13 @@ def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     no_browser.real = windows.browser_for  # for the test of the real one
     monkeypatch.setattr(windows, "browser_for", no_browser)
     monkeypatch.setattr(windows, "open_in", lambda exe, url: None)
+    # No test asks the internet whether a site exists (the test of that gives its own answers).
+    from pyxi.companion import actions as actions_mod
+
+    async def every_site_exists(host):
+        return True
+
+    monkeypatch.setattr(actions_mod, "_resolves", every_site_exists)
     monkeypatch.setattr(browsersetup, "_addon", None)
     monkeypatch.setattr(browsersetup, "last_fault", None)
     clip = {"text": "what I had copied"}

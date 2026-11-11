@@ -306,8 +306,8 @@ async def test_when_it_doesnt_land_pyxi_puts_the_cursor_in_the_cell_and_pastes_a
     cell A1 first", four times, while the founder asked it to just do it."""
     empty = ["Untitled Spreadsheet.xlsx", "A", "B", "C"]
     full = [*empty, "Region", "Sales", "West", "1200"]
-    # the turn's look, before, three looks after the first paste, before again, after the click
-    looks = [empty, empty, empty, empty, empty, empty, full]
+    # the turn's look, before, three looks after the first paste, then after the click
+    looks = [empty, empty, empty, empty, empty, full]
     brain, rec, _ = _on_a_sheet(settings, monkeypatch, looks, [[("paste_table", {"rows": ROWS}), ("say", {"text": "It's in."})]])
     clicks = []
 
@@ -321,6 +321,31 @@ async def test_when_it_doesnt_land_pyxi_puts_the_cursor_in_the_cell_and_pastes_a
     assert [a["kind"] for a in rec.of("action")] == ["insert_table", "insert_table"]  # pasted again, nothing left copied
     assert "outcome" not in next(c for c in brain._calls if c["tool"] == "paste_table")
     assert [s["text"] for s in rec.of("say")] == ["It's in."]
+
+
+async def test_after_its_own_mouse_work_there_pyxi_clicks_the_cell_first(settings, monkeypatch, fast_paste):
+    """Live: Pyxi opened a new sheet by clicking, and the paste that followed took 11 seconds of
+    a 15 second turn: a first paste into nowhere, three looks to find that out, then the click.
+    The keyboard is known not to be in the grid, so the click comes first and one paste lands."""
+    import time
+
+    empty = ["Untitled Spreadsheet.xlsx", "A", "B", "C"]
+    full = [*empty, "Region", "Sales", "West", "1200"]
+    brain, rec, _ = _on_a_sheet(
+        settings, monkeypatch, [empty, empty, full], [[("paste_table", {"rows": ROWS}), ("say", {"text": "It's in."})]]
+    )
+    clicks = []
+
+    async def click(target):
+        clicks.append(len(rec.of("action")))  # how many pastes had gone before the click
+        return True
+
+    brain._put_cursor_in_cell = click  # type: ignore[method-assign]
+    brain._mouse_was_in = (4, time.monotonic())
+    await brain.turn("create a sample sales table here")
+    assert clicks == [0]  # clicked before anything was pasted
+    assert [a["kind"] for a in rec.of("action")] == ["insert_table"]  # and one paste did it
+    assert brain._mouse_was_in == (0, 0.0)  # the next paste there does not click again
 
 
 async def test_no_click_without_their_standing_allow_for_the_mouse(settings, monkeypatch, fast_paste):

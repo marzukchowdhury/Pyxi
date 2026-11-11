@@ -609,9 +609,11 @@ COMPANION_TOOLS += [
         "Google Sheets or Docs, Excel, Word, Notion, Airtable, an email). Use it to put data, a sample "
         "table, a list of rows or an empty table into the file they're looking at whenever Ledger can't "
         "reach that file: it's Excel or Word in a browser tab, another app or site, or edit_document said "
-        "it can't open it. It only fills cells: a cell that starts with = is a formula in a spreadsheet, "
-        "but a pivot, a chart or formatting needs edit_document. It lands where their cursor is, so if "
-        "nothing is selected yet say 'click the cell where it should start' first. Say one short line.",
+        "it can't open it. It only fills cells: a cell that starts with = is a formula in a spreadsheet; "
+        "a pivot, a chart or formatting is edit_document in a Google file or a file on disk, and "
+        "use_computer through the app's menus anywhere else. It lands at the selected cell and clicks "
+        "it itself when it has to: a new sheet has A1 selected, so paste, and never ask them to click a "
+        "cell first. Say one short line.",
         {
             "rows": {
                 "type": "array",

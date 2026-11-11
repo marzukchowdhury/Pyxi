@@ -511,3 +511,29 @@ async def test_a_misheard_name_is_offered_back_and_never_used(tmp_path):
     # Nothing near it at all: the plain question, as before.
     out = await g.gmail_people({"name": "zzyzx quorble"})
     assert out == "gmail_people: no one like 'zzyzx quorble' in their recent mail. Ask the user for the address (one short question)."
+
+
+def test_a_mails_time_is_given_in_their_own_zone(tmp_path):
+    """Live: the header said "+0000" and Pyxi told them 5:35, then 6:35. The model is handed
+    the time already in their zone, in words, so there is nothing for it to convert."""
+    from datetime import datetime
+
+    from pyxi.connectors.google import GoogleConnector
+
+    g = GoogleConnector(tmp_path / "connectors", tmp_path / "downloads")
+    g._tz = "America/Toronto"
+    sent = datetime.fromisoformat("2026-11-05T02:35:00+00:00")
+    msg = {
+        "id": "m1",
+        "internalDate": str(int(sent.timestamp() * 1000)),
+        "snippet": "Looking forward to connecting.",
+        "payload": {
+            "headers": [
+                {"name": "From", "value": "Elizabeth <e@example.com>"},
+                {"name": "Subject", "value": "Re: Call"},
+                {"name": "Date", "value": "Thu, 5 Nov 2026 02:35:00 +0000"},
+            ]
+        },
+    }
+    line = g._summary(msg)
+    assert "Wed 04 Nov 2026, 9:35 PM (their own time)" in line and "+0000" not in line

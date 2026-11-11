@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import re
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -80,6 +81,47 @@ def safe_url(value: str) -> str | None:
         # (a backslash before an @), or with a "user@" in front of the real one.
         return None
     return value if parsed.scheme in ("http", "https") and parsed.netloc else None
+
+
+# ---------------------------------------------------------------------- is there such a site
+_KNOWN_SITE = "www.google.com"  # resolves whenever the internet is there at all
+_STUCK_WORDS = ("open", "goto", "visit", "on", "to", "in", "at", "go")
+
+
+async def _resolves(host: str) -> bool | None:
+    """Does this name have an address: yes, no, or can't tell (slow, or some other trouble)."""
+    try:
+        await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(host, 443), 2.5)
+        return True
+    except socket.gaierror:
+        return False
+    except (TimeoutError, OSError):
+        return None
+
+
+async def real_site(url: str) -> str | None:
+    """The address to open, or None when there is no such site.
+
+    Live: "on techlandbd.com, find earphones" was written down as "ontechlandbd.com", Pyxi
+    opened that, and the browser said "Server Not Found". An address whose name does not exist
+    is not opened: a small word stuck to its front is taken off when that makes a real site,
+    and otherwise the caller says there is no such site. Offline, or when the check is slow,
+    the address is opened as it is (nothing can be told then).
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if not host or "." not in host or host == "localhost" or re.fullmatch(r"[\d.:]+", host):
+        return url
+    if await _resolves(host) is not False:
+        return url
+    if await _resolves(_KNOWN_SITE) is not True:
+        return url  # offline: every name fails, and that says nothing about this one
+    bare = host.removeprefix("www.")
+    for word in _STUCK_WORDS:
+        rest = bare.removeprefix(word)
+        if rest != bare and len(rest.split(".")[0]) >= 4 and await _resolves(rest) is True:
+            return url.replace(host, rest, 1)
+    return None
 
 
 def app_target(name: str) -> str | None:

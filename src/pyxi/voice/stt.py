@@ -222,7 +222,10 @@ class CloudEars:
                 "only for spelling: when a word they say sounds like a word in it, spell that "
                 f"word as it is here, and never add a word they did not say: {names}. An email address "
                 "said aloud ('name at the rate of gmail dot com', 'name at gmail dot com') is "
-                "written as an address. Output only the transcript, with no comment. If there "
+                "written as an address, and so is a website's name; the words before it stay "
+                "their own words ('on techland bd dot com' is 'on techlandbd.com', never "
+                "'ontechlandbd.com'). When they stumble and say a word or phrase twice ('can "
+                "you can you open'), write it once. Output only the transcript, with no comment. If there "
                 "is no speech, output nothing."
             )
         if language == "bn":

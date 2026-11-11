@@ -52,7 +52,7 @@ from pyxi.companion import (
     specialists,
     tabwork,  # Pyxi in your browser (the extension)
 )
-from pyxi.companion.actions import app_target, in_account, open_app, safe_url
+from pyxi.companion.actions import app_target, in_account, open_app, real_site, safe_url
 from pyxi.companion.aim import Survey, confirm_target, survey
 from pyxi.companion.annotations import (
     MARKER,
@@ -255,6 +255,7 @@ class Brain:
         """Push-to-talk pressed: capture the screen *now*, while the user starts speaking."""
         self.interrupt(hold=True)
         self._words_gen = self._speech_gen  # more words are coming: a running turn is talked over
+        self._talk_presses = getattr(self, "_talk_presses", 0) + 1
         self._prefetch = asyncio.create_task(self._capture())
         self._spawn(self.set_state("listening"))
         self.warm_voice(listening=True)
@@ -341,6 +342,20 @@ class Brain:
             await self.say_line("Sorry, I didn't catch that.")
             await self.set_state("idle")
             return
+        # The first half of a sentence said in two presses goes in front of the second.
+        half, self._half_said = getattr(self, "_half_said", None), None
+        if half and time.monotonic() - half[1] < _CARRY_S and not instant.is_stop(text):
+            text = f"{half[0]} {text}"
+        # A sentence that stops mid-way ("Can you open another tab on"): they let go of the key
+        # to think, and are about to go on. Live, Pyxi acted on the half at once. It waits a
+        # moment, and when the key goes down again the rest is heard before anything is done.
+        if _HALF_SAID.search(text.strip()):
+            presses = getattr(self, "_talk_presses", 0)
+            for _ in range(int(HALF_SAID_WAIT_S / 0.05)):
+                await asyncio.sleep(0.05)
+                if getattr(self, "_talk_presses", 0) != presses:
+                    self._half_said = (text, time.monotonic())
+                    return
         await self.turn(text)
 
     async def _set_alarm(self, alarm: alarms.Alarm) -> None:
@@ -676,6 +691,9 @@ class Brain:
         finally:
             usage, self._operator = (self._operator.usage if self._operator else None), None
             await self.hub.emit("driving", doing=None)
+            # Where the mouse has just been: the keyboard is not in a sheet Pyxi opened by
+            # clicking, so the next paste there starts with a click on the cell.
+            self._mouse_was_in = (windows.foreground() if windows.available() else 0, time.monotonic())
         cost = usage.cost_usd if usage else 0.0
         self.turns.add_spend("hands", cost)
         await self.jobs.settle(job, ok=out.ok, summary=out.summary, cost=cost)
@@ -727,9 +745,13 @@ class Brain:
         if args.get("screen") and on is None:
             names = ", ".join(s["name"] for s in windows.screens()) or "one"
             return f"arrange_windows: there's no {args['screen']!r} screen (they have: {names})."
-        if on is not None and (layout != "panes" or len(panes) <= 1):
+        two = layout == "split" and str(args.get("open") or "").strip()
+        if on is not None and not two and (layout != "panes" or len(panes) <= 1):
             # "Put YouTube on my right screen": that window (or the one they're in), moved there
             # and made full-screen (or snapped, if they said left or right half).
+            # (Not a split that names its screen: live, "split the screen, Chrome on the right
+            # and Firefox on the left" on a PC with three screens came here four times running,
+            # and each time the window in front was made full-screen and called a split.)
             win = hwnd
             if panes and panes[0].lower() not in ("current", "this", "this window", "here"):
                 win = windows.window_like(panes[0], windows.open_windows(minimized=True), set()) or 0
@@ -980,6 +1002,15 @@ class Brain:
                     "instead. Say in one short line that these are search results for that "
                     "site. Don't open another address for this."
                 )
+            found = await real_site(url)
+            if found is None:
+                host = url.split("://", 1)[-1].split("/", 1)[0]
+                return (
+                    f"open_url: there is no site at {host}, so nothing was opened. The name was "
+                    "probably misheard or misspelled. Say so in one short line and ask which "
+                    "site they mean; don't guess another address."
+                )
+            url = found
             opened = getattr(self, "_opened_urls", set())
             if url in opened:  # a looping model once made six new docs for one "new doc"
                 return "open_url: that's already open from this request. Don't open it again; answer or stop."
@@ -1144,15 +1175,26 @@ class Brain:
             )
         words = check_words(clip["text"])
         before = await self._cells_on_screen(target, words) if words else None
+        # Pyxi's own mouse was in this window a moment ago (it opened the sheet by clicking):
+        # the keyboard is not in the grid, so the first paste would go nowhere and cost five
+        # seconds to find out (live: 11 s of a 15 s turn). The cell is clicked first.
+        was, at = getattr(self, "_mouse_was_in", (0, 0.0))
+        clicked = bool(
+            target
+            and was == target
+            and time.monotonic() - at < _MOUSE_JUST_S
+            and await self._put_cursor_in_cell(target)
+        )
+        self._mouse_was_in = (0, 0.0)
         await self.hub.emit("action", kind="insert_table", value=message)
         if before is not None and not await self._pasted(target, words, before):
             # The keyboard isn't in the sheet (live: a spreadsheet Pyxi had just opened with
             # the mouse; "click cell A1 first" four times over). With their standing Allow
-            # for the mouse, Pyxi makes that one click itself and pastes once more.
-            if await self._put_cursor_in_cell(target):
-                before = await self._cells_on_screen(target, words)
+            # for the mouse, Pyxi makes that one click itself and pastes once more. (Nothing
+            # arrived, so what was counted on screen before still stands.)
+            if not clicked and await self._put_cursor_in_cell(target):
                 await self.hub.emit("action", kind="insert_table", value=message)
-                if before is None or await self._pasted(target, words, before):
+                if await self._pasted(target, words, before):
                     return f"The table is pasted. {changed}" if changed else None
             # It was sent and nothing arrived (live: three times into a spreadsheet, "Done"
             # each time). The cells stay copied, so one click and ctrl+v by them finishes it.
@@ -1234,7 +1276,7 @@ class Brain:
         least (one, for a table of one or two words): reading text off a screen wavers by a
         word between looks. Looked at up to three times, since an app can take a moment."""
         need = 2 if len(words) > 2 else 1
-        for wait in (0.6, 0.8, 1.2):
+        for wait in (0.5, 0.7, 1.0):
             await asyncio.sleep(wait)
             now = await self._cells_on_screen(target, words)
             if now is None or now - before >= need:
@@ -2200,6 +2242,11 @@ class Brain:
                 f'Before they went on, you had already said aloud: "{left["said"][-400:]}". Carry '
                 "on from there: don't say it again, reworded or not."
             )
+        # They said the same thing again because nothing had happened yet (live: "Create a
+        # sample sales data. Create a sample sales data."): once is the request.
+        was, now = (re.sub(r"[^\w ]+", "", t.lower()).split() for t in (left["text"], user_text))
+        if was and " ".join(was) in " ".join(now):
+            return user_text, failed
         return f"{left['text']} {user_text}", failed
 
     async def turn(
@@ -4138,6 +4185,14 @@ _MULTI_SCREEN_NOTE = (
 
 # Words from a turn they talked over are carried into their next turn only this soon after.
 _CARRY_S = 90.0
+HALF_SAID_WAIT_S = 1.5  # how long a sentence that stops mid-way waits for its other half
+# Ends on a word that cannot end a request, with nothing to close the sentence.
+_HALF_SAID = re.compile(
+    r"(?i)\b(?:on|in|to|at|of|for|with|from|into|onto|about|by|and|or|but|so|because|then|"
+    r"the|a|an|my|your|which|who|where|if|when|while|is|are|was|can|could|would|"
+    r"should|will|also)$"
+)
+_MOUSE_JUST_S = 120.0  # how long after Pyxi's own mouse work a paste there starts with a click
 # The longest a dictation is held (the app stops recording at a minute), with some room.
 _DICTATION_S = 90.0
 _BACKGROUND_TOOLS = {

@@ -309,3 +309,46 @@ async def test_what_was_already_said_goes_with_the_carried_words(settings, monke
         'you had already said aloud: "Comparing the two on battery and screen."' in llm.prompts[-1]
     )
     assert [s["text"] for s in rec.of("say")][-1] == "The first one, and its camera is better too."
+
+
+async def test_the_same_request_said_again_is_one_request(settings):
+    """Live: nothing had happened three seconds after "Create a sample sales data.", so they
+    said it again, and the model was handed the sentence twice in a row."""
+    llm = Slow([("say", {"text": "Dropped."})], [("say", {"text": "Once."})])
+    brain, _ = make_brain(settings, llm=llm)
+    first = asyncio.create_task(brain.turn("Create a sample sales data."))
+    await thinking(llm)
+    brain.begin_listening()
+    await brain.turn("Create a sample sales data, please.")
+    await first
+    assert asked(llm) == "Create a sample sales data, please."
+
+
+async def test_a_sentence_that_stops_mid_way_waits_for_its_other_half(settings, monkeypatch):
+    """Live: "Can you open another tab on" (they let go of the key to think), and Pyxi opened
+    a tab at once. It waits a moment; when the key goes down again, both halves are one
+    request, and when it doesn't, the half is answered as it is."""
+    from pyxi.companion import brain as brain_mod
+
+    monkeypatch.setattr(brain_mod, "HALF_SAID_WAIT_S", 0.3)
+    llm = Script([("say", {"text": "Both."})], [("say", {"text": "Half."})], [("say", {"text": "Whole."})])
+    brain, _ = make_brain(settings, llm=llm)
+    heard = iter(["Can you open another tab on", "Chrome with YouTube in it.", "Open another tab on", "Turn it on."])
+
+    async def transcribe(audio, language="en"):
+        return next(heard), 0.1, "en"
+
+    monkeypatch.setattr(brain.stt, "transcribe", transcribe)
+    first = asyncio.create_task(brain.hear(b"clip"))
+    await asyncio.sleep(0.1)
+    assert llm.prompts == []  # nothing is done on the half
+    brain.begin_listening()
+    await first
+    await brain.hear(b"clip")
+    assert asked(llm) == "Can you open another tab on Chrome with YouTube in it."
+    # They don't go on: the half is the request after all.
+    await brain.hear(b"clip")
+    assert asked(llm) == "Open another tab on"
+    # A whole sentence that happens to end on such a word is not held up.
+    await brain.hear(b"clip")
+    assert asked(llm) == "Turn it on."
