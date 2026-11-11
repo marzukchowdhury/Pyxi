@@ -956,6 +956,22 @@ class Brain:
             return None
         if action == "tabs":
             return await self._tabs(value)
+        if action == "listening":
+            # Live: the founder read the switch's name aloud ("Turn my speech into text on this
+            # PC only"), and Pyxi could only say it didn't know where its own ears were.
+            if self.studio is None:
+                return "quick_action: the voice settings aren't available right now."
+            here = not re.search(r"(?i)\b(cloud|online|usual|default|normal)\b", value)
+            self.studio.update(listen_here=here)
+            await self.hub.emit("settings", **self.public_state())
+            return (
+                "Done: from now on their speech is turned into text on this PC only, and nothing "
+                "they say is sent anywhere. Names and unusual words may be misheard more often. "
+                "The switch is in the panel's Voice tab. Tell them in one or two short lines."
+                if here
+                else "Done: their speech is turned into text by the cloud model again (Pyxi does "
+                "not keep the sound). Tell them in one short line."
+            )
         if action == "volume":
             if not windows.available():
                 return "volume: this only works on Windows."

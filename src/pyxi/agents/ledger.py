@@ -2370,7 +2370,7 @@ _SHEET_EDITS = """Spreadsheets (Excel .xlsx and Google Sheets). "sheet" names a 
 - {"op": "dropdown", "range": "E2:E50", "options": ["Yes", "No"]}
 - {"op": "clear", "range": "A2:D9", "what"?: "values"|"formats"|"all"}
 - {"op": "find_replace", "find": "..", "replace": "..", "sheet"?: name, "match_case"?: true, "whole_cell"?: true}
-- {"op": "copy", "from": "A1:C5", "to": "E1", "cut"?: true, "values_only"?: true}  ("cut" moves it)
+- {"op": "copy", "from": "A1:C5", "to": "E1", "cut"?: true, "values_only"?: true, "format_only"?: true}  ("cut" moves it; "format_only" copies how the cells look and nothing in them, repeated over the whole "to" range: "give B2:D2 the same background, font and colour as A2" is {"op": "copy", "from": "A2", "to": "B2:D2", "format_only": true}. You never need to know a cell's colour to match it)
 - {"op": "note", "cell": "B2", "text": ".."}
 - {"op": "remove_duplicates", "columns"?: [..]}  and  {"op": "trim"}  (strips stray spaces)
 - {"op": "add_sheet", "name": "Summary", "rows"?: [[..], [..]]}  (only when they ask for a new tab; sample or new data for an empty sheet is set_cells on it from A1)

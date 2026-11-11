@@ -1312,3 +1312,33 @@ async def test_the_problem_dropped_after_the_second_pass_is_the_one_it_mended():
     r, _ = await on_google(g, [chart, colour], [{"file": 0, "op": "format", "range": "A1:C1", "color": "teal"}])
     assert r.changes == ["Formatted A1:C1 on Sheet1"]
     assert r.problems == ["There's no sheet called 'Nope'."]
+
+
+# ============================================================================ the look of a cell
+def test_a_cells_look_is_copied_onto_others_without_knowing_its_colour(tmp_path):
+    """Live: "change the background of B2 to D2 to the same as A2". Ledger said it couldn't
+    read A2's fill and asked for a hex code, then guessed a shade. It never needs to know the
+    colour: the look of A2 goes onto each of the other cells, and what is in them stays."""
+    from openpyxl.styles import Font, PatternFill
+
+    def grey(wb, ws):
+        ws["A2"].fill = PatternFill("solid", fgColor="FF666666")
+        ws["A2"].font = Font(bold=True, color="FFFF0000")
+
+    rows = [["Sum of Sales", "Product", None, None], ["Region", "Widget A", "Widget B", "Grand Total"], ["East", 1105, None, 1105]]
+    b = Workbook(book(tmp_path / "p.xlsx", rows, grey))
+    said = b.apply({"op": "copy", "from": "A2", "to": "B2:D2", "format_only": True})
+    ws = b.wb["Data"]
+    assert said == "Made B2:D2 look like A2"
+    for cell in ("B2", "C2", "D2"):
+        assert ws[cell].fill.fgColor.rgb == "FF666666" and ws[cell].font.bold and ws[cell].font.color.rgb == "FFFF0000"
+    assert [ws[c].value for c in ("B2", "C2", "D2")] == ["Widget A", "Widget B", "Grand Total"]  # untouched
+    assert ws["B3"].fill.fgColor.rgb != "FF666666"  # and only the cells named
+
+
+async def test_on_a_google_sheet_the_look_is_pasted_as_format_only():
+    g = that_evening()
+    (result, _) = await on_google(g, [{"file": 0, "op": "copy", "sheet": "Sheet1", "from": "A1", "to": "B1:C1", "format_only": True}])
+    sent = [r["copyPaste"] for r in g.sent if "copyPaste" in r]
+    assert [s["pasteType"] for s in sent] == ["PASTE_FORMAT"]
+    assert result.changes == ["Made B1:C1 look like A1"]

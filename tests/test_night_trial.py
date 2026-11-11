@@ -199,3 +199,28 @@ async def test_the_subscription_list_is_said_and_put_on_a_card(settings):
     assert said == "$110.45 a month in subscriptions. The full result is on the card."
     [card] = rec.of("answer")
     assert "Netflix" in str(card)
+
+
+async def test_listening_on_this_pc_can_be_asked_for_aloud(settings):
+    """Live: the founder read the switch's name aloud ("Turn my speech into text on this PC
+    only"), and Pyxi could only say it didn't know where its own ears were."""
+    brain, rec = make_brain(settings)
+    if brain.studio is None:
+        note = await brain._quick_action("listening", "this pc")
+        assert note and note.startswith("quick_action: the voice settings")
+        return
+    note = await brain._quick_action("listening", "this pc")
+    assert brain.studio.prefs.listen_here is True and "on this PC only" in note
+    assert rec.of("settings")  # the panel's switch follows
+    note = await brain._quick_action("listening", "cloud")
+    assert brain.studio.prefs.listen_here is False and "cloud model again" in note
+
+
+def test_an_address_said_aloud_that_finds_nothing_may_be_one_word():
+    """Live: "tareknoorxyz@example.com" was written down as "Tarek Noor xyz@example.com", searched
+    as xyz@example.com, and Pyxi said there was no such mail while it was on the screen."""
+    import inspect
+
+    from pyxi.connectors.google import GoogleConnector
+
+    assert "may be tareknoorxyz@example.com" in inspect.getsource(GoogleConnector.gmail_search)

@@ -883,8 +883,17 @@ class WorkbookExtras:
 
         src_ws, src = self._range(op, "from")
         dest_ws, dest = self._range(op, "to")
-        c1, r1, _, _ = a1_bounds(src)
-        dc, dr, _, _ = a1_bounds(dest)
+        c1, r1, c2, r2 = a1_bounds(src)
+        dc, dr, dc2, dr2 = a1_bounds(dest)
+        if op.get("format_only"):
+            # How the cells look, repeated over the whole of the range named, and nothing of
+            # what is in them ("the same background as A2").
+            wide, tall = c2 - c1 + 1, r2 - r1 + 1
+            for r in range(dr, max(dr2, dr + tall - 1) + 1):
+                for c in range(dc, max(dc2, dc + wide - 1) + 1):
+                    like = src_ws.cell(r1 + (r - dr) % tall, c1 + (c - dc) % wide)
+                    dest_ws.cell(r, c)._style = copy(like._style)
+            return f"Made {op.get('to')} look like {op.get('from')}"
         moved = []
         for cell in self._cells(src_ws, src):
             v = cell.value

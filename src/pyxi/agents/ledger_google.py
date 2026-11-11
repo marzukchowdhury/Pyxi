@@ -647,6 +647,14 @@ class SheetExtras:
         _, _, source, _ = self._grid(op, "from")
         _, dest_id, dest, _ = self._grid(op, "to")
         paste = "PASTE_VALUES" if op.get("values_only") else "PASTE_NORMAL"
+        if op.get("format_only"):
+            # "Make B2 to D2 the same background as A2": how the cell looks, onto each cell of
+            # the range, and nothing of what is in it. Live, Ledger answered that it couldn't
+            # read A2's colour and asked for a hex code; it never needs to know the colour.
+            await self._batch(
+                {"copyPaste": {"source": source, "destination": dest, "pasteType": "PASTE_FORMAT"}}
+            )
+            return f"Made {op.get('to')} look like {op.get('from')}"
         if op.get("cut"):
             cell = {
                 "sheetId": dest_id,

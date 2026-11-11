@@ -621,7 +621,17 @@ class GoogleConnector(Connector):
                 if ids:
                     note += f" (nothing matched {q!r} exactly; these are {why}: {wider!r})"
         if not ids:
-            return f"gmail_search: nothing matched {q!r}{note}."
+            # An address said aloud after a name is often one address heard in pieces (live:
+            # "tareknoorxyz@example.com" written down as "Tarek Noor xyz@example.com", searched as
+            # xyz@example.com, and nothing found).
+            spoken = (
+                " If they said that address aloud, the words just before it may be part of it "
+                "(\"Tarek Noor xyz@example.com\" may be tareknoorxyz@example.com): try it joined "
+                "up, or find the person by name with gmail_people."
+                if EMAIL.search(q)
+                else ""
+            )
+            return f"gmail_search: nothing matched {q!r}{note}.{spoken}"
         metas = await asyncio.gather(
             *(self._api("GET", f"{GMAIL}/messages/{i}", params={"format": "full"}) for i in ids)
         )
