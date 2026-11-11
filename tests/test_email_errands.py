@@ -498,3 +498,16 @@ async def test_the_question_reaches_the_notch(settings):
     assert not ready["ok"] and ready["title"] == "Which Alex?" and ready["body"] == question
     assert not rec.of("confirm")
     assert any(question in said for _, said in brain.history)  # so the next reply can answer it
+
+
+async def test_a_misheard_name_is_offered_back_and_never_used(tmp_path):
+    """Live: "send an email to Tarek Noor XYZ at example.com" was heard as "AreknoorXYZ". Nothing
+    matched, and Pyxi asked for the exact address though the person was in the sent mail."""
+    g = connector(tmp_path, mailbox())
+    out = await g.gmail_people({"name": "sam.rahmen@uni.edu"})  # one letter off
+    assert out.startswith("gmail_people: no one called exactly") and "misheard" in out
+    assert "Sam Rahman (sam.rahman@uni.edu)" in out
+    assert "Don't use any of these until they say yes" in out
+    # Nothing near it at all: the plain question, as before.
+    out = await g.gmail_people({"name": "zzyzx quorble"})
+    assert out == "gmail_people: no one like 'zzyzx quorble' in their recent mail. Ask the user for the address (one short question)."

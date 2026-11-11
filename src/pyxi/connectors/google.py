@@ -660,6 +660,18 @@ class GoogleConnector(Connector):
                 if when and (p["last"] is None or when > p["last"]):
                     p["last"] = when
         if not people:
+            # Nobody by that name. It may have been misheard ("AreknoorXYZ" for tareknoorxyz):
+            # the people they write to whose name or address is nearly it are offered back,
+            # to be confirmed, never used as they are.
+            near = await self._near_people(words, me) if named else []
+            if near:
+                return (
+                    f"gmail_people: no one called exactly {asked!r} in their mail, and the name "
+                    "may have been misheard. The nearest people they write to:\n"
+                    + "\n".join(f"- {_who(name, addr)}" for addr, name in near)
+                    + "\nAsk the user in one short question whether they mean the first one "
+                    "(say the name and the address). Don't use any of these until they say yes."
+                )
             return (
                 f"gmail_people: no one like {asked!r} in their recent mail. Ask the user for "
                 "the address (one short question)."
@@ -685,6 +697,42 @@ class GoogleConnector(Connector):
             f"Several people could be {asked!r}. Ask the user which one, in one short question "
             "naming the top two or three:\n" + "\n".join(lines)
         )
+
+    async def _near_people(self, words: list[str], me: set[str]) -> list[tuple[str, str]]:
+        """People they have written to lately whose name or address is nearly what was said:
+        (address, name), nearest first, three at most."""
+        import difflib
+
+        said = re.sub(r"[^a-z0-9]", "", " ".join(w.split("@")[0] for w in words))
+        if len(said) < 4:
+            return []
+        try:
+            ids = await self._list("in:sent", 40)
+            metas = await asyncio.gather(
+                *(
+                    self._api(
+                        "GET",
+                        f"{GMAIL}/messages/{i}",
+                        params={"format": "metadata", "metadataHeaders": ["To", "Cc"]},
+                    )
+                    for i in ids
+                )
+            )
+        except Exception:  # a look that fails: the plain "ask for the address" stands
+            return []
+        scored: dict[str, tuple[float, str]] = {}
+        for meta in metas:
+            h = self._headers(meta)
+            for name, addr in getaddresses([h.get("to", ""), h.get("cc", "")]):
+                addr = addr.lower()
+                if "@" not in addr or addr in me or NOREPLY.search(addr):
+                    continue
+                forms = [re.sub(r"[^a-z0-9]", "", addr.split("@")[0]), re.sub(r"[^a-z0-9]", "", name.lower())]
+                best = max(difflib.SequenceMatcher(None, said, f).ratio() for f in forms if f)
+                if best >= 0.72 and best > scored.get(addr, (0.0, ""))[0]:
+                    scored[addr] = (best, name.strip().strip('"'))
+        ranked = sorted(scored.items(), key=lambda item: item[1][0], reverse=True)
+        return [(addr, name) for addr, (_, name) in ranked[:3]]
 
     def _headers(self, msg: dict[str, Any]) -> dict[str, str]:
         return {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
