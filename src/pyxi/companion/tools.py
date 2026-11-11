@@ -278,7 +278,7 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "Teach them to do it themselves, in any app or site (Vercel, CapCut, Excel, Settings), one step at a "
         "time until they're done: mark the one thing to act on next, with an arrow to it, and say what to do "
         "and why in one short friendly sentence. Pyxi waits for them to do it (a click on the mark; for a "
-        "scroll, typing, a key or a drag it sees the screen change, or they press Done), looks at the new screen, and you give the next step (call guide again), until "
+        "scroll, typing, a key or a drag it sees the screen change, or they press Done or say 'done'), looks at the new screen, and you give the next step (call guide again), until "
         "the goal is reached (done=true, with a cheerful line). Use `use_computer` instead when they want "
         "you to do it for them. If you're not sure where things are in this version of the app, web_search "
         "the current steps first. Before a step that inserts or pastes something at the cursor, first "
@@ -290,7 +290,10 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "the finished result (a pivot with its rows and values filled in, not just the empty editor). "
         "A control listed as '(cut off at the bottom edge: only part of it shows)' needs a scroll first: "
         "action 'scroll' with its element_id and the direction, and Pyxi marks the list it is in. Never "
-        "give the step you just gave a second time: if they haven't done it, say one short line and wait. "
+        "give the step you just gave a second time: if they haven't done it, say one short line and wait "
+        "(only a scroll that hasn't brought the thing into view yet may be asked for once more). "
+        "Point at the control they act on: `element_id` is the switch, the button or the row itself, "
+        "never the words beside it, and `quote` is the words on it. "
         "If the app isn't on screen any more (they switched away), don't guess: say one short line and "
         "stop calling guide, which ends the coaching.",
         {

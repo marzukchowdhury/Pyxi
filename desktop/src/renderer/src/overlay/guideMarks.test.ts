@@ -46,6 +46,20 @@ describe("a click somewhere on the desktop, during a guide", () => {
     expect(guideClick({ rect: step.rect, action: "type" }, 120, 110)).toBeNull();
   });
 
+  it("inside the list of a scroll step is heard: they scrolled, and clicked what they came for", () => {
+    expect(guideClick({ rect: step.rect, action: "scroll" }, 120, 110)).toBe("within");
+    expect(guideClick({ rect: step.rect, action: "look" }, 120, 110)).toBe("within");
+    expect(guideClick({ rect: step.rect, action: "press" }, 120, 110)).toBe("within");
+    expect(guideClick({ rect: step.rect, action: "drag" }, 120, 110)).toBeNull();
+    expect(guideClick({ rect: step.rect, action: "scroll" }, 500, 500)).toBe("elsewhere");
+  });
+
+  it("on the drawn frame itself, a little outside the control, is still on the mark", () => {
+    expect(guideClick(step, 90, 92)).toBe("clicked");
+    expect(guideClick(step, 190, 140)).toBe("clicked");
+    expect(guideClick(step, 196, 110)).toBe("elsewhere");
+  });
+
   it("says nothing on a screen that has no mark, so one screen answers when all are told", () => {
     // The click is sent to every screen's overlay (it used to go to the main one only, and a
     // step marked on a second screen never heard its click).

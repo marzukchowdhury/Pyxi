@@ -209,12 +209,36 @@ async def test_two_turns_by_itself_at_most_then_it_waits(settings):
     brain, rec = make_brain(settings, llm=llm)
     brain.screen.foreground_title = lambda: "Settings - App"
     await brain.turn("guide me there")
-    for shade in (20, 60, 100):  # three clicks off the mark, each changing the screen
-        screen_changes(brain, shade)
-        await brain.guide_clicked("elsewhere")
+    for _ in range(3):  # three times the page changes with nothing done: Pyxi's own guesses
+        await brain.guide_clicked("moved")
     assert len(llm.prompts) == 3  # the request and two turns by itself: the third is not taken
     assert brain._guide is None and rec.of("guide")[-1]["active"] is False
     assert "I've lost track of where you are, so I'll stop pointing." in " ".join(said(rec))
+
+
+async def test_a_click_beside_the_mark_is_not_a_guess_and_gets_five_before_pyxi_gives_up(settings):
+    """Live, eight steps in twenty were done a little off the mark. Counted with Pyxi's own
+    guesses, three of those in a row ended the walk-through with "I've lost track"."""
+    n = iter(range(100))
+
+    class Following(Scripted):
+        async def complete(self, **kw):
+            self.default = step(f"Step {next(n)}", 1 + next(n) % 4)
+            return await super().complete(**kw)
+
+    llm = Following()
+    brain, rec = make_brain(settings, llm=llm)
+    brain.screen.foreground_title = lambda: "Settings - App"
+    await brain.turn("guide me there")
+    for shade in (20, 60, 100, 140, 180):
+        screen_changes(brain, shade)
+        await brain.guide_clicked("elsewhere")
+    assert len(llm.prompts) == 6 and brain._guide is not None and brain._guide.step == 6
+    assert not any("lost track" in s for s in said(rec))
+    screen_changes(brain, 220)
+    await brain.guide_clicked("elsewhere")  # the sixth with not one step done on its mark
+    assert len(llm.prompts) == 6 and brain._guide is None
+    assert "I've lost track of where you are" in " ".join(said(rec))
 
 
 async def test_a_step_done_in_between_starts_the_count_again(settings):
@@ -353,14 +377,14 @@ async def test_it_looks_only_once_they_have_touched_something_and_gone_quiet(set
     brain.screen.capture = counted
     await brain.turn("guide me there")
     await asyncio.sleep(2.6)
-    # The turn's own look, how the window looked as the mark went up (for a click off the
-    # mark), and how it looked once the mark had settled (for this).
-    assert len(looks) == 3
+    # The turn's own look, and how the window looked as the mark went up: for a click off
+    # the mark, and for this (it was a third look, taken once Pyxi had finished talking).
+    assert len(looks) == 2
     idle["s"] = 0.1  # they are at the keyboard
     screen_changes(brain)
     brain.screen.capture = counted
     await asyncio.sleep(1.4)
-    assert len(looks) == 3 and len(llm.prompts) == 1  # not while they are still at it
+    assert len(looks) == 2 and len(llm.prompts) == 1  # not while they are still at it
     idle["s"] = 1.5  # and now they have stopped
     for _ in range(60):
         if len(llm.prompts) > 1:
@@ -451,7 +475,10 @@ async def test_resting_the_mouse_on_a_row_does_not_start_a_turn(settings):
 
 
 async def test_a_turn_from_seeing_the_screen_change_counts_like_any_other_by_itself(settings):
-    """"Seen" set the count of automatic turns back to nought, so there was no end to them."""
+    """"Seen" set the count of automatic turns back to nought, so there was no end to them.
+    (A step seen done that leads to a new step is taken off the count again: that is how
+    every step goes in a window whose clicks can't be heard. What still ends it is the page
+    changing by itself, twice, with nothing new to give in between.)"""
     labels = iter(["Dark mode", "Settings", "General", "Export"])
     ids = {"Dark mode": 3, "Settings": 1, "General": 2, "Export": 4}
 
@@ -466,25 +493,43 @@ async def test_a_turn_from_seeing_the_screen_change_counts_like_any_other_by_its
     brain.screen.foreground_title = lambda: "Settings - App"
     await brain.turn("guide me there")
     await brain.guide_clicked("seen")
-    screen_changes(brain, 60)
-    await brain.guide_clicked("elsewhere")
-    assert brain._guide_autos == 2 and len(llm.prompts) == 3
-    await brain.guide_clicked("seen")  # the third in a row: not taken
-    assert len(llm.prompts) == 3 and brain._guide is None
+    assert brain._guide_autos == 0 and brain._guide.step == 2  # seen done, and a new step: following
+    await brain.guide_clicked("moved")
+    await brain.guide_clicked("moved")
+    assert brain._guide_autos == 2 and len(llm.prompts) == 4
+    await brain.guide_clicked("moved")  # the third in a row: not taken
+    assert len(llm.prompts) == 4
+    assert brain._guide is None
     assert "I've lost track of where you are" in " ".join(said(rec))
 
 
-async def test_the_same_step_after_only_seeing_a_change_is_refused(settings):
-    """It was left out of the refusal, so "Scroll down to Recovery." came again and again."""
+async def test_the_same_scroll_is_asked_once_more_and_not_a_third_time(settings):
+    """It was left out of the refusal, so "Scroll down to Recovery." came again and again.
+    Then it was refused outright, and a scroll that had not gone far enough ended the
+    walk-through. They did scroll: the same scroll may be asked for once more, as the same
+    step, and not again after that."""
     scroll = [("say", {"text": "Scroll down to Recovery."}), ("guide", {"goal": GOAL, "action": "scroll", "direction": "down", "label": "Recovery"})]
-    llm = Scripted(scroll, scroll, [("say", {"text": "Still below. Want to keep going?"})])
+    llm = Scripted(scroll, scroll, scroll, [("say", {"text": "Still below. Want to keep going?"})])
     brain, rec = make_brain(settings, llm=llm)
     brain.screen.foreground_title = lambda: "Settings - App"
     await brain.turn("guide me there")
     await brain.guide_clicked("seen")
-    assert "'Recovery' is the step you just gave" in llm.prompts[2]
-    assert [g["step"] for g in rec.of("guide") if g["active"]] == [1]
+    assert brain._guide is not None and brain._guide.again and brain._guide.step == 1
+    assert [g["step"] for g in rec.of("guide") if g["active"]] == [1, 1]
+    await brain.guide_clicked("seen")
+    assert "'Recovery' is the step you just gave" in llm.prompts[3]
+    assert [g["step"] for g in rec.of("guide") if g["active"]] == [1, 1]
     assert brain._guide is None and rec.of("guide")[-1]["active"] is False
+
+
+async def test_a_click_step_seen_changed_is_still_not_given_twice(settings):
+    llm = Scripted(step(), step(), [("say", {"text": "Want to carry on from Export?"})])
+    brain, _ = make_brain(settings, llm=llm)
+    brain.screen.foreground_title = lambda: "Settings - App"
+    await brain.turn("guide me there")
+    await brain.guide_clicked("seen")
+    assert "'Export' is the step you just gave" in llm.prompts[2]
+    assert brain._guide is None
 
 
 # ------------------------------------------------------------------ a key on screen
@@ -537,7 +582,7 @@ async def test_a_stray_click_on_a_page_showing_a_key_starts_nothing(settings):
     for _ in range(3):
         await brain.guide_clicked("elsewhere")  # a click that changed nothing at all
     assert len(llm.prompts) == 1 and brain._guide is not None and brain._guide.step == 1
-    assert brain.screen.glances == 4
+    assert brain.screen.glances >= 4  # each click: is the page still arriving, then did it change
     # The glance has the key in it, so it goes nowhere: the model got the look with the key
     # blacked out and nothing else, and nothing of the glance is kept with the turn.
     assert len(brain._images) == 1
@@ -627,7 +672,7 @@ CARD = {
     "title": "Who sent this, and when",
     "closing": "Want me to draft that reply?",
     "items": [
-        {"text": "Sent under Elizabeth's name", "element_id": 3, "say": "The sender name is Elizabeth Thomas, but the mail comes from a jobalerts address."},
+        {"text": "Sent under Dana's name", "element_id": 3, "say": "The sender name is Dana Reyes, but the mail comes from a jobalerts address."},
         {"text": "Interview: tomorrow, 8 AM Pacific", "element_id": 4, "say": "The date and time are in the body: Wednesday the 11th, 8 AM Pacific."},
     ],
 }

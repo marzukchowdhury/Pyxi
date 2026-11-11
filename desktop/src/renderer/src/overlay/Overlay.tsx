@@ -147,9 +147,9 @@ export function Overlay() {
       if (what === "clicked") {
         useOverlay.setState((s) => ({ annotations: s.annotations.filter((a) => !a.guide) }));
         brain.send({ type: "guide_clicked", how: "clicked" });
-      } else if (what === "elsewhere" && performance.now() - lastElsewhere > 1500) {
+      } else if (what && performance.now() - lastElsewhere > 1500) {
         lastElsewhere = performance.now();
-        brain.send({ type: "guide_clicked", how: "elsewhere" });
+        brain.send({ type: "guide_clicked", how: what });
       }
     });
   }, []);

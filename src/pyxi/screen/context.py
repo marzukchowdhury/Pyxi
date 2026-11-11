@@ -504,6 +504,14 @@ class ScreenReader:
         shot = self.glance((ctx.origin[0], ctx.origin[1], ctx.screenshot.width, ctx.screenshot.height))
         return ocr.read_lines(shot, ctx.origin) if shot is not None else None
 
+    def words_in(self, rect: tuple[int, int, int, int]) -> list[TextLine] | None:
+        """The words in one part of the screen now (pixels and OCR, nothing kept or sent):
+        has a scroll brought what it was for into view? None when it can't be read."""
+        if not self.config.ocr:
+            return None
+        shot = self.glance(rect)
+        return ocr.read_lines(shot, (rect[0], rect[1])) if shot is not None else None
+
     @staticmethod
     def input_idle_s() -> float | None:
         """Seconds since the mouse or keyboard was last touched (when, never what)."""

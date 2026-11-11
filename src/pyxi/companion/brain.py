@@ -21,6 +21,7 @@ import asyncio
 import base64
 import dataclasses
 import io
+import itertools
 import json
 import logging
 import random
@@ -84,6 +85,7 @@ from pyxi.companion.notes import (
     place_stage,
     result_card,
     scroll_area,
+    step_rect,
     target_rect,
     where_they_were,
 )
@@ -2040,12 +2042,9 @@ class Brain:
         if ctx is None:
             return None
         # The box is still only a guess, but it says which of two places with the same words
-        # was meant: "Settings" is on the pinned app and in the search box's hint.
-        exact = target_rect(
-            ctx,
-            {"element_id": args.get("element_id"), "quote": args.get("quote")},
-            near=near_point(ctx, args),
-        )
+        # was meant: "Settings" is on the pinned app and in the search box's hint. And the
+        # mark is the control, whole, not the words on or beside it (notes.step_rect).
+        exact = step_rect(ctx, args, near=near_point(ctx, args))
         if exact:
             return exact
         guess = resolve_rect(ctx, None, args.get("box"))
@@ -2071,11 +2070,19 @@ class Brain:
             return None
         return (point[0] - w // 2, point[1] - h // 2, w, h)
 
-    async def guide_clicked(self, how: str = "clicked") -> None:
-        """They did the step (clicked the mark, or pressed Done), or did something else that
-        changed the screen: look again and give the next step, until the goal is reached."""
+    async def guide_clicked(self, how: str = "clicked", heard: str = "") -> None:
+        """They did the step (clicked the mark, pressed Done, or said so: ``heard``), or did
+        something else that changed the screen: look again and give the next step, until the
+        goal is reached."""
         guide = self._guide
         if guide is None or getattr(self, "_guide_advanced", None) is guide:
+            return
+        watcher = getattr(self, "_step_watcher", None)
+        if how == "elsewhere" and guide.action == "type" and watcher and not watcher.done():
+            # A click beside the field and the first letters going in: they are typing. Live
+            # that was "you clicked something else", three times in one field, and "there's
+            # a stray V in the code box" halfway through the code. The step's own watcher
+            # looks once the keys have gone quiet.
             return
         for _ in range(150):  # they were quicker than Pyxi's turn: wait for it, don't drop it
             if not self._lock.locked():
@@ -2083,11 +2090,20 @@ class Brain:
             await asyncio.sleep(0.2)
         if self._guide is not guide:
             return
+        self._guide_busy = getattr(self, "_guide_busy", 0) + 1  # a next step is being worked out
+        try:
+            await self._next_step(guide, how, heard)
+        finally:
+            self._guide_busy -= 1
+
+    async def _next_step(self, guide: Guide, how: str, heard: str = "") -> None:
+        """Look at what the step did and have the model give the next one (guide_clicked)."""
         log.info("guide: %s on step %d (%s)", how, guide.step, guide.label)
-        if how != "elsewhere":
+        stray = how in ("elsewhere", "within")  # a click that was not on a click step's mark
+        if not stray:
             self._guide_advanced = guide  # a click and the page change it causes: one next step
-        await asyncio.sleep(0.8)  # let the app react before looking
-        if how == "elsewhere":
+        await self._settled(getattr(self, "_guide_view", None))  # let the app react before looking
+        if stray:
             # They clicked somewhere other than the mark. Only worth a new look if it changed
             # something (they found another way, or wandered off): a stray click changes nothing.
             before, view = getattr(self, "_guide_glance", None), getattr(self, "_guide_view", None)
@@ -2102,7 +2118,7 @@ class Brain:
             if getattr(self, "_guide_advanced", None) is guide:
                 return
             self._guide_advanced = guide
-        if how in ("elsewhere", "moved", "seen") and self._guide_left(guide):
+        if how in ("elsewhere", "within", "moved", "seen") and self._guide_left(guide):
             # They closed it, tucked it away or went to something else. Live, after Settings
             # was closed, Pyxi told them twice to start over from the Start button. Now it
             # says so once and waits for their words: no look, no model, no next step.
@@ -2112,27 +2128,37 @@ class Brain:
                 "Say carry on when you want the next step.",
             )
             return
-        if how in ("elsewhere", "moved", "seen"):
+        if how in ("moved", "seen"):
             # Turns Pyxi starts by itself, with no step done in between: two at most. A third
             # is Pyxi talking to someone who has gone their own way. "The screen changed, so
             # I think they did it" is Pyxi's own guess and counts like the others: left out,
             # a row's hover tint started thirteen turns in forty seconds. Only a click on
             # the mark or Done (or their own words) starts the count again.
             self._guide_autos = getattr(self, "_guide_autos", 0) + 1
-            if self._guide_autos > 2:
-                await self._end_guide(
-                    guide,
-                    "I've lost track of where you are, so I'll stop pointing. Say next when "
-                    "you want the next step.",
-                )
-                return
+        elif stray:
+            # A click of their own that changed the screen is not Pyxi's guess, and is often
+            # the step itself, done a little off the mark: five of those in a row before
+            # Pyxi takes it that they have gone their own way (it was two, with the guesses,
+            # and someone who clicked beside three marks was told "I've lost track").
+            self._guide_strays = getattr(self, "_guide_strays", 0) + 1
         else:
-            self._guide_autos = 0
+            self._guide_autos = self._guide_strays = 0
+        if getattr(self, "_guide_autos", 0) > 2 or getattr(self, "_guide_strays", 0) > 5:
+            await self._end_guide(
+                guide,
+                "I've lost track of where you are, so I'll stop pointing. Say next when "
+                "you want the next step.",
+            )
+            return
         self._guide_how = how  # what set this turn off: a step repeated after nothing was done is refused
         said = {
             "clicked": f"I did step {guide.step} ({guide.action} '{guide.label}').",
             "done": f"I did step {guide.step} ({guide.action} '{guide.label}') and pressed Done.",
+            "said": f"About step {guide.step} ({guide.action} '{guide.label}') I said: \"{heard[:80]}\". "
+            "Take it that I did it, unless the screen shows I haven't.",
             "elsewhere": f"Instead of '{guide.label}' I clicked something else, and the screen changed.",
+            "within": f"On step {guide.step} ({guide.action} '{guide.label}') I clicked something "
+            "inside the marked area, and the screen changed: I may have done the step and gone on.",
             "moved": f"The page changed after step {guide.step}.",
             "seen": f"The screen changed after step {guide.step} ({guide.action} '{guide.label}'), "
             "so I think I did it.",
@@ -2140,7 +2166,7 @@ class Brain:
         last = (
             f" That was the last step you planned ({guide.step} of {guide.total}): unless the screen "
             "clearly shows it didn't work, the goal is reached."
-            if how != "elsewhere" and guide.total and guide.step >= guide.total
+            if not stray and guide.total and guide.step >= guide.total
             else ""
         )
         # One rule with the guide tool's own words: carry on inside the app, never guess or
@@ -2151,11 +2177,49 @@ class Brain:
             f"{guide.goal}. If I went a different way in the same app, carry on from where I am. "
             "If what you need isn't on screen any more (I closed it or switched away), don't "
             "guess and don't start over: say one short line and don't call guide. Never give "
-            "the step you just gave again. If the goal is reached, tell me and call guide with "
-            "done=true.)",
-            shown="Next step" if how != "clicked" else f"Clicked {guide.label}",
+            "the step you just gave again (a scroll that hasn't brought the thing into view "
+            "yet may be asked for once more). If the goal is reached, tell me and call guide "
+            "with done=true. Say only the next step, in one short sentence: no praise, and no "
+            "account of what I just did or what is open now.)",
+            shown=heard or ("Next step" if how != "clicked" else f"Clicked {guide.label}"),
             synthetic=True,
         )
+
+    async def _step_said(self, heard: str) -> None:
+        """They said the step is done ("done", "okay", "what's next")."""
+        guide = self._guide
+        if guide is not None and getattr(self, "_guide_advanced", None) is guide:
+            # The next step was already on its way, from their click. Pressing talk can cut
+            # that turn short, and a turn cut short marks nothing and ends the walk-through:
+            # live that was silence. So wait for it, and if no new step came of it, this
+            # one is still the step they are talking about.
+            for _ in range(150):
+                if not self._lock.locked() and not getattr(self, "_guide_busy", 0):
+                    break
+                await asyncio.sleep(0.2)
+            if self._guide is not None and self._guide is not guide:
+                return  # it came, and is marked: nothing more to do
+            self._guide, self._guide_advanced = guide, None
+        await self.guide_clicked("said", heard=heard)
+
+    async def _settled(self, view: tuple[int, int, int, int] | None) -> None:
+        """Wait until what a step did has finished arriving, then return: a menu opens in a
+        blink, a web page takes a second or two, and a look taken 0.8 s after every click
+        read half-loaded pages (and the step given from one pointed at what then moved).
+        Half a second at least, then until two looks 0.3 s apart are the same, a little over
+        two seconds at most (a video or a spinner never holds still)."""
+        await asyncio.sleep(0.5)
+        if view is None or self.overlay_in_capture or getattr(self.screen, "glance", None) is None:
+            # No cheap look to compare (or each one would blank Pyxi's drawings): as before.
+            await asyncio.sleep(0.3)
+            return
+        last = await self._view_of(view)
+        for _ in range(6):
+            await asyncio.sleep(0.3)
+            now = await self._view_of(view)
+            if last is None or now is None or _same_view(last, now):
+                return
+            last = now
 
     async def _view_of(self, rect: tuple[int, int, int, int] | None) -> Image.Image | None:
         """What one part of the screen looks like now, to compare with how it looked: pixels
@@ -2209,7 +2273,7 @@ class Brain:
     async def _end_guide(self, guide: Guide | None = None, line: str = "") -> None:
         """Stop the walk-through and take its mark off the screen. With a line, say why, and
         leave a note in the conversation so "carry on" knows what was being done."""
-        self._guide, self._guide_trail, self._guide_autos = None, [], 0
+        self._guide, self._guide_trail, self._guide_autos, self._guide_strays = None, [], 0, 0
         watcher = getattr(self, "_step_watcher", None)
         if watcher and not watcher.done() and watcher is not asyncio.current_task():
             watcher.cancel()
@@ -2255,6 +2319,29 @@ class Brain:
         self._reread = (ctx, time.monotonic(), lines)
         return lines
 
+    async def _words_showing(self, view: tuple[int, int, int, int], words: str) -> bool | None:
+        """Are these words in that part of the screen now? Pixels and OCR, nothing kept.
+        None when it can't be told (no OCR, sharing paused, a screen that only looks whole)."""
+        from pyxi.screen.ocr import find_text
+
+        read = getattr(self.screen, "words_in", None)
+        if read is None or len(re.sub(r"\W", "", words)) < 3:
+            return None
+        if not self.overlay_in_capture:
+            lines = await asyncio.to_thread(read, view)
+        else:
+            await self.hub.emit("capture_hide")  # Pyxi's own caption may have the words in it
+            await asyncio.sleep(0.09)
+            try:
+                lines = await asyncio.to_thread(read, view)
+            finally:
+                await self.hub.emit("capture_show")
+        if not lines:
+            return None  # not read (or not a word on it, which is the reader failing too)
+        hit = find_text(lines, words)
+        # In view means all of it: a row half under the bottom edge still needs the scroll.
+        return hit is not None and hit[1] + hit[3] <= view[1] + view[3] - 4
+
     async def _as_it_is_now(
         self, ctx: ScreenContext, args: dict[str, Any], rect: tuple[int, int, int, int]
     ) -> tuple[bool, tuple[int, int, int, int] | None]:
@@ -2299,10 +2386,25 @@ class Brain:
         if old and not old.done():
             old.cancel()
         view = getattr(self, "_guide_view", None)
-        if guide.action not in ("scroll", "type", "press", "drag") or view is None:
-            return
         idle = getattr(self.screen, "input_idle_s", None)
-        quiet = 2.0 if guide.action == "type" else 0.9  # typing has pauses in it
+        # A click step waits for its click, and the click is heard by a hook that hears
+        # nothing while a window run as administrator is in front (Task Manager, the
+        # Registry Editor, an installer), nor a step done from the keyboard. Those sat on
+        # the step for good. So a click step is watched too, as a last resort: only once
+        # they have been quiet for longer than a heard click takes to be acted on, and only
+        # for a page that is plainly another page (a hover or a tooltip never is).
+        last_resort = guide.action.endswith("click") or guide.action == "look"
+        if view is None or (last_resort and idle is None):
+            return
+        if not last_resort and guide.action not in ("scroll", "type", "press", "drag"):
+            return
+        quiet = 2.5 if last_resort else 2.0 if guide.action == "type" else 0.9  # typing has pauses in it
+        drawn = time.monotonic()
+        # How it looked as the mark went up. It used to be how it looked once Pyxi had
+        # finished saying the step, and live they had scrolled (and clicked what they were
+        # scrolling to) before the sentence ended: the "before" was already the "after",
+        # nothing ever changed again, and the walk-through sat there.
+        first = getattr(self, "_guide_glance", None)
 
         def waiting() -> bool:
             return self._guide is guide and getattr(self, "_guide_advanced", None) is not guide
@@ -2310,17 +2412,24 @@ class Brain:
         def changed(was: Image.Image, now: Image.Image) -> bool:
             # For a scroll, only a scroll counts: a hovered row's tint, a tooltip or a video
             # frame is a change too, and each one used to start a turn.
+            if last_resort:
+                return view_replaced(was, now)
             return view_scrolled(was, now) if guide.action == "scroll" else not _same_view(was, now)
 
         async def watch() -> None:
             await asyncio.sleep(1.2)  # the mark draws itself and the app settles
             while self._lock.locked() and waiting():
                 await asyncio.sleep(0.3)  # Pyxi is still saying the step
-            before = await self._view_of(view) if waiting() else None
+            before = first
+            if before is None and waiting():
+                before = await self._view_of(view)
             if before is None:
                 return
-            touched = False
+            age = idle() if idle else None
+            # At it already, while Pyxi was still talking: that counts as touched.
+            touched = first is not None and age is not None and age < time.monotonic() - drawn
             looked = time.monotonic()
+            held, held_at = 0, 0.0  # a scroll that hasn't brought its words into view yet
             for _ in range(900):  # up to ~9 minutes
                 await asyncio.sleep(0.6)
                 if not waiting():
@@ -2328,6 +2437,11 @@ class Brain:
                 if self._lock.locked():
                     continue  # a turn is under way: its answer decides what comes next
                 age = idle() if idle else None
+                if held_at and time.monotonic() - held_at > 2.5 and (age is None or age >= quiet):
+                    # They scrolled, what they were scrolling to isn't in view, and they have
+                    # stopped: waiting for Pyxi, then. It looks and says what is next.
+                    self._spawn(self.guide_clicked("seen"))
+                    return
                 if age is not None:
                     if age < quiet:
                         touched = True  # still at it
@@ -2348,8 +2462,15 @@ class Brain:
                     again = await self._view_of(view)
                     if again is None or not _same_view(now, again):
                         continue
-                if waiting():
-                    self._spawn(self.guide_clicked("seen"))
+                if not waiting():
+                    return
+                unsure = guide.action == "scroll" and guide.words and held < 2
+                if unsure and await self._words_showing(view, guide.words) is False:
+                    # A notch of the wheel, and the thing is still out of view: no turn
+                    # (and no "a bit more") while they are still on their way to it.
+                    held, held_at, before = held + 1, time.monotonic(), now
+                    continue
+                self._spawn(self.guide_clicked("seen"))
                 return
 
         self._step_watcher = asyncio.ensure_future(watch())
@@ -2580,6 +2701,11 @@ class Brain:
         address in it never counts as the user naming that person)."""
         if getattr(self, "_object_shut", False) and _PART_CLICKED.match(user_text or ""):
             return  # a click on a model they have since closed
+        if not synthetic and self._guide is not None and step_said_done(user_text):
+            # Mid walk-through, "done", "okay" and "what's next" are the step done, like a
+            # press on its Done button: Pyxi looks and gives the next one.
+            await self._step_said(user_text.strip())
+            return
         self.warm_voice()  # the voice loads while the model thinks, if it was let go
         behind = self._turn_id if self._lock.locked() else ""  # sent while that turn still ran
         async with self._lock:
@@ -3534,17 +3660,43 @@ class Brain:
                     },
                 )
                 to = (dest[0] + dest[2] // 2, dest[1] + dest[3] // 2) if dest else None
+            words = ""
             if action == "scroll" and ctx is not None:
+                words = scroll_words(ctx, args, label)  # read before the row becomes the list
                 rect = scroll_area(ctx, args.get("element_id"), rect)  # the list, not the row
-            if getattr(self, "_guide_fresh", False):
-                self._guide_autos, self._guide_how = 0, ""  # they spoke: a fresh count
-            going = self._guide if not getattr(self, "_guide_fresh", False) else None
+            elif ctx is not None and action != "drag":
+                # The look this step was read from is seconds old (the model took that long
+                # to answer), and they don't wait: live they had clicked on before the mark
+                # was drawn, and it went up on a page that was no longer there. The words
+                # are read again: moved, the mark moves with them; gone, the step is stale.
+                there, now = await self._as_it_is_now(ctx, args, rect)
+                if not there:
+                    return (
+                        f"guide: '{label}' was there when you looked, a few seconds ago, and "
+                        "isn't now: the screen has changed (they may have done the step "
+                        "already). Nothing was marked. Call look_again with seconds 0.5, "
+                        "then give the step for the screen as it is."
+                    )
+                rect = now or rect
+            fresh = getattr(self, "_guide_fresh", False)
+            if fresh:
+                # They spoke: a fresh count of the turns Pyxi takes by itself.
+                self._guide_autos, self._guide_strays, self._guide_how = 0, 0, ""
+            # A new request starts a new walk-through at step 1. Words about the one under
+            # way ("where is it?", "I can't see it") don't: the count carries on.
+            going = self._guide if not fresh or same_goal(self._guide, str(args["goal"])) else None
+            same = going is not None and going.label.lower() == label.lower() and going.action == action
+            again = (
+                same
+                and action == "scroll"
+                and getattr(self, "_guide_how", "") in ("seen", "within")
+                and not going.again
+            )  # they did scroll, and it isn't in view yet: the same scroll, once more
             if (
-                going is not None
+                same
+                and not again
                 and getattr(self, "_synthetic", False)
-                and getattr(self, "_guide_how", "") in ("elsewhere", "moved", "seen")
-                and going.label.lower() == label.lower()
-                and going.action == action
+                and getattr(self, "_guide_how", "") in ("elsewhere", "within", "moved", "seen")
             ):
                 # Nothing was done since that step, and here it is again. Live: "start over
                 # from the Start button", twice, to someone who had left the walk-through.
@@ -3554,7 +3706,17 @@ class Brain:
                     "don't call guide: the walk-through waits for their words."
                 )
             self._guide_fresh = False
-            step = going.step + 1 if going else 1  # one guide at a time: keep counting
+            if going is not None and not same and getattr(self, "_guide_how", "") == "seen":
+                # They touched something, the screen changed, and there is a new step to
+                # give: that is someone following, not Pyxi talking to itself. (A step seen
+                # done is how every step goes in a window whose clicks can't be heard, and
+                # the third one in a row was "I've lost track of where you are".)
+                self._guide_autos = max(0, getattr(self, "_guide_autos", 0) - 1)
+            # One guide at a time: keep counting. A scroll asked once more is the same step,
+            # and so is a step shown again because they asked where it was, or said "done"
+            # when the screen shows it isn't.
+            shown_again = same and (fresh or getattr(self, "_guide_how", "") == "said")
+            step = (going.step if again or shown_again else going.step + 1) if going else 1
             total = (
                 int(args["steps_total"]) if str(args.get("steps_total") or "").isdigit() else None
             )
@@ -3589,6 +3751,8 @@ class Brain:
                 hwnd=ctx.window.hwnd if ctx else 0,
                 app=ctx.window.app if ctx else "",
                 title=ctx.window.title if ctx else "",
+                words=words,
+                again=bool(again),
             )
             # How this part of the screen looks now, to tell later whether anything changed:
             # the window, or the whole picture when no window was read (its tree failed).
@@ -4850,6 +5014,58 @@ def only_polite(text: str) -> str | None:
     return "heard"
 
 
+# Said in the middle of a walk-through, these are "I did it, what's next": the step is taken
+# as done and the next one comes. Live, "Done." after a scroll step was taken for "okay, got
+# it" (which asks for nothing), answered with nothing, and ended the walk-through in silence.
+_STEP_SAID_LEAD = r"(?:(?:ok(?:ay)?|alright|all\s+right|yeah|yes|yep|yup|well|so|and|now|right|hey|pyxi)\W+)*"
+_STEP_SAID_ONE = (
+    r"(?:(?:all\s+)?done|finished|did\s+(?:it|that|this)"
+    r"|i(?:'ve|\s+have)?\s+(?:just\s+)?(?:done|did|clicked|pressed|typed|scrolled|opened|selected|found|pasted|entered)"
+    r"(?:\s+(?:it|that|this|them|there|down|up|on\s+it))?(?:\s+(?:now|already))?"
+    r"|i(?:'?m|\s+am)\s+(?:done|there|here|in)|(?:it'?s|that'?s)\s+(?:done|open|there|on)"
+    r"|(?:the\s+)?next(?:\s+(?:step|one))?|what(?:'s|\s+is)?\s+(?:the\s+)?next(?:\s+step)?"
+    r"|what\s+now|now\s+what|what\s+then|then\s+what|then|and\s+then|what\s+do\s+i\s+do\s+(?:next|now)"
+    r"|carry\s+on|continue|keep\s+going|go\s+on|go\s+ahead|move\s+on"
+    r"|got\s+it|ok(?:ay)?|alright|yes|yeah|yep|yup)"
+)
+_STEP_SAID = re.compile(
+    rf"(?i)^\W*{_STEP_SAID_LEAD}{_STEP_SAID_ONE}(?:\W+{_STEP_SAID_LEAD}{_STEP_SAID_ONE})*"
+    r"(?:\W+(?:pyxi|now|please))*\W*$"
+)
+
+
+def step_said_done(text: str) -> bool:
+    """Are these words, said mid walk-through, only "done", "okay" or "what's next"?"""
+    return len(text or "") <= 60 and bool(_STEP_SAID.match(text or ""))
+
+
+def same_goal(guide: Guide | None, goal: str) -> bool:
+    """Is a step asked for in new words still the walk-through under way? Its goal, mostly
+    (the model words it a little differently each time)."""
+    if guide is None:
+        return False
+    a, b = (
+        {w for w in re.findall(r"[a-z0-9']{3,}", t.lower()) if w not in _SMALL_WORDS}
+        for t in (guide.goal, goal)
+    )
+    return bool(a and b) and len(a & b) / min(len(a), len(b)) >= 0.6
+
+
+def scroll_words(ctx: ScreenContext, args: dict[str, Any], label: str) -> str:
+    """The words a scroll step is scrolling to, to read off the screen whether they are in
+    view yet: the quote, else the control's name when it is short enough to be found as it
+    is written, else the label when the control's name has it. Empty when there are none."""
+    quote = str(args.get("quote") or "").strip()
+    if quote:
+        return quote[:60]
+    e = ctx.element(int(args["element_id"])) if str(args.get("element_id") or "").isdigit() else None
+    name = (e.name if e else "").strip()
+    if name and len(name.split()) <= 4:
+        return name[:60]
+    plain = re.sub(r"\s*\([^)]*\)\s*$", "", label).strip()
+    return plain if len(plain) >= 3 and plain.lower() in name.lower() else ""
+
+
 def guide_step_words(calls: list[dict[str, Any]]) -> str:
     """A guide step said in words, from what the model marked, when it gave no words of its
     own: "Click Advanced startup: Restart now." Empty when this turn marked no step."""
@@ -5354,6 +5570,20 @@ def view_scrolled(before: Image.Image, after: Image.Image) -> bool:
         lo, hi = int(lines[0]), int(lines[-1]) + 1
         if hi - lo < 0.25 * m.shape[0]:
             continue  # one row lit up, a tooltip: too little of the view for a scroll
+        # A list scrolled by whole rows: every row lands where another row was, so the
+        # boxes are the same and only the words in them differ. That is a little change in
+        # each of many rows, all the way down, and it is what a scrolled list really looks
+        # like (live, in Windows Settings: 2% of the view changed, in ten thin stripes, and
+        # it was called no scroll; so was a jump too far for the two pictures to overlap).
+        # A hover is one stripe, a highlight that moved is two, a video is one thick one.
+        stripes = _stripes(lines)
+        if axis == 0 and hi - lo >= 0.4 * m.shape[0] and stripes >= 4:
+            return True
+        if stripes in (2, 3):
+            # The highlight went from one row to the next (and a tooltip came with it). In
+            # a small window two rows are a good part of the view, and sliding one picture
+            # by a row lines the two highlights up: it passed for a scroll.
+            continue
         bands = [m[i : i + 9].any() for i in range(lo, hi, 9)]
         if sum(bands) < 0.7 * len(bands):
             continue  # two spots far apart (the highlight went from one row to another)
@@ -5377,6 +5607,32 @@ def view_scrolled(before: Image.Image, after: Image.Image) -> bool:
         if best < 0.4 * still:
             return True
     return False
+
+
+def view_replaced(before: Image.Image, after: Image.Image) -> bool:
+    """Is this plainly another page (or the same one scrolled), and not something that came
+    and went on it? Most of it is new; or a little of it changed in many places all the way
+    down, which is what words replaced by other words look like. A row lit by the mouse, a
+    tooltip and a video are one stripe, and a highlight that moved is two."""
+    import numpy as np
+
+    size = (320, 180)
+    a = np.asarray(before.convert("L").resize(size, Image.BOX), dtype=np.int16)
+    b = np.asarray(after.convert("L").resize(size, Image.BOX), dtype=np.int16)
+    moved = np.abs(a - b) > 20
+    if float(moved.mean()) >= 0.5:
+        return True
+    lines = np.where(moved.any(axis=1))[0]
+    if not len(lines):
+        return False
+    return int(lines[-1]) + 1 - int(lines[0]) >= 0.4 * moved.shape[0] and _stripes(lines) >= 4
+
+
+def _stripes(lines: Any) -> int:
+    """How many separate stripes these changed lines make (a gap of two lines or more
+    between them starts a new one)."""
+    rows = [int(v) for v in lines]
+    return 1 + sum(1 for a, b in itertools.pairwise(rows) if b - a > 2) if rows else 0
 
 
 def _strips(picture: Image.Image, axis: int) -> Any:

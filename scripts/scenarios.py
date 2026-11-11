@@ -466,6 +466,23 @@ NIGHT_SCENARIOS = [
 ]
 SCENARIOS += NIGHT_SCENARIOS
 
+# The steps after the first one of a walk-through: the turns Pyxi starts by itself when they
+# click the mark. The question is the step they have just done: "step|action|label|goal".
+# (The screens are the founder's own, of 10 and 11 November: each is what was on screen
+# once that step was done.)
+BOOT = "Open UEFI firmware settings (BIOS) from Windows Recovery, without the Delete key"
+PASSWORD = "Change the Facebook password"
+SETTINGS_HOME, SYSTEM_PAGE, FB_MENU, FB_ACCOUNTS = "turn_9c08ecf4", "turn_e668c9fc", "turn_9f297a5e", "turn_db1a58ec"
+NEXT_STEP_SCENARIOS = [
+    # Live: Recovery was under the bottom edge of the list. A scroll for it, by its element.
+    ("guide next scroll", SYSTEM_PAGE, f"1|click|System|{BOOT}", "next_step:scroll"),
+    ("guide next menu", FB_MENU, f"1|click|Account menu|{PASSWORD}", "next_step"),
+    ("guide next accounts", FB_ACCOUNTS, f"4|click|Accounts Center|{PASSWORD}", "next_step"),
+    # They said "done" and had not done it (Settings is still on Home): the same step again.
+    ("guide next not done", SETTINGS_HOME, f"said|click|System|{BOOT}", "next_step:same"),
+]
+SCENARIOS += NEXT_STEP_SCENARIOS
+
 # What Pyxi must never sound like, in any scenario.
 STOCK = re.compile(r"\b(roger that|copy that|aye aye|leave it with me|on the case|say no more)\b", re.I)
 
@@ -746,7 +763,19 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     brain.connectors.google.connected = lambda: True  # type: ignore[method-assign]
     specialist_fakes(brain, background, name)
     started = time.monotonic()
-    await brain.turn(question)
+    before = None
+    if expect.startswith("next_step"):
+        from pyxi.companion.notes import Guide
+
+        n, action, label, goal = question.split("|", 3)
+        before = Guide(goal=goal, label=label, rect=(0, 0, 40, 40), step=1 if n == "said" else int(n), action=action, total=6)
+        brain._guide, brain._guide_view = before, None
+        if n == "said":
+            await brain.turn("Done.")
+        else:
+            await brain.guide_clicked("clicked")
+    else:
+        await brain.turn(question)
     await asyncio.sleep(0.3)
     took = time.monotonic() - started
     tools = [c["tool"] for c in brain._calls]
@@ -862,6 +891,23 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         not any(b.startswith("delegate ledger") for b in background) or "use_computer" in tools
     ):
         problems.append("didn't hand it to Ledger")
+    if expect.startswith("next_step"):
+        step = brain._guide
+        given = next((c.get("arguments") or {} for c in reversed(brain._calls) if c["tool"] == "guide"), {})
+        if step is None or step is before:
+            problems.append(f"no next step marked ({[c.get('note') for c in brain._calls if c.get('note')]})")
+        elif expect.endswith(":same") and step.label.lower() != before.label.lower():
+            problems.append(f"went on to '{step.label}' though the step was not done")
+        elif not expect.endswith(":same") and step.label.lower() == before.label.lower():
+            problems.append("gave the step they had just done again")
+        if expect.endswith(":scroll") and (given.get("action") != "scroll" or given.get("element_id") is None):
+            problems.append(f"no scroll by element for what is under the edge ({given})")
+        if len(re.findall(r"[.!?](\s|$)", said)) > 2 or len(said) > 170:
+            problems.append(f"more than the next step ({len(said)} chars)")
+        if re.match(r"\W*(good|great|nice|perfect|well done|awesome|excellent)\b", said, re.I):
+            problems.append("praise before the step")
+        if any(b.startswith("hands") for b in background):
+            problems.append("did it instead of teaching")
     if expect == "teach":
         if any(b.startswith("hands") for b in background):
             problems.append("did it instead of teaching")

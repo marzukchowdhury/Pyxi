@@ -591,7 +591,9 @@ def create_app(
         elif kind == "guide_clicked":
             how = str(msg.get("how") or "clicked")
             brain._spawn(
-                brain.guide_clicked(how if how in ("clicked", "done", "elsewhere") else "clicked")
+                brain.guide_clicked(
+                    how if how in ("clicked", "done", "elsewhere", "within") else "clicked"
+                )
             )
         elif kind == "guide_cancel":
             brain._guide = None

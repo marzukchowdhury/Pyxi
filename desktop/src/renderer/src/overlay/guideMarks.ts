@@ -38,17 +38,25 @@ export function labelSize(text: string, done = false): { w: number; h: number } 
  * screen: "clicked" on the mark of a click step, "elsewhere" off it, nothing when this screen
  * has no mark. Every screen's overlay is told of every click and only the one holding the mark
  * answers, so a step on a second screen hears its click too.
+ *
+ * "within": a click inside the area of a scroll, look or key step. "Scroll down to Recovery"
+ * frames the whole list, and people scroll and then click Recovery, which is inside it. That
+ * click was nothing at all, and the walk-through sat on a page they had already left. Inside
+ * a field they are to type in (or the start of a drag) a click is still not a step.
  */
 export function guideClick(
   target: { rect?: readonly number[] | null; action?: string | null } | undefined,
   x: number,
   y: number,
-): "clicked" | "elsewhere" | null {
+): "clicked" | "elsewhere" | "within" | null {
   if (!target?.rect) return null;
   const [rx, ry, rw, rh] = target.rect;
-  const pad = 6;
+  // A mark is drawn a little outside its control, and people aim at the drawing: a click
+  // on the frame itself (or a hair outside it) is a click on the step.
+  const pad = 12;
   const inside = x >= rx - pad && y >= ry - pad && x <= rx + rw + pad && y <= ry + rh + pad;
   const clicky = !target.action || target.action.endsWith("click");
-  if (inside) return clicky ? "clicked" : null; // inside a field they are to type in: not a step yet
-  return "elsewhere";
+  if (!inside) return "elsewhere";
+  if (clicky) return "clicked";
+  return target.action === "type" || target.action === "drag" ? null : "within";
 }

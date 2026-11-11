@@ -538,7 +538,7 @@ export type ClientMessage =
   | { type: "set"; key: string; value: unknown }
   | { type: "notice"; message: string }
   | { type: "voice_catalog" }
-  | { type: "guide_clicked"; how?: "clicked" | "done" | "elsewhere" }
+  | { type: "guide_clicked"; how?: "clicked" | "done" | "elsewhere" | "within" }
   | { type: "connectors" }
   | { type: "routines" }
   | { type: "routine_delete"; id: string }

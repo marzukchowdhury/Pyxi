@@ -175,7 +175,58 @@ def target_rect(
     return elem or resolve_rect(ctx, None, raw.get("box"))
 
 
-_HOLDS_ROWS = {"List", "Pane", "Group", "Document", "Table", "Tree", "DataGrid", "Tab"}
+def _mid(r: tuple[int, int, int, int]) -> tuple[float, float]:
+    return r[0] + r[2] / 2, r[1] + r[3] / 2
+
+
+def _goes_with(words: tuple[int, int, int, int], thing: tuple[int, int, int, int]) -> bool:
+    """Are these words the name of that thing: on its row (a switch and the words beside
+    it), or right under or over it (an icon and its caption)?"""
+    tall = max(words[3], thing[3])
+    if abs(_mid(words)[1] - _mid(thing)[1]) <= tall * 0.75:
+        return True  # the same row, however far along it
+    across = min(words[0] + words[2], thing[0] + thing[2]) - max(words[0], thing[0])
+    apart = max(words[1], thing[1]) - min(words[1] + words[3], thing[1] + thing[3])
+    return across > 0 and apart <= 1.5 * tall
+
+
+def step_rect(
+    ctx: ScreenContext | None, raw: dict[str, Any], near: tuple[int, int] | None = None
+) -> tuple[int, int, int, int] | None:
+    """Where a guide step's mark goes, when that is known exactly (None: only a guessed box).
+
+    `target_rect` finds words to underline. A step is clicked, so its mark is the control,
+    whole. Live, eight steps in twenty were "you clicked something else" although they had
+    done the step: a switch named by its element id, with the words beside it as the quote,
+    was marked on the words (a quote that isn't inside the element is looked for anywhere);
+    a menu row was marked on its words alone, so a click on its icon missed; and a Start
+    menu icon, given as a box with its caption as the quote, was marked on the caption."""
+    if ctx is None:
+        return None
+    elem = resolve_rect(ctx, raw.get("element_id"), None)
+    quote = str(raw.get("quote") or "").strip()
+    where = near or near_point(ctx, raw)
+    hit = ctx.find_text(quote, elem, where) if quote else None
+    if elem and hit:
+        (hx, hy), (ex, ey, ew, eh) = _mid(hit), elem
+        if ex <= hx <= ex + ew and ey <= hy <= ey + eh:
+            # The words are in it. A row or a button is taken whole; in something big (a
+            # list, a pane, a card) the words say which part was meant.
+            return elem if eh <= max(3.5 * hit[3], 80) else hit
+        # The words are somewhere else. Beside or under the control they are its name, and
+        # the control is what gets clicked; far from it the words win, as they always have.
+        return elem if _goes_with(hit, elem) else hit
+    if elem or not hit:
+        return elem
+    box = resolve_rect(ctx, None, raw.get("box"))
+    # An icon and its caption: a click on either is the step. The box is the model's guess,
+    # so it only widens the mark when it is the size of a control, not of half the window.
+    if box and box[2] <= 240 and box[3] <= 160 and _goes_with(hit, box):
+        return _union([hit, box])
+    return hit
+
+
+_HOLDS_ROWS ={"List", "Pane", "Group", "Document", "Table", "Tree", "DataGrid", "Tab"}
 
 
 def scroll_area(
@@ -544,6 +595,10 @@ class Guide(BaseModel):
     hwnd: int = 0
     app: str = ""
     title: str = ""
+    # For a scroll: the words being scrolled to, so "is it in view yet" can be read off the
+    # screen; and whether this is the same scroll asked a second time (it is, once at most).
+    words: str = ""
+    again: bool = False
 
 
 def guide_left(

@@ -89,7 +89,10 @@ async def test_a_guide_steps_box_breaks_the_tie_instead_of_being_thrown_away(set
     ctx = fake_context()
     ctx.text = [line("Save", (100, 300, 40, 10), 21), line("Save", (900, 300, 40, 10), 22)]
     step = {"quote": "Save", "box": [880, 280, 80, 40]}
-    assert await brain._guide_target(ctx, step, "Save") == (900, 300, 40, 10)
+    # (The mark takes in the box as well, when it sits on the words: an icon and its caption.)
+    assert await brain._guide_target(ctx, step, "Save") == (880, 280, 80, 40)
+    sloppy = {"quote": "Save", "box": [700, 200, 500, 300]}  # which "Save", but not how big
+    assert await brain._guide_target(ctx, sloppy, "Save") == (900, 300, 40, 10)
     assert await brain._guide_target(ctx, {"quote": "Save"}, "Save") == (100, 300, 40, 10)
 
 
