@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -37,6 +38,7 @@ from pyxi import hands, safety, windows
 from pyxi.companion.actions import app_target, safe_url
 from pyxi.companion.aim import confirm_target
 from pyxi.companion.annotations import resolve_point, resolve_rect
+from pyxi.companion.learned import BROWSERS, Learned, place_of
 from pyxi.screen import ScreenContext, uia
 from pyxi.screen import press as presses
 
@@ -235,6 +237,45 @@ it and carry on with their task.
 - Never install software, change security settings or download files they didn't ask for."""
 
 
+NOTES = ToolSpec(
+    "notes",
+    "What to remember about this app or site for the next task in it.",
+    {
+        "type": "object",
+        "properties": {
+            "keep": {
+                "type": "array",
+                "maxItems": 2,
+                "items": {"type": "string"},
+                "description": "0 to 2 notes, each one sentence of at most 25 words. Empty when nothing reusable was learned.",
+            },
+            "wrong": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Notes you were given that turned out to be wrong, word for word.",
+            },
+        },
+        "required": ["keep"],
+    },
+)
+
+LEARN_SYSTEM = """You watched Pyxi's hands do a task in an app or on a website. Write down what would make \
+the NEXT task in the same place quicker, for whoever does it knowing nothing: where a control \
+really is, the order things must be done in, what did nothing and what worked instead, a \
+shortcut, a dialog that always appears and how to get past it.
+
+Rules:
+- Only how the place works. Never what this person did in it: no names, no numbers, no file \
+names, no addresses, nothing they typed or asked for. Write 'the file', 'the name box'.
+- Only what the steps show. A step marked as having done nothing, a retry, or a second way \
+that worked is the best source. If it went straight through with nothing to learn, keep nothing.
+- General to the place, not to this task. 'The Insert tab holds PivotTable' is a note; 'made a \
+pivot of sales' is not.
+- At most two, each one plain sentence. Do not repeat a note you were already given.
+- If a note you were given was wrong, list it under `wrong` exactly as given.
+Call notes once."""
+
+
 @dataclass
 class Step:
     n: int
@@ -272,6 +313,7 @@ class Operator:
         make_hands=None,
         press=None,
         direct: bool = True,
+        learned: Learned | None = None,
     ) -> None:
         # Pressing a control itself, with no mouse (screen/press.py). With pretend hands
         # (tests) nothing real is pressed unless a pretend ``press`` comes with them.
@@ -293,12 +335,25 @@ class Operator:
         self.cancelled = False
         self.held = False  # talk is pressed: wait for their words before the next click
         self.usage = None
+        # What was found out about this app or site on earlier tasks (companion/learned.py).
+        self.learned = learned
+        self._where_at: Counter[str] = Counter()  # looks spent in each place this task
+        self._shown: dict[str, list[str]] = {}  # the notes that were on hand, by place
+        self._urls: dict[tuple[int, str], str | None] = {}  # a browser window's page
+        self.learning: set[asyncio.Task] = set()  # notes being written after a task
 
     async def run(self, task: str, window: int | None = None, come_back: bool = False) -> Outcome:
         """``window``: the one they were in. With ``come_back``, it's put back in front when the
         task is done (music playing behind it, a file saved), so they carry on where they were."""
         self._task = task
+        self._where_at.clear()
+        self._shown.clear()
         out = await self._run(task, window)
+        if self.learned is not None and not out.stopped and len(out.steps) >= 2 and self._where_at:
+            # Written after the answer is back, never before it: they are not kept waiting.
+            writing = asyncio.create_task(self._learn(task, out, self._where_at.most_common(1)[0][0], dict(self._shown)))
+            self.learning.add(writing)
+            writing.add_done_callback(self.learning.discard)
         if come_back and window and not out.stopped:
             await asyncio.to_thread(windows.focus, window)
         return out
@@ -502,13 +557,65 @@ class Operator:
             return True
         return False
 
+    async def _place(self, ctx: ScreenContext) -> str:
+        """Where the hands are: the site when the window is a browser on one, else the app."""
+        process = (ctx.window.process or "").lower()
+        url = None
+        if process in BROWSERS and ctx.window.hwnd:
+            key = (ctx.window.hwnd, ctx.window.title)
+            if key not in self._urls:  # asked once a page, not once a look
+                try:
+                    self._urls[key] = await asyncio.to_thread(uia.browser_url, ctx.window.hwnd)
+                except Exception:
+                    self._urls[key] = None
+            url = self._urls[key]
+        return place_of(process, url)
+
+    async def _learn(self, task: str, out: Outcome, place: str, shown: dict[str, list[str]]) -> None:
+        """After a task: what is worth knowing about this place next time (at most two
+        notes), and which of the notes on hand were wrong. One short call, text only."""
+        try:
+            for where, notes in shown.items():
+                self.learned.used(where, notes, out.ok)
+            had = shown.get(place, [])
+            trail = "\n".join(f"{s.n}. {s.actions}" + (f"  -> {s.note}" if s.note else "") for s in out.steps[-20:])
+            text = (
+                f"Place: {place}\nTask: {task}\n\nSteps taken:\n{trail}\n\n"
+                f"How it ended: {'done' if out.ok else 'not done'}. {out.summary}\n\n"
+                "Notes you were given for this place:\n" + ("\n".join(f"- {n}" for n in had) or "(none)")
+            )
+            res = await self.llm.complete(system=LEARN_SYSTEM, messages=[Message("user", [TextPart(text)])], tools=[NOTES], max_tokens=400)
+            self.usage = res.usage if self.usage is None else self.usage + res.usage
+            call = next((c for c in res.tool_calls if c.name == "notes"), None)
+            if call is None:
+                return
+            args = call.arguments or {}
+            wrong = [w for w in (args.get("wrong") or []) if isinstance(w, str)]
+            keep = [k for k in (args.get("keep") or []) if isinstance(k, str)]
+            gone = self.learned.drop(place, wrong)
+            kept = self.learned.add(place, keep, task)
+            if kept or gone:
+                log.info("learned about %s: kept %d, dropped %d", place, len(kept), gone)
+        except Exception as exc:  # never a reason for a task to fail: it is already over
+            log.warning("could not write down what was learned: %s", exc)
+
     async def _decide(self, task: str, steps: list[Step], ctx: ScreenContext):
         image = ctx.model_image(self.image_width)
+        known = ""
+        if self.learned is not None:
+            place = await self._place(ctx)
+            self._where_at[place] += 1
+            if notes := self._shown.get(place) or self.learned.recall(place):
+                self._shown.setdefault(place, notes)  # the same ones all task: a prompt that does not shift
+                known = (
+                    "\n\nWhat you found out here on earlier tasks (the app may have changed: where the "
+                    "screen says otherwise, trust the screen):\n" + "\n".join(f"- {n}" for n in notes)
+                )
         history = "\n".join(
             f"{s.n}. {s.actions}" + (f"  -> {s.note}" if s.note else "") for s in steps[-12:]
         )
         text = (
-            f"Task: {task}\n\nDone so far:\n{history or '(nothing yet)'}\n\n"
+            f"Task: {task}{known}\n\nDone so far:\n{history or '(nothing yet)'}\n\n"
             f"Screen now:\n{ctx.render(120)}"
         )
         parts: list[Any] = [TextPart(text)]

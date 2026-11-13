@@ -105,6 +105,7 @@ Everything lives in `%APPDATA%\Pyxi\.pyxi`:
 - things you asked Pyxi to remember;
 - Memory Palace history, if it's on (deleted after 72 hours);
 - Ditto's recordings, until you delete them;
+- short notes on how apps and websites work ("the PivotTable button is on the Insert tab"), which Pyxi writes after doing a task in one so the next task there is quicker. At most six per app or site, in `learned.json`. They are about the app, not about you: what you typed, your files, names and numbers are kept out. "Wipe everything" clears them, and you can open or delete the file yourself;
 - teammates' task records, flashcard decks and budgets;
 - the booking details you saved (name, email, phone, date of birth, city and preferences). Health card, passport and other ID numbers are never saved;
 - your settings, including which folders Pyxi may search;

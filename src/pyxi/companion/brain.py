@@ -698,6 +698,7 @@ class Brain:
                 else None
             ),
             direct=getattr(self.settings, "hands_direct", True),
+            learned=self._learned(),
         )
         try:
             out = await self._operator.run(task, window, come_back)
@@ -1588,6 +1589,16 @@ class Brain:
             tools = [t for t in tools if t.name not in _SCREEN_MARKS]
         tools += tabwork.tools(self)  # read_tab and use_tab, only while a browser is connected
         return tools
+
+    def _learned(self):
+        """What the hands found out about apps and sites on earlier tasks (one small file)."""
+        if not getattr(self.settings, "hands_learn", True):
+            return None
+        if getattr(self, "_learned_store", None) is None:
+            from pyxi.companion.learned import Learned
+
+            self._learned_store = Learned(self.settings.data_dir / "learned.json")
+        return self._learned_store
 
     def _builder_llm(self) -> LLMProvider:
         """Streamed, so the model can be on screen assembling itself while the rest arrives (a
@@ -2540,6 +2551,8 @@ class Brain:
                 store.forget(scope)
         self.spatial.forget_all()
         self.activity.forget_all()
+        if (learned := self._learned()) is not None:
+            learned.forget()  # what the hands learned about apps and sites
         self.turns.prune(0)
         self.history = []
         self.audit.add(

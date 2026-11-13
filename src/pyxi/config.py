@@ -184,6 +184,12 @@ class PyxiSettings(BaseSettings):
         description="Takes over driving when the quick model gets stuck (canvas apps like Google "
         "Sheets, a dialog it can't get past). About 8x the cost per look, only when needed.",
     )
+    hands_learn: bool = Field(
+        True,
+        description="After a task in an app or on a site, keep up to two short notes on how "
+        "that place works (never what was done in it), and read them before the next task "
+        "there. Kept in learned.json in the data folder. PYXI_HANDS_LEARN=0 turns it off.",
+    )
     hands_direct: bool = Field(
         True,
         description="Press buttons, switches, tabs, menu items and list rows through the "
