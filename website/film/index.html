@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en" class="force-motion film">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex" />
+    <title>Pyxi: the film</title>
+    <!--
+      The film: every scene of the Pyxi video, played on one clock at 1920 x 1080. It is not part
+      of the site (it is not in the build): tools/film.py opens it on the dev server, has Pyxi's
+      own voice read the lines, plays it once while recording the frames, and puts the two together.
+      Open /film/?play to watch it without sound.
+    -->
+    <script type="module" src="/src/film/film.js"></script>
+  </head>
+  <body>
+    <canvas class="swarm" aria-hidden="true"></canvas>
+    <div id="cue" data-swarm="field" data-swarm-opacity="0.6" data-swarm-at="#swarm-box"></div>
+    <div id="swarm-box"></div>
+
+    <p class="f-brand"><i></i>Pyxi</p>
+    <p class="f-chapter" id="chapter"></p>
+
+    <!-- 1. hello -->
+    <section class="sc" id="sc-intro">
+      <p class="f-tagline">A little firefly that helps with anything on your screen</p>
+    </section>
+
+    <!-- 2 and 3. real recordings: pointing, and notes beside the words -->
+    <section class="sc" id="sc-point">
+      <div class="f-frame"><video src="/clips/point.webm" muted playsinline preload="auto"></video><i class="f-rec">Recorded from Pyxi</i></div>
+    </section>
+    <section class="sc" id="sc-notes">
+      <div class="f-frame"><video src="/clips/notes.webm" muted playsinline preload="auto"></video><i class="f-rec">Recorded from Pyxi</i></div>
+    </section>
+
+    <!-- 4. a picture, explained on the picture -->
+    <section class="sc" id="sc-picture">
+      <div class="op" id="op">
+        <div class="op-stage">
+          <p class="op-notch" data-state="idle"><i></i><span class="op-notch-text"></span></p>
+          <div class="op-window">
+            <div class="op-chrome"><i></i><i></i><i></i><span>Anatomy notes: the heart</span></div>
+            <div class="op-page">
+              <div class="op-pic">
+                <!--include:heart-->
+                <svg class="op-ink" viewBox="0 0 600 660"></svg>
+                <div class="op-tags"></div>
+              </div>
+              <div class="op-text">
+                <h3>The heart</h3>
+                <p>Chapter 4 &middot; Circulation</p>
+                <i></i><i style="--w: 94%"></i><i style="--w: 98%"></i><i class="gap" style="--w: 62%"></i>
+                <i style="--w: 96%"></i><i></i><i style="--w: 90%"></i><i class="gap" style="--w: 44%"></i>
+                <i style="--w: 98%"></i><i style="--w: 92%"></i><i style="--w: 70%"></i>
+              </div>
+            </div>
+          </div>
+          <span class="op-fly"></span>
+        </div>
+        <div class="op-side">
+          <p class="op-you"><b>Explain this diagram to me.</b></p>
+          <ol class="op-lines"></ol>
+          <button type="button" data-act="replay"></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. built in 3D, live -->
+    <section class="sc" id="sc-build">
+      <div class="b3-stage">
+        <div class="b3-desk">
+          <i class="col"></i>
+          <i style="--x: 4%; --y: 22%; --w: 12%"></i><i style="--x: 4%; --y: 31%; --w: 9%"></i><i style="--x: 4%; --y: 40%; --w: 13%"></i><i style="--x: 4%; --y: 49%; --w: 8%"></i>
+          <i style="--x: 25%; --y: 22%; --w: 30%"></i><i style="--x: 25%; --y: 34%; --w: 68%"></i><i style="--x: 25%; --y: 42%; --w: 62%"></i><i style="--x: 25%; --y: 50%; --w: 66%"></i><i style="--x: 25%; --y: 58%; --w: 40%"></i><i style="--x: 25%; --y: 72%; --w: 64%"></i><i style="--x: 25%; --y: 80%; --w: 52%"></i>
+        </div>
+        <p class="b3-ask"><i></i><b id="b3-ask"></b></p>
+        <div class="b3-view" id="b3-view"></div>
+        <p class="b3-count" id="b3-count"></p>
+        <div class="b3-bar" id="b3-bar"><span class="b3-step" id="b3-step"></span></div>
+      </div>
+    </section>
+
+    <!-- 6. it does the clicking, after you press Allow -->
+    <section class="sc" id="sc-act">
+      <div class="f-mail">
+        <div class="f-mail-bar"><i></i><i></i><i></i><span>Mail</span></div>
+        <div class="f-mail-body">
+          <div class="f-mail-list">
+            <div class="on"><b>Sam Rivera</b><span>Recommendation letter</span></div>
+            <div><b>Priya Shah</b><span>Tuesday call</span></div>
+            <div><b>Library</b><span>Your loan is due soon</span></div>
+            <div><b>Dana Lee</b><span>Photos from Saturday</span></div>
+          </div>
+          <div class="f-compose">
+            <p class="f-c-head">Reply</p>
+            <p class="f-c-row"><span>To</span>sam.rivera@example.com</p>
+            <p class="f-c-row"><span>Subject</span>Re: Recommendation letter</p>
+            <p class="f-c-text" id="mail-text"></p>
+            <span class="f-c-send">Send</span>
+          </div>
+        </div>
+      </div>
+      <div class="f-req" id="req">
+        <p class="f-req-title"><i></i>Pyxi needs your OK</p>
+        <p class="f-req-what">Send this reply to Sam Rivera</p>
+        <p class="f-req-buttons"><span class="yes" id="req-allow">Allow</span><span>Don't</span></p>
+      </div>
+      <p class="f-toast" id="toast">Sent to Sam Rivera</p>
+      <svg class="f-cursor" id="cursor" viewBox="0 0 28 34" width="34" height="42"><path d="M3 2v24.800l6.700-5.900 4.400 9.600 4.100-1.800-4.400-9.600h8.200z" /></svg>
+    </section>
+
+    <!-- 7. the team -->
+    <section class="sc" id="sc-team">
+      <svg class="f-team-lines" id="team-lines" viewBox="0 0 1920 1080"></svg>
+      <div class="f-team-me"><i></i><b>Pyxi</b><span>talks to you and coordinates</span></div>
+      <div id="team"></div>
+    </section>
+
+    <!-- 8. you stay in control -->
+    <section class="sc" id="sc-control">
+      <div class="f-read">
+        <div class="story-scenes"><div class="story-tilt"><figure class="scene on" data-scene="read">
+                    <svg viewBox="0 0 640 400">
+                      <rect class="pane" data-fly="ice" data-w="4" x="86" y="30" width="468" height="340" rx="18" />
+                      <line class="rule" x1="86" y1="76" x2="554" y2="76" />
+                      <text class="t" x="108" y="59">Settings</text>
+                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="100" width="124" height="30" rx="6" /><text class="t mono" x="117" y="119">Item "General"</text>
+                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="140" width="124" height="30" rx="6" /><text class="t mono" x="117" y="159">Item "Sync"</text>
+                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="180" width="124" height="30" rx="6" /><text class="t mono" x="117" y="199">Item "Privacy"</text>
+                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="220" width="124" height="30" rx="6" /><text class="t mono" x="117" y="239">Item "About"</text>
+                      <rect class="ice" data-fly="ice" data-w="3" x="258" y="100" width="272" height="44" rx="8" /><text class="t mono" x="270" y="126">Edit "Name"</text><text class="t mono dim" x="518" y="126" text-anchor="end">x 258  y 100</text>
+                      <rect class="ice" data-fly="ice" data-w="3" x="258" y="158" width="272" height="44" rx="8" /><text class="t mono" x="270" y="184">Edit "Email"</text><text class="t mono dim" x="518" y="184" text-anchor="end">x 258  y 158</text>
+                      <rect class="ice" data-fly="ice" data-w="3" x="258" y="218" width="150" height="42" rx="10" /><text class="t mono" x="333" y="243" text-anchor="middle">Button "Export"</text>
+                      <rect class="secret" data-fly="ice" data-w="3" x="258" y="290" width="272" height="40" rx="8" />
+                      <path class="lock" d="M275 308h12v10h-12zM277.500 308v-3.500a3.500 3.500 0 0 1 7 0v3.500" />
+                      <text class="t mono dim" x="296" y="314">hidden</text>
+                      <path class="gold" data-fly="gold" data-w="5" d="M70 50V14H106M534 14H570V50M570 350V386H534M106 386H70V350" />
+                      <circle class="glow" cx="596" cy="32" r="18" />
+                      <circle class="fly" data-fly="gold" data-w="fill" cx="596" cy="32" r="6.500" />
+                      <path class="lead" d="M530 122H574" /><circle class="lead-dot" cx="530" cy="122" r="2.5" />
+                    </svg>
+                    <div class="tags">
+                      <span class="tag c gold" style="--x: 50%; --y: 3.5%">One look, when you ask</span>
+                      <span class="tag r" style="--x: 89.7%; --y: 30.5%">The names and positions of the controls</span>
+                      <span class="tag l" style="--x: 39%; --y: 77.5%">Passwords are blacked out</span>
+                    </div>
+                  </figure></div></div>
+      </div>
+      <ol class="f-rules" id="rules">
+        <li><b>I look when you ask</b><span>One look at the window you're on</span></li>
+        <li><b>Passwords are blacked out</b><span>Before anything is sent</span></li>
+        <li><b>You're always in control</b><span>Move the mouse or press Esc and I stop</span></li>
+      </ol>
+    </section>
+
+    <!-- 9. come say hey -->
+    <section class="sc" id="sc-outro">
+      <div class="f-end">
+        <h1>Pyxi</h1>
+        <p>Free beta for Windows 10 and 11</p>
+        <p class="f-url"><i></i>pyxi-site.vercel.app</p>
+      </div>
+    </section>
+
+    <p class="f-cap" id="cap"></p>
+  </body>
+</html>

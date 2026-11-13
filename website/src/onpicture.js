@@ -126,9 +126,13 @@ function arrowHead(route) {
 }
 const reading = (text) => Math.max(2500, text.split(/\s+/).length * 290 + 900);
 
-export function initOnPicture({ reduced = false } = {}) {
+/**
+ * `pace` scales every pause (0.5 plays twice as fast) and `auto: false` leaves the start to the
+ * caller, who gets `{ play }` back: both are for the film (film/), which plays this on its own clock.
+ */
+export function initOnPicture({ reduced = false, pace = 1, auto = true } = {}) {
   const el = document.getElementById("op");
-  if (!el) return;
+  if (!el) return null;
   const $ = (s) => el.querySelector(s);
   const ink = $(".op-ink");
   const tags = $(".op-tags");
@@ -212,7 +216,7 @@ export function initOnPicture({ reduced = false } = {}) {
   function play(from = -2) {
     const me = ++run;
     const wait = (ms) =>
-      new Promise((done) => setTimeout(() => me === run && done(), reduced ? 0 : ms));
+      new Promise((done) => setTimeout(() => me === run && done(), reduced ? 0 : ms * pace));
     el.classList.remove("is-done");
     (async () => {
       if (from <= -1 || from < shown) clear();
@@ -263,9 +267,10 @@ export function initOnPicture({ reduced = false } = {}) {
     el.classList.add("is-still", "is-done");
     mark(STEPS.length);
     say("Ask me anything", "idle");
-    return;
+    return { play };
   }
   say("Hold Ctrl Alt and ask", "idle");
+  if (!auto) return { play };
   new IntersectionObserver(
     (entries, o) => {
       if (entries.some((e) => e.isIntersecting)) {
@@ -275,4 +280,5 @@ export function initOnPicture({ reduced = false } = {}) {
     },
     { threshold: 0.6 },
   ).observe($(".op-stage"));
+  return { play };
 }
