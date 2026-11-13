@@ -14,7 +14,7 @@ Pyxi is a desktop assistant that can see your screen, read the files you point i
 - What Pyxi reads is **data, not instructions**. Text in an email, page or document can't make Pyxi act: every send, booking and file change still needs your Allow, and the card says when a recipient came from something Pyxi read.
 - What you ask, plus the screenshot, on-screen text and the parts of files or emails it needs to answer, goes to an AI model to work out the reply. **We don't sell it, and we don't use it to train models.**
 - Your history stays **on your computer**. Conversations are deleted after 30 days; Memory Palace history after 72 hours.
-- Your speech is turned into text **on your computer**. The one exception is Bengali, which is sent to a cloud model to be understood (see below).
+- What you say to Pyxi is sent to a cloud model to be turned into text, because it mishears far less than a model that fits on a PC. **Neither Pyxi nor the Pyxi beta server keeps the sound**; the model provider processes it under its own terms (see below). You can keep your voice on your computer instead: Voice panel, "Turn my speech into text on this PC only". Then nothing you say is sent. Offline, your computer listens by itself. Meeting recordings are always turned into text on your computer.
 - Pyxi uses your mouse and keyboard **only after you press Allow**. Anything that sends, books, buys, deletes or posts asks again. Pyxi never types passwords, card numbers or government ID numbers, and **never pays for anything**.
 
 ## What Pyxi looks at
@@ -43,14 +43,18 @@ You can pause all screen access at any time with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+
 
 | Teammate | What it does with the file | Sent to the AI model? |
 |---|---|---|
-| Pixel | Converts, merges, compresses, fills and compares documents | No, it all happens on your computer |
-| Ledger | Edits Excel, Word and PowerPoint files, and Google Sheets and Docs | An outline of the file, to decide the edits |
+| Pixel | Converts, merges, compresses, fills and compares documents | No, it all happens on your computer, with one exception: the first time Pixel sees a PDF form, the words printed on the blank form go to the model once, to work out what the form asks. What is typed in the form, your saved details and your answers never do |
+| Ledger | Edits Excel, Word and PowerPoint files, the workbook, document or deck you have open in those apps, and Google Sheets and Docs | An outline of the file or the open document, to decide the edits |
 | Sage | Makes flashcards and quizzes from slides and notes | The text of the file |
 | Scribe | Turns a meeting recording into notes | The recording is transcribed on your computer; only the transcript is sent |
 | Patch | Explains an error in a script and proposes a small fix | The error and the lines around it |
 | Forms | Fills a job or government form from a CV or document you name | The parts the form needs. Passwords, card numbers and government ID numbers are cut out first |
 
 Results are saved as new files beside the original, or in `Documents\Pyxi`. Originals are never overwritten, with two exceptions you approve: Patch changes a script only after you press Allow on a card that shows the change (and keeps a backup), and Google Docs and Sheets are edited in place, where Google keeps every earlier version.
+
+**Filling in a PDF form.** Pixel puts the form's questions on a card, with your name, email, phone and the like already typed in from your saved details, and you type the rest. What you type goes straight into the form on your computer; no AI model sees your answers, and a box that asks for an ID number, a card number or a password is never on the card. Two things are kept on your computer so the next form is quicker: how each form reads (its questions, never an answer), and, if you leave "Remember" ticked on the card, your address and any of your name, email, phone or date of birth that Settings did not have yet. Untick it and nothing is kept.
+
+**A document open in Excel, Word or PowerPoint.** When you ask for a change to the workbook, document or deck you have open in the app, Ledger makes it right there, through the app itself, instead of with your mouse. The same outline as for a file goes to the AI model, and nothing else: no copy is made, nothing new is stored, and Pyxi never saves, closes or deletes the document. You save it, or not. Before a change would replace or remove more than a few filled cells, a card asks you first. Word and PowerPoint can undo these changes with Ctrl+Z; Excel usually cannot, so the card says so.
 
 **LibreOffice (optional).** For exact Office layouts and old .doc, .xls and .ppt files, Pyxi can download LibreOffice from The Document Foundation, after a card asks you first. It's installed in Pyxi's own folder and changes nothing else on your PC.
 
@@ -78,7 +82,7 @@ Pyxi never sends an email, posts, messages, invites someone or cancels anything 
 | What | Where it goes | Why |
 |---|---|---|
 | Your request, the masked screenshot and on-screen text, recent conversation, and the parts of files or emails a job needs | The AI model, through OpenRouter (during the beta, through the Pyxi beta server), or the provider of your own key if you added one | To understand your screen and answer |
-| Bengali speech | Google's Gemini model, through OpenRouter (during the beta, through the Pyxi beta server) | To turn Bengali speech into text. Other languages stay on your computer |
+| What you say to Pyxi (the sound of each request, and dictation) | Google's Gemini model, through OpenRouter (during the beta, through the Pyxi beta server) | To turn your speech into text. With "Turn my speech into text on this PC only" switched on in the Voice panel, nothing you say is sent: your computer listens (Bengali then needs the offline Bengali model, which Pyxi offers to download) |
 | Web searches you ask for, and price checks | DuckDuckGo or Bing, then the store websites that come up | To look things up and compare prices |
 | Pages a teammate opens | Those websites, in a browser on your computer | To do the research, booking or form you asked for |
 | Emails, calendar events, documents and posts you ask Pyxi to send or change | Google, Discord or LinkedIn, only for accounts you connected | To do the errand, after an approval card |
@@ -87,7 +91,7 @@ Pyxi never sends an email, posts, messages, invites someone or cancels anything 
 | Update checks | GitHub | Pyxi checks for a new version when it starts and every four hours, and downloads updates from GitHub |
 | Voice and speech models | GitHub and Hugging Face | Downloaded once, the first time they're needed |
 
-**AI providers.** OpenRouter passes your request to the model provider: Anthropic's Claude for answers and teammates, and Google's Gemini for Bengali speech. They process it to produce the answer, under their own terms and privacy policies ([OpenRouter](https://openrouter.ai/privacy), [Anthropic](https://www.anthropic.com/legal/privacy), [Google](https://policies.google.com/privacy)). **[Before launch: confirm and state the data-retention and training settings on your OpenRouter account.]** In local mode (Ollama), nothing goes to any AI provider.
+**AI providers.** OpenRouter passes your request to the model provider: Anthropic's Claude for answers and teammates, and Google's Gemini for turning speech into text. They process it to produce the answer, under their own terms and privacy policies ([OpenRouter](https://openrouter.ai/privacy), [Anthropic](https://www.anthropic.com/legal/privacy), [Google](https://policies.google.com/privacy)). **[Before launch: confirm and state the data-retention and training settings on your OpenRouter account.]** In local mode (Ollama), nothing goes to any AI provider.
 
 **The Pyxi beta server** forwards your requests to OpenRouter with our key, so you don't need one. It **doesn't store what you ask, what's on your screen, or your voice**. It keeps only:
 
@@ -105,6 +109,7 @@ Everything lives in `%APPDATA%\Pyxi\.pyxi`:
 - things you asked Pyxi to remember;
 - Memory Palace history, if it's on (deleted after 72 hours);
 - Ditto's recordings, until you delete them;
+- short notes on how apps and websites work ("the PivotTable button is on the Insert tab"), which Pyxi writes after doing a task in one so the next task there is quicker. At most six per app or site, in `learned.json`. They are about the app, not about you: what you typed, your files, names and numbers are kept out. "Wipe everything" clears them, and you can open or delete the file yourself;
 - teammates' task records, flashcard decks and budgets;
 - the booking details you saved (name, email, phone, date of birth, city and preferences). Health card, passport and other ID numbers are never saved;
 - your settings, including which folders Pyxi may search;

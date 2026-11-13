@@ -1,9 +1,9 @@
 {
   "siteUrl": "https://pyxi-site.vercel.app",
-  "version": "0.1.4",
+  "version": "0.1.12",
   "downloadUrl": "https://github.com/marzukchowdhury/Pyxi/releases/latest/download/Pyxi-Setup.exe",
   "downloadFile": "Pyxi-Setup.exe",
-  "downloadSize": "305 MB",
+  "downloadSize": "166 MB",
   "macDownloadUrl": "",
   "macIntelDownloadUrl": "",
   "macDownloadSize": "",
