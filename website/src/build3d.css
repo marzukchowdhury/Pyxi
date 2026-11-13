@@ -711,3 +711,15 @@
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------- the RAM how-to: its own page, scaled to fill the stage */
+.b3-ram { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; border: 0; transform-origin: 50% 50%; pointer-events: none; opacity: 0; transition: opacity 0.4s; z-index: 3; }
+.b3.is-ram .b3-ram { opacity: 1; }
+.b3.is-ram .b3-view, .b3.is-ram .b3-desk, .b3.is-ram .b3-ask, .b3.is-ram .b3-bar, .b3.is-ram .b3-hint, .b3.is-ram .b3-count, .b3.is-ram .b3-poster { display: none; }
+.b3.is-ram .b3-tools { visibility: hidden; }
+.b3.is-ram .b3-say span { opacity: 1; animation: none; }
+.b3-tabs.three { grid-template-columns: 1fr 1fr 1fr; }
+.b3-tabs.three button { padding: 11px 12px 12px; }
+.b3-tabs.three button span { display: none; }
+/* the RAM guide is a 16 by 9 picture: the stage takes that shape while it plays, so nothing is cut off */
+.b3.is-ram .b3-stage { aspect-ratio: 16 / 9; align-self: start; }

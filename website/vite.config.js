@@ -74,6 +74,8 @@ export default defineConfig({
         privacy: resolve(root, "privacy.html"),
         terms: resolve(root, "terms.html"),
         404: resolve(root, "404.html"),
+        // the RAM how-to, played inside the home page's 3D section
+        ram: resolve(root, "film2/ram.html"),
       },
     },
   },
