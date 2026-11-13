@@ -42,7 +42,6 @@ from pydantic import ValidationError
 
 from pyxi import alarms, booking, hands, media, safety, tidy, weather, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
-from pyxi.agents.jobs import Handoff
 from pyxi.companion import (
     answers,
     filework,
@@ -4190,11 +4189,6 @@ class Brain:
                 await self.show_scene(scene)
             return None
         if name == "delegate":
-            then = (
-                Handoff(agent=args["then_agent"], task=args.get("then_task") or "Use the result.")
-                if args.get("then_agent") and self.registry.get(str(args["then_agent"]))
-                else None
-            )
             # A file that isn't there is said, not dropped: with the path mistyped by one
             # letter, Quill was started with no file at all, wrote a "draft" from the task
             # line alone, and the card said "Your draft is ready".
@@ -4212,6 +4206,14 @@ class Brain:
                     "delegate: Ditto repeats what it has watched them do once. Use watch_me so "
                     "they can show it, or do the task another way."
                 )
+            # The teammate after this one (then_agent), or the call sent back once when the
+            # line being said promises one and the call names none (companion/filework.py).
+            starting = self.registry.get(str(args["agent"]))
+            then, note = filework.handoff(
+                self, "delegate", starting.name if starting else str(args["agent"]), args
+            )
+            if note:
+                return note
             job = await self.jobs.start(
                 str(args["agent"]),
                 str(args["task"]),
@@ -4219,6 +4221,11 @@ class Brain:
                 then=then,
                 files=files,
             )
+            if then is not None:
+                return (
+                    f"Started {job.id}: {job.agent_name} is on it, and what it makes goes "
+                    f"straight to {then.agent} when it's done."
+                )
             return f"Started {job.id}: {job.agent_name} is on it."
         if name == "weather":
             place = str(args.get("place") or "").strip() or await self._home_city()
@@ -5035,12 +5042,18 @@ class Brain:
             names = ", ".join(Path(f).name for f in fixed)
             n = int(data.get("count") or len(data.get("changes") or []))
             if all("(corrections by Pyxi)" in Path(f).name for f in fixed):
-                # A PDF can't be edited: what Quill made is the list of corrections, not a fixed file.
+                # A scan has no text in it to change: what Quill made is the list of
+                # corrections, not a fixed file. (A typed PDF comes back as a fixed Word copy.)
                 title = "Corrections for your PDF"
-                body = f"The corrections to make are listed in {names}. The PDF itself is unchanged."
+                body = (
+                    f"It's a scan, so there is no text in it to change: the corrections to "
+                    f"make are listed in {names}. The PDF itself is unchanged."
+                )
             else:
                 title = "Your document is fixed"
-                body = f"{n} fix{'es' if n != 1 else ''} in {names}. The original is untouched."
+                # A PDF comes back as Word: said, so the new file's type is no surprise.
+                copy = ", a Word copy of your PDF" if data.get("from_pdf") else ""
+                body = f"{n} fix{'es' if n != 1 else ''} in {names}{copy}. The original is untouched."
             actions = ["open", "folder", "send_back"]
         elif job.status == "done":
             title = f"{job.agent_name} finished"

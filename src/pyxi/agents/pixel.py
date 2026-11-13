@@ -72,7 +72,7 @@ OPERATIONS = {
     "delete_pages": "Remove pages from a PDF (options: pages).",
     "rotate_pages": "Turn pages (options: pages, default all; angle 90, 180, 270, left or right).",
     "reorder_pages": "Put pages in a new order (options: order like '3, 1-2'; the rest follow).",
-    "compress_pdf": "Make a PDF smaller (images re-saved at lower quality, streams compressed).",
+    "compress_pdf": "Make a PDF smaller. When they name a size, pass it and Pixel works down to it: options target_kb (get under this many KB: 'under 80 KB' is target_kb 80) or reduce_by_kb (take at least this many KB off: '20 KB less' is reduce_by_kb 20). It says so itself when the file can't go that small without looking worse.",
     "add_page_numbers": "Number the pages (options: position like 'bottom right', start, format 'Page {n} of {total}').",
     "add_watermark": "Stamp text across every page (options: text, opacity).",
     "protect_pdf": "Lock a PDF with a password. The user types it on a card; never put it in options.",
@@ -345,17 +345,24 @@ def _soft_mask(writer: Any, ref: Any, alpha: Any) -> None:
     ref.get_object()[NameObject("/SMask")] = writer._add_object(mask.flate_encode())
 
 
-def compress_pdf(
-    files: list[Path], quality: int = 60, max_px: int = 1600, out: Path | None = None
-) -> PixelResult:
-    """Smaller PDFs: big images are scaled down and re-saved as JPEG, then streams are compressed
-    and identical objects shared. Text stays text."""
+# How hard the pictures in a PDF are squeezed: (JPEG quality, longest side in pixels), mildest
+# first. The first is what "make it smaller" has always used; the ones after it are only tried
+# when a size was asked for, and each is used only if the one before it did not get there.
+# Below the last, a photo on a page looks plainly worse, so Pixel stops and says so.
+SQUEEZE = [(60, 1600), (48, 1300), (38, 1050), (30, 850), (24, 700)]
+_SOFTER_FROM = 2  # from this step on, the result says the pictures are a little softer
+
+
+def _squeezed(src: Path, quality: int, max_px: int) -> tuple[bytes, int]:
+    """``src`` made smaller with these picture settings: its bytes, and how many pictures
+    were re-saved. Text stays text, and nothing but the pictures looks any different."""
     from PIL import Image
     from pypdf import PdfWriter
 
-    (src,) = need(files, {".pdf"}, "PDF")
-    before = src.stat().st_size
+    from pyxi.agents import pixel_shrink
+
     writer = PdfWriter(clone_from=pixel_pdf._reader(src))
+    pictures = 0
     for page in writer.pages:
         for img in page.images:
             try:
@@ -386,33 +393,110 @@ def compress_pdf(
                     if alpha is not None:
                         alpha = alpha.resize(size, Image.LANCZOS)
                 img.replace(pic if pic.mode == "L" else flat_rgb(pic), quality=quality)
+                pictures += 1
                 if alpha is not None:
                     # Really see-through (a logo): the picture is re-saved and its mask goes
                     # back on at the same size. As a bare JPEG it came back in a white box.
                     _soft_mask(writer, ref, alpha)
             except Exception:  # an image pypdf can't re-encode stays as it is
                 continue
-        page.compress_content_streams()
+        page.compress_content_streams(9)
+    try:
+        pixel_shrink.drop_extras(writer)
+        pixel_shrink.tighten(writer)
+    except Exception:  # the file is still whole without these
+        pass
     try:
         writer.compress_identical_objects(remove_duplicates=True, remove_unreferenced=True)
     except TypeError:  # older pypdf names them differently
         writer.compress_identical_objects(remove_identicals=True, remove_orphans=True)
-    buf = io.BytesIO()
-    writer.write(buf)
-    after = buf.tell()
-    if after >= before * 0.98:
+    return pixel_shrink.packed(writer), pictures
+
+
+def compress_pdf(
+    files: list[Path],
+    quality: int = 60,
+    max_px: int = 1600,
+    out: Path | None = None,
+    *,
+    target: int | None = None,
+    less: int | None = None,
+) -> PixelResult:
+    """Smaller PDFs: big images are scaled down and re-saved as JPEG, streams are compressed as
+    hard as they go, identical objects are shared and the file is written the compact way. Text
+    stays text.
+
+    ``target`` is a size in bytes to get under ("under 80 KB"); ``less`` is how many bytes to
+    take off ("at least 20 KB less"). With either, the pictures are squeezed a step at a time
+    (SQUEEZE) until the file is small enough, and no further. If it can't get there without
+    plainly hurting how the file looks, the smallest it reached is saved and the answer says
+    so, the first time it is asked. (Live: "at least 20 KB less" on a 99 KB PDF got 90.2 KB
+    and no word about the 20; asked again, "already about as small as it gets".)"""
+    (src,) = need(files, {".pdf"}, "PDF")
+    before = src.stat().st_size
+    if less:
+        target = min(target or before, before - less)
+    if target is not None and target <= 0:
+        raise PixelError(f"{src.name} is only {size_text(before)}: that's more than there is to take off.")
+    if target is not None and before <= target:
+        return PixelResult(
+            [],
+            f"{src.name} is already {size_text(before)}, under the {size_text(target)} you asked for.",
+            {"before": before, "after": before, "target": target, "reached": True},
+        )
+    steps = [(quality, max_px), *SQUEEZE[1:]] if target is not None else [(quality, max_px)]
+    best, step = b"", 0
+    for n, (q, px) in enumerate(steps):
+        data, pictures = _squeezed(src, q, px)
+        if not best or len(data) < len(best):
+            best, step = data, n
+        if target is None or len(best) <= target or not pictures:
+            break  # small enough, or there are no pictures left to squeeze harder
+    after = len(best)
+    aimed = {"target": target, "reached": after <= target} if target is not None else {}
+    if target is not None and after > target:
+        # What is left is what a harder squeeze would spoil.
+        why = (
+            "Its pictures are already as low as they go before they look bad."
+            if pictures
+            else "It is nearly all text and fonts, which don't shrink the way pictures do."
+        )
+        if after >= before * 0.98:
+            return PixelResult(
+                [],
+                f"{src.name} is already about as small as it gets ({size_text(before)}): I can't "
+                f"get it to {size_text(target)} without hurting how it looks. {why}",
+                {"before": before, "after": before, **aimed},
+            )
+        made = unique_path(out or out_dir_for(src), f"{src.stem} (smaller).pdf")
+        made.write_bytes(best)
+        return PixelResult(
+            [made],
+            f"Made {made.name}: {size_text(before)} down to {size_text(after)}. That is as "
+            f"small as it goes without hurting how it looks, so it didn't reach the "
+            f"{size_text(target)} you asked for. {why}",
+            {"before": before, "after": after, **aimed},
+        )
+    # With no size asked for, a saving too small to notice is not worth a second file.
+    if target is None and (after >= before * 0.98 or before - after < 1024):
         return PixelResult(
             [],
             f"{src.name} is already about as small as it gets ({size_text(before)}).",
             {"before": before, "after": before},
         )
-    target = unique_path(out or out_dir_for(src), f"{src.stem} (smaller).pdf")
-    target.write_bytes(buf.getvalue())
+    made = unique_path(out or out_dir_for(src), f"{src.stem} (smaller).pdf")
+    made.write_bytes(best)
     saved = round(100 * (1 - after / before))
+    if target is None:
+        tail = f", {saved}% smaller."
+    else:
+        tail = f", under the {size_text(target)} you asked for." + (
+            " The pictures in it are a little softer." if step >= _SOFTER_FROM else ""
+        )
     return PixelResult(
-        [target],
-        f"Made {target.name}: {size_text(before)} down to {size_text(after)}, {saved}% smaller.",
-        {"before": before, "after": after},
+        [made],
+        f"Made {made.name}: {size_text(before)} down to {size_text(after)}{tail}",
+        {"before": before, "after": after, **aimed},
     )
 
 
@@ -745,7 +829,29 @@ def _run_one(
     if op == "reorder_pages":
         return pixel_pdf.reorder_pages(paths, pages("order", "pages"), out)
     if op == "compress_pdf":
-        return compress_pdf(paths, num("quality") or 60, out=out)
+        from pyxi.agents.pixel_shrink import size_bytes
+
+        def size(*keys: str) -> int | None:
+            for k in keys:
+                try:
+                    v = o.get(k)
+                    if k.endswith("_mb") and v not in (None, ""):
+                        v = f"{v} MB" if not isinstance(v, str) or v.strip()[-1:].isdigit() else v
+                    if (n := size_bytes(v)) is not None:
+                        return n
+                except ValueError:
+                    raise PixelError(
+                        f"{k} should be a size like 80 (KB) or '1.5 MB', not {o.get(k)!r}."
+                    ) from None
+            return None
+
+        return compress_pdf(
+            paths,
+            num("quality") or 60,
+            out=out,
+            target=size("target_kb", "target_mb", "target_size", "target", "max_kb", "max_size"),
+            less=size("reduce_by_kb", "reduce_by_mb", "reduce_by", "less_kb"),
+        )
     if op == "add_page_numbers":
         return pixel_pdf.add_page_numbers(
             paths,

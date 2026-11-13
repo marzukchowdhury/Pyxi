@@ -1,10 +1,14 @@
-"""A grammar check is never a rewrite, and a PDF is never typed out again.
+"""A grammar check is never a rewrite, and a PDF comes back as a document, not one block of text.
 
 Live, in the founder's trial: a resume (a PDF) sent for a grammar check came back as one block
 of text in a Word file, its layout gone. Twice: the second time he had said "keep the exact
 form". Two faults. The task named what it was told not to do ("don't rewrite anything"), and
 that word alone chose the rewrite. And a PDF's words can't be changed where they are, so a
-"fixed" PDF was the page typed out again.
+"fixed" PDF was the page typed out again, every line a plain paragraph.
+
+For a while after that a PDF got only a list of corrections, as a .txt. That was no better:
+"why is it a txt file that she gave me?" Now Pixel's own converter turns the PDF into Word
+(headings, lists, bold and pictures come through) and the corrections are made in that copy.
 """
 
 from __future__ import annotations
@@ -46,6 +50,8 @@ def test_what_a_task_rules_out_is_not_what_it_asks_for(task, mode):
 class _Editor:
     """A copy editor that finds two mistakes."""
 
+    at = 0  # the number of the paragraph the mistakes are in
+
     def __init__(self) -> None:
         self.asked: list[str] = []
 
@@ -55,7 +61,7 @@ class _Editor:
         self.asked.append(system)
         first = len(self.asked) == 1
         body = {
-            "edits": [{"i": 0, "text": "Video Editor 2020 to 2023. Managed a team of five."}] if first else [],
+            "edits": [{"i": self.at, "text": "Video Editor 2020 to 2023. Managed a team of five."}] if first else [],
             "changes": [
                 {"from": "Video Editor2020", "to": "Video Editor 2020", "why": "missing space"},
                 {"from": "a team of five people's", "to": "a team of five", "why": "grammar"},
@@ -81,21 +87,37 @@ def _resume_pdf(folder: Path) -> Path:
     return path
 
 
-async def test_a_pdf_sent_for_a_grammar_check_comes_back_as_corrections(tmp_path, monkeypatch):
+async def test_a_pdf_sent_for_a_grammar_check_comes_back_as_a_fixed_word_file(tmp_path, monkeypatch):
+    """13 November: a research proposal (a PDF) came back as a .txt list of 28 corrections.
+    "Why is it a txt file that she gave me?" Pixel turns a PDF into Word in seconds, headings
+    and all, so Quill uses that and fixes the Word copy: a file that can be sent."""
     pytest.importorskip("reportlab")
+    from docx import Document
+
     monkeypatch.setattr("pyxi.agents.pixel_common.out_dir_for", lambda path: tmp_path)
     pdf = _resume_pdf(tmp_path)
     before = pdf.read_bytes()
-    result = await fix_document(pdf, "Fix the grammar only. Keep the layout.", _Editor(), mode="fix")
-    assert result.listed and result.changed == 2
-    assert result.path.name == "Resume (corrections by Pyxi).txt"
-    said = result.path.read_text(encoding="utf-8")
-    assert "1. 'Video Editor2020' → 'Video Editor 2020' (missing space)" in said
-    assert "2. 'a team of five people's' → 'a team of five' (grammar)" in said
-    assert "The phone number has nine digits." in said and "can't be edited" in said
-    # Nothing was typed out again, and the PDF is as it was.
-    assert sorted(p.suffix for p in tmp_path.iterdir()) == [".pdf", ".txt"]
+    # Pixel's converter reads the name as a heading and the line under it as a paragraph.
+    editor = _Editor()
+    editor.at = 1
+    result = await fix_document(pdf, "Fix the grammar only. Keep the layout.", editor, mode="fix")
+    assert result.converted and not result.listed and result.changed == 1
+    assert result.path.name == "Resume (fixed by Pyxi).docx"
+    fixed = Document(str(result.path))
+    assert [(p.style.name, p.text) for p in fixed.paragraphs] == [
+        ("Heading 1", "A. Person"),  # still a heading, not one block of text
+        ("Normal", "Video Editor 2020 to 2023. Managed a team of five."),
+    ]
+    assert "'Video Editor2020' → 'Video Editor 2020' (missing space)" in result.changes
+    assert "The phone number has nine digits." in result.notes
+    # One new file beside the PDF: no list, no stray Word copy, and the PDF is as it was.
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["Resume (fixed by Pyxi).docx", "Resume.pdf"]
     assert pdf.read_bytes() == before
+    # Asked again, the first copy is not written over.
+    again = _Editor()
+    again.at = 1
+    second = await fix_document(pdf, "Fix the grammar.", again, mode="fix")
+    assert second.path.name == "Resume (fixed by Pyxi) (2).docx"
 
 
 async def test_a_word_file_is_still_fixed_inside_itself(tmp_path, monkeypatch):

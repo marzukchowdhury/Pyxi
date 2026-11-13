@@ -462,22 +462,36 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "for work that needs a site worked step by step (a form, a sign-in, a cart, a booking, many pages compared "
         "in depth); that takes a minute or more, so never for 'find me / what's a good / the cheapest / the best X', "
         "which web_search answers in seconds. "
-        "Writers (like Quill) draft text; explainers (like Sketch) build 3D scenes. Chain a handoff with then_agent/"
-        "then_task, e.g. Scout researches then Quill drafts. Give complete, specific instructions. For files use "
-        "convert_files (Pixel) and edit_document (Ledger) instead: they're faster and exact.",
+        "Writers (like Quill) draft text, and fix the grammar of, translate, rewrite or summarize a document "
+        "given in files; explainers (like Sketch) build 3D scenes. Quill fixes a PDF too, on its own: it turns "
+        "the PDF into Word itself and returns the corrected Word file beside the original, so 'turn this PDF "
+        "into Word and fix the grammar' is ONE delegate to Quill with the PDF, never a conversion first. "
+        "Two teammates, one after the other (Scout researches, then Quill drafts): pass then_agent and "
+        "then_task in this same call, and the second starts by itself on what the first made. Whenever your "
+        "line says a second teammate comes next ('then Quill...'), then_agent must be in the call, or that "
+        "teammate never starts. Give complete, specific instructions. For other file work use convert_files "
+        "(Pixel) and edit_document (Ledger) instead: they're faster and exact.",
         {
             "agent": {"type": "string"},
             "task": {"type": "string"},
             "start_url": {"type": "string"},
-            "then_agent": {"type": "string"},
-            "then_task": {"type": "string"},
+            "then_agent": {
+                "type": "string",
+                "description": "The teammate who takes over when this one is done (Quill, Pixel, "
+                "Ledger, Scout...). It gets the result, and any file that was made, by itself.",
+            },
+            "then_task": {
+                "type": "string",
+                "description": "What then_agent does with the result, in full: it has not heard "
+                "the conversation ('Fix the grammar and spelling; keep the meaning').",
+            },
             "files": {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Paths of documents on this PC for a writer to fix, translate or "
                 "rewrite (.docx, .txt, .md, .pdf) or summarize (also .xlsx, .pptx, .html); the new "
-                "copy is saved beside the original. Say what to do in task ('Summarize the key "
-                "dates', 'Translate into French').",
+                "copy is saved beside the original (a PDF comes back as a Word file). Say what "
+                "to do in task ('Summarize the key dates', 'Translate into French').",
             },
         },
         ["agent", "task"],
@@ -1041,7 +1055,15 @@ COMPANION_TOOLS += [
         "for scans); a searchable PDF from a scan; compare two documents; HEIC to JPG; resize or "
         "shrink images; CSV and Excel. Needs real paths: from what's on screen (an Explorer window, "
         "an attachment you downloaded), from search_files, or from them. The original is never "
-        "changed; the new file goes beside it. Say one short line that names the job; they get a notification.",
+        "changed; the new file goes beside it. A size they name is passed on, not just said: "
+        "'make it under 80 KB' is compress_pdf with options target_kb 80, 'at least 20 KB "
+        "smaller' is reduce_by_kb 20, and Pixel works down to it or says why it can't. "
+        "When they ask for a second step on the new file in the same breath ('turn it into Word, "
+        "then shorten it', 'merge these and have Ledger total them'), pass then_agent and "
+        "then_task in this same call: that teammate starts on the new file the moment Pixel is "
+        "done. Never say 'then Quill...' without them: nothing would follow. One exception that "
+        "needs no chain: fixing the grammar of a PDF is a single delegate to Quill with the PDF "
+        "(Quill turns it into Word itself). Say one short line that names the job; they get a notification.",
         {
             "operation": {
                 "type": "string",
@@ -1062,7 +1084,19 @@ COMPANION_TOOLS += [
                 "page numbers, values ({what the form asks for, in its own words: their answer} for fill_form, "
                 "such as {\"Monthly rent\": \"1800\", \"Landlord name\": \"Sam Example\"}, only what they told "
                 "you), name (new file's name, no extension), format (jpg, png, webp...), "
-                "quality (1-95), max_side, width, height, percent, dpi, sheet. Never a password.",
+                "quality (1-95), max_side, width, height, percent, dpi, sheet, target_kb (the "
+                "size a PDF must get under, in KB) or reduce_by_kb (how many KB to take off "
+                "it) for compress_pdf. Never a password.",
+            },
+            "then_agent": {
+                "type": "string",
+                "description": "The teammate who works on the new file next (Quill, Ledger...), "
+                "when they asked for two steps. It is handed the file by itself.",
+            },
+            "then_task": {
+                "type": "string",
+                "description": "What then_agent does with the new file, in full ('Make it more "
+                "formal', 'Add a totals row').",
             },
         },
         ["operation", "files"],
@@ -1085,19 +1119,33 @@ COMPANION_TOOLS += [
         "no copy is made; it can do cells, formulas, totals, formatting, sorting, a pivot and a chart "
         "in Excel, headings, text, formatting, find and replace, tables and page setup in Word, and "
         "slides, text, pictures and slide order in PowerPoint, and it says so itself when a request "
-        "needs the mouse instead. For fixing the grammar of a "
-        "document, delegate to Quill instead. Say one short line that names the job; they get a "
-        "notification.",
+        "needs the mouse instead. "
+        "BUILDING a workbook is Ledger's as well, and only Ledger's: anything more than a sheet "
+        "or two (a financial model, a tracker with several tabs, 'a 15-sheet workbook') is never "
+        "use_computer and never `app`, whatever app they named, because the mouse and keyboard "
+        "cannot click fifteen tabs into being. Ledger builds it as a file, sheet by sheet, and "
+        "it is opened for them when it's ready: files ['new xlsx: <title>'] when they named "
+        "Excel or any desktop app (GenOffice, LibreOffice, WPS: they all open .xlsx), or google "
+        "['new sheet: <title>'] when they named Google Sheets or no app at all and Google is "
+        "connected. Put their whole brief in task, word for word: every sheet, column and "
+        "formula they asked for. Say in your one line that it is being built as a file and "
+        "will open when ready. For fixing the grammar of a "
+        "document, delegate to Quill instead. A second teammate on the result (Ledger builds "
+        "it, then Pixel makes it a PDF) is then_agent and then_task in this same call. Say one "
+        "short line that names the job; they get a notification.",
         {
             "task": {
                 "type": "string",
                 "description": "Exactly what to change, with every value they gave, e.g. 'Add a "
-                "totals row under the Amount column' or 'Make a pivot of total sales by region'.",
+                "totals row under the Amount column' or 'Make a pivot of total sales by region'. "
+                "For a workbook to build, the whole brief.",
             },
             "files": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Full paths of .xlsx, .docx or .pptx files on this PC.",
+                "description": "Full paths of .xlsx, .docx or .pptx files on this PC. Or, to "
+                "build a new Excel workbook that doesn't exist yet, the one entry 'new xlsx: "
+                "<title>' (it is saved in Documents\\Pyxi and opened for them).",
             },
             "google": {
                 "type": "array",
@@ -1113,6 +1161,15 @@ COMPANION_TOOLS += [
                 "description": "The Microsoft Excel, Word or PowerPoint app on this PC, for the "
                 "workbook, document or deck open in it now (the window in front, or the app they "
                 "named). Not for Office in a browser tab, and never together with files or google.",
+            },
+            "then_agent": {
+                "type": "string",
+                "description": "The teammate who works on the edited file next (Pixel, Quill...), "
+                "when they asked for two steps. It is handed the file by itself.",
+            },
+            "then_task": {
+                "type": "string",
+                "description": "What then_agent does with it, in full ('Turn it into a PDF').",
             },
         },
         ["task"],

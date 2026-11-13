@@ -588,11 +588,37 @@ class Workbook(WorkbookExtras):
         return f"Added sheet {ws.title}"
 
     def save(self) -> Path:
-        out = unique_path(
-            out_dir_for(self.path), f"{self.path.stem} (edited by Pyxi){self.path.suffix}"
-        )
+        if getattr(self, "fresh", False):  # built from nothing: saved under its own name
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            out = unique_path(self.path.parent, self.path.name)
+        else:
+            out = unique_path(
+                out_dir_for(self.path), f"{self.path.stem} (edited by Pyxi){self.path.suffix}"
+            )
         self.wb.save(out)
         return out
+
+
+def new_workbook(title: str, folder: Path) -> Workbook:
+    """An empty workbook that isn't on the disk yet: Ledger fills it from a brief, and it is
+    saved as "<title>.xlsx" in ``folder`` (never over a file that is already there)."""
+    import shutil
+    import tempfile
+
+    import openpyxl
+
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", title).strip(" .")[:80] or "Workbook"
+    if name.lower().endswith(".xlsx"):
+        name = name[:-5].rstrip(" .") or "Workbook"
+    tmp = Path(tempfile.mkdtemp(prefix="pyxi_new_"))
+    try:  # read into memory like any other workbook; nothing is left behind in Temp
+        openpyxl.Workbook().save(tmp / "new.xlsx")
+        book = Workbook(tmp / "new.xlsx")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    book.path = folder / f"{name}.xlsx"
+    book.fresh = True
+    return book
 
 
 _ALIGN = {
@@ -2533,6 +2559,11 @@ class LedgerResult:
     live: list[str] = field(default_factory=list)  # documents changed in the open app, unsaved
     sent: bool = False  # an edit's calls went to an open app (whether or not it worked)
     declined: bool = False  # they said no on a card that asked before replacing cells
+    # A workbook built sheet by sheet (ledger_build.py): what was built, said in full, and
+    # the sheets by name. Empty for an ordinary edit.
+    headline: str = ""
+    built: dict[str, list[str]] = field(default_factory=dict)
+    made: list[str] = field(default_factory=list)  # outputs that are new files, not copies
 
 
 def parse_edits(text: str) -> dict[str, Any]:
@@ -2593,13 +2624,14 @@ def _alike(failed: dict[str, Any], new: dict[str, Any]) -> int:
     return score
 
 
-def _reopen(path: Path, edits: list[dict[str, Any]]) -> Any:
-    target = open_local(path)
+def _reopen(path: Any, edits: list[dict[str, Any]]) -> Any:
+    # A workbook being built from nothing has no file to open again: it is made again.
+    target = path() if callable(path) else open_local(path)
     for e in edits:
         try:
             target.apply(e)
         except Exception:  # it worked a moment ago on the same file; say so and carry on
-            log.warning("ledger: %s didn't replay on %s", e.get("op"), path.name, exc_info=True)
+            log.warning("ledger: %s didn't replay on %s", e.get("op"), target.path.name, exc_info=True)
     return target
 
 
@@ -2608,7 +2640,7 @@ def _edit_key(index: int, edit: dict[str, Any]) -> str:
     return json.dumps({**edit, "file": index}, sort_keys=True, default=str)
 
 
-async def _reopened(path: Path, edits: list[dict[str, Any]]) -> Any:
+async def _reopened(path: Any, edits: list[dict[str, Any]]) -> Any:
     """A local file opened afresh, with the edits that worked done again in order. An edit
     that died part-way leaves half its work in memory (a sort that stopped at a merged cell
     had already rewritten three rows): this is the file without that half."""
@@ -2627,7 +2659,11 @@ async def run_ledger(task: str, *, live: list[Any] | None = None, **kw: Any) -> 
     can't be reached at the start the job stops with ``Unreachable`` and nothing changed.
 
     An edit that worked is never applied a second time, whatever the second reply says, and
-    how long each part took is logged (live, one chart took 20.9 s and nothing said where)."""
+    how long each part took is logged (live, one chart took 20.9 s and nothing said where).
+
+    A big spreadsheet build doesn't fit in one reply, so it is planned first and written a
+    sheet at a time (ledger_build.py); ``new`` starts it in a workbook that doesn't exist
+    yet, saved under its own name in ``new_dir``."""
     try:
         return await _run_ledger(task, live=live or [], **kw)
     finally:
@@ -2647,13 +2683,31 @@ async def _run_ledger(
     persona: str = "",
     context: str = "",
     progress: Callable[[str], Awaitable[None]] | None = None,
+    new: list[dict[str, Any]] | None = None,
+    new_dir: Path | None = None,
 ) -> LedgerResult:
     began = time.perf_counter()
     targets: list[Any] = []
-    sources: dict[int, Path] = {}  # local files by their place in ``targets``
+    # Local files by their place in ``targets``: the path, or for a workbook that is being
+    # built from nothing, how to make an empty one again.
+    sources: dict[int, Any] = {}
+    fresh: set[int] = set()
     for f in files:
         sources[len(targets)] = Path(f)
         targets.append(await asyncio.to_thread(open_local, Path(f)))
+    for item in new or []:
+        # "new xlsx: NEXORA": an empty workbook, filled from the brief and saved under its
+        # own name (Documents\Pyxi unless the caller says where).
+        if str(item.get("kind") or "xlsx") != "xlsx":
+            raise LedgerError("I can start a new Excel workbook (.xlsx), or a new Google file.")
+        from pyxi.agents.pixel_common import pyxi_folder
+
+        def make(title: str = str(item.get("title") or "Workbook")) -> Workbook:
+            return new_workbook(title, new_dir or pyxi_folder())
+
+        sources[len(targets)] = make
+        fresh.add(len(targets))
+        targets.append(await asyncio.to_thread(make))
     for ref in google_refs or []:
         if google is None or not google.connected():
             raise LedgerError("Google isn't connected. Connect it in Settings, then ask again.")
@@ -2691,7 +2745,75 @@ async def _run_ledger(
             )
             half_done.discard(index)
 
-    for attempt in range(2):
+    async def put(e: dict[str, Any]) -> str:
+        """One edit of a workbook that is being built sheet by sheet, onto the one file:
+        "" when it is in, else why it isn't. The same care as an edit of the usual pass: it
+        loads nothing from a web address the task didn't name, and a local file an edit died
+        on is opened afresh before it is used again."""
+        try:
+            if stray := fetched_from(e, allowed):
+                raise LedgerError(
+                    f"I only load things from web addresses you gave me, and {stray} isn't one."
+                )
+            await clean(0)
+            said = await _apply(targets[0], e)
+        except LedgerError as exc:
+            why, wrote = str(exc), _may_have_written(targets[0], e, exc)
+        except Exception as exc:
+            what = str(e.get("op") or "edit").replace("_", " ")
+            why, wrote = f"The {what} didn't work ({str(exc)[:120]}).", True
+        else:
+            changed.add(0)
+            done.append((0, e, said))
+            done_keys.add(_edit_key(0, e))
+            return ""
+        if 0 in sources and wrote:
+            half_done.add(0)
+        return why
+
+    async def now() -> Any:
+        await clean(0)
+        return targets[0]
+
+    async def build(least: int | None = None) -> bool:
+        """The job as a sheet-by-sheet build (ledger_build.py). False when it isn't one:
+        nothing was changed, and it goes the usual way."""
+        from pyxi.agents import ledger_build
+
+        builder = ledger_build.Builder(
+            task, target=now, put=put, ask=ask, system=system, name=name, context=context,
+            progress=progress, least=least,
+        )  # fmt: skip
+        try:
+            built = await builder.run()
+        finally:
+            result.cost_usd += builder.cost
+        if built is None:
+            return False
+        result.changes = built.changes()
+        result.problems = built.problems
+        result.headline = built.headline()
+        result.built = {
+            "done": [s.name for s in built.done],
+            "not_done": [s.name for s in built.not_done],
+        }
+        log.info(
+            "ledger: built %d of %d sheets in %.1fs",
+            len(built.done), len(built.sheets), time.perf_counter() - began,
+        )  # fmt: skip
+        return True
+
+    # A big spreadsheet build is planned first and written a sheet at a time: one reply for
+    # all of it is cut off at its length limit (live: a 15-sheet workbook, "my plan came out
+    # unreadable, twice"). A small edit never takes this road.
+    one_sheet_file = len(targets) == 1 and getattr(targets[0], "kind", "") in ("xlsx", "gsheet")
+    split = False
+    if one_sheet_file:
+        from pyxi.agents.ledger_build import looks_big
+
+        split = looks_big(task) and await build()
+
+    for attempt in range(0 if split else 2):
         asked = time.perf_counter()
         try:
             text, cost = await ask(system, pending)
@@ -2830,6 +2952,13 @@ async def _run_ledger(
                 )
                 + f"\n\nThe files now (with the edits that worked):\n{outline}\n\nReturn only the edits still needed, or none if one can't be done."
             )
+    if one_sheet_file and not split and unread and not tried and not gone:
+        # The plan was cut off twice and nothing was touched: it was a bigger job than its
+        # words let on. It is written in parts instead, however few sheets it has.
+        split = await build(least=1)
+        unread = not split
+    if split and not result.changes:
+        changed.clear()  # no sheet was written: a file of empty tabs is not worth saving
     saving = time.perf_counter()
     for i in sorted(changed):
         if i in sources:
@@ -2839,6 +2968,8 @@ async def _run_ledger(
             result.live.append(t.title)  # changed where it's open; saving is theirs to do
         elif hasattr(t, "save"):
             result.outputs.append(str(await asyncio.to_thread(t.save)))
+            if i in fresh:
+                result.made.append(result.outputs[-1])
         else:
             result.links.append(t.url)
     result.sent = any(getattr(t, "sent", False) for t in live)
