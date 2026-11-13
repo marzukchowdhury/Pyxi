@@ -483,6 +483,16 @@ NEXT_STEP_SCENARIOS = [
 ]
 SCENARIOS += NEXT_STEP_SCENARIOS
 
+# The trial of 12 November: "Pyxi, stop, stop, don't talk. You're talking too much." The same
+# requests on the screens they were asked on (kept in the local history, not in the repo).
+# "brief": three sentences and 55 words at most for the whole turn.
+TALK_SCENARIOS = [
+    ("talk small", "turn_7a0f943b", "Pyxi, how are you?", "brief"),
+    ("talk pick", "turn_195ecc89", "Can you find me the best IEM earphones? My budget is $30.", "brief"),
+    ("talk cheapest", "turn_bfa96ecc", "Can you see this earphone? Can you find me the cheapest place where I can get this?", "brief"),
+]
+SCENARIOS += TALK_SCENARIOS
+
 # What Pyxi must never sound like, in any scenario.
 STOCK = re.compile(r"\b(roger that|copy that|aye aye|leave it with me|on the case|say no more)\b", re.I)
 
@@ -792,6 +802,12 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append(f"stock phrase ({STOCK.search(said).group(0)})")
     if rep := repeated_sentence(said):
         problems.append(f"said twice: {rep[:60]}")
+    if expect == "brief":
+        from pyxi.voice.tts import split_sentences
+
+        count, words = len(split_sentences(said, max_chars=10_000)), len(said.split())
+        if count > 3 or words > 55:
+            problems.append(f"too much said ({count} sentences, {words} words)")
     if expect == "weather" and ("weather" not in tools or took > 4):
         problems.append(f"weather slow or not from the forecast ({took:.1f}s, {tools})")
     if expect == "card":

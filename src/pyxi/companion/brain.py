@@ -1478,6 +1478,8 @@ class Brain:
         if card is None or self._narrated_card == card.id:
             return
         self._narrated_card = card.id
+        if not self._card_is_read():
+            return
         rest = [
             it for it in card.items if it.n not in self._noted and it.n not in self._narrated_items
         ]
@@ -1553,8 +1555,18 @@ class Brain:
             if it.n in self._noted or it.n in self._narrated_items:
                 continue
             self._narrated_items.add(it.n)
+            if not self._card_is_read():
+                continue  # on the card to be read, not read out: see _card_is_read
             line = (it.say or it.text).strip()
             self._speak(f"[note:{it.n}] {line if line[-1:] in '.!?' else line + '.'}")
+
+    def _card_is_read(self) -> bool:
+        """Are a cue card's points said aloud this turn? When they asked for an explanation
+        ("explain this diagram", "what is this?"), yes: that is the explanation. When the card
+        marks an answer (three sets of earphones under $30), no: the verdict is said and the
+        points are there to read. Live, 12 November, a pick with three marked options was 134
+        words, most of them the card read out."""
+        return bool(getattr(self, "_long_form", True))
 
     def _builder_on(self) -> bool:
         return bool(self.settings.model_3d) and not self.settings.local_mode
@@ -2729,6 +2741,10 @@ class Brain:
             if not synthetic:
                 self._guide_fresh = True  # a new request: a guide in it counts from step 1
             self._pending_say = ""  # an answer held back during a lookup round
+            self._spoken = {"all": 0, "answer": 0}  # sentences said this turn (fit_to_say)
+            self._round_kind = "answer"  # what the model is doing this round: see _note_kind
+            self._answer_before_round = 0
+            self._long_form = asks_long(user_text)
             self._promise_nudged = False  # "you said you'd do it, so do it": once a turn at most
             self._refused = False  # a tool that can refuse did, this turn
             self._unsaid_pick = None  # an answer card shown this round, until its pick is said
@@ -3138,6 +3154,7 @@ class Brain:
             async def as_it_streams(i: int, name: str, raw: str) -> None:
                 if self._speech_gen != self._turn_gen:
                     return
+                self._note_kind(name, {t.spec.name for t in connector_tools if t.info})
                 if claim["say"] is not None and name != "say":
                     waiting, claim["say"] = claim["say"], None
                     if name in ("explain_on_screen", "explain_on_picture"):
@@ -3155,7 +3172,9 @@ class Brain:
                     # The first sentence goes to the voice as soon as it's written.
                     got = partial_string(raw, "text")
                     first = first_chunk(got[0]) if got and not got[1] else ""
-                    if first and not claims_work(first):
+                    # (A long one waits until what follows shows what it is: a thought said
+                    # before a search is not said at all.)
+                    if first and not claims_work(first) and len(first.split()) <= EARLY_WORDS:
                         head["text"] = first
                         self._noted |= {
                             int(m.group(2))
@@ -3203,6 +3222,8 @@ class Brain:
 
             first_round = state.get("round", 0) == 0
             said_from = len(self._said)  # anything past this was said in this round
+            self._round_kind = "answer"
+            self._answer_before_round = getattr(self, "_spoken", {}).get("answer", 0)
             extra: dict[str, Any] = {}
             if isinstance(self.llm, StreamingChat):
                 extra = {"on_call": speak_early, "on_partial": as_it_streams}
@@ -3257,6 +3278,8 @@ class Brain:
                 "show_scene",
             }
             calls = sorted(response.tool_calls, key=lambda c: c.name not in visual)
+            for c in calls:
+                self._note_kind(c.name, {t.spec.name for t in connector_tools if t.info})
             # The spoken reply of this round, in case a drawing arrives without its own steps.
             self._round_say = " ".join(
                 str(c.arguments.get("text", "")) for c in calls if c.name == "say"
@@ -3476,6 +3499,7 @@ class Brain:
         async def finish(state: TurnState) -> TurnState:
             if self._pending_say and state.get("stop") != "interrupted":
                 held, _ = drop_false_promises(self._pending_say)  # never "searching now" at the end
+                self._round_kind = "answer"
                 if held:
                     self._speak(held)  # the latest answer from a lookup round
                 self._pending_say = ""
@@ -3517,6 +3541,19 @@ class Brain:
         g.add_conditional_edges("think", route, {"think": "think", "finish": "finish"})
         g.add_edge("finish", END)
         return g.compile()
+
+    def _note_kind(self, name: str, lookups: Any = ()) -> None:
+        """A tool of this round is known: is the round a lookup, a job being started, or
+        neither? What was already said in it was then a remark, not part of the answer."""
+        if name == "say":
+            return
+        was = getattr(self, "_round_kind", "answer")
+        if name in INFO_TOOLS or name in lookups:
+            self._round_kind = "lookup"
+        elif name in ACTS and was != "lookup":
+            self._round_kind = "action"
+        if was == "answer" and self._round_kind != "answer" and getattr(self, "_spoken", None):
+            self._spoken["answer"] = self._answer_before_round
 
     # ================================================================== tools
     async def _act(self, name: str, args: dict[str, Any]) -> str | None:
@@ -4220,6 +4257,12 @@ class Brain:
         lines (a finished build, an error) that aren't part of the current turn. ``result``:
         what came of a job, which is never dropped as a repeat of the line that started it."""
         if record and agent == "Pyxi":
+            kind = "answer" if result else getattr(self, "_round_kind", "answer")
+            spoken = getattr(self, "_spoken", None)
+            if spoken is not None:
+                text, n = fit_to_say(text, kind, spoken, getattr(self, "_long_form", False))
+                spoken["all"] += n
+                spoken["answer"] += n if kind == "answer" else 0
             text = trim_chatter(text, said_before=bool(self._said))
             text = strip_filler(text)  # "There you go, I have done this."
             text = hide_secrets(text)
@@ -5557,6 +5600,75 @@ def vary_ack(text: str, recent: list[str], pick: Any = random.choice) -> str:
     recent.append(ack)
     del recent[:-3]
     return m.group(1) + ack + text[m.end() :]
+
+
+# ---------------------------------------------------------------- how much is said
+# Live, 12 November: "Pyxi, stop, stop, don't talk. You're talking too much." The prompt asks
+# for one or two short sentences; that evening it gave four, five and nine in a turn: a
+# thought before every search ("For $30 IEMs I'm looking for a tuned set with real reviews,
+# not just a cheap shell with a big bass boost."), a remark between rounds, and answers with
+# a second and third choice in them. So the length is no longer only asked for. This is what
+# is spoken, whatever was written.
+#
+# Tools that start work. A line said beside one is about that work: its first sentence.
+ACTS = CAN_REFUSE | {
+    "subscriptions", "returns", "fill_form", "check_in_flight", "play_music", "tidy_folder",
+    "arrange_windows", "schedule_routine", "travel", "money", "meeting_notes", "make_flashcards",
+    "fix_code", "watch_me", "check_prices", "create_agent",
+}  # fmt: skip
+OPENER_WORDS = 10  # a line said before a lookup: this short, or it is "On it."
+EARLY_WORDS = 12  # a first sentence this short is spoken as it arrives; a longer one waits
+SAY_LIMIT = {False: (3, 2), True: (6, 5)}  # sentences a turn, and of them the answer's
+_ASKS_LONG = re.compile(
+    r"(?i)\b(?:explain|describe|summar(?:y|ise|ize|ies)|tell me (?:more|about|everything|a story|"
+    r"how|why|what happened)|(?:walk|talk) me through|read (?:it|this|that|them|me|out)|"
+    r"what does (?:it|this|that|he|she|they) say|how (?:do|does|did|can|could|should|would|to)|"
+    r"why|what happened|compare|difference|pros and cons|in detail|details|elaborate|go on|"
+    r"teach me|step by step|steps|understand|meaning|what am i looking at|"
+    r"what(?:'s| is| are| does| do) (?:this|that|these|those|it|they)\b[^?.!]{0,40}(?:mean|do|for|about)?)\b"
+)
+
+
+def asks_long(text: str) -> bool:
+    """Did they ask for something that takes more than two sentences to say?"""
+    return bool(_ASKS_LONG.search(text or ""))
+
+
+def fit_to_say(text: str, kind: str, spoken: dict[str, int], long_form: bool) -> tuple[str, int]:
+    """What of ``text`` is said, and how many of its sentences that is.
+
+    ``kind`` is what the model is doing in the round the line came in: "lookup" (it is about
+    to search or read: the answer isn't known yet, so this is a remark; one short line a
+    turn, else "On it."), "action" (it started a job: the line's first sentence), "answer"
+    (anything else: two sentences, five when they asked for an explanation). ``spoken``
+    counts this turn's sentences so far ("all", and "answer"). The answer's first sentence is
+    always said. A sentence that carries a mark for a drawing stays and is not counted."""
+    parts = split_sentences(text, max_chars=10_000)
+    plain = [i for i, part in enumerate(parts) if not MARKER.search(part)]
+    if not plain:
+        return text, 0
+    most, of_answer = SAY_LIMIT[long_form]
+    room = most - spoken.get("all", 0)
+    if kind == "lookup":
+        if spoken.get("all", 0) or room <= 0:
+            keep: list[int] = []
+        elif len(parts[plain[0]].split()) <= OPENER_WORDS:
+            keep = plain[:1]
+        else:
+            return "On it.", 1
+    elif kind == "action":
+        keep = plain[:1]
+    else:
+        n = min(of_answer - spoken.get("answer", 0), room)
+        if spoken.get("answer", 0) == 0:
+            n = max(n, 1)
+        keep = plain[: max(n, 0)]
+        if not long_form and len(keep) == 2 and sum(len(parts[i].split()) for i in keep) > 45:
+            keep = keep[:1]
+    if len(keep) == len(plain):
+        return text, len(keep)
+    kept = set(keep)
+    return " ".join(part for i, part in enumerate(parts) if i in kept or i not in plain), len(keep)
 
 
 def trim_chatter(text: str, said_before: bool) -> str:
