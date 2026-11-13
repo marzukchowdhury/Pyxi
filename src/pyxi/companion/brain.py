@@ -933,6 +933,39 @@ class Brain:
         self._spawn(go())
         return None
 
+    async def _link_allowed(self, url: str) -> bool:
+        """A link opens straight away when it's theirs. After Pyxi read an email, a document, a
+        spreadsheet or a signed-in browser tab in this turn, a link to a site they didn't name
+        asks first: the address itself can carry what was read to that site (a "?data=..." that
+        an email or a page told the model to add), and it may be a look-alike sign-in page."""
+        from urllib.parse import urlparse
+
+        reads = [
+            (label, text)
+            for label, text in getattr(self, "_turn_reads", [])
+            if label in safety.PRIVATE_SOURCES
+        ]
+        if not reads:
+            return True
+        host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+        if host and host in (self._user_text or "").lower():
+            return True
+        origin = safety.provenance([], url, self._user_text or "", reads)
+        read = ", ".join(sorted({label for label, _ in reads}))
+        ok = await self.hub.request(
+            "confirm",
+            timeout=300,
+            job_id="",
+            agent="Pyxi",
+            action=f"Open {host or 'this address'} in your browser?",
+            reason=f"Pyxi just read {read}, and you didn't name this site. An address can carry "
+            "what was read to that site, or be a look-alike sign-in page.\n\n"
+            f"It would open: {url}" + (f"\n\n{origin}" if origin else ""),
+        )
+        if ok:
+            self.audit.add("clicked", f"Opened {host or url}", detail=url)
+        return bool(ok)
+
     async def _quick_action(self, action: str, value: str) -> str | None:
         if not value.strip():
             return f"{action}: nothing to do."
@@ -981,6 +1014,19 @@ class Brain:
             if self.studio is None:
                 return "quick_action: the voice settings aren't available right now."
             here = not re.search(r"(?i)\b(cloud|online|usual|default|normal)\b", value)
+            if not here and (
+                getattr(self, "_synthetic", False)
+                or not re.search(
+                    r"(?i)\b(cloud|online|usual|default|normal)\b", self._user_text or ""
+                )
+            ):
+                # Sending their voice off the PC again is theirs to say, in their own words:
+                # never because a page, an email or a routine asked for it.
+                return (
+                    "listening: they didn't ask for that themselves, so their speech stays on "
+                    "this PC. If they want the cloud model back, they can say so or use the "
+                    "Voice panel."
+                )
             self.studio.update(listen_here=here)
             await self.hub.emit("settings", **self.public_state())
             return (
@@ -1060,6 +1106,8 @@ class Brain:
                     "site they mean; don't guess another address."
                 )
             url = found
+            if not await self._link_allowed(url):
+                return "open_url: they said no, so nothing was opened. Don't open it another way."
             opened = getattr(self, "_opened_urls", set())
             if url in opened:  # a looping model once made six new docs for one "new doc"
                 return "open_url: that's already open from this request. Don't open it again; answer or stop."

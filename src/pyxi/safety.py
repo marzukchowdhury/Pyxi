@@ -89,6 +89,11 @@ SOURCE_LABEL = {
 }
 
 Reads = list[tuple[str, str]]  # (label from SOURCE_LABEL, the text that was read)
+# What they read that's private as well as untrusted (their mail, files, signed-in tabs): after
+# reading one, a link to a site they didn't name asks first (Brain._link_allowed).
+PRIVATE_SOURCES = frozenset(
+    {"the email you read", "the document you read", "the spreadsheet you read", "the browser tab you read"}
+)
 
 _URL = re.compile(r"https?://[^\s<>\"')\]]+")
 _EMAIL = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
