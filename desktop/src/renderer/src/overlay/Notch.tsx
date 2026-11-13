@@ -4,7 +4,9 @@
  *
  *   hold Ctrl + Alt   it opens into "Listening" with a live waveform of your voice
  *   let go            "Thinking" (or "Looking at your screen"), then Pyxi's words stream in
- *   hover it          it unfolds into a small chat: recent lines, a text box, the mic
+ *   hover it          a small tab drops down that says "Open Pyxi": nothing else. Hovering
+ *                     used to unfold the chat, which got in the way of the browser tabs
+ *                     that sit right under it; now only a click opens anything
  *   click it          it unfolds into everything: chat, team, memory, 3D, voice, settings
  *                     (also Ctrl+Alt+W or the tray icon); Escape or the close button folds it
  *   double-tap Ctrl   it opens with the text box ready to type
@@ -25,10 +27,14 @@ import { FileReady } from "./FileReady";
 import { Interactive } from "./Interactive";
 import { useOverlay, voice } from "./store";
 
-type Mode = "idle" | "hint" | "working" | "paused" | "offline" | "notice" | "speaking" | "thinking" | "listening" | "open" | "full" | "result";
+type Mode = "idle" | "peek" | "hint" | "working" | "paused" | "offline" | "notice" | "speaking" | "thinking" | "listening" | "open" | "full" | "result";
+// Resting states: the pointer on the notch turns these (and only these) into the small tab.
+const RESTING = new Set<Mode>(["idle", "hint", "working", "paused", "offline"]);
+const DWELL_MS = 160; // how long the pointer must rest on the top edge: a pass on the way to a tab does nothing
 
 const WIDTH: Record<Mode, number> = {
   idle: 136,
+  peek: 184,
   hint: 292,
   working: 320,
   paused: 228,
@@ -92,6 +98,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const [hintUntil, setHintUntil] = useState(0);
   const bornAt = useRef(performance.now());
   const leaveTimer = useRef<number>(0);
+  const dwellTimer = useRef<number>(0);
   // After you close it, the pointer is still on it: don't reopen until it has left once.
   const suppress = useRef(false);
   const input = useRef<HTMLInputElement>(null);
@@ -115,10 +122,11 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   }, []);
 
   const running = Object.values(jobs).filter((j) => j.status === "running" || j.status === "queued");
-  // Open only while the pointer is on it, or while you're typing in it. Status states
-  // (Listening, Thinking, captions, notices) never catch the mouse.
-  const open = hover || pinned || (focused && text.trim() !== "");
-  const mode: Mode = full ? "full"
+  // The small chat is open only when asked for (double-tap Ctrl) or while you're typing in
+  // it, never because the pointer wandered over the top edge. Status states (Listening,
+  // Thinking, captions, notices) never catch the mouse.
+  const open = pinned || (focused && text.trim() !== "");
+  const resting: Mode = full ? "full"
     : result ? "result"
     : open ? "open"
     : state === "listening" ? "listening"
@@ -130,6 +138,8 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     : running.length ? "working"
     : paused ? "paused"
     : "idle";
+  // The pointer resting on it: a small tab to click, and nothing more.
+  const mode: Mode = hover && RESTING.has(resting) ? "peek" : resting;
 
   // Height follows the content (CSS can't animate to `auto`).
   useLayoutEffect(() => {
@@ -198,14 +208,16 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     over.current[where] = true;
     window.clearTimeout(leaveTimer.current);
     if (suppress.current) return;
-    setHover(true);
+    window.clearTimeout(dwellTimer.current);
+    dwellTimer.current = window.setTimeout(() => setHover(true), DWELL_MS);
   };
   const leave = (where: "handle" | "body") => {
     over.current[where] = false;
     if (over.current.handle || over.current.body) return;
     suppress.current = false;
+    window.clearTimeout(dwellTimer.current);
     window.clearTimeout(leaveTimer.current);
-    leaveTimer.current = window.setTimeout(() => setHover(false), 450);
+    leaveTimer.current = window.setTimeout(() => setHover(false), 220);
   };
   const close = () => {
     setPinned(false);
@@ -239,7 +251,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
       <Interactive className="notch-handle" onEnter={() => enter("handle")} onLeave={() => leave("handle")} />
       <Interactive
         className="notch-hit"
-        active={mode === "open" || mode === "full" || mode === "result"}
+        active={mode === "open" || mode === "full" || mode === "result" || mode === "peek"}
         // Where the notch is growing to, plus a forgiving margin: while it animates wider, a
         // pointer heading for its far corner must not count as having left.
         hitRect={() => {
@@ -262,6 +274,14 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
         {watching && <i className="notch-watching" title="Memory Palace is on: Pyxi notes which windows you use. Ctrl+Alt+P pauses it." aria-label="Memory Palace is on" />}
         <div ref={inner} className="notch-inner" key={mode}>
           {mode === "idle" && running.length > 0 && <Marks jobs={running.map((j) => j.agent_name)} />}
+
+          {mode === "peek" && (
+            <div className="notch-row peek">
+              <Firefly />
+              <span className="notch-text strong">Open Pyxi</span>
+              <span className="notch-peek-key">click</span>
+            </div>
+          )}
 
           {mode === "hint" && (
             <div className="notch-row">
