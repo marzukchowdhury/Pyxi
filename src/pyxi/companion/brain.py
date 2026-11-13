@@ -621,9 +621,21 @@ class Brain:
 
     async def _use_computer(self, args: dict[str, Any]) -> str | None:
         """Do a task with the mouse and keyboard, in the background, after they allow it."""
-        task = str(args.get("task") or "").strip()[:600]
+        # The whole task, never a cut one. Live, 13 November: a 15-sheet brief reached the
+        # hands ending "On General Journal, enter 12", cut at 600 characters with no word to
+        # anybody, and the hands set off on half a job.
+        task = str(args.get("task") or "").strip()
         if not task:
             return "use_computer: say what to do."
+        if len(task) > HANDS_TASK_CHARS:
+            return (
+                f"use_computer: nothing was started. That job is too large for the mouse and "
+                f"keyboard ({len(task)} characters; the most is {HANDS_TASK_CHARS}), and it was "
+                "not cut short to fit. Building or filling a whole workbook, document or deck "
+                "is edit_document's work (one call, in seconds). If it really has to be done by "
+                "hand in an app, give use_computer one small part at a time, each with its own "
+                "'done looks like'."
+            )
         if not hands.available():
             return "use_computer: this only works on Windows."
         if self._operator is not None:
@@ -708,6 +720,7 @@ class Brain:
             ),
             direct=getattr(self.settings, "hands_direct", True),
             learned=self._learned(),
+            glance=getattr(self.screen, "glance", None),
         )
         try:
             out = await self._operator.run(task, window, come_back)
@@ -5324,6 +5337,9 @@ _HALF_SAID = re.compile(
     r"should|will|also)$"
 )
 _MOUSE_JUST_S = 120.0  # how long after Pyxi's own mouse work a paste there starts with a click
+# The longest task the mouse and keyboard are given. A longer one is refused in words, never
+# cut: the hands do a job of some thirty steps, and a brief past this is not one.
+HANDS_TASK_CHARS = 2000
 # The longest a dictation is held (the app stops recording at a minute), with some room.
 _DICTATION_S = 90.0
 _BACKGROUND_TOOLS = {

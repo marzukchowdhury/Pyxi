@@ -135,6 +135,40 @@ class OwnWindow(Exception):
 
 
 _last_input = 0.0  # time.monotonic() of the last input Pyxi sent
+# The same moment on Windows' own clock (GetTickCount, milliseconds), the one its "last
+# input" time is kept on: what came in after this, plus a moment's grace, was not Pyxi's.
+_own_tick: int | None = None
+# And of the last input it sent through SendInput (not a press through the accessibility
+# layer): while that is going out, the pointer is watched by where it is, not by the clock.
+_sent_tick: int | None = None
+# How long after Pyxi's own input Windows may still be booking it (and the app answering
+# it): input stamped inside this window is taken as Pyxi's own.
+GRACE_MS = 150
+# Input sent this lately is still "going out" (keys are typed 14 ms apart, a glide's moves
+# 12 to 16): until it is older than this, Windows' clock can't tell the user's input from it.
+SENDING_MS = 40
+
+
+def _tick_now() -> int:
+    return int(ctypes.windll.kernel32.GetTickCount()) & 0xFFFFFFFF  # type: ignore[attr-defined]
+
+
+def _stamp(sent: bool = False) -> None:
+    """Pyxi is acting now: on both clocks. ``sent``: with the mouse or the keyboard."""
+    global _last_input, _own_tick, _sent_tick
+    _last_input = time.monotonic()
+    try:
+        _own_tick = _tick_now()
+    except Exception:  # not Windows: only the first clock is kept
+        _own_tick = None
+    if sent:
+        _sent_tick = _own_tick
+
+
+def _after(a: int, b: int) -> int:
+    """Milliseconds ``a`` is after ``b`` on a clock that wraps at 2**32 (negative: before)."""
+    d = (a - b) & 0xFFFFFFFF
+    return d - 0x100000000 if d >= 0x80000000 else d
 
 
 def recently_acted(within_s: float = 1.5) -> bool:
@@ -143,10 +177,12 @@ def recently_acted(within_s: float = 1.5) -> bool:
 
 
 def acted() -> None:
-    """Pyxi just did something to the screen without the mouse or the keyboard (a control
-    pressed through the accessibility layer, screen/press.py): timed like any other input."""
-    global _last_input
-    _last_input = time.monotonic()
+    """Pyxi is doing, or just did, something to the screen without the mouse or the keyboard
+    (a control pressed through the accessibility layer, screen/press.py): timed like any
+    other input. Called before and after such a press, so that whatever the app does in
+    answer (moving the keyboard, or the pointer to a dialog's button) is not read as the
+    user's hand."""
+    _stamp()
 
 
 def own_pids() -> set[int]:
@@ -235,7 +271,9 @@ class Hands:
         # Where Pyxi last put the cursor. Windows applies moves a moment late, so the cursor
         # trails a step or two behind mid-glide: it only counts as the user's hand when it's
         # far from all of the recent spots.
-        self._trail: deque[tuple[int, int]] = deque(maxlen=8)
+        # A whole glide is kept (64 spots), because on a busy PC the cursor can trail further
+        # behind than a step or two; once Pyxi has stopped sending, only the last few count.
+        self._trail: deque[tuple[int, int]] = deque(maxlen=64)
         self.reason = ""  # why it stopped, for the logs
         self._u.GetAsyncKeyState(VK_ESCAPE)  # clear the "pressed since last call" bit
 
@@ -245,16 +283,71 @@ class Hands:
         self._u.GetCursorPos(ctypes.byref(p))
         return p.x, p.y
 
+    def _tick(self) -> int:
+        """Windows' own clock, in milliseconds."""
+        return _tick_now()
+
+    def _input_tick(self) -> int | None:
+        """When Windows last saw any input (the user's or Pyxi's own), on that clock."""
+
+        class _LastInput(ctypes.Structure):
+            _fields_ = [("cbSize", wt.UINT), ("dwTime", wt.DWORD)]
+
+        info = _LastInput(ctypes.sizeof(_LastInput), 0)
+        if not self._u.GetLastInputInfo(ctypes.byref(info)):
+            return None
+        return int(info.dwTime)
+
+    def _esc(self) -> bool:
+        return bool(self._u.GetAsyncKeyState(VK_ESCAPE) & 0x8001)
+
     def interrupted(self) -> bool:
-        if self._u.GetAsyncKeyState(VK_ESCAPE) & 0x8001:
+        """Has the user taken over: Esc, or the pointer somewhere Pyxi did not put it.
+
+        Pyxi's own actions never count. Live, 13 November: "Paused while you use the mouse"
+        in the same second as Pyxi's own click, on a PC nobody was touching. Two things can
+        move the pointer away from where Pyxi left it without the user: Pyxi's own glide still
+        landing (so the whole glide is compared while Pyxi's input is going out), and the app
+        or Windows itself (the pointer snapping to a dialog's button after a press). So:
+
+        * while Pyxi's own mouse or keyboard input is going out, the pointer is theirs when
+          it is off the whole of Pyxi's glide (Windows' clock can't tell their input from
+          Pyxi's then, so the place decides, as it always did);
+        * once that has stopped, a pointer in a new place is theirs only if Windows also saw
+          input after Pyxi's last own act (its input, or a press through the accessibility
+          layer); otherwise that place is taken as where the pointer now is."""
+        if self._esc():
             self.reason = "esc"
             return True
-        if self._trail:
-            x, y = self.cursor()
-            if all(abs(x - ex) > 24 or abs(y - ey) > 24 for ex, ey in self._trail):
-                self.reason = f"mouse at {(x, y)}, expected near {self._trail[-1]}"
-                return True
-        return False
+        if not self._trail:
+            return False
+        x, y = self.cursor()
+        own, sent = _own_tick, _sent_tick
+        now = self._tick()
+        sending = sent is not None and _after(now, sent) <= SENDING_MS
+        spots = list(self._trail) if sending else list(self._trail)[-8:]
+        if not all(abs(x - ex) > 24 or abs(y - ey) > 24 for ex, ey in spots):
+            return False
+        if sending:
+            self.reason = f"mouse at {(x, y)} while Pyxi's own input was going out, expected near {self._trail[-1]}"
+            return True
+        seen = self._input_tick() if own is not None else None
+        if seen is not None and _after(seen, own) <= GRACE_MS:
+            # Nobody has touched anything since Pyxi last did: not a hand on the mouse.
+            self._trail.append((x, y))
+            return False
+        late = "no reading" if seen is None else f"{_after(seen, own)} ms after Pyxi's own act"
+        ago = "?" if own is None else str(_after(now, own))
+        self.reason = (
+            f"mouse at {(x, y)}, expected near {self._trail[-1]}; input seen {late}, "
+            f"which was {ago} ms ago"
+        )
+        return True
+
+    def rest(self) -> None:
+        """The pointer is wherever the user just put it on purpose (they answered one of
+        Pyxi's own cards with it): that is not them taking over."""
+        self._trail.clear()
 
     def check(self) -> None:
         if self.interrupted():
@@ -263,13 +356,10 @@ class Hands:
     def idle_seconds(self) -> float:
         """How long since the user last touched the mouse or keyboard (Windows' own count)."""
 
-        class _LastInput(ctypes.Structure):
-            _fields_ = [("cbSize", wt.UINT), ("dwTime", wt.DWORD)]
-
-        info = _LastInput(ctypes.sizeof(_LastInput), 0)
-        if not self._u.GetLastInputInfo(ctypes.byref(info)):
+        seen = self._input_tick()
+        if seen is None:
             return 0.0
-        return max(0, ctypes.windll.kernel32.GetTickCount() - info.dwTime) / 1000  # type: ignore[attr-defined]
+        return max(0, _after(self._tick(), seen)) / 1000
 
     def wait_idle(self, quiet_s: float = 3.0, timeout_s: float = 300.0) -> bool:
         """Wait until the user has left the mouse and keyboard alone for ``quiet_s``. False if
@@ -277,9 +367,9 @@ class Hands:
         import time
 
         end = time.monotonic() + timeout_s
-        self._u.GetAsyncKeyState(VK_ESCAPE)
+        self._esc()
         while time.monotonic() < end:
-            if self._u.GetAsyncKeyState(VK_ESCAPE) & 0x8001:
+            if self._esc():
                 self.reason = "esc"
                 return False
             if self.idle_seconds() >= quiet_s:
@@ -301,10 +391,10 @@ class Hands:
 
     # ----------------------------------------------------------------- the mouse
     def _send(self, *inputs: _Input) -> None:
-        global _last_input
-        _last_input = time.monotonic()
+        _stamp(sent=True)  # before and after: the input is Pyxi's from first moment to last
         arr = (_Input * len(inputs))(*inputs)
         self._u.SendInput(len(inputs), arr, ctypes.sizeof(_Input))
+        _stamp(sent=True)
 
     def _mouse(self, flags: int, x: int = 0, y: int = 0, data: int = 0) -> _Input:
         return _Input(INPUT_MOUSE, _Union(mi=_MouseInput(x, y, data & 0xFFFFFFFF, flags, 0, None)))
