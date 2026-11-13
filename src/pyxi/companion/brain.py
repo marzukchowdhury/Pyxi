@@ -106,6 +106,7 @@ from pyxi.routines import RoutineStore
 from pyxi.scenes import SceneSpec, build_exploded_scene, get_scene, parse_scene
 from pyxi.scenes import library as model_library
 from pyxi.scenes.builder import build_model, explain_library_model
+from pyxi.scenes.diagram import Diagram, DiagramError, parse_diagram
 from pyxi.scenes.object_gallery import OBJECT_GALLERY
 from pyxi.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summary
 from pyxi.scenes.sketch import Sketchboard, steps_from_speech
@@ -3299,6 +3300,7 @@ class Brain:
                 "explain_in_3d",
                 "explode_view",
                 "sketch_diagram",
+                "draw_diagram",
                 "show_scene",
             }
             calls = sorted(response.tool_calls, key=lambda c: c.name not in visual)
@@ -3448,11 +3450,11 @@ class Brain:
                     or call.name in INFO_TOOLS
                     or (
                         note
-                        and note.startswith(("SCENE_INVALID", "MODEL_INVALID", "SKETCH_INVALID"))
+                        and note.startswith(VISUAL_INVALID)
                     )
                 ):
                     needs_more = True
-                if note and note.startswith(("SCENE_INVALID", "MODEL_INVALID", "SKETCH_INVALID")):
+                if note and note.startswith(VISUAL_INVALID):
                     self._visual_retry = True
                 # A tool that couldn't do its job ("errand: no accounts are connected yet") goes
                 # back to the model, so the user hears what happened instead of silence.
@@ -3927,6 +3929,36 @@ class Brain:
                 f"Drawing '{board.title}' ({len(board.shapes)} shapes, {len(board.steps)} steps)."
             )
             return f"{note} Repairs: {'; '.join(board.notes[:4])}" if board.notes else None
+        if name == "draw_diagram":
+            spoken = []
+            if not args.get("steps") and isinstance(args.get("items"), list):
+                # No steps: narrate with the spoken reply, the same way a sketch does.
+                spoken = (
+                    split_sentences(split_markers(self._round_say)[0])
+                    if self._round_say and not self._said
+                    else []
+                )
+                args["steps"] = steps_from_speech(
+                    spoken, args["items"], str(args.get("title", ""))
+                )
+            try:
+                diagram = parse_diagram(args)
+            except DiagramError as exc:
+                if self._scene_retry:
+                    return "draw_diagram failed twice; explain in words instead."
+                self._scene_retry = True
+                # Everything to change, in one note: the second try has to be the last.
+                return (
+                    "DIAGRAM_INVALID: fix these and call draw_diagram again: "
+                    + "; ".join(exc.problems[:5])
+                )
+            self._say_in_board = bool(spoken)
+            await self.show_sketch(diagram)
+            note = (
+                f"Drawing '{diagram.title}' ({diagram.type}, {len(diagram.items)} items, "
+                f"{len(diagram.steps)} steps)."
+            )
+            return f"{note} Repairs: {'; '.join(diagram.notes[:4])}" if diagram.notes else None
         if name == "build_3d_model" and self._builder_on() and not args.get("parts"):
             # A brief: the 3D builder makes the model in the background while Pyxi talks.
             self._visual_turn = True
@@ -4545,8 +4577,9 @@ class Brain:
         )
         self._spawn(self._narrate(scene))
 
-    async def show_sketch(self, board: Sketchboard) -> None:
-        """Put a self-drawing diagram on screen, in empty space, threaded to what it explains."""
+    async def show_sketch(self, board: Sketchboard | Diagram) -> None:
+        """Put a self-drawing diagram on screen, in empty space, threaded to what it explains.
+        A typed diagram goes the same way: the same board, with content for it to lay out."""
         self._visual_turn = True
         ctx = self._ctx
         if board.anchor and ctx is not None:
@@ -4561,7 +4594,7 @@ class Brain:
         audio_key = f"{board.id}:{secrets.token_hex(3)}"
         await self.hub.emit(
             "sketch",
-            board=board.model_dump(mode="json"),
+            board=board.as_board() if isinstance(board, Diagram) else board.model_dump(mode="json"),
             audio_key=audio_key,
             place=list(place) if place else None,
         )
@@ -5278,6 +5311,8 @@ TOOL_ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
     "explain_picture": ("explain_on_screen", {"style": "on_picture"}),
 }
 QUIET_NOTES = {"say", "explain_on_screen", "point", "circle", "highlight", "arrow", "remember"}
+# A visual the model drew wrong: the note says what to fix, and it gets one more try.
+VISUAL_INVALID = ("SCENE_INVALID", "MODEL_INVALID", "SKETCH_INVALID", "DIAGRAM_INVALID")
 THREE_D_TOOLS = {"build_3d_model", "edit_3d_model", "explain_in_3d", "explode_view"}
 _ASKS_3D = re.compile(
     r"\b(3d|3-d|three[- ]?d|in three dimensions|(build|make|show) (me )?(a |the )?model|render|build (it|this|me|one|a|an|the)|"

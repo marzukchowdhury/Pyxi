@@ -40,6 +40,29 @@ def test_broken_or_missing_diagrams_are_left_out_not_fatal():
     assert kept is not None and len(kept.shapes) == 1
 
 
+def test_a_card_diagram_keeps_one_accent_on_the_one_or_two_things_to_notice():
+    box = {"kind": "rect", "at": [5, 5], "size": [10, 8], "step": 0}
+    label = {"kind": "text", "at": [6, 10], "text": "Key", "step": 0}
+    arrow = {"kind": "arrow", "points": [[16, 9], [30, 9]], "step": 1}
+    colours = ["ice", "amber", "amber", "rose", "amber", "amber", "muted", "amber", "amber", "ink"]
+    shapes = [box, label, box, arrow, box, label, arrow, label, box, arrow]
+    kept = build_diagram({"shapes": [{**s, "color": c} for s, c in zip(shapes, colours, strict=True)]}, 2)
+    assert kept is not None
+    assert [s.color for s in kept.shapes] == [
+        "ink",  # ice was a second accent: plain ink now
+        "amber",  # a label on the thing to notice
+        "amber",  # the thing to notice
+        "ink",  # rose
+        "amber",  # the second thing to notice
+        "amber",  # and its label
+        "muted",  # quiet stays quiet
+        "ink",  # a third amber label: one too many
+        "ink",  # a third amber box: one too many
+        "ink",
+    ]
+    assert "One accent only" in DIAGRAM_SCHEMA["description"]
+
+
 def test_the_card_is_bigger_and_makes_room_for_a_diagram():
     w, h = card_size(["one point", "another point"], "Title")
     w2, h2 = card_size(["one point", "another point"], "Title", diagram=True)

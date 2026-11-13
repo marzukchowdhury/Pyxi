@@ -87,7 +87,24 @@ def build_diagram(raw: Any, points: int) -> NoteDiagram | None:
     except Exception:
         return None
     caption = " ".join(str(raw.get("caption") or "").split())[:48] or None
-    return NoteDiagram(caption=caption, shapes=board.shapes)
+    return NoteDiagram(caption=caption, shapes=one_accent(board.shapes))
+
+
+def one_accent(shapes: list[DiagramShape]) -> list[DiagramShape]:
+    """One accent, used sparingly: amber on the one or two things to notice (and their labels),
+    everything else in plain ink. Five colours in a card-sized diagram is a legend to decode,
+    and the same rule a typed diagram follows (pyxi/scenes/diagram.py)."""
+    drawn = written = 0
+    for s in shapes:
+        if s.color in ("ink", "muted"):
+            continue
+        is_text = s.kind in ("text", "equation")
+        used = written if is_text else drawn
+        if s.color == "amber" and used < 2:
+            written, drawn = written + is_text, drawn + (not is_text)
+        else:
+            s.color = "ink"
+    return shapes
 
 
 _DIAGRAM_SHAPE = dict(SKETCH_TOOL_SCHEMA["properties"]["shapes"]["items"])
@@ -104,9 +121,10 @@ DIAGRAM_SCHEMA: dict[str, Any] = {
     "description": "Optional small hand-drawn diagram inside the card. Only when the answer is a "
     "process (steps in order, a cycle, cause and effect, a request going through systems) or a "
     "structure (layers, parts of a whole, a hierarchy) and a picture makes it click; leave it out "
-    "for opinions, summaries and jokes. 100 wide x 64 tall grid, y down, ~6 units of margin. 4-14 "
-    "shapes: rect or ellipse boxes with 1-2 word text labels inside, arrows between them (flow: "
-    "true on what moves), colour ice for the key path and amber for the one thing to notice. "
+    "for opinions, summaries and jokes. 100 wide x 64 tall grid, y down, ~6 units of margin. "
+    "Fewer is clearer: 3-6 rect or ellipse boxes with 1-2 word text labels inside, arrows "
+    "between them (flow: true on what moves), 14 shapes at most. One accent only: amber on the "
+    "one or two things to notice, everything else ink. "
     "Give each shape the `step` of the point it belongs to, so it builds as you talk.",
     "properties": {
         "caption": {"type": "string", "description": "Optional, under 6 words."},

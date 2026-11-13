@@ -227,6 +227,37 @@ export interface Sketchboard {
   shapes: SketchShape[];
   steps: { narration: string; title: string | null }[];
   anchor: { element_id: number | null; quote: string | null; rect: [number, number, number, number] | null } | null;
+  /** A typed diagram (src/pyxi/scenes/diagram.py): content only, laid out by scene/diagramLayout.ts.
+   * When it is here, `shapes` is empty. */
+  diagram?: DiagramSpec | null;
+}
+
+export type DiagramType = "steps" | "flowchart" | "timeline" | "comparison" | "tree" | "loop";
+export interface DiagramItem {
+  id: string;
+  label: string;
+  step: number;
+  focus?: boolean;
+  /** comparison in two columns */
+  side?: "left" | "right" | null;
+  /** timeline: the date or moment, as it should read */
+  when?: string | null;
+  /** comparison on two axes: 0 to 100, x left to right and y bottom to top */
+  x?: number | null;
+  y?: number | null;
+}
+export interface DiagramLink {
+  from: string;
+  to: string;
+  label?: string | null;
+}
+export interface DiagramSpec {
+  type: DiagramType;
+  items: DiagramItem[];
+  links: DiagramLink[];
+  columns?: [string, string] | null;
+  axes?: { x: [string, string]; y: [string, string] } | null;
+  center?: string | null;
 }
 
 export interface ObjectScene {
