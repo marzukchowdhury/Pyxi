@@ -4,6 +4,13 @@ A tight loop: look at the screen (the accessibility tree, OCR text and a screens
 model pick the next one to four actions, do them with ``Hands``, look again, until the task is
 done. It works in any app because it uses the screen the way a person does.
 
+A click on a button, a switch, a tab, a menu item or a list row that the look gave an id is
+done without the mouse where the control allows it (screen/press.py): the control is found
+again in the window and pressed itself, so the press can't land beside it, it goes to where
+the control is now, and the pointer stays where the user left it. Everything else, and any
+control that can't be pressed that way or shows nothing for it, is clicked as before. Every
+guard below is in front of both.
+
 Safety, in order of importance:
 * It only runs after the user pressed Allow on a card naming the task.
 * Touching the mouse or pressing Esc stops it at once (``Hands`` checks between moves).
@@ -31,6 +38,7 @@ from pyxi.companion.actions import app_target, safe_url
 from pyxi.companion.aim import confirm_target
 from pyxi.companion.annotations import resolve_point, resolve_rect
 from pyxi.screen import ScreenContext, uia
+from pyxi.screen import press as presses
 
 log = logging.getLogger(__name__)
 
@@ -260,7 +268,15 @@ class Operator:
         strong_llm=None,
         max_cost: float = 0.25,
         make_hands=None,
+        press=None,
+        direct: bool = True,
     ) -> None:
+        # Pressing a control itself, with no mouse (screen/press.py). With pretend hands
+        # (tests) nothing real is pressed unless a pretend ``press`` comes with them.
+        self.press = press or (presses.press if direct and make_hands is None else None)
+        self._no_direct: set[tuple[str, str, str]] = set()  # controls it did nothing for
+        self._greyed: set[tuple[str, str, str]] = set()  # controls said to be greyed out
+        self._pressed: list[tuple[tuple[str, str, str], str]] = []  # this step's, to check
         self.make_hands = make_hands or hands.Hands  # tests pass pretend hands
         self.max_cost = max_cost  # dollars per task before it stops and asks
         self.llm = llm
@@ -307,6 +323,16 @@ class Operator:
             if ctx.excluded:
                 return Outcome(False, "That's a private app, so I won't touch it.", steps)
             look = _glance(ctx)
+            pressed, self._pressed = self._pressed, []
+            if pressed and steps and last_look is not None and look is not None and _same(last_look, look):
+                # Pressed without the mouse and nothing shows for it: some controls take the
+                # press and do nothing with it. From here on that control is clicked.
+                self._no_direct.update(key for key, _ in pressed)
+                names = ", ".join(f"“{name}”" for _, name in pressed)
+                steps[-1].note = (
+                    f"{steps[-1].note} {names} was pressed without the mouse and the screen looks "
+                    "the same. If it didn't take, click it again: that will use the mouse."
+                ).strip()
             if steps and last_look is not None and look is not None and _same(last_look, look):
                 still += 1
                 if still >= 2:
@@ -553,6 +579,48 @@ class Operator:
             )
         return point, ""
 
+    async def _direct(
+        self, h: Any, ctx: ScreenContext, a: dict[str, Any]
+    ) -> tuple[bool, str, tuple[int, int] | None]:
+        """Press the control itself, with no mouse, when the click names one by its id and it
+        is the kind a press works on. Returns (pressed, a note when it must not be clicked
+        either, where the control is now when that is known)."""
+        if a.get("element_id") is None:
+            return False, "", None
+        try:
+            el = ctx.element(int(a["element_id"]))
+        except (TypeError, ValueError):
+            el = None
+        if el is None or el.role not in presses.PRESSABLE or not el.name.strip():
+            return False, "", None
+        if a.get("quote") and el.role not in presses.SIMPLE:
+            return False, "", None  # words inside a row: maybe a link in it, so the mouse
+        key = (ctx.window.process.lower(), el.role, el.name)
+        if key in self._no_direct or not ctx.window.hwnd:
+            return False, "", None
+        if h.interrupted():
+            raise hands.Interrupted
+        target = presses.Target(ctx.window.hwnd, el.role, el.name, el.rect)
+        res = await asyncio.to_thread(self.press, target)
+        if res is None:
+            return False, "", None
+        now = (res.rect[0] + res.rect[2] // 2, res.rect[1] + res.rect[3] // 2) if res.rect else None
+        if res.how:
+            hands.acted()
+            log.info("hands: pressed %r by %s%s", el.name, res.how, " (late)" if res.late else "")
+            if not res.sure:
+                self._pressed.append((key, el.name))
+            return True, "", now
+        if res.why == "disabled" and key not in self._greyed:
+            self._greyed.add(key)  # said once; if it is clicked again, it is clicked
+            return (
+                False,
+                f"skipped: “{el.name}” is greyed out right now, so pressing it would do nothing. "
+                "Something else has to happen first (a field filled in, a row chosen)",
+                now,
+            )
+        return False, "", now
+
     async def _do(
         self, h: hands.Hands, ctx: ScreenContext, a: dict[str, Any], n: int
     ) -> tuple[str, str]:
@@ -650,6 +718,14 @@ class Operator:
         ):
             return f"{do} {name}", "declined by the user"
         await self.report(f"Clicking {name[:40] or 'there'}", n)
+        if do == "click" and self.press is not None:
+            pressed, note, now = await self._direct(h, ctx, a)
+            if pressed:
+                return f"{do} {name or (cx, cy)}", ""
+            if note:
+                return f"{do} {name}", note
+            if now is not None:
+                cx, cy = now  # where the control is now, not where the look saw it
         button = "right" if do == "right_click" else "left"
         count = 2 if do == "double_click" else 1
         await asyncio.to_thread(h.click, cx, cy, button, count)

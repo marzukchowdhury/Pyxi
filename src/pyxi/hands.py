@@ -142,6 +142,13 @@ def recently_acted(within_s: float = 1.5) -> bool:
     return _last_input > 0 and time.monotonic() - _last_input < within_s
 
 
+def acted() -> None:
+    """Pyxi just did something to the screen without the mouse or the keyboard (a control
+    pressed through the accessibility layer, screen/press.py): timed like any other input."""
+    global _last_input
+    _last_input = time.monotonic()
+
+
 def own_pids() -> set[int]:
     """The processes whose windows are Pyxi's: the desktop app (PYXI_APP_PID) and the brain."""
     pids = {os.getpid()}

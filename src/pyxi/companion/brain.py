@@ -697,6 +697,7 @@ class Brain:
                 if self.settings.model_hands_strong and not self.settings.local_mode
                 else None
             ),
+            direct=getattr(self.settings, "hands_direct", True),
         )
         try:
             out = await self._operator.run(task, window, come_back)

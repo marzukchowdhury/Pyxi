@@ -184,6 +184,12 @@ class PyxiSettings(BaseSettings):
         description="Takes over driving when the quick model gets stuck (canvas apps like Google "
         "Sheets, a dialog it can't get past). About 8x the cost per look, only when needed.",
     )
+    hands_direct: bool = Field(
+        True,
+        description="Press buttons, switches, tabs, menu items and list rows through the "
+        "accessibility layer, without the mouse, where the control allows it "
+        "(PYXI_HANDS_DIRECT). False: every click is a mouse click.",
+    )
     model_aim: str | None = Field(
         "anthropic/claude-sonnet-5.5",
         description="Model that finds the parts of a picture Pyxi explains (PYXI_MODEL_AIM), on a "
