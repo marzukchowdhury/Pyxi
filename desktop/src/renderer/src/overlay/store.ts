@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { AudioQueue, RemoteVoice, type Voice } from "../shared/audio";
 import { bridge, currentDisplay, onThisDisplay, toLocal } from "../shared/bridge";
-import type { Annotation, AnswerCard, BrainEvent, BrainState, Job, NoteCard, ObjectScene, Pin, SceneSpec, Sketchboard, TimelineMoment, Walkthrough } from "../shared/protocol";
+import type { Annotation, AnswerCard, BrainEvent, BrainState, FormField, Job, NoteCard, ObjectScene, Pin, SceneSpec, Sketchboard, TimelineMoment, Walkthrough } from "../shared/protocol";
 import { startChime } from "../shared/chime";
 import { brain } from "../shared/socket";
 
@@ -78,6 +78,8 @@ interface Request {
   question?: string;
   /** A third button, e.g. "Always allow" (answers "always"). */
   always?: string;
+  /** A PDF form's questions: answered together on one card (FormAsk). */
+  fields?: FormField[];
 }
 
 interface OverlayState {

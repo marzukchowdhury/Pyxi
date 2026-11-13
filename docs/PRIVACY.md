@@ -43,7 +43,7 @@ You can pause all screen access at any time with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+
 
 | Teammate | What it does with the file | Sent to the AI model? |
 |---|---|---|
-| Pixel | Converts, merges, compresses, fills and compares documents | No, it all happens on your computer, with one exception: a PDF form whose boxes have no names. To tell which box is which, the words printed on the form and the answers you asked Pixel to put in go to the model. What is already typed in the form does not, and your saved details (name, email, phone) are put in on your computer: the model only says which box each belongs in |
+| Pixel | Converts, merges, compresses, fills and compares documents | No, it all happens on your computer, with one exception: the first time Pixel sees a PDF form, the words printed on the blank form go to the model once, to work out what the form asks. What is typed in the form, your saved details and your answers never do |
 | Ledger | Edits Excel, Word and PowerPoint files, the workbook, document or deck you have open in those apps, and Google Sheets and Docs | An outline of the file or the open document, to decide the edits |
 | Sage | Makes flashcards and quizzes from slides and notes | The text of the file |
 | Scribe | Turns a meeting recording into notes | The recording is transcribed on your computer; only the transcript is sent |
@@ -51,6 +51,8 @@ You can pause all screen access at any time with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+
 | Forms | Fills a job or government form from a CV or document you name | The parts the form needs. Passwords, card numbers and government ID numbers are cut out first |
 
 Results are saved as new files beside the original, or in `Documents\Pyxi`. Originals are never overwritten, with two exceptions you approve: Patch changes a script only after you press Allow on a card that shows the change (and keeps a backup), and Google Docs and Sheets are edited in place, where Google keeps every earlier version.
+
+**Filling in a PDF form.** Pixel puts the form's questions on a card, with your name, email, phone and the like already typed in from your saved details, and you type the rest. What you type goes straight into the form on your computer; no AI model sees your answers, and a box that asks for an ID number, a card number or a password is never on the card. Two things are kept on your computer so the next form is quicker: how each form reads (its questions, never an answer), and, if you leave "Remember" ticked on the card, your address and any of your name, email, phone or date of birth that Settings did not have yet. Untick it and nothing is kept.
 
 **A document open in Excel, Word or PowerPoint.** When you ask for a change to the workbook, document or deck you have open in the app, Ledger makes it right there, through the app itself, instead of with your mouse. The same outline as for a file goes to the AI model, and nothing else: no copy is made, nothing new is stored, and Pyxi never saves, closes or deletes the document. You save it, or not. Before a change would replace or remove more than a few filled cells, a card asks you first. Word and PowerPoint can undo these changes with Ctrl+Z; Excel usually cannot, so the card says so.
 

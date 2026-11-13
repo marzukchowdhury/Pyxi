@@ -341,6 +341,22 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
+def detail_key(name: str) -> str:
+    """Which saved detail a field's name asks for ('first_name', 'email'...), or ''."""
+    key = _norm(name)
+    if not key or SECRET.search(name):
+        return ""
+    if key in ("name", "fullname", "yourname", "applicantname", "nameofapplicant", "legalname"):
+        return "full_name"
+    for detail, words in FIELD_WORDS:
+        for w in words:
+            if key == w or (len(w) > 4 and w in key):
+                return detail
+            if w in ("first", "last") and key.startswith(w) and "name" in key:
+                return detail
+    return ""
+
+
 def match_field(name: str, details: dict[str, str]) -> str | None:
     """The saved detail a form field wants, or None."""
     key = _norm(name)
@@ -363,9 +379,62 @@ def match_field(name: str, details: dict[str, str]) -> str | None:
     return None
 
 
-def _plain_label(label: str) -> str:
-    """'Monthly rent: $__' -> 'Monthly rent'."""
-    return re.sub(r"[\s:$_*()]+$", "", " ".join(label.split()))[:40]
+def _write_filled(src: Path, reader: Any, filled: dict[str, str], out: Path | None) -> Path:
+    from pypdf import PdfWriter
+    from pypdf.generic import BooleanObject, NameObject
+
+    writer = PdfWriter(clone_from=reader)
+    for page in writer.pages:
+        writer.update_page_form_field_values(page, filled, auto_regenerate=False)
+    writer._root_object["/AcroForm"][NameObject("/NeedAppearances")] = BooleanObject(True)
+    target = unique_path(out or out_dir_for(src), f"{src.stem} (filled).pdf")
+    _write(writer, target)
+    return target
+
+
+def _fill_placed(
+    src: Path,
+    reader: Any,
+    fields: dict[str, Any],
+    placed: dict[str, str],
+    labels: dict[str, str],
+    out: Path | None,
+) -> PixelResult:
+    """Write what was typed on the form card. Only a field the form has, never one that asks
+    for an ID number, and only if something would change."""
+
+    def now(name: str) -> str:
+        f = fields[name]
+        value = f.get("/V")
+        if f.get("/FT") == "/Btn":
+            return str(value) if value not in (None, "") else "/Off"
+        return "" if value is None else str(value)
+
+    filled = {
+        name: str(value)
+        for name, value in placed.items()
+        if name in fields
+        and fields[name].get("/FT") in ("/Tx", "/Ch", "/Btn")
+        and not SECRET.search(name)
+        and not SECRET.search(labels.get(name, ""))
+    }
+    changed = sorted(name for name, value in filled.items() if value != now(name))
+    if not changed:
+        raise PixelError("Nothing was changed on the card, so I left the form as it is.")
+    filled = {name: filled[name] for name in changed}  # a field they left alone is not touched
+    target = _write_filled(src, reader, filled, out)
+    empty = sum(
+        1
+        for name, f in fields.items()
+        if f.get("/FT") in ("/Tx", "/Ch") and filled.get(name, now(name)) == ""
+    )
+    n = len(changed)
+    tail = f" {empty} place{'s' if empty != 1 else ''} to write {'are' if empty != 1 else 'is'} still empty." if empty else ""
+    return PixelResult(
+        [target],
+        f"Filled in {n} answer{'s' if n != 1 else ''} in {target.name}.{tail} Check it before you send it.",
+        {"filled": changed, "empty": empty},
+    )
 
 
 def fill_form(
@@ -379,11 +448,10 @@ def fill_form(
     """Fill a PDF's form fields: values they gave first, then saved details by field name.
     ID numbers, card numbers and passwords are never filled.
 
-    ``placed`` holds values already matched to fields by the words printed beside them
-    (pixel_forms.py), for a form whose fields have no names worth reading; ``labels`` those
-    words, so what's left empty is named the way the page names it."""
-    from pypdf import PdfWriter
-    from pypdf.generic import NameObject
+    ``placed`` is what they typed on Pixel's form card, already matched to the form's fields
+    (pixel_ask.py): {field name: what to write}. When it is given it is the whole of what is
+    written, and nothing is matched by name. ``labels`` are the words printed for each field,
+    so a box that asks for an ID number is known by them too."""
 
     (src,) = need(files, {".pdf"}, "PDF")
     reader = _reader(src)
@@ -392,18 +460,16 @@ def fill_form(
         raise PixelError(
             f"{src.name} has no fillable fields. Scout can fill a form on a website instead."
         )
+    if placed is not None:
+        return _fill_placed(src, reader, fields, placed, labels or {}, out)
     given = {_norm(k): v for k, v in (values or {}).items()}
-    placed, labels = placed or {}, labels or {}
     filled: dict[str, str] = {}
     left: list[str] = []
     for name, f in fields.items():
         if f.get("/FT") not in ("/Tx", "/Ch", "/Btn"):
             continue
-        if SECRET.search(name) or SECRET.search(labels.get(name, "")):
+        if SECRET.search(name):
             left.append(name)
-            continue
-        if name in placed and _norm(name) not in given:
-            filled[name] = placed[name]  # a box's value is already the state that ticks it
             continue
         value = given.get(_norm(name))
         if value is None and f.get("/FT") == "/Tx":
@@ -423,25 +489,8 @@ def fill_form(
         raise PixelError(
             "None of the form's fields matched your saved details. Tell me what to put in which field."
         )
-    writer = PdfWriter(clone_from=reader)
-    for page in writer.pages:
-        writer.update_page_form_field_values(page, filled, auto_regenerate=False)
-    writer._root_object["/AcroForm"][NameObject("/NeedAppearances")] = __import__(
-        "pypdf"
-    ).generic.BooleanObject(True)
-    target = unique_path(out or out_dir_for(src), f"{src.stem} (filled).pdf")
-    _write(writer, target)
+    target = _write_filled(src, reader, filled, out)
     tail = f" Still empty: {', '.join(left[:8])}." if left else ""
-    if labels:
-        # Named the way the page names them, and only the ones that were empty to begin with:
-        # "Still empty: untitled3, untitled4" tells nobody anything.
-        empty = [n for n in left if fields[n].get("/V") in (None, "", "/Off")]
-        named = list(dict.fromkeys(_plain_label(labels[n]) for n in empty if _plain_label(labels.get(n, ""))))
-        named = [n for n in named if re.search(r"[A-Za-z]{4}", n) and not n.startswith("(")]
-        if len(empty) > 12 or not named:  # a long form: a count says more than a list would
-            tail = f" {len(empty)} boxes are still empty." if empty else ""
-        else:
-            tail = f" Still empty: {', '.join(named[:8])}."
     return PixelResult(
         [target],
         f"Filled {len(filled)} field{'s' if len(filled) != 1 else ''} in {target.name}.{tail} Check it before you send it.",

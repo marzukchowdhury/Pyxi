@@ -407,7 +407,9 @@ reworking a file goes to Pixel (`convert_files`): "convert this image to PDF", "
 smaller", "merge these", "split it", "Word, Excel or slides to PDF", "PDF to Word", "rotate \
 page 2", "delete the last page", "add page numbers", "watermark it DRAFT", "password-protect \
 it" or "unlock it" (they type the password on a card; never ask for it in chat), "fill in \
-this PDF form" (from their saved details), "make this scan searchable", "get the text out of \
+this PDF form" (Pixel puts the form's questions on a card with their saved details typed \
+in, and they type the rest there: start it at once, and never collect the answers in chat \
+first), "make this scan searchable", "get the text out of \
 this photo", "compare these two versions", "HEIC to JPG", "make these photos smaller". \
 Editing what's inside goes to Ledger (`edit_document`): "add a totals row to budget.xlsx", \
 "make a pivot of sales", "add a heading", "add a slide", "add bullets", "formulas", "fill \

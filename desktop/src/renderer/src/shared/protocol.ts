@@ -329,6 +329,20 @@ export interface Walkthrough {
   steps: GhostStep[];
 }
 
+/** One question on the card Pixel shows before it fills a PDF form: a place to write, or tick
+ * boxes that are one choice ("choice") or several ("multi"). `value` is what is known already:
+ * from the form itself, their saved details, or what they said in chat (`from`). */
+export interface FormField {
+  id: string;
+  label: string;
+  section: string;
+  kind: "text" | "choice" | "multi";
+  page?: number;
+  options?: string[];
+  value: string | string[];
+  from?: "form" | "saved" | "said" | "";
+}
+
 export interface Pin {
   id: number;
   note: string;
@@ -477,7 +491,7 @@ export type BrainEvent =
   | { type: "job_frame"; job_id: string; image: string }
   | { type: "handoff"; source: string; target: string; task: string }
   | { type: "confirm"; request_id: string; job_id: string; agent: string; action: string; reason: string; always?: string }
-  | { type: "ask"; request_id: string; job_id: string; agent: string; question: string; handover?: boolean; secret?: boolean }
+  | { type: "ask"; request_id: string; job_id: string; agent: string; question: string; handover?: boolean; secret?: boolean; fields?: FormField[] }
   | { type: "request_closed"; request_id: string }
   | { type: "driving"; doing: string | null }
   | { type: "agents"; agents: Agent[] }

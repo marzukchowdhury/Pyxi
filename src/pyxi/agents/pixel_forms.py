@@ -1,23 +1,20 @@
-"""Filling a PDF form whose boxes have no names worth reading.
+"""Reading a PDF form the way a person does: each page's printed words, line by line, with
+every field marked where it sits.
 
-Pixel fills a form by the names its author gave the fields ("First Name", "Email Address").
-Many real forms have none: every field is "untitled17", and what a box is for is only printed
-beside it on the page. Two real application forms (195 fields and 7) were refused outright:
-"None of the form's fields matched your saved details."
+Many real forms give their fields no names worth reading: every one is "untitled17", and
+what a box is for is only printed beside it. So Pixel lays the page out:
 
-Here each page is laid out the way a person reads it: its printed words, line by line, with
-every field marked where it sits ("Monthly rent: $ [f31] Utilities included: [f32 box] Yes").
-The model is shown that, what the user asked to put in, and the NAMES of the saved details
-(never their values), and answers which field takes what, in a small fixed form. Every part
-of the answer is checked here: the field must exist, a box takes yes or no and nothing else,
-a saved detail is looked up on this PC, and a field that asks for an ID number, a card number
-or a password is never filled, whatever the answer says. What is typed in the fields already
-is not shown to the model.
+    Monthly rent: $ [f31] Utilities included: [f32 box] Yes [f33 box] No
+
+and works out, for each field, the words it belongs to (the words before a place to write,
+or the heading over its column; the words after a box). What is typed in a field is kept
+for the card shown on this PC and is never part of the outline the model sees.
+
+What is done with the outline is in pixel_ask.py.
 """
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,7 +29,7 @@ _JUNK_WORDS = frozenset(
 _PRIVATE_USE = re.compile(r"[\ue000-\uf8ff\x00-\x08\x0b-\x1f]")  # symbol-font glyphs
 _LINES = re.compile(r"_{3,}|\.{6,}")
 MAX_FIELDS = 600
-MAX_VALUE = 400
+MAX_VALUE = 2000
 _PUSH, _READ_ONLY = 1 << 16, 1
 
 
@@ -46,6 +43,12 @@ class Field:
     state: str = ""  # a box: the value that ticks it
     filled: bool = False
     label: str = ""  # the printed words it belongs to
+    value: str = ""  # what is typed in it now: for the card on this PC, never for the model
+    line: int = 0  # which line of its page it sits on
+    before: str = ""  # the words just before it on its line
+    above: str = ""  # the nearest words printed over it
+    below: str = ""  # the words printed right under it
+    mates: list[str] = field(default_factory=list)  # other places to write on its line
 
 
 @dataclass
@@ -114,7 +117,8 @@ def _widgets(reader: Any) -> list[Field]:
                     filled = str(w.get("/AS") or value or "/Off") == state
                 out.append(
                     Field("", ".".join(reversed(parts)), "box" if kind == "/Btn" else "text",
-                          number, rect, state, filled)
+                          number, rect, state, filled,
+                          value="" if kind == "/Btn" or value is None else str(value)[:2000])
                 )  # fmt: skip
             except Exception:  # one broken box is not the whole form
                 continue
@@ -179,10 +183,17 @@ def _lay_out(runs: list[tuple[float, float, float, float, str]], fields: list[Fi
             if not re.search(r"\w", before):
                 before = ""  # a "$" or a rule before the box is not what it is for
             after = line[at + 1][3] if at + 1 < len(line) and isinstance(line[at + 1][3], str) else ""
+            what.line = n
+            what.before = before
+            what.above = _above(lines[:n], left, right)
+            what.below = _above(list(reversed(lines[n + 1 : n + 2])), left, right)
             if what.kind == "box":
                 what.label = after or before  # a box's words follow it
             else:
-                what.label = before or _above(lines[:n], left, right) or after
+                what.label = before or what.above or what.below or after
+                what.mates = [
+                    o[3].id for o in line if not isinstance(o[3], str) and o[3] is not what and o[3].kind == "text"
+                ]
             mark = what.id + (" box" if what.kind == "box" else "") + (" filled" if what.filled else "")
             parts.append(f"[{mark}]")
         shown.append(" ".join(parts))
@@ -192,9 +203,11 @@ def _lay_out(runs: list[tuple[float, float, float, float, str]], fields: list[Fi
 def _above(lines: list[list[tuple[float, float, float, Any]]], left: float, right: float) -> str:
     """The nearest words printed over that stretch of the page: a column's heading."""
     for line in reversed(lines[-12:]):
-        for _, a, b, what in line:
-            if isinstance(what, str) and a < right and b > left:
-                return what
+        # every run of that line that reaches over the stretch: one heading is often several
+        # runs ("(Co", "-", "Applicant. Please print)")
+        over = [(a, what) for _, a, b, what in line if isinstance(what, str) and a < right and b > left]
+        if over:
+            return " ".join(what for _, what in sorted(over))
     return ""
 
 
@@ -221,80 +234,6 @@ def read(path: Path, reader: Any = None) -> Form:
         runs = words[number] if number < len(words) else []
         pages.append(_lay_out(runs, on_page) if runs or on_page else "")
     return Form(fields, pages)
-
-
-SYSTEM = (
-    "You place answers in a paper form. You are shown each page as it reads, top to bottom, "
-    "with every place to write marked [f12] and every box to tick marked [f13 box]; one marked "
-    "'filled' already has something in it. A box's words come right after it; a place to write "
-    "belongs to the words before it or, in a table, to the heading over its column. Use only "
-    "what you are given: the answers the person gave, and their saved details, which you "
-    "know by name only. Never invent an answer, never fill a place nothing was given for, "
-    "never change a filled one unless a new answer was given for it, and never fill an ID "
-    "number, card number, bank account or password. Mind whose details a section asks for: "
-    "the person's saved details are theirs, not their landlord's, employer's or emergency "
-    "contact's.\n\n"
-    'Return JSON only: {"fields": {"f12": "text to write", "f13": true, "f14": {"detail": '
-    '"first_name"}}, "unplaced": ["an answer you were given and found no place for"]}. A '
-    "place to write takes text, or {\"detail\": <name>} for a saved detail; a box takes true "
-    "to tick it or false to clear it."
-)
-
-
-def prompt(form: Form, said: dict[str, Any], details: dict[str, str]) -> str:
-    names = ", ".join(sorted(k for k, v in details.items() if v and k != "preferences")) or "none"
-    answers = json.dumps(said, ensure_ascii=False)[:6000] if said else "none"
-    return (
-        f"Answers the person gave: {answers}\n"
-        f"Their saved details (names only): {names}. full_name is first_name and last_name together.\n\n"
-        f"The form:\n{form.outline()[:60000]}"
-    )
-
-
-def place(
-    answer: str, form: Form, details: dict[str, str], secret: re.Pattern[str]
-) -> tuple[dict[str, str], list[str]]:
-    """The model's answer as {the PDF's field name: the value to write}, with everything in it
-    checked, and the answers it found no place for. Anything that isn't allowed is dropped."""
-    m = re.search(r"\{.*\}", answer or "", re.S)
-    try:
-        data = json.loads(m.group(0)) if m else {}
-    except ValueError:
-        data = {}
-    wanted = data.get("fields") if isinstance(data, dict) else None
-    known = form.by_id()
-    full = " ".join(x for x in (details.get("first_name", ""), details.get("last_name", "")) if x)
-    placed: dict[str, str] = {}
-    for key, value in (wanted if isinstance(wanted, dict) else {}).items():
-        f = known.get(str(key).strip().strip("[]").split()[0] if str(key).strip() else "")
-        if f is None or secret.search(f.label) or secret.search(f.name):
-            continue
-        if f.kind == "box":
-            if value is True:
-                placed[f.name] = f.state
-            elif value is False and f.name not in placed:
-                placed[f.name] = "/Off"
-            continue
-        if isinstance(value, dict):
-            which = str(value.get("detail") or "")
-            value = full if which == "full_name" else details.get(which, "") if which != "preferences" else ""
-        if isinstance(value, bool) or not isinstance(value, str | int | float):
-            continue
-        text = " ".join(str(value).split())[:MAX_VALUE]
-        if text:
-            placed[f.name] = text
-    unplaced = data.get("unplaced") if isinstance(data, dict) else None
-    return placed, [str(u)[:80] for u in (unplaced if isinstance(unplaced, list) else [])[:6]]
-
-
-def needs_model(form: Form, said: dict[str, Any]) -> bool:
-    """Is this a form the names can't fill: most fields have no real name, or an answer was
-    given for something no field is named after."""
-    if not form.fields:
-        return False
-    names = {re.sub(r"[^a-z0-9]", "", f.name.lower()) for f in form.fields}
-    strays = [k for k in said if re.sub(r"[^a-z0-9]", "", str(k).lower()) not in names]
-    return form.unnamed() or bool(strays)
 
 
 def check(path: Path) -> Form:

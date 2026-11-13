@@ -116,6 +116,7 @@ brain.on((e: BrainEvent) => {
       usePanel.setState((s) => ({ requests: [...s.requests, { request_id: e.request_id, kind: "confirm", agent: e.agent, text: e.action, detail: e.reason }] }));
       break;
     case "ask":
+      if (e.fields) break; // a form's questions are answered on the card on screen, not in a prompt box
       usePanel.setState((s) => ({ requests: [...s.requests, { request_id: e.request_id, kind: "ask", agent: e.agent, text: e.question }] }));
       break;
     case "request_closed":

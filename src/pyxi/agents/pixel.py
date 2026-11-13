@@ -77,7 +77,7 @@ OPERATIONS = {
     "add_watermark": "Stamp text across every page (options: text, opacity).",
     "protect_pdf": "Lock a PDF with a password. The user types it on a card; never put it in options.",
     "unlock_pdf": "Remove a PDF's password. The user types it on a card; never put it in options.",
-    "fill_form": "Fill a PDF form's fields from their saved details (options: values for anything else, by field name).",
+    "fill_form": "Fill in a PDF form: Pixel reads what the form asks and puts every question on a card for them, with their saved details (name, email, phone, address) and anything in options values typed in already; what they type on the card is written into the form.",
     "extract_text": "Get the text out of a PDF or an image (OCR for scans) as a .txt.",
     "make_searchable": "Turn a scanned PDF or photos of pages into a searchable PDF (OCR).",
     "compare_documents": "List what changed between two documents (old first, then new).",

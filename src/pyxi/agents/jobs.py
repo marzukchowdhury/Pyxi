@@ -692,7 +692,8 @@ class JobManager:
             from pyxi import booking
 
             options["details"] = booking.load(self.settings.data_dir)
-            await self._place_by_label(job, agent, options)
+            if not await self._ask_form(job, agent, options):
+                return
         note = ""
         if op in ("to_pdf", "word_to_pdf") and any(
             Path(f).suffix.lower() in pixel.OFFICE for f in job.files
@@ -713,8 +714,6 @@ class JobManager:
         options.pop("password", None)
         job.outputs = [str(p) for p in result.outputs]
         job.summary = result.summary
-        if options.get("unplaced"):  # an answer they gave that the form has no box for
-            job.summary += f" I found no place for: {'; '.join(options['unplaced'])}."
         if note:
             job.summary = job.summary.replace(pixel.BUILT_IN_NOTE, "") + note
         if job.outputs:
@@ -723,38 +722,98 @@ class JobManager:
         job.data = {"operation": op, "outputs": job.outputs, **result.details}
         job.status = "done"
 
-    async def _place_by_label(self, job: Job, agent: AgentProfile, options: dict[str, Any]) -> None:
-        """A form whose fields are all called "untitled17": which box takes what is read off
-        the page instead (agents/pixel_forms.py), with one model call. The model sees the
-        form's printed words and the answers they gave, and the saved details by name only;
-        their values are put in here, on this PC. A form with real field names is filled
-        from those names as before, with no model call."""
-        from pyxi.agents import pixel_forms, pixel_pdf
+    async def _ask_form(self, job: Job, agent: AgentProfile, options: dict[str, Any]) -> bool:
+        """Before a PDF form is filled: read what it asks (once per form; the reading is kept on
+        this PC), show every question on one card with what is already known typed in, and
+        wait for their answers (agents/pixel_ask.py). What they type goes to the matching
+        fields with no model in between. False: they closed the card, so nothing is filled.
+
+        The model sees the form's printed words to make the list of questions, and nothing
+        else: not what is typed in the form, not their saved details, not their answers."""
+        from pyxi import booking
+        from pyxi.agents import pixel_ask, pixel_forms, pixel_pdf
 
         files = [Path(f) for f in job.files if Path(f).suffix.lower() == ".pdf"]
-        if len(files) != 1:
-            return
-        said = options.get("values") if isinstance(options.get("values"), dict) else {}
+        if len(files) != 1 or len(job.files) != 1:
+            return True  # Pixel says what it needs
         try:
             form = await asyncio.to_thread(pixel_forms.read, files[0])
-            if not pixel_forms.needs_model(form, said):
-                return
-            options["labels"] = form.labels()
-            await self._status(job, "Reading what each box is for")
-            details = {k: str(v) for k, v in (options.get("details") or {}).items() if v}
-            llm = self.llm_factory(agent)
-            response = await llm.complete(
-                system=pixel_forms.SYSTEM + UNTRUSTED_RULE,
-                messages=[Message.user(pixel_forms.prompt(form, said, details))],
-                max_tokens=6000,
-            )
-            job.cost_usd += response.usage.cost_usd
-            placed, unplaced = pixel_forms.place(response.text, form, details, pixel_pdf.SECRET)
-            options["placed"] = placed
-            if unplaced:
-                options["unplaced"] = unplaced
-        except Exception:  # the form is still filled by its field names, or says why it can't be
-            log.warning("pixel: couldn't match the form's boxes to its labels", exc_info=True)
+        except Exception:
+            return True  # not a PDF that opens: Pixel says so
+        if not form.fields:
+            return True  # nothing to fill: Pixel says so
+        data_dir = self.settings.data_dir
+        key = pixel_ask.fingerprint(form)
+        questions = await asyncio.to_thread(pixel_ask.load_map, data_dir, key)
+        llm = None
+        if questions is None:
+            await self._status(job, "Reading the form (only the first time takes this long)")
+            questions = []
+            for attempt in range(2):
+                try:
+                    llm = llm or self.llm_factory(agent)
+                    response = await llm.complete(
+                        system=pixel_ask.SYSTEM + UNTRUSTED_RULE,
+                        messages=[Message.user(pixel_ask.prompt(form))],
+                        max_tokens=8000,
+                    )
+                    job.cost_usd += response.usage.cost_usd
+                    found, dropped = pixel_ask.read_map(response.text, form)
+                except Exception:
+                    log.warning("pixel: the form couldn't be read by the model", exc_info=True)
+                    break
+                log.info(
+                    "pixel: reading %d: %d questions for %d fields, %d lines dropped",
+                    attempt + 1, len(found), len(form.fields), dropped,
+                )
+                if pixel_ask.coverage(found, form) > pixel_ask.coverage(questions, form):
+                    questions = found
+                if pixel_ask.coverage(questions, form) >= pixel_ask.ENOUGH:
+                    break  # a reading that leaves most of the form out is made once more
+            if pixel_ask.coverage(questions, form) >= pixel_ask.ENOUGH:
+                await asyncio.to_thread(pixel_ask.save_map, data_dir, key, questions)
+            elif not questions:  # each box by the words beside it; tried again next time
+                questions = pixel_ask.plain_map(form)
+        details = {**booking.load(data_dir), **pixel_ask.remembered(data_dir)}
+        details.pop("preferences", None)
+        said = options.get("values") if isinstance(options.get("values"), dict) else {}
+        told: dict[str, Any] = {}
+        if said and questions:
+            try:  # what they said in chat is typed onto the card for them to check
+                llm = llm or self.llm_factory(agent)
+                response = await llm.complete(
+                    system=pixel_ask.SAID_SYSTEM + UNTRUSTED_RULE,
+                    messages=[Message.user(pixel_ask.said_prompt(questions, said))],
+                    max_tokens=2000,
+                )
+                job.cost_usd += response.usage.cost_usd
+                told = pixel_ask.read_said(response.text, questions)
+            except Exception:
+                log.warning("pixel: couldn't place what they said on the card", exc_info=True)
+        fields = pixel_ask.card(questions, form, details, told, pixel_pdf.SECRET)
+        if not fields:
+            return True  # nothing Pixel could read: the old way says why
+        await self._status(job, "Waiting for your answers on the card")
+        answer = await self.hub.request(
+            "ask",
+            timeout=1800,
+            job_id=job.id,
+            agent=agent.name,
+            question=f"What goes in {files[0].name}?",
+            fields=fields,
+        )
+        if not isinstance(answer, dict) or not isinstance(answer.get("answers"), dict):
+            job.status, job.summary = "stopped", "The card was closed, so nothing was filled in."
+            return False
+        answers = answer["answers"]
+        options["placed"] = pixel_ask.plan(questions, form, answers, pixel_pdf.SECRET)
+        options["labels"] = form.labels()
+        if answer.get("remember"):
+            new, _ = await asyncio.to_thread(pixel_ask.remember, data_dir, questions, answers, details)
+            if new:  # a detail Settings didn't have yet; one that is saved is never replaced
+                saved = booking.save(data_dir, {**booking.load(data_dir), **new})
+                await self.hub.emit("profile", profile=saved, saved=True)
+        return True
 
     async def _ask_password(self, job: Job, agent: AgentProfile, op: str, names: str) -> str:
         """The user types the password on a masked card; it goes straight to Pixel."""

@@ -398,6 +398,12 @@ async def test_fill_form_job_uses_details_saved_on_this_pc(settings, tmp_path):
         {"first_name": "Mina", "last_name": "Rahman", "email": "mina@example.com"},
     )
     brain, _ = make_brain(settings)
+
+    async def press_fill_it_in(kind, timeout=300, **data):
+        # Pixel's card: the saved details are typed in already, and they press the button.
+        return {"answers": {f["id"]: f["value"] for f in data["fields"]}, "remember": False}
+
+    brain.hub.request = press_fill_it_in  # type: ignore[method-assign]
     src = form(tmp_path / "application.pdf")
     await filework.handle(
         brain,

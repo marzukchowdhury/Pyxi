@@ -1,5 +1,6 @@
 // Approval and question toasts from teammates: "Can Scout click Submit?" right on screen.
 import { useState } from "react";
+import { FormAsk } from "./FormAsk";
 import { Interactive } from "./Interactive";
 import { trusted } from "../shared/trusted";
 import { useOverlay } from "./store";
@@ -11,8 +12,10 @@ export function Requests() {
   return (
     <div className="requests">
       {requests.map((r) => (
-        <Interactive key={r.request_id} className="request">
-          {r.kind === "confirm" ? (
+        <Interactive key={r.request_id} className={r.fields ? "request form" : "request"}>
+          {r.fields ? (
+            <FormAsk id={r.request_id} agent={r.agent} question={r.question ?? ""} fields={r.fields} onAnswer={answer} />
+          ) : r.kind === "confirm" ? (
             <>
               <div className="req-title">{r.agent} needs your OK</div>
               <div className="req-action">{r.action}</div>

@@ -260,6 +260,13 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             files=files,
             params={"operation": op, "options": options},
         )
+        if op == "fill_form":
+            return (
+                f"Started {job.id}: {job.agent_name} is reading the form and will put a card on "
+                "their screen with every question it asks; their name, email, phone and the like "
+                "are typed in already, and they type the rest. Don't ask them for the answers "
+                "yourself. Say one short line, like 'I'll ask you for the answers on a card.'"
+            )
         if op in NEEDS_PASSWORD:
             return (
                 f"Started {job.id}: a card is asking them to type the password (never ask for it "
