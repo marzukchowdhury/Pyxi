@@ -38,7 +38,7 @@ export function initBuild3D({ reduced = false } = {}) {
   let loading = false;
   let current = "ram";
   const ramFrame = $(".b3-ram");
-  let ramAt = 2.2; // where the RAM guide is in its own ten seconds
+  let ramAt = 6.0; // where the RAM guide is in its own seconds (it starts as the model builds)
   let ramLast = 0;
   let ramRaf = 0;
   const ramWindow = () => (ramFrame.contentDocument?.body?.dataset.ready ? ramFrame.contentWindow : null);
@@ -53,7 +53,7 @@ export function initBuild3D({ reduced = false } = {}) {
         w.setup({ c: 999, total: 999, phrases: RAM_STEPS.map((s, i) => ({ text: s.title + ".", at: s.at - 0.1, until: (RAM_STEPS[i + 1]?.at ?? 11.4) - 0.1 })) });
       }
       ramAt = reduced ? 11.4 : ramAt + Math.min(0.1, (now - (ramLast || now)) / 1000);
-      if (ramAt > 13) ramAt = 2.2;
+      if (ramAt > 13) ramAt = 6.0;
       w.draw(ramAt);
       [...steps.children].forEach((li, k) => {
         li.classList.toggle("on", ramAt >= RAM_STEPS[k].at && (k === 2 || ramAt < RAM_STEPS[k + 1].at));
@@ -87,7 +87,7 @@ export function initBuild3D({ reduced = false } = {}) {
         return li;
       }),
     );
-    ramAt = 2.2;
+    ramAt = 6.0;
     ramLast = 0;
     if (!ramRaf) ramRaf = requestAnimationFrame(ramTick);
   };
