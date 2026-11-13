@@ -168,6 +168,39 @@ THANKED = re.compile(
 BILL = re.compile(r"\b(?:e-?bills?|bills?|statements?)\b", re.I)
 
 
+# The money did not move. Live, 12 November: eight "$29.00 payment to ... was unsuccessful
+# again" mails were a subscription charged eight times, and three "Third billing failure"
+# notices were one charged every week.
+FAILED = re.compile(
+    r"\b(?:unsuccessful|billing failure|"
+    r"(?:payments?|billing|charges?|transactions?|renewals?) (?:has |have |was |were |is )?"
+    r"(?:failed|declined|not successful|did(?: not|n'?t) go through)|"
+    r"(?:failed|declined) (?:payments?|charges?|transactions?|renewals?|billing)|"
+    r"(?:could ?not|couldn'?t|unable to|(?:was|were) ?n[o']t able to) (?:process|charge|bill|collect|renew)|"
+    r"card (?:was |has been )?declined)\b",
+    re.I,
+)
+# An advert by its subject, whatever prices are in it. Live: "What $99 gets you this Black
+# Friday" was a $899.00 a year subscription nobody had bought.
+PROMO_SUBJECT = re.compile(
+    r"\b(?:black friday|cyber monday|boxing (?:day|week)|prime day|flash sale|"
+    r"sale (?:ends|starts|is on)|last chance|special offer|limited[- ]time|\d+% off|"
+    r"save (?:up to )?\$?\d|what \$?\d[\d,.]* gets you|free trial|we miss you|come back)\b",
+    re.I,
+)
+# A bill that says it was paid, not only that it is ready or due.
+PAID_NOTICE = re.compile(
+    r"\b(?:payment (?:was |has been |is )?(?:received|confirmed|successful|processed|complete)|"
+    r"received your payment|thanks?(?: you)? for your payment|you paid|amount paid|total paid|"
+    r"paid in full|auto-?pay(?:ment)? (?:was |has been )?(?:processed|made|completed)|"
+    # ... or that it pays itself: "It will be taken from your account on the 20th".
+    r"will be (?:taken|withdrawn|debited|charged|deducted|paid) (?:from|to|on|automatically)|"
+    r"pre-?authori[sz]ed (?:payment|debit)|auto-?pay(?:ment)?s? (?:is|are) (?:on|set up|enabled|scheduled)|"
+    r"automatic (?:payment|withdrawal|debit)|automatically (?:charged|paid|withdrawn|debited))\b",
+    re.I,
+)
+
+
 def said_in_head(sender: str, subject: str, body: str) -> bool:
     """Does the mail say it is about money paid in its sender, subject or opening line?"""
     return bool(
@@ -440,6 +473,10 @@ def charge_in(sender: str, subject: str, body: str) -> Charge | None:
     text = f"{subject}\n{body}"
     if PROMO.search(text) and not re.search(r"\b(?:receipt|invoice)", text, re.I):
         return None
+    if PROMO_SUBJECT.search(subject) and not RECEIPT_SUBJECT.search(subject):
+        return None  # an advert, whatever it costs
+    if FAILED.search(f"{subject}\n{body[:300]}"):
+        return None  # nothing was paid
     part = f"{subject}\n{body[: row.end]}" if row else subject
     if row is None:  # "Your payment of $15.49 was received", and nothing in the text
         row = _paid_row(subject)
@@ -528,6 +565,10 @@ _BANDS = {"monthly": (25, 36), "yearly": (350, 381), "weekly": (6, 8)}
 # The same amount from the same service this soon again is the same charge, mailed twice
 # (PayPal's receipt and the service's own).
 SAME_CHARGE = timedelta(days=3)
+# A bill that is ready and its reminder ("due soon", "overdue") are one bill, weeks apart. Live,
+# 12 November: a gas bill and its reminder seven days later were "CA$519.63 each time", every
+# seven days, which made the month's total CA$2,576.
+SAME_BILL = timedelta(days=21)
 
 
 def _from_gaps(dates: list[datetime]) -> str | None:
@@ -636,6 +677,7 @@ class _Seen:
     about_sub: bool  # the subject itself says subscription, membership or renewal
     one_off: bool  # an order, a ride, a ticket: bought each time
     receipt: bool  # the subject says invoice or receipt
+    unpaid_bill: bool = False  # a bill that is ready or due, with no word that it was paid
 
 
 def said_day(d: datetime, now: datetime | None = None) -> str:
@@ -690,12 +732,15 @@ def find_subscriptions(
         part = got.part  # the receipt itself
         about = bool(SUB_WORD.search(part) or RENEWS.search(text))
         bill = bool(BILL.search(subject))
+        if ONE_OFF.search(subject) and not SUB_WORD.search(part):
+            continue  # an order or a ride, however often: bought each time, not subscribed to
         g["charges"].append(
             _Seen(
                 mail=e,
                 amount=got.amount,
                 currency="USD" if got.currency == "$" and US_DOLLARS.search(part) else got.currency,
                 says=about or bill or bool(RECURRING.search(part)),
+                unpaid_bill=bill and not about and not (PAID_NOTICE.search(text) or PAID_CLEARLY.search(text)),
                 cadence=_cadence(part) or (_stated_cadence(text) if about else None),
                 in_head=got.in_head,
                 about_sub=bool(SUB_WORD.search(subject)),
@@ -710,7 +755,8 @@ def find_subscriptions(
             # PayPal's receipt and the service's own, a day apart, are one charge: nothing
             # charges the same amount twice within three days.
             again = any(
-                abs(k.amount - c.amount) < 0.005 and k.mail["date"] - c.mail["date"] <= SAME_CHARGE
+                abs(k.amount - c.amount) < 0.005
+                and k.mail["date"] - c.mail["date"] <= (SAME_BILL if c.unpaid_bill and k.unpaid_bill else SAME_CHARGE)
                 for k in charges
             )
             if not again:
@@ -743,7 +789,13 @@ def find_subscriptions(
             cadence = said
         elif says_so and len(charges) >= 2:
             cadence = "repeating"  # at no rhythm with a name: every 3 months, say
-            every = max((dates[0] - dates[-1]).days / (len(dates) - 1), 7.0)
+            every = (dates[0] - dates[-1]).days / (len(dates) - 1)
+            if every < 20:
+                # Closer together than any plan charges and not weekly either: notices about
+                # one charge, not a charge every few days. Counted once, and not in the total.
+                if not charges[0].about_sub:
+                    continue
+                cadence, every = "once", 0.0
         elif charges[0].about_sub:
             cadence = "once"  # a subscription's receipt that doesn't say how often it comes
         else:
@@ -799,6 +851,8 @@ def subscriptions_report(subs: list[Subscription]) -> tuple[str, str, list[str]]
                 if since
                 else "I looked through a year of receipts and didn't find any recurring charges."
             )
+            + " I only see what sends a receipt to this mailbox, so a service that mails none "
+            "(or mails another address) isn't here."
             + (f" {failed}" if failed else ""),
             [],
         )
@@ -825,6 +879,8 @@ def subscriptions_report(subs: list[Subscription]) -> tuple[str, str, list[str]]
             if once and by_currency
             else ""
         )
+        + "I only see what sends a receipt to this mailbox, so a service that mails none "
+        "(or mails another address) isn't here. "
         + 'Say "cancel" and the name, and I\'ll open its cancel page.'
         + (
             f" I could only read back to {said_day(since)}, so older charges may be missing."

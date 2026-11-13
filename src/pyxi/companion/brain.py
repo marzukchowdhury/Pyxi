@@ -4974,7 +4974,7 @@ _TALK_AGAIN = re.compile(
     r"why aren'?t you (?:talking|speaking|answering|saying anything)|"
     rf"{_NOT_QUIET})\b"
 )
-_FILLER = frozenset(["bro", "please", "pyxi", "hey", "just", "come", "on", "man", "dude", "and", "but"])
+_ADDRESSING = frozenset(["bro", "please", "pyxi", "hey", "just", "come", "on", "man", "dude", "and", "but"])
 
 
 def asks_quiet(text: str) -> bool:
@@ -4994,7 +4994,7 @@ def more_than_voice(text: str) -> bool:
     rest = [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s and not _TALK_AGAIN.search(s)]
     words = [
         w for s in rest for w in re.findall(r"[a-z']+", s.lower())
-        if w not in _ONLY_POLITE and w not in _FILLER
+        if w not in _ONLY_POLITE and w not in _ADDRESSING
     ]  # fmt: skip
     return len(words) >= 3
 # Words that are only thanks, or only "I heard you": nothing in them asks for anything.

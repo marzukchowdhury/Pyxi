@@ -1242,3 +1242,104 @@ async def test_pennys_month_says_when_some_mail_could_not_be_read(settings, monk
     [ready] = await until(rec, "job_ready")
     assert ready["ok"] and ready["title"] == "October: $290.00 spent"
     assert ready["body"].endswith("1 mail couldn't be read just now, so something may be missing.")
+
+
+# ---------------------------------------------------------------- the trial of 12 November
+
+
+def test_the_five_that_nobody_was_paying_for():
+    """Live, 12 November: "which subscriptions am I paying for?" came back with five, all
+    wrong, and "CA$2,576.27 a month". A gas bill that was only ready (and its reminder a week
+    later, read as a charge every seven days), eight payments that had failed, food orders, a
+    Black Friday advert, and three billing-failure notices. The mails here are made up to the
+    same shapes."""
+    gas = [
+        mail(
+            "Coastline Gas <ebill@coastlinegas.example>",
+            "Your November 2026 Coastline Gas natural gas bill for account 1234567 is ready",
+            "Your bill is ready to view.\nAmount due: $519.63\nDue date: November 27\n",
+            ago(13),
+        ),
+        mail(
+            "Coastline Gas <ebill@coastlinegas.example>",
+            "Reminder: your Coastline Gas bill is due soon",
+            "Your bill is due soon.\nAmount due: $519.63\n",
+            ago(6),
+        ),
+    ]
+    failed = [
+        mail(
+            "Tagmill <billing@tagmill.example>",
+            "$29.00 payment to Tagmill.ai was unsuccessful again",
+            "We tried to charge your card for your Tagmill subscription.\nAmount: $29.00\n",
+            ago(d),
+        )
+        for d in (2, 9, 16, 23, 30, 37, 44, 51)
+    ]
+    orders = [
+        mail(
+            "DashDine <no-reply@dashdine.example>",
+            "Order Confirmation for Tay from Corner Chicken",
+            "Thanks for your order.\nTotal: $18.78\nA DashDine membership, billed monthly, saves on delivery.\n",
+            ago(d),
+        )
+        for d in (8, 15, 22, 29, 36)
+    ]
+    advert = mail(
+        "Strum School <news@strumschool.example>",
+        "What $99 gets you this Black Friday",
+        "Full Access: a year of lessons.\nTotal: $899.00\nAnnual membership, renews yearly.\n",
+        ago(4),
+    )
+    notices = [
+        mail(
+            "Pixelworks <message@pixelworks.example>",
+            f"NOTICE: {nth} billing failure",
+            "We couldn't process the payment for your Pixelworks plan.\nAmount due: $7.83\n"
+            "Your plan renews monthly.\n",
+            ago(d),
+        )
+        for nth, d in (("Third", 8), ("Second", 15), ("First", 22))
+    ]
+    for mails in (gas, failed, orders, [advert], notices):
+        assert find_subscriptions(mails, now()) == [], mails[0]["subject"]
+    everything = [*gas, *failed, *orders, advert, *notices]
+    found = find_subscriptions(everything, now())
+    assert found == []
+    title, body, lines = subscriptions_report(found)
+    assert title == "No subscriptions found" and lines == []
+    assert "only see what sends a receipt to this mailbox" in body
+    # The real ones beside them are still found, and the total is theirs alone.
+    found = find_subscriptions([*everything, *netflix(), *spotify()], now())
+    assert [s.service for s in found] == ["Netflix", "Spotify"]
+    title, body, _ = subscriptions_report(found)
+    assert title == "$27.48 a month in subscriptions"
+    assert "only see what sends a receipt to this mailbox" in body
+
+
+def test_a_bill_that_comes_every_month_is_still_one_and_its_reminder_is_not_a_second():
+    water = monthly(
+        "City Water <noreply@citywater.example>",
+        "Your water bill is ready",
+        "Amount due: {AMT}\nDue date: {NEXT}\n",
+        amounts=("$141.07", "$152.42", "$139.07"),
+    )
+    reminder = mail(
+        "City Water <noreply@citywater.example>",
+        "Reminder: your water bill is due",
+        "Amount due: $141.07\n",
+        water[0]["date"] + timedelta(days=9),
+    )
+    [sub] = find_subscriptions([*water, reminder], now())
+    assert (sub.cadence, sub.charges) == ("monthly", 3)
+
+
+def test_a_payment_that_failed_or_an_advert_is_not_spending_either():
+    from pyxi.mailwatch import charge_in
+
+    assert charge_in("Tagmill <billing@tagmill.example>", "Your payment was declined", "Amount: $29.00\n") is None
+    assert charge_in("Shop <billing@shop.example>", "We couldn't process your payment", "Total: $12.00\n") is None
+    assert charge_in("Strum School <news@strumschool.example>", "Black Friday: 50% off", "Total: $99.00\n") is None
+    # A receipt is a receipt, whatever the season.
+    assert charge_in("Shop <billing@shop.example>", "Your receipt for the Black Friday sale", "Total: $99.00\n")
+    assert charge_in("Tagmill <billing@tagmill.example>", "Your Tagmill receipt", "Amount paid: $29.00\n")
