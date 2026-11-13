@@ -16,9 +16,6 @@ import "../onpicture.css";
 import "./film.css";
 import { initSwarm } from "../swarm.js";
 import { initOnPicture } from "../onpicture.js";
-import { createStage } from "../build3d/stage.js";
-import engine from "../build3d/models/engine.json";
-import seat from "../build3d/models/ejection_seat.json";
 
 export const LINES = [
   { id: "hi", scene: "intro", text: "Hi. I'm Pyxi. A little firefly that lives beside your cursor." },
@@ -40,15 +37,8 @@ export const LINES = [
     scene: "picture",
     text: "Every part gets its name, and I trace how things move from one to the next.",
   },
-  {
-    id: "b1",
-    scene: "build",
-    text: "Ask how something works, and I build it in 3D, part by part, on top of whatever you have open.",
-  },
-  { id: "b2", scene: "build", text: "Turn it around.", hold: 1.5 },
-  { id: "b3", scene: "build", text: "Look inside.", hold: 1.5 },
-  { id: "b4", scene: "build", text: "Ask for a change, and the same model changes.", hold: 1.2 },
-  { id: "b5", scene: "build", text: "Then I tell the story, step by step, like a short video." },
+  { id: "b1", scene: "build", text: "Ask how to do something, and I build it in 3D, right on your screen.", hold: 3.2 },
+  { id: "b2", scene: "build", text: "Open the two clips, line up the notch, and press down until both clips click." },
   { id: "a1", scene: "act", text: "I can do the clicking too. I'll write the reply and get it ready." },
   {
     id: "a2",
@@ -71,17 +61,17 @@ export const LINES = [
 
 /** Each scene: quiet before its first line, after its last, and the label in the corner. */
 const SCENES = [
-  { name: "intro", pre: 2.4, post: 1.5, chapter: "" },
-  { name: "point", pre: 0.8, post: 0.9, chapter: "Points at it" },
-  { name: "notes", pre: 0.8, post: 1.3, chapter: "Writes notes for you" },
-  { name: "picture", pre: 0.8, post: 2.2, chapter: "Explains any picture" },
-  { name: "build", pre: 0.9, post: 7.2, chapter: "Builds it in 3D" },
-  { name: "act", pre: 0.8, post: 2.0, chapter: "Does the clicking" },
-  { name: "team", pre: 0.9, post: 1.2, chapter: "A team of twelve" },
-  { name: "control", pre: 0.8, post: 1.3, chapter: "You stay in control" },
-  { name: "outro", pre: 1.6, post: 3.4, chapter: "" },
+  { name: "intro", pre: 1.5, post: 0.9, chapter: "" },
+  { name: "point", pre: 0.5, post: 0.6, chapter: "Points at it" },
+  { name: "notes", pre: 0.5, post: 0.8, chapter: "Writes notes for you" },
+  { name: "picture", pre: 0.5, post: 1.4, chapter: "Explains any picture" },
+  { name: "build", pre: 0.5, post: 2.2, chapter: "Shows you in 3D" },
+  { name: "act", pre: 0.5, post: 1.4, chapter: "Does the clicking" },
+  { name: "team", pre: 0.6, post: 0.8, chapter: "A team of twelve" },
+  { name: "control", pre: 0.5, post: 0.9, chapter: "You stay in control" },
+  { name: "outro", pre: 1.1, post: 2.8, chapter: "" },
 ];
-const GAP = 0.32; // between two lines of one scene
+const GAP = 0.22; // between two lines of one scene
 const TEAM = [
   ["Scout", "Research and browsing"],
   ["Quill", "Writing"],
@@ -99,6 +89,19 @@ const TEAM = [
 const REPLY =
   "Hi Sam, thank you so much! The dates are right. I'll send you the signed copy on Friday.";
 const $ = (s) => document.querySelector(s);
+const BUG = `<svg viewBox="-24 -24 48 48"><defs>
+  <radialGradient id="fft" cx="0.45" cy="0.4" r="0.65"><stop offset="0" stop-color="#fffbea"/><stop offset="0.55" stop-color="#ffe08a"/><stop offset="1" stop-color="#ffb02e"/></radialGradient>
+  <radialGradient id="ffh"><stop offset="0" stop-color="#ffe08a" stop-opacity="0.6"/><stop offset="0.45" stop-color="#ffc861" stop-opacity="0.22"/><stop offset="1" stop-color="#ffc861" stop-opacity="0"/></radialGradient></defs>
+  <circle r="16" fill="url(#ffh)"/><g transform="rotate(-30)">
+  <path class="feel" d="M-0.7 -9.2 Q-1.6 -11.6 -3.4 -12.6 M0.7 -9.2 Q1.6 -11.6 3.4 -12.6"/>
+  <g transform="rotate(-38 -2.4 -5)"><ellipse class="wing" cx="-2.4" cy="-5" rx="3.8" ry="1.7"/></g>
+  <g transform="rotate(38 2.4 -5)"><ellipse class="wing" cx="2.4" cy="-5" rx="3.8" ry="1.7"/></g>
+  <ellipse class="bod" cx="0" cy="-5" rx="2.3" ry="2.6"/><circle class="bod" cx="0" cy="-8.3" r="1.6"/>
+  <ellipse cx="0" cy="0" rx="3" ry="3.7" fill="url(#fft)"/></g></svg>`;
+for (const el of document.querySelectorAll(".f-brand i, .f-team-me i, .f-req-title i, .f-end h1 i")) {
+  el.classList.add("bug");
+  el.innerHTML = BUG.replace('viewBox="-24 -24 48 48"', 'viewBox="-11 -16 22 24"'); // in close on the firefly itself; its glow spills past the box
+}
 const SVG = "http://www.w3.org/2000/svg";
 
 // ------------------------------------------------------------------ the pieces the scenes use
@@ -114,17 +117,7 @@ function cue(name, { opacity = 1, place = "mid" } = {}) {
   if (moved) swarm?.set(name, { force: true });
 }
 
-const picture = initOnPicture({ pace: 0.36, auto: false });
-
-const stage = createStage($("#b3-view"), {
-  onBuild: (shown, total) => {
-    $("#b3-count").textContent =
-      shown < total ? `Building it: ${shown} of ${total} parts` : `${total} parts`;
-    $("#b3-bar").classList.toggle("on", shown >= total);
-  },
-  onBeat: (i, beat) => ($("#b3-step").textContent = beat.title),
-});
-stage.setInsets(70, 84);
+const picture = initOnPicture({ pace: 0.26, auto: false });
 
 // the team: twelve names round Pyxi, each on its own thread
 const team = TEAM.map(([name, role], i) => {
@@ -146,6 +139,7 @@ const team = TEAM.map(([name, role], i) => {
 
 // ------------------------------------------------------------------ the clock
 let t0 = 0;
+let RAM_STEPS = [0, 1.3, 2.3]; // when each step is said within Pyxi's line, from the voice itself
 const at = (sec) =>
   new Promise((done) => setTimeout(done, Math.max(0, t0 + sec * 1000 - performance.now())));
 
@@ -180,11 +174,13 @@ const RUN = {
     cue("field", { opacity: 0.55 });
     const v = $("#sc-point video");
     v.currentTime = 0.4;
+    v.playbackRate = 1.3;
     v.play();
   },
   async notes() {
     const v = $("#sc-notes video");
     v.currentTime = 1.6;
+    v.playbackRate = 1.3;
     v.play();
   },
   async picture(sc) {
@@ -192,33 +188,18 @@ const RUN = {
     picture.play(0);
   },
   async build(sc, L) {
-    stage.setActive(true);
-    await at(sc.start + 0.25);
-    $("#b3-ask").textContent = "How does a car engine work?";
-    stage.load(engine);
-    await at(L.b2.start - 0.1);
-    stage.turn(-2.3, L.b3.start - L.b2.start - 0.2);
-    await at(L.b3.start);
-    stage.setBeat(1); // from the front, with the casing turned to glass
-    await at(L.b4.start + 0.5);
-    stage.setStyle("blueprint");
-    await at(L.b5.start - 0.35);
-    $("#sc-build").classList.add("swap");
-    await at(L.b5.start - 0.05);
-    stage.setStyle("studio");
-    $("#b3-ask").textContent = "How does a pilot eject from a jet?";
-    stage.load(seat, { assemble: false });
-    $("#sc-build").classList.remove("swap");
-    await at(L.b5.start + 1.3);
-    stage.setBeat(1); // the canopy goes
-    await at(L.b5.start + 3.6);
-    stage.setBeat(2); // the seat fires
-    await at(L.b5.start + 6.3);
-    stage.setBeat(3);
-    await at(L.b5.start + 7.8);
-    stage.setBeat(4); // the parachute opens
-    await at(sc.end + 0.6);
-    stage.setActive(false);
+    // the RAM scene draws itself from a time: its own second 7.7 is where Pyxi starts the steps
+    const w = $("#ram").contentWindow;
+    const zero = L.b2.start - 7.7;
+    const [o1, o2, o3] = RAM_STEPS;
+    w.setup({ s1: 7.7 + o1, s2: 7.7 + o2, s3: 7.7 + o3, c: 999, total: 999, env: [], phrases: [] });
+    const tick = () => {
+      const t = (performance.now() - t0) / 1000 - zero;
+      if (t > sc.end - zero + 0.6) return;
+      w.draw(Math.max(0, t));
+      requestAnimationFrame(tick);
+    };
+    tick();
   },
   async act(sc, L) {
     const text = $("#mail-text");
@@ -282,6 +263,7 @@ const RUN = {
 };
 
 async function start(durations) {
+  if (durations._ram) RAM_STEPS = durations._ram;
   const plan = schedule(durations);
   const cap = $("#cap");
   const chapter = $("#chapter");
@@ -323,11 +305,16 @@ const ready = (async () => {
         }),
     ),
   );
-  // warm the 3D stage (shaders, the studio light) so its first frame in the film is not a stall
-  stage.setActive(true);
-  stage.load(engine, { assemble: false });
-  await new Promise((done) => setTimeout(done, 1200));
-  stage.setActive(false);
+  // the RAM scene's page: loaded, its fonts in, its own captions off (this film has its own), and one frame drawn to warm it
+  const ram = $("#ram");
+  await new Promise((done) => {
+    const check = () => (ram.contentDocument?.body?.dataset.ready ? done() : setTimeout(check, 100));
+    check();
+  });
+  ram.contentDocument.head.insertAdjacentHTML("beforeend", "<style>#cap, #band { display: none !important; }</style>");
+  ram.contentWindow.draw(8);
+  await new Promise((done) => setTimeout(done, 800));
+  ram.contentWindow.draw(0);
   return true;
 })();
 

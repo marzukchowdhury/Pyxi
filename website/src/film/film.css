@@ -782,3 +782,16 @@ body.f-out::after {
   font-size: 24px;
   color: var(--ink-2);
 }
+
+/* the RAM scene (film2/ram.html), full frame under the film's own label and caption */
+#ram { position: absolute; inset: 0; width: 1920px; height: 1080px; border: 0; }
+/* the firefly on every Pyxi logo */
+i.bug { display: inline-block; width: 40px !important; height: 44px !important; background: none !important; box-shadow: none !important; border-radius: 0 !important; margin: 0 !important; flex: none; }
+i.bug svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 0 5px #ffd27a) drop-shadow(0 0 18px rgba(255, 190, 80, 0.9)); }
+.wing { fill: rgba(255, 252, 242, 0.6); stroke: rgba(255, 240, 200, 0.5); stroke-width: 0.4; }
+.bod { fill: #2b2416; stroke: rgba(255, 236, 190, 0.6); stroke-width: 0.45; }
+.feel { fill: none; stroke: #c9b98f; stroke-width: 0.6; stroke-linecap: round; }
+.f-team-me i.bug { width: 64px !important; height: 70px !important; margin-bottom: 8px !important; }
+.f-end h1 { display: flex; align-items: center; justify-content: center; gap: 26px; }
+.f-end h1 i.bug { width: 130px !important; height: 142px !important; }
+.f-req-title i.bug { width: 30px !important; height: 33px !important; }

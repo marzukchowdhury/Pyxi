@@ -26,6 +26,7 @@ REPO = SITE.parent
 OUT = SITE / ".shots" / "film"
 URL = "http://localhost:5191/film/"
 FPS = 30
+SPEED = 1.12  # Pyxi speaks a little quicker than its default in the film
 RATE = 48000
 sys.path.insert(0, str(REPO / "src"))
 
@@ -62,12 +63,21 @@ async def voice():
     (OUT / "voice").mkdir(parents=True, exist_ok=True)
     durations = {}
     for line in lines:
-        speech = await tts.synthesize(line["text"])
+        speech = await tts.synthesize_with(line["text"].replace("Pyxi", "Pixie"), voice=VoiceConfig().voice, speed=SPEED, lang="en-us")
         (OUT / "voice" / f"{line['id']}.wav").write_bytes(speech.wav)
         durations[line["id"]] = round(speech.duration_s, 3)
         print(f"  {line['id']:<6} {speech.duration_s:5.2f} s  {line['text']}")
+    # when each of the three RAM steps is said, heard back from the voice itself
+    from faster_whisper import WhisperModel
+
+    clip = read_wav(OUT / "voice" / "b2.wav")
+    sound = clip[: len(clip) // 3 * 3].reshape(-1, 3).mean(1).astype(np.float32)
+    segments, _ = WhisperModel("base.en", device="cpu", compute_type="int8").transcribe(sound, word_timestamps=True)
+    heard = [(w.word.strip().lower().strip(".,"), w.start) for seg in segments for w in seg.words]
+    durations["_ram"] = [round(next(t for w, t in heard if w == word), 3) for word in ("open", "line", "press")]
+    print("  RAM steps said at", durations["_ram"], "in:", " ".join(w for w, _ in heard))
     (OUT / "voice.json").write_text(json.dumps(durations, indent=1), encoding="utf-8")
-    print(f"voice: {len(lines)} lines, {sum(durations.values()):.1f} s of speech")
+    print(f"voice: {len(lines)} lines, {sum(v for k, v in durations.items() if k != '_ram'):.1f} s of speech")
 
 
 # ------------------------------------------------------------------ 2. the picture
@@ -179,7 +189,10 @@ def sound(log) -> np.ndarray:
     starts = np.maximum(np.arange(n) - win // 2, 0)
     level = ((total_so_far[ends] - total_so_far[starts]) / win).astype(np.float32)  # a running average
     duck = 1 - 0.55 * np.clip(level / 0.04, 0, 1)
-    bed = music(total, np.random.default_rng(7)) * 0.2 * duck[:, None]
+    from film2_film import music as track  # the driving track written for the launch film
+
+    starts = [sc["start"] for sc in log["scenes"]]
+    bed = track(total, starts[1], starts[2:-1], [], starts[-1] + 1.1) * 0.4 * duck[:, None]
     mix = bed + speech[:, None]
     return np.clip(mix / max(1.0, np.abs(mix).max() / 0.95), -1, 1)
 
@@ -191,7 +204,7 @@ def encode():
     log = json.loads((OUT / "log.json").read_text(encoding="utf-8"))
     stamps = np.array(log["stamps"]) - log["wall0"] / 1000
     mix = sound(log)
-    target = OUT / "pyxi-film.mp4"
+    target = OUT / "pyxi-film-v2.mp4"  # the first cut stays as it was
     with av.open(str(target), "w") as out:
         v = out.add_stream("libx264", rate=FPS)
         v.width, v.height, v.pix_fmt = 1920, 1080, "yuv420p"

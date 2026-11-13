@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex" />
+    <title>Pyxi film: adding RAM</title>
+    <!--
+      One scene of the launch film (docs/FILM-MOCKUP.md): "New RAM. No idea where it goes."
+      The page is a pure function of time: draw(t) puts everything where it belongs at t seconds.
+      tools/film2_render.py steps it one frame at a time at 60 frames a second and adds the sound.
+      Not part of the site build. Open with ?t=8.5 to look at one moment.
+    -->
+    <script type="module" src="/src/film2/ram.js"></script>
+  </head>
+  <body>
+    <div id="stage">
+      <u id="g1"></u><u id="g2"></u>
+      <div id="world">
+        <div id="win">
+          <div class="bar"><u></u><span>Your order has arrived</span></div>
+          <div class="page">
+            <h1>Delivered today</h1>
+            <div class="order"><i></i><div><b>Corvid 32 GB memory kit</b><span>2 x 16 GB, DDR5, 5600 MHz</span><em>Order 48-2071</em></div></div>
+            <p></p><p style="width: 82%"></p><p style="width: 90%"></p><p style="width: 60%"></p>
+            <h2>Fitting it yourself</h2>
+            <p></p><p style="width: 86%"></p><p style="width: 74%"></p>
+          </div>
+        </div>
+        <canvas id="gl"></canvas>
+        <div id="tags"></div>
+        <div id="card"><h4>Adding RAM</h4><p><b>1</b>Open the two clips</p><p><b>2</b>Line up the notch</p><p><b>3</b>Press until both clips click</p></div>
+        <p id="count"></p>
+        <svg id="ptr" viewBox="0 0 28 34"><path d="M3 2v24.800l6.700-5.900 4.400 9.600 4.100-1.800-4.400-9.600h8.200z" /></svg>
+        <div id="pill"><b><s></s><s></s><s></s><s></s></b><span></span></div>
+        <div id="fly"></div>
+      </div>
+      <div id="slam1" class="slam"></div>
+      <div id="slam2" class="slam"></div>
+      <div id="band"></div>
+      <p id="cap"></p>
+      <div id="flash"></div>
+      <div id="name"><i></i><b>Pyxi</b><em>Just ask.</em></div>
+      <u id="vig"></u>
+    </div>
+  </body>
+</html>
