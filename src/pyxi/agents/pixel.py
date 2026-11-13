@@ -764,7 +764,9 @@ def _run_one(
         return pixel_pdf.unlock_pdf(paths, str(o.get("password") or ""), out)
     if op == "fill_form":
         values = o.get("values") if isinstance(o.get("values"), dict) else {}
-        return pixel_pdf.fill_form(paths, o.get("details") or {}, values, out)
+        return pixel_pdf.fill_form(
+            paths, o.get("details") or {}, values, out, o.get("placed"), o.get("labels")
+        )
     if op == "extract_text":
         return pixel_pdf.extract_text(paths, out)
     if op == "make_searchable":

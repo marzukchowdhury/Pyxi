@@ -680,7 +680,7 @@ class JobManager:
         options = {
             k: v
             for k, v in (job.params.get("options") or {}).items()
-            if k not in ("password", "details", "out_dir")
+            if k not in ("password", "details", "out_dir", "placed", "labels")
         }
         if op in pixel.NEEDS_PASSWORD:
             password = await self._ask_password(job, agent, op, names)
@@ -692,6 +692,7 @@ class JobManager:
             from pyxi import booking
 
             options["details"] = booking.load(self.settings.data_dir)
+            await self._place_by_label(job, agent, options)
         note = ""
         if op in ("to_pdf", "word_to_pdf") and any(
             Path(f).suffix.lower() in pixel.OFFICE for f in job.files
@@ -712,6 +713,8 @@ class JobManager:
         options.pop("password", None)
         job.outputs = [str(p) for p in result.outputs]
         job.summary = result.summary
+        if options.get("unplaced"):  # an answer they gave that the form has no box for
+            job.summary += f" I found no place for: {'; '.join(options['unplaced'])}."
         if note:
             job.summary = job.summary.replace(pixel.BUILT_IN_NOTE, "") + note
         if job.outputs:
@@ -719,6 +722,39 @@ class JobManager:
             job.summary += f" It's in {where}." if len(job.outputs) == 1 else f" They're in {where}."
         job.data = {"operation": op, "outputs": job.outputs, **result.details}
         job.status = "done"
+
+    async def _place_by_label(self, job: Job, agent: AgentProfile, options: dict[str, Any]) -> None:
+        """A form whose fields are all called "untitled17": which box takes what is read off
+        the page instead (agents/pixel_forms.py), with one model call. The model sees the
+        form's printed words and the answers they gave, and the saved details by name only;
+        their values are put in here, on this PC. A form with real field names is filled
+        from those names as before, with no model call."""
+        from pyxi.agents import pixel_forms, pixel_pdf
+
+        files = [Path(f) for f in job.files if Path(f).suffix.lower() == ".pdf"]
+        if len(files) != 1:
+            return
+        said = options.get("values") if isinstance(options.get("values"), dict) else {}
+        try:
+            form = await asyncio.to_thread(pixel_forms.read, files[0])
+            if not pixel_forms.needs_model(form, said):
+                return
+            options["labels"] = form.labels()
+            await self._status(job, "Reading what each box is for")
+            details = {k: str(v) for k, v in (options.get("details") or {}).items() if v}
+            llm = self.llm_factory(agent)
+            response = await llm.complete(
+                system=pixel_forms.SYSTEM + UNTRUSTED_RULE,
+                messages=[Message.user(pixel_forms.prompt(form, said, details))],
+                max_tokens=6000,
+            )
+            job.cost_usd += response.usage.cost_usd
+            placed, unplaced = pixel_forms.place(response.text, form, details, pixel_pdf.SECRET)
+            options["placed"] = placed
+            if unplaced:
+                options["unplaced"] = unplaced
+        except Exception:  # the form is still filled by its field names, or says why it can't be
+            log.warning("pixel: couldn't match the form's boxes to its labels", exc_info=True)
 
     async def _ask_password(self, job: Job, agent: AgentProfile, op: str, names: str) -> str:
         """The user types the password on a masked card; it goes straight to Pixel."""

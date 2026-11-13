@@ -250,7 +250,7 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         raw = args.get("options") if isinstance(args.get("options"), dict) else {}
         # A password never travels through the model or the job record: Pixel asks for it on a
         # masked card. Saved details are read on this PC by the job itself.
-        options = {k: v for k, v in raw.items() if k not in ("password", "details", "out_dir")}
+        options = {k: v for k, v in raw.items() if k not in ("password", "details", "out_dir", "placed", "labels")}
         if op == "compare_documents" and len(files) != 2:
             return "convert_files: compare_documents needs exactly two files, the old one first."
         names = ", ".join(Path(f).name for f in files[:3])

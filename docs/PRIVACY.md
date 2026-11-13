@@ -43,7 +43,7 @@ You can pause all screen access at any time with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+
 
 | Teammate | What it does with the file | Sent to the AI model? |
 |---|---|---|
-| Pixel | Converts, merges, compresses, fills and compares documents | No, it all happens on your computer |
+| Pixel | Converts, merges, compresses, fills and compares documents | No, it all happens on your computer, with one exception: a PDF form whose boxes have no names. To tell which box is which, the words printed on the form and the answers you asked Pixel to put in go to the model. What is already typed in the form does not, and your saved details (name, email, phone) are put in on your computer: the model only says which box each belongs in |
 | Ledger | Edits Excel, Word and PowerPoint files, the workbook, document or deck you have open in those apps, and Google Sheets and Docs | An outline of the file or the open document, to decide the edits |
 | Sage | Makes flashcards and quizzes from slides and notes | The text of the file |
 | Scribe | Turns a meeting recording into notes | The recording is transcribed on your computer; only the transcript is sent |

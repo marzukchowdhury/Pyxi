@@ -363,14 +363,25 @@ def match_field(name: str, details: dict[str, str]) -> str | None:
     return None
 
 
+def _plain_label(label: str) -> str:
+    """'Monthly rent: $__' -> 'Monthly rent'."""
+    return re.sub(r"[\s:$_*()]+$", "", " ".join(label.split()))[:40]
+
+
 def fill_form(
     files: list[Path],
     details: dict[str, str] | None = None,
     values: dict[str, Any] | None = None,
     out: Path | None = None,
+    placed: dict[str, str] | None = None,
+    labels: dict[str, str] | None = None,
 ) -> PixelResult:
     """Fill a PDF's form fields: values they gave first, then saved details by field name.
-    ID numbers, card numbers and passwords are never filled."""
+    ID numbers, card numbers and passwords are never filled.
+
+    ``placed`` holds values already matched to fields by the words printed beside them
+    (pixel_forms.py), for a form whose fields have no names worth reading; ``labels`` those
+    words, so what's left empty is named the way the page names it."""
     from pypdf import PdfWriter
     from pypdf.generic import NameObject
 
@@ -382,13 +393,17 @@ def fill_form(
             f"{src.name} has no fillable fields. Scout can fill a form on a website instead."
         )
     given = {_norm(k): v for k, v in (values or {}).items()}
+    placed, labels = placed or {}, labels or {}
     filled: dict[str, str] = {}
     left: list[str] = []
     for name, f in fields.items():
         if f.get("/FT") not in ("/Tx", "/Ch", "/Btn"):
             continue
-        if SECRET.search(name):
+        if SECRET.search(name) or SECRET.search(labels.get(name, "")):
             left.append(name)
+            continue
+        if name in placed and _norm(name) not in given:
+            filled[name] = placed[name]  # a box's value is already the state that ticks it
             continue
         value = given.get(_norm(name))
         if value is None and f.get("/FT") == "/Tx":
@@ -417,6 +432,16 @@ def fill_form(
     target = unique_path(out or out_dir_for(src), f"{src.stem} (filled).pdf")
     _write(writer, target)
     tail = f" Still empty: {', '.join(left[:8])}." if left else ""
+    if labels:
+        # Named the way the page names them, and only the ones that were empty to begin with:
+        # "Still empty: untitled3, untitled4" tells nobody anything.
+        empty = [n for n in left if fields[n].get("/V") in (None, "", "/Off")]
+        named = list(dict.fromkeys(_plain_label(labels[n]) for n in empty if _plain_label(labels.get(n, ""))))
+        named = [n for n in named if re.search(r"[A-Za-z]{4}", n) and not n.startswith("(")]
+        if len(empty) > 12 or not named:  # a long form: a count says more than a list would
+            tail = f" {len(empty)} boxes are still empty." if empty else ""
+        else:
+            tail = f" Still empty: {', '.join(named[:8])}."
     return PixelResult(
         [target],
         f"Filled {len(filled)} field{'s' if len(filled) != 1 else ''} in {target.name}.{tail} Check it before you send it.",

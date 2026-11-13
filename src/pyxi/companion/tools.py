@@ -1059,7 +1059,8 @@ COMPANION_TOOLS += [
                 "delete_pages, rotate_pages, pdf_to_images; 'last' works), order ('3, 1-2' for "
                 "reorder_pages), angle (90, 180, 270, left, right), text (the watermark), "
                 "position ('bottom right', 'top center') and format ('Page {n} of {total}') for "
-                "page numbers, values ({field name: value} for fill_form, only what they told "
+                "page numbers, values ({what the form asks for, in its own words: their answer} for fill_form, "
+                "such as {\"Monthly rent\": \"1800\", \"Landlord name\": \"Sam Example\"}, only what they told "
                 "you), name (new file's name, no extension), format (jpg, png, webp...), "
                 "quality (1-95), max_side, width, height, percent, dpi, sheet. Never a password.",
             },
