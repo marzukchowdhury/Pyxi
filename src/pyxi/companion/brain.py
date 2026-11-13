@@ -75,16 +75,24 @@ from pyxi.companion.filework import FILE_TOOLS
 from pyxi.companion.layout import Placed
 from pyxi.companion.notes import (
     BOARD_SIZES,
+    EMPTY_CARD,
+    EMPTY_CARD_NOTE,
     PLATE_SIZE,
     Guide,
+    NoteCard,
     build_card,
     card_size,
+    covers_marks,
     guide_left,
+    has_points,
+    merge_calls,
     near_point,
     picture_rect,
+    place_again,
     place_stage,
     result_card,
     scroll_area,
+    settle_marks,
     step_rect,
     target_rect,
     where_they_were,
@@ -1593,15 +1601,17 @@ class Brain:
         """Show the points that have arrived so far, and say the new ones."""
         args = {**(head or {}), "title": title, "items": items}
         found = await self._survey_result() if args.get("style") == "on_picture" else None
-        card = build_card(self._ctx, args, self._placed.others("card"), found, self._turn_card)
+        # Room for four points from the first one on: live, a card placed for one point grew
+        # down over the post's header as the other three arrived.
+        card = build_card(
+            self._ctx, args, self._placed.others("card"), found, self._turn_card, rows=4
+        )
         if not card.items:
             return
+        await self._settle_card(self._ctx, args, card, self._turn_card, rows=4)
         first = self._turn_card is None
         if not first:
-            card.id, card.place = (
-                self._turn_card.id,
-                self._turn_card.place,
-            )  # stays put as it fills in
+            self._same_card(card, self._turn_card)  # stays put as it fills in
         self._turn_card = card
         await self.hub.emit("notes", card=card.model_dump(mode="json"))
         if first:
@@ -1614,6 +1624,42 @@ class Brain:
                 continue  # on the card to be read, not read out: see _card_is_read
             line = (it.say or it.text).strip()
             self._speak(f"[note:{it.n}] {line if line[-1:] in '.!?' else line + '.'}")
+
+    @staticmethod
+    def _same_card(card: NoteCard, shown: NoteCard) -> None:
+        """``card`` is ``shown`` with more of it arrived: the same card, in the same spot,
+        unless there it would now sit on something one of its own points marks."""
+        card.id = shown.id
+        if shown.place and card.style == shown.style and not covers_marks(shown.place, card):
+            card.place = shown.place
+
+    async def _settle_card(
+        self,
+        ctx: ScreenContext | None,
+        args: dict[str, Any],
+        card: NoteCard,
+        keep: NoteCard | None = None,
+        rows: int = 0,
+    ) -> list[int]:
+        """Before a card is drawn: are the things its points mark still where the look had
+        them? The look is from when they pressed talk, and live a card drawn 15 s later had
+        its marks 100 to 500 px off, the page having moved under them. So once the look is
+        no longer fresh the words on screen are read again (pixels and OCR, a fraction of a
+        second, one read for every mark), the marks go where their words are now, a mark
+        whose words can't be found again is left off, and the card is placed clear of where
+        the marks ended up. Returns the points that lost their mark."""
+        if ctx is None or not ctx.text or time.time() - ctx.captured_at <= self.STALE_LOOK_S:
+            return []
+        if not any(it.rect or it.at for it in card.items) and not card.sketches:
+            return []
+        lines = await self._text_now(ctx)
+        if not lines:
+            return []  # couldn't look again
+        dropped = settle_marks(ctx, args, card, lines, keep)
+        place_again(ctx, card, self._placed.others("card"), rows)
+        if dropped:
+            log.info("card points %s: their words are not on screen now, so no mark", dropped)
+        return dropped
 
     def _card_is_read(self) -> bool:
         """Are a cue card's points said aloud this turn? When they asked for an explanation
@@ -2814,6 +2860,7 @@ class Brain:
             self._price_sent_back = False  # a pick's price was sent to be checked at a shop
             self._price_nudged = False  # ... and it was told once more to go and look
             self._claim_nudged = False  # said it was on it with nothing started: told once
+            self._card_sent_back = False  # an explaining call with nothing in it: asked again once
             self._round_kind = "answer"  # what the model is doing this round: see _note_kind
             self._answer_before_round = 0
             self._long_form = asks_long(user_text)
@@ -3172,6 +3219,7 @@ class Brain:
 
             head = {"text": ""}  # the first sentence(s) of `say`, already being spoken
             live_items = {"n": 0}
+            live_cards: dict[int, dict[str, Any]] = {}  # explaining calls of this answer, as they arrive
             scene_preview = {"shown": False}
 
             held = {"say": None}  # a later round's reply, waiting to go just before its card
@@ -3291,12 +3339,22 @@ class Brain:
                     if head_args:
                         self._start_survey(head_args)
                     # Each cue-card point is shown, and said, as soon as it has fully arrived.
-                    items = complete_items(raw)
+                    # Two explaining calls in one answer are one card (the overlay shows one):
+                    # the second one's points follow the first one's, they never replace them.
+                    title = partial_string(raw, "title")
+                    live_cards[i] = {
+                        **(head_args or {}),
+                        "title": title[0] if title and title[1] else "",
+                        "items": complete_items(raw),
+                    }
+                    so_far = merge_calls([live_cards[k] for k in sorted(live_cards)])
+                    items = so_far.get("items") or []
                     if len(items) > live_items["n"]:
                         live_items["n"] = len(items)
-                        title = partial_string(raw, "title")
                         await self._show_card_so_far(
-                            title[0] if title and title[1] else "", items, head_args
+                            str(so_far.get("title") or ""),
+                            items,
+                            {k: v for k, v in so_far.items() if k not in ("title", "items")},
                         )
 
             first_round = state.get("round", 0) == 0
@@ -3358,6 +3416,7 @@ class Brain:
                 "show_scene",
             }
             calls = sorted(response.tool_calls, key=lambda c: c.name not in visual)
+            calls = one_card(calls)
             for c in calls:
                 self._note_kind(c.name, {t.spec.name for t in connector_tools if t.info})
             # The spoken reply of this round, in case a drawing arrives without its own steps.
@@ -3534,6 +3593,14 @@ class Brain:
                 # back to the model, so the user hears what happened instead of silence.
                 if note and note.startswith(f"{call.name}:") and call.name not in QUIET_NOTES:
                     needs_more = True
+                if note and note.startswith(EMPTY_CARD):
+                    # An explaining call with nothing in it (live: explain_on_picture with no
+                    # arguments at all, one sentence said and nothing drawn). The model is
+                    # told so and asked for it again, once a turn.
+                    entry["outcome"], entry["note"] = "refused", note[:200]
+                    if not getattr(self, "_card_sent_back", False):
+                        self._card_sent_back = True
+                        needs_more = True
                 if note and call.name == "point" and note.startswith("point:"):
                     # A pointer that was not drawn is heard too: the line that went with it
                     # ("it's on the Pivot tab, here") promised something to look at.
@@ -3772,13 +3839,23 @@ class Brain:
             keep = self._turn_card if self._narrated_items else None
             card = build_card(ctx, args, self._placed.others("card"), found, keep)
             if not card.items:
-                return "explain_on_screen: give at least one point with text."
-            if self._turn_card is not None and self._narrated_items:
+                # Nothing is drawn, and nothing already drawn is touched: a card shown
+                # earlier this turn stays exactly as it is.
+                if self._turn_card is not None:
+                    return (
+                        "explain_on_screen: that call had no points in it and was left out. "
+                        "The card already on screen stays as it is."
+                    )
+                return EMPTY_CARD_NOTE
+            await self._settle_card(ctx, args, card, keep)
+            if keep is not None:
                 # It was shown point by point while streaming: same card, same spot, now complete.
-                card.id, card.place = self._turn_card.id, self._turn_card.place
+                self._same_card(card, keep)
             await self.hub.emit("notes", card=card.model_dump(mode="json"))
             if card.place:
-                w, h = card_size([it.text for it in card.items], card.title)
+                w, h = card_size(
+                    [it.text for it in card.items], card.title, card.diagram is not None
+                )
                 linger = min(22.0, 7.0 + 1.8 * len(card.items)) + 8.0  # reading time, plus speech
                 self._placed.put("card", (*card.place, w, h), linger)
             self._turn_card = card
@@ -6053,6 +6130,34 @@ def whole_sentences(text: str) -> list[str]:
         if ln.strip()
         for s in split_sentences(ln, max_chars=10_000)
     ]
+
+
+CARD_TOOLS = ("explain_on_screen", "explain_on_picture", "explain_picture")
+
+
+def one_card(calls: list[ToolCall]) -> list[ToolCall]:
+    """Several explaining calls in one answer become one, in the first one's place.
+
+    The overlay shows one card at a time. Live, an answer had two explain_on_screen calls,
+    one with four points and one with none, and the user saw nothing. So an empty call
+    beside a real one is dropped (it is never run, so it can neither refuse nor replace),
+    and the points of two real ones go onto one card, in order (notes.merge_calls). A lone
+    call is left alone, empty or not: the tool answers that one itself."""
+    cards = [c for c in calls if c.name in CARD_TOOLS]
+    if len(cards) < 2:
+        return calls
+
+    def as_given(c: ToolCall) -> dict[str, Any]:
+        on_picture = c.name != "explain_on_screen"
+        return {**({"style": "on_picture"} if on_picture else {}), **c.arguments}
+
+    real = [c for c in cards if has_points(c.arguments) and not c.arguments.get("__unparseable__")]
+    if not real:
+        return [c for c in calls if c not in cards[1:]]  # one empty call says it all
+    merged = ToolCall(
+        id=real[0].id, name=real[0].name, arguments=merge_calls([as_given(c) for c in real])
+    )
+    return [merged if c is real[0] else c for c in calls if c is real[0] or c not in cards]
 
 
 def card_talks(items: Any) -> bool:

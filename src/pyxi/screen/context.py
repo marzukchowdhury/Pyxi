@@ -47,6 +47,7 @@ class WindowInfo:
     process: str = ""
     rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     hwnd: int = 0
+    tree: str = "ok"  # for another window of the screen: "failed" when it was not read
 
     @property
     def app(self) -> str:
@@ -62,6 +63,9 @@ class UIElement:
     depth: int = 0
     parent: int | None = None
     is_password: bool = False
+    # The window it is in, when that is another window of the screen than the one the look
+    # was for (0: that one, or the taskbar).
+    hwnd: int = 0
 
     @property
     def center(self) -> tuple[int, int]:
@@ -91,6 +95,10 @@ class ScreenContext:
     # How the window's accessibility tree was read: "ok"; "partial" (it stopped part-way);
     # "failed" (none of it); "none" (no window of this screen was read at all).
     tree: str = "ok"
+    # The other windows in the picture (two side by side, one beside a smaller one), most in
+    # view first. ``window`` stays the one the look was for; their controls are in
+    # ``elements`` after its own, each with its window's ``hwnd``.
+    others: list[WindowInfo] = field(default_factory=list)
 
     # ------------------------------------------------------------------ lookups
     def element(self, element_id: int) -> UIElement | None:
@@ -108,6 +116,12 @@ class ScreenContext:
         """Where a phrase is on screen, word-exact (from OCR). None if it isn't there.
         ``near``: where it was thought to be, to pick among several places that say it."""
         return ocr.find_text(self.text, quote, within, near)
+
+    def find_places(
+        self, quote: str, within: tuple[int, int, int, int] | None = None
+    ) -> list[tuple[int, int, int, int]]:
+        """Every place on screen that says a phrase equally well (see ocr.find_places)."""
+        return ocr.find_places(self.text, quote, within)
 
     def view_rect(self) -> tuple[int, int, int, int] | None:
         """The part of the window that is in the picture (all of the picture when no window
@@ -131,14 +145,20 @@ class ScreenContext:
         the window; or it is the last (first) of its kind in its list, much shorter than the
         others, and right on the edge of the list or the window, which is what a list does
         to the row its edge cuts."""
-        bounds = self.view_rect() or self.window.rect
+        out = self._cut_in(self.view_rect() or self.window.rect, 0)
+        for other in self.others:  # each window's rows are cut by its own edges
+            out.update(self._cut_in(other.rect, other.hwnd))
+        return out
+
+    def _cut_in(self, bounds: tuple[int, int, int, int], hwnd: int) -> dict[int, str]:
         bx, by, bw, bh = bounds
         if bw <= 0 or bh <= 0:
             return {}
         mine = [
             e
             for e in self.elements
-            if e.role != "TaskbarButton"
+            if e.hwnd == hwnd
+            and e.role != "TaskbarButton"
             and e.role != "Document"
             and (e.role + "Control" in uia.INTERACTIVE or e.role in ("Text", "Image"))
         ]
@@ -237,18 +257,52 @@ class ScreenContext:
                 f"Screenshot: {round(self.screenshot.width / s)}x{round(self.screenshot.height / s)} px "
                 "(every position below is in these screenshot px)"
             )
-        if self.elements:
+        own = [e for e in self.elements if not e.hwnd]
+        cut = self.cut_off() if self.elements else {}
+
+        def listed(group: list[UIElement], most: int) -> None:
             lines.append(
-                f"UI elements ({min(len(self.elements), max_elements)} of {len(self.elements)}, from the accessibility tree):"
+                f"UI elements ({min(len(group), most)} of {len(group)}, from the accessibility tree):"
             )
-            cut = self.cut_off()
             lines.extend(
-                "  " * min(e.depth, 6) + e.describe(img, cut.get(e.id, ""))
-                for e in self.elements[:max_elements]
+                "  " * min(e.depth, 6) + e.describe(img, cut.get(e.id, "")) for e in group[:most]
             )
-        else:
+
+        def place(r: tuple[int, int, int, int]) -> str:
+            x, y, ww, hh = img(r)
+            return f"@({x},{y},{ww}x{hh})"
+
+        if self.others:
+            # Said first, and each list under its own window: live, with two windows side by
+            # side, the model had the controls of one and a picture of both, and drew nothing.
+            lines.append(
+                f"This picture shows {len(self.others) + 1} windows. Each one's controls are "
+                "listed under its own heading; an id from any of them can be marked or pointed at."
+            )
+            lines.append(
+                f"Window 1, the one under the mouse: {w.app} {w.title[:80]!r} {place(w.rect)}"
+                if w.title or w.process
+                else "Window 1: none was read under the mouse."
+            )
+        if own:
+            listed(own, max_elements)
+        elif not self.others:
             lines.append("(No accessibility tree available: rely on the screenshot.)")
-        if self.tree == "failed" and self.elements:
+        # The others share half as many lines again: the window they asked from keeps its own.
+        left = max(24, max_elements // 2)
+        for i, other in enumerate(self.others):
+            lines.append(f"Window {i + 2}: {other.app} {other.title[:80]!r} {place(other.rect)}")
+            group = [e for e in self.elements if e.hwnd == other.hwnd]
+            if not group:
+                lines.append(
+                    "(Its controls were not read this time: go by the screenshot and the text "
+                    "read from the pixels for what is in it.)"
+                )
+                continue
+            most = min(len(group), max(1, left // (len(self.others) - i)))
+            listed(group, most)
+            left -= most
+        if self.tree == "failed" and own:
             lines.append(
                 "(This window's accessibility tree could not be read this time, so nothing of "
                 "the window is listed above: rely on the screenshot for what is in it.)"
@@ -408,7 +462,7 @@ class ScreenReader:
     def _capture_sync(
         self, pixels: bool, follow_mouse: bool = True, hwnd: int | None = None
     ) -> ScreenContext:
-        now = time.time()
+        now, started = time.time(), time.monotonic()
         if self.paused:
             return ScreenContext(
                 captured_at=now, window=WindowInfo(), excluded="screen sharing is paused"
@@ -452,6 +506,14 @@ class ScreenReader:
                     return _contains(screen, r.rect)
 
         elements = self._number(raw, on_screen)
+        others: list[WindowInfo] = []
+        if shot is not None and follow_mouse:
+            # The picture is of the whole screen, so every window it shows is read, not only
+            # the one under the mouse (never while Pyxi drives: that look is of one window).
+            others, theirs = self._read_others(
+                (origin[0], origin[1], shot.width, shot.height), window, started
+            )
+            elements.extend(theirs)
         if shot is not None:
             self._black_out(shot, origin, self.private_rects(skip=window.hwnd))
         if shot is not None:
@@ -475,7 +537,54 @@ class ScreenReader:
             origin=origin,
             text=text,
             tree=tree,
+            others=others,
         )
+
+    LOOK_BUDGET_S = 1.5  # reading every window of a screen, the first one included
+    OTHER_WINDOWS = 3  # besides the one under the mouse
+
+    def _read_others(
+        self, screen: tuple[int, int, int, int], main: WindowInfo, started: float
+    ) -> tuple[list[WindowInfo], list[UIElement]]:
+        """The other windows this screen's picture shows, and their controls: most in view
+        first, until the look's time is used up (a window there was no time for is still
+        named, so the model knows it is in the picture). Private windows are never read, nor
+        named: they are black in the picture. Of a window partly behind another, only the
+        controls that are in view are kept. Never raises."""
+        try:
+            seen = uia.other_windows(screen, main.hwnd, self.OTHER_WINDOWS)
+        except Exception:
+            return [], []
+        windows: list[WindowInfo] = []
+        elements: list[UIElement] = []
+        for hwnd, part, above in seen:
+            named = uia.named_window(hwnd)
+            info = WindowInfo(named.title, named.process, part, hwnd)
+            if self.is_excluded(info):
+                continue
+            left = self.LOOK_BUDGET_S - (time.monotonic() - started)
+            raw_window, raw = (
+                uia.read_window(
+                    hwnd, budget_s=min(left, 0.9), max_elements=self.config.max_elements * 3
+                )
+                if left >= 0.2
+                else (None, [])
+            )
+            info.tree = raw_window.tree if raw_window else "failed"
+
+            def in_view(
+                r: uia.RawElement,
+                part: tuple[int, int, int, int] = part,
+                above: list[tuple[int, int, int, int]] = above,
+            ) -> bool:
+                return _contains(part, r.rect) and not any(_contains(a, r.rect) for a in above)
+
+            mine = self._number(raw, in_view, most=max(24, self.config.max_elements // 2))
+            for e in mine:
+                e.hwnd = hwnd
+            windows.append(info)
+            elements.extend(mine)
+        return windows, elements
 
     def glance(self, rect: tuple[int, int, int, int]) -> Image.Image | None:
         """Only the pixels of one part of the screen, to tell whether it changed since the
@@ -580,15 +689,17 @@ class ScreenReader:
             self._next_id += 1
         return lines
 
-    def _number(self, raw: list[uia.RawElement], keep: Any = None) -> list[UIElement]:
+    def _number(
+        self, raw: list[uia.RawElement], keep: Any = None, most: int | None = None
+    ) -> list[UIElement]:
         """``keep``: which of them are in the picture (a window can lie across two screens,
-        and the desktop lies across all of them)."""
+        and the desktop lies across all of them). ``most``: how many, when fewer than usual."""
         # Prefer interactive and named elements when trimming to the budget.
         ranked = sorted(
             (i for i in range(len(raw)) if keep is None or keep(raw[i])),
             key=lambda i: (raw[i].role + "Control" not in uia.INTERACTIVE, not raw[i].name, i),
         )
-        keep = sorted(ranked[: self.config.max_elements])
+        keep = sorted(ranked[: most or self.config.max_elements])
         index_to_id: dict[int, int] = {}
         out: list[UIElement] = []
         for i in keep:
