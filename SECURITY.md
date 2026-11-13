@@ -2,7 +2,7 @@
 
 Pyxi sees your screen, works in the accounts you connect and can use your mouse and keyboard, so we treat security problems as the most important bugs there are. This page says how to report one, what Pyxi stores and where, what never leaves your PC, and how Pyxi is protected. What Pyxi shares, and with whom, is in the [privacy policy](docs/PRIVACY.md).
 
-For builders: the [threat model](docs/THREAT_MODEL.md) and the [pre-release checklist](docs/RELEASE_CHECKLIST.md).
+For builders: the [threat model](docs/THREAT_MODEL.md) and the [pre-release checklist](docs/RELEASE_CHECKLIST.md). For the founder, in plain words: [the security overview](docs/SECURITY-OVERVIEW.md).
 
 ## Reporting a problem
 
@@ -96,6 +96,15 @@ Pyxi moves files but never deletes them, and every tidy can be undone.
 
 - Every request must carry a random key that the desktop app makes at each launch, so other programs on the PC can't send requests or answer an Allow card.
 - Requests from web pages are refused, so a site in your browser can't reach the brain.
+
+**Your own browser.** When you connect the browser extension (or let Pyxi work in a tab through Windows' accessibility layer), Pyxi can read and work in your signed-in tabs, so it's guarded closely:
+
+- The extension pairs once, with a code shown only in Pyxi's Settings. After that both sides prove who they are on every connection, and every message is signed, so a website, another extension or another program can't pose as either side.
+- Pyxi asks before it works on a site, and again before it moves to any other site or opens an address it wrote itself. "Always allow on this site" lasts 30 days, and never covers a task that came from something Pyxi read.
+- Sending, submitting, buying, deleting and posting in a tab always ask again.
+- Password, card, ID-number and file-upload fields are never read or filled, and private pages (banking, password managers, your own list) are skipped.
+
+**Links.** Pyxi opens only `http` and `https` links. After it has read an email, a document or a signed-in tab, a link to a site you didn't name asks first: the address could otherwise carry what it read to that site.
 
 **Hardened windows.** Pyxi's windows are hardened against a page taking them over:
 
