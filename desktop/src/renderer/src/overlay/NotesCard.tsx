@@ -168,7 +168,9 @@ export function NotesCard() {
     if (innerHeight - below > 240) return { left, top: below, width: CARD_W };
     if (region.y - gap > 300) return { left, top: Math.max(16, region.y - gap - 360), width: CARD_W };
     return { left: innerWidth - CARD_W - 16, top, width: CARD_W };
-  }, [notes?.card.id]);
+    // The spot too: a card that is still arriving is moved by the brain when a later point
+    // marks something under where it first sat (live, it covered the header it explained).
+  }, [notes?.card.id, notes?.card.place?.[0], notes?.card.place?.[1]]);
 
   // Where each written point's bullet sits, so threads can start there.
   useLayoutEffect(() => {

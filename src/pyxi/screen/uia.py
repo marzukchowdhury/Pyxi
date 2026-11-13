@@ -182,6 +182,99 @@ def top_window_on(screen: tuple[int, int, int, int]) -> int | None:
     return None
 
 
+Box = tuple[int, int, int, int]  # x, y, w, h
+
+
+def _clip(r: Box, to: Box) -> Box | None:
+    x0, y0 = max(r[0], to[0]), max(r[1], to[1])
+    x1, y1 = min(r[0] + r[2], to[0] + to[2]), min(r[1] + r[3], to[1] + to[3])
+    return (x0, y0, x1 - x0, y1 - y0) if x1 > x0 and y1 > y0 else None
+
+
+def _share_in_view(part: Box, above: list[Box], grid: int = 12) -> float:
+    """How much of this part of a window nothing above it covers (0..1), by sampling."""
+    seen = 0
+    for i in range(grid):
+        for j in range(grid):
+            px = part[0] + (i + 0.5) * part[2] / grid
+            py = part[1] + (j + 0.5) * part[3] / grid
+            if not any(a[0] <= px < a[0] + a[2] and a[1] <= py < a[1] + a[3] for a in above):
+                seen += 1
+    return seen / (grid * grid)
+
+
+def windows_in_view(
+    stack: list[tuple[int, tuple[int, int, int, int]]],
+    screen: Box,
+    main: int = 0,
+    limit: int = 3,
+) -> list[tuple[int, Box, list[Box]]]:
+    """The other windows a picture of ``screen`` shows, besides ``main`` (the one under the
+    mouse): (hwnd, the part of it on this screen, the windows above it), most in view first.
+
+    Two windows side by side are both in the picture, and live the model was given the
+    controls of one of them only, so nothing could be drawn on the other. ``stack`` is
+    `_real_windows()`: topmost first, (hwnd, (left, top, right, bottom)). A window counts
+    when a good part of the screen is its own and most of that is not behind another window:
+    one that only peeks out from behind the window in front is not what anyone is reading."""
+    area = max(1, screen[2] * screen[3])
+    found: list[tuple[float, int, Box, list[Box]]] = []
+    above: list[Box] = []
+    for hwnd, (left, top, right, bottom) in stack:
+        rect = (left, top, right - left, bottom - top)
+        part = _clip(rect, screen)
+        if hwnd != main and part and part[2] >= 200 and part[3] >= 150:
+            showing = _share_in_view(part, above) * part[2] * part[3]
+            if showing >= 0.08 * area and showing >= 0.5 * part[2] * part[3]:
+                found.append((showing, hwnd, part, list(above)))
+        above.append(rect)
+    found.sort(key=lambda f: -f[0])
+    return [(hwnd, part, over) for _, hwnd, part, over in found[: max(0, limit)]]
+
+
+def other_windows(screen: Box, main: int = 0, limit: int = 3) -> list[tuple[int, Box, list[Box]]]:
+    """`windows_in_view` of the windows that are open now (the desktop itself is not one)."""
+    shell = desktop_window()
+    stack = [(hwnd, r) for hwnd, r in _real_windows() if hwnd != shell]
+    return windows_in_view(stack, screen, main, limit)
+
+
+def read_window(
+    hwnd: int, *, budget_s: float, max_elements: int = 400, max_depth: int = 25
+) -> tuple[RawWindow, list[RawElement]]:
+    """One more window of the screen, read in one call or not at all: its controls when they
+    came back within ``budget_s``, else the window alone, marked as not read. It is never
+    walked the slow way: the look as a whole has to stay quick. Never raises."""
+    window = named_window(hwnd)
+    if not available() or budget_s <= 0:
+        window.tree = "failed"
+        return window, []
+    try:
+        import uiautomation as auto
+
+        got = read_in_one_call(auto, hwnd, budget_s, max_elements, max_depth)
+    except Exception as exc:
+        log.debug("couldn't read another window of the screen: %s", exc)
+        got = None
+    if got is None:
+        window.tree = "failed"
+    return window, got or []
+
+
+def named_window(hwnd: int) -> RawWindow:
+    """A window's title, program and place, asked of Windows directly (nothing of what is in
+    it): enough to tell whether it is a private one before any of it is read."""
+    try:
+        return RawWindow(
+            title=window_title(hwnd) or "",
+            process=process_name(_pid_of(hwnd)),
+            rect=_rect_of(hwnd),
+            hwnd=hwnd,
+        )
+    except Exception:
+        return RawWindow("", "", (0, 0, 0, 0), hwnd)
+
+
 def desktop_window() -> int:
     """The desktop itself (its icons), which is what's there when no window is."""
     if sys.platform != "win32":

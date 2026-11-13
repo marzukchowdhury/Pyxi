@@ -96,6 +96,15 @@ def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(browsersetup, "clip_set", lambda text: clip.__setitem__("text", text) or True)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_windows_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test reads the other windows that are really on this PC's screen: a look at the
+    screen finds none besides the one it is given (a test of several gives its own)."""
+    from pyxi.screen import uia
+
+    monkeypatch.setattr(uia, "other_windows", lambda screen, main=0, limit=3: [])
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> PyxiSettings:
     return PyxiSettings(
