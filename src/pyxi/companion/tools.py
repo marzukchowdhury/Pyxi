@@ -8,6 +8,7 @@ from pyxi.agents.pixel import OPERATIONS as PIXEL_OPERATIONS
 from pyxi.companion.notes import DIAGRAM_SCHEMA
 from pyxi.scenes import TITLES, tool_schema
 from pyxi.scenes import library as model_library
+from pyxi.scenes.diagram import DIAGRAM_TOOL_SCHEMA
 from pyxi.scenes.object_gallery import OBJECT_TITLES
 from pyxi.scenes.objects import build_tool_schema, edit_tool_schema
 from pyxi.scenes.sketch import SKETCH_TOOL_SCHEMA
@@ -357,9 +358,11 @@ COMPANION_TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         "sketch_diagram",
-        "Draw a hand-made diagram that inks itself in while you talk: the fastest, clearest way to explain a "
-        "mechanism, force, flow, process or comparison ('is this real?', 'how does it hover?', 'why does it "
-        "float?', 'how does the signal get there?'). Grid is 100 wide x 64 tall, y down. Draw the subject simply "
+        "Draw a hand-made diagram that inks itself in while you talk: the fastest, clearest way to explain how "
+        "a physical thing works, a mechanism, a force or a flow through a shape ('is this real?', 'how does it "
+        "hover?', 'why does it float?', 'how does the signal get there?'). For an idea with a known shape (a "
+        "process, a decision, an order of events, a comparison, a hierarchy, a cycle) use draw_diagram instead. "
+        "Grid is 100 wide x 64 tall, y down. Draw the subject simply "
         "(a side view outline as one polygon or curve, its key parts as rects/ellipses), then what acts on it "
         "(arrows; flow=true when something moves: air, water, current, data), then short labels (text) next to "
         "what they name, and finish with the takeaway as an `equation` or rule ('Lift = weight'). Each shape has "
@@ -373,6 +376,20 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "step 2; arrow [[58,40],[58,52]] muted step 2; text 'Weight' at [61,50] step 2; equation 'Lift = weight' "
         "at [58,12] step 3.",
         SKETCH_TOOL_SCHEMA,
+    ),
+    ToolSpec(
+        "draw_diagram",
+        "Draw a tidy diagram of an idea that inks itself in while you talk. You choose the type and give only "
+        "the content; Pyxi lays it out, so nothing overlaps. Types: steps (a process in order), flowchart (a "
+        "decision with branches), timeline (events in order, each with `when`), comparison (two `columns` "
+        "with a `side` on each item, or two `axes` with x and y on each item), tree (a hierarchy), loop (a "
+        "cycle that feeds itself). Fewer is clearer: 3-7 items, never more than 9, each label 1-4 words, and "
+        "`focus` on the one or two that matter most (the answer, the turning point). Each item has a `step`; "
+        "give 2-5 steps, each one short spoken sentence, so it builds with the words. For how a physical thing "
+        "works (a jet hovering, a pump, a force) use sketch_diagram instead. Example, 'what happens if I miss "
+        "my flight': type flowchart; items a 'Flight missed' step 0, b 'Flexible ticket?' step 1, c 'Rebooked "
+        "free' step 1, d 'Pay the change fee' step 2 focus; links a to b, b to c 'yes', b to d 'no'.",
+        DIAGRAM_TOOL_SCHEMA,
     ),
     ToolSpec(
         "build_3d_model",

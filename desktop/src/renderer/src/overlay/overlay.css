@@ -458,6 +458,22 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .sk-anchor { fill: none; stroke: var(--sk-ice); stroke-width: 1.6; stroke-dasharray: 7 6; opacity: .85; filter: drop-shadow(0 0 6px rgba(127,186,255,.5)); animation: fade .6s .2s both; }
 .sk-thread-line { fill: none; stroke: rgba(127,186,255,.75); stroke-width: 1.4; stroke-dasharray: 1; stroke-dashoffset: 1; filter: drop-shadow(0 0 4px rgba(158,203,255,.6)); animation: ink-draw .7s .4s var(--ease) forwards; }
 
+/* Typed diagrams (steps, flowchart, timeline, comparison, tree, loop): laid out by
+   scene/diagramLayout.ts, drawn in the board's own ink. Thin lines, and one accent (amber) on
+   the one or two items that matter; nothing is coloured to decorate. */
+.dg-box { stroke: var(--sk-ink); stroke-opacity: .82; }
+.dg-box.focus { stroke: var(--sk-amber); stroke-opacity: 1; }
+.dg-fill { fill: var(--sk-amber); }
+.dg-wire { stroke: var(--sk-muted); }
+.dg-rule { stroke: var(--sk-muted); stroke-opacity: .6; filter: none; }
+.dg-dot { fill: var(--sk-ink); animation: fade .4s both; }
+.dg-dot.focus { fill: var(--sk-amber); filter: drop-shadow(0 0 5px rgba(255,201,60,.5)); }
+.sk-text.dg text { fill: var(--sk-ink); }
+.sk-text.dg.when text, .sk-text.dg.axis text, .sk-text.dg.link text { font-weight: 500; fill: var(--sk-muted); }
+.sk-text.dg.head text { font-family: "Fraunces", Georgia, serif; font-weight: 600; }
+.sk-text.dg.center text { font-family: "Fraunces", Georgia, serif; font-style: italic; font-weight: 500; fill: var(--ink-2); }
+.sk-text.dg.accent text { fill: var(--sk-amber); }
+
 /* The takeaway line on a drawing reads like a pull quote. */
 .sk-text.eq text { font-family: "Fraunces", Georgia, serif; font-style: italic; font-weight: 500; }
 

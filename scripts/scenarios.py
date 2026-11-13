@@ -467,6 +467,18 @@ NIGHT_SCENARIOS = [
 ]
 SCENARIOS += NIGHT_SCENARIOS
 
+# An idea with a known shape gets a typed diagram (Pyxi gives the content, the board lays it
+# out); how a physical thing works is still drawn freehand. SCEN_BOARDS=<folder> keeps what was
+# drawn as JSON, to look at it in the overlay.
+DIAGRAM_SCENARIOS = [
+    ("diagram refund", FIREFOX, "How does a refund get approved?", "diagram:steps|flowchart"),
+    ("diagram rent or buy", FIREFOX, "Compare renting and buying a home.", "diagram:comparison"),
+    ("diagram mortgage", FIREFOX, "How does a mortgage application get decided?", "diagram:steps|flowchart"),
+    ("diagram habit", FIREFOX, "How does a habit form? Draw it.", "diagram:loop|steps"),
+    ("diagram pump", FIREFOX, "How does a bicycle pump push air into the tyre? Draw it.", "sketch"),
+]
+SCENARIOS += DIAGRAM_SCENARIOS
+
 # The steps after the first one of a walk-through: the turns Pyxi starts by itself when they
 # click the mark. The question is the step they have just done: "step|action|label|goal".
 # (The screens are the founder's own, of 10 and 11 November: each is what was on screen
@@ -836,8 +848,24 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("3D not asked for")
     if expect == "3d" and not any(b.startswith("3d") for b in background):
         problems.append("no 3D build")
-    if expect == "visual" and not ({"sketch_diagram", "explain_on_screen"} & set(tools)):
+    if expect == "visual" and not ({"sketch_diagram", "draw_diagram", "explain_on_screen"} & set(tools)):
         problems.append("no visual")
+    boards = [e["board"] for e in events if e["type"] == "sketch"]
+    if expect.startswith("diagram:"):
+        # An idea with a known shape: Pyxi names the type and gives the content, no positions.
+        typed = [b["diagram"] for b in boards if b.get("diagram")]
+        if "sketch_diagram" in tools:
+            problems.append("drew boxes by hand instead of a typed diagram")
+        elif not typed:
+            problems.append(f"no typed diagram ({tools})")
+        elif not re.fullmatch(expect.split(":", 1)[1], typed[-1]["type"]):
+            problems.append(f"a {typed[-1]['type']} diagram, wanted {expect.split(':', 1)[1]}")
+        elif sum(bool(i.get("focus")) for i in typed[-1]["items"]) > 2 or len(typed[-1]["items"]) > 9:
+            problems.append("too many items or accents")
+    if expect == "sketch" and ("sketch_diagram" not in tools or any(b.get("diagram") for b in boards)):
+        problems.append(f"a physical thing was not drawn freehand ({tools})")
+    if boards and (out := os.environ.get("SCEN_BOARDS")):  # keep what was drawn, to look at it
+        Path(out, name.replace(" ", "_") + ".json").write_text(json.dumps(boards[-1]), encoding="utf-8")
     if expect == "chat" and (len(said) > 260 or set(tools) - {"say"}):
         problems.append(f"chat not short ({len(said)} chars, {set(tools) - {'say'}})")
     if expect == "errand":
