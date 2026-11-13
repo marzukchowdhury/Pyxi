@@ -809,6 +809,7 @@ class JobManager:
 
     async def _run_documents(self, job: Job, agent: AgentProfile) -> None:
         """Ledger: edit Excel, Word and PowerPoint files (a copy beside each) or Google files."""
+        from pyxi.agents import ledger_live
         from pyxi.agents.ledger import run_ledger
 
         llm = self.llm_factory(agent)
@@ -822,18 +823,39 @@ class JobManager:
         async def progress(line: str) -> None:
             await self._status(job, line[:1].upper() + line[1:])
 
+        async def confirm(action: str, reason: str) -> bool:
+            return bool(
+                await self.hub.request(
+                    "confirm", timeout=180, job_id=job.id, agent=agent.name, action=action, reason=reason
+                )
+            )
+
+        # A document open in Excel, Word or PowerPoint, edited where it is (ledger_live.py).
+        live = []
+        for ref in job.params.get("live") or []:
+            if isinstance(ref, dict) and ref.get("app") in ledger_live.APPS:
+                live.append(ledger_live.target(str(ref["app"]), ref.get("hwnd") or None, confirm=confirm))
         google_refs = [str(g) for g in job.params.get("google") or [] if str(g).strip()]
-        result = await run_ledger(
-            job.task,
-            files=job.files,
-            google=self._google() if google_refs else None,
-            google_refs=google_refs,
-            ask=ask,
-            name=agent.name,
-            persona=agent.persona,
-            context=job.context,
-            progress=progress,
-        )
+        try:
+            result = await run_ledger(
+                job.task,
+                files=job.files,
+                google=self._google() if google_refs else None,
+                google_refs=google_refs,
+                live=live,
+                ask=ask,
+                name=agent.name,
+                persona=agent.persona,
+                context=job.context,
+                progress=progress,
+            )
+        except ledger_live.Unreachable as exc:
+            # The app went away or got busy between the look and the job. Nothing was changed,
+            # so the brain does it the way it did before there was a direct route.
+            job.status = "failed"
+            job.summary = str(exc)
+            job.data = {"handover": str(exc), "live": job.params.get("live")}
+            return
         job.cost_usd = result.cost_usd
         job.outputs = result.outputs
         job.data = {
@@ -841,10 +863,15 @@ class JobManager:
             "notes": result.problems[:3],
             "links": result.links,
             "outputs": result.outputs,
+            "edited": result.live,
         }
         if not result.changes:
             job.status = "failed"
             job.summary = result.summary or "I couldn't make that change."
+            if live and not result.sent and not result.declined:
+                # Nothing reached the app: the edits asked for are not ones the direct route
+                # has. The brain hands the job to the mouse and keyboard, as it always did.
+                job.data |= {"handover": job.summary, "live": job.params.get("live")}
             return
         # One sentence for the edits: the notification shows the first two sentences, so the
         # edits that failed and where the copy went are never cut off by a list of edits.
@@ -859,6 +886,8 @@ class JobManager:
         if result.outputs:
             names = ", ".join(Path(o).name for o in result.outputs)
             parts.append(f"Saved as {names}, beside the original.")
+        if result.live:
+            parts.append(f"Changed in {' and '.join(result.live)}, where it's open. I haven't saved it.")
         made = any(str(g).lower().startswith("new ") for g in job.params.get("google") or [])
         if result.links and made:
             parts.append("It's a new file in your Google Drive: " + " ".join(result.links))

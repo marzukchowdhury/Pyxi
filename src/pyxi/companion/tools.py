@@ -644,7 +644,8 @@ COMPANION_TOOLS += [
         "table, a list of rows or an empty table into the file they're looking at whenever Ledger can't "
         "reach that file: it's Excel or Word in a browser tab, another app or site, or edit_document said "
         "it can't open it. It only fills cells: a cell that starts with = is a formula in a spreadsheet; "
-        "a pivot, a chart or formatting is edit_document in a Google file or a file on disk, and "
+        "a pivot, a chart or formatting is edit_document in a Google file, a file on disk or the "
+        "Excel, Word or PowerPoint app (which puts the cells in too, so use it alone there), and "
         "use_computer through the app's menus anywhere else. It lands at the selected cell and clicks "
         "it itself when it has to: a new sheet has A1 selected, so paste, and never ask them to click a "
         "cell first. Say one short line.",
@@ -839,7 +840,9 @@ COMPANION_TOOLS += [
         "from the taskbar, or a new tab, then come back), search Maps, rename or move files in Explorer, "
         "change a setting in an app, click through a site. Never for files, PDFs, images, Excel, Word, "
         "PowerPoint, Google Sheets or Google Docs: convert_files and edit_document do those in the "
-        "background, in seconds, without their mouse. They see an Allow card first, watch the cursor move, and can stop it by "
+        "background, in seconds, without their mouse, and that includes the workbook, document or "
+        "deck open in the Excel, Word or PowerPoint app (edit_document with app), unless "
+        "edit_document just said it can't reach it. They see an Allow card first, watch the cursor move, and can stop it by "
         "moving the mouse or pressing Esc; anything that sends, buys, posts or deletes asks again. Use it "
         "whenever they ask you to DO something on screen; use `guide` instead when they want to learn to "
         "do it themselves. Give `task` exactly: what to do, in which app, and what done looks like, plus "
@@ -1075,7 +1078,13 @@ COMPANION_TOOLS += [
         "text boxes, shapes, pictures, tables and charts on a slide, moving and resizing things, "
         "backgrounds, speaker notes. Changing something already there (the table in this doc, the "
         "chart on this sheet) is this tool too: say which one in the task. A local file is saved as "
-        "a copy beside the original; Google files are edited in place. For fixing the grammar of a "
+        "a copy beside the original; Google files are edited in place. A workbook, document or deck "
+        "that is OPEN in the Excel, Word or PowerPoint app on this PC is changed right there, live, "
+        "in a few seconds and without their mouse: give `app` (and no files). Nothing is saved and "
+        "no copy is made; it can do cells, formulas, totals, formatting, sorting, a pivot and a chart "
+        "in Excel, headings, text, formatting, find and replace, tables and page setup in Word, and "
+        "slides, text, pictures and slide order in PowerPoint, and it says so itself when a request "
+        "needs the mouse instead. For fixing the grammar of a "
         "document, delegate to Quill instead. Say one short line that names the job; they get a "
         "notification.",
         {
@@ -1096,6 +1105,13 @@ COMPANION_TOOLS += [
                 "words from the file's name ('sales sheet'), 'this sheet' / 'this doc' / 'this "
                 "deck' for the one open on screen, or 'new sheet: <title>' / 'new doc: <title>' / "
                 "'new slides: <title>' to make a new one.",
+            },
+            "app": {
+                "type": "string",
+                "enum": ["excel", "word", "powerpoint"],
+                "description": "The Microsoft Excel, Word or PowerPoint app on this PC, for the "
+                "workbook, document or deck open in it now (the window in front, or the app they "
+                "named). Not for Office in a browser tab, and never together with files or google.",
             },
         },
         ["task"],

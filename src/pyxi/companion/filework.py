@@ -179,6 +179,50 @@ async def _reachable(brain: Brain, ref: str) -> bool:
     return True
 
 
+_APP_WORDS = {"ppt": "powerpoint", "power point": "powerpoint", "slides": "powerpoint", "xl": "excel"}
+
+
+async def _open_app(brain: Brain, app: str) -> tuple[dict[str, Any] | None, str | None]:
+    """The document open in Excel, Word or PowerPoint, for a direct edit: (what the job needs,
+    None), or (None, a note for the model) when the app can't be reached right now, or
+    (None, None) when no such app was named and none is in front.
+
+    The look changes nothing and comes back within three seconds whatever the app is doing."""
+    from pyxi import windows
+    from pyxi.agents import ledger_live
+    from pyxi.screen.context import WindowInfo
+
+    app = " ".join(app.lower().split())
+    app = _APP_WORDS.get(app, app)
+    w = brain._ctx.window if brain._ctx else None
+    front = ledger_live.app_of(w.process) if w else ""
+    if not app:
+        app = front  # they're looking at it, and named no file
+    if not app:
+        return None, None
+    if app not in ledger_live.APPS:
+        return None, "edit_document: app is excel, word or powerpoint."
+    label = ledger_live.APPS[app]["label"]
+    hwnd, title, exe = (w.hwnd, w.title, w.process) if w and front == app else (0, "", "")
+    if not hwnd:  # named, not in front: its topmost window
+        for h, t, e in await asyncio.to_thread(windows.open_windows):
+            if ledger_live.app_of(e) == app:
+                hwnd, title, exe = h, t, e
+                break
+    is_excluded = getattr(brain.screen, "is_excluded", None)
+    if is_excluded and title and is_excluded(WindowInfo(title, exe)):
+        return None, f"edit_document: that {label} window is one of their private apps, so Pyxi leaves it alone."
+    why, name = await asyncio.to_thread(ledger_live.probe, app, hwnd or None)
+    if why:
+        return None, (
+            f"edit_document: {why} So Pyxi can't change it directly right now. If {label} is open "
+            "on their screen, do this with use_computer now through the app's own menus (or "
+            "paste_table when it's only cells to put in), and don't mention this note; if it "
+            f"isn't open, say in one short line that there's nothing open in {label}."
+        )
+    return {"app": app, "hwnd": int(hwnd or 0), "name": name, "label": label}, None
+
+
 async def _open_when_done(brain: Brain, job_id: str) -> None:
     """A sheet or doc Pyxi made (asked for, or because the open one was out of reach): put it
     on their screen when it's ready."""
@@ -243,7 +287,22 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
                 "exact path with search_files first, or ask them."
             )
         if not files and not google:
-            return "edit_document: which file? Give files (paths on this PC) or google (a link or the file's name)."
+            # The workbook, document or deck open in Excel, Word or PowerPoint: edited where it
+            # is (agents/ledger_live.py), when the app can be reached right now.
+            ref, note = await _open_app(brain, str(args.get("app") or ""))
+            if note:
+                return note
+            if ref:
+                job = await brain.jobs.start("ledger", task, files=[], params={"live": [ref]})
+                return (
+                    f"Started {job.id}: {job.agent_name} is changing {ref['name']} right in "
+                    f"{ref['label']}, where it's open; it takes a few seconds and nothing is saved. "
+                    "Say one short line that names the job; they're told when it's done."
+                )
+            return (
+                "edit_document: which file? Give files (paths on this PC), google (a link or the "
+                "file's name), or app (excel, word or powerpoint) for the one open in that app."
+            )
         if google and not brain.connectors.google.connected():
             return (
                 "edit_document: Google isn't connected. Tell them to connect it in Settings first."

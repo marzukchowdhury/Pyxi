@@ -26,6 +26,8 @@ from typing import Any
 from pyxi.agents.ledger_common import LedgerError, a1_tab, cell_rc, col_letter, split_tab
 from pyxi.agents.ledger_common import rgb as _rgb
 from pyxi.agents.ledger_google import DocExtras, GoogleSlides, SheetExtras
+from pyxi.agents.ledger_live import Unreachable
+from pyxi.agents.ledger_live import menus as _live_menus
 from pyxi.agents.ledger_office import DeckExtras, WordExtras, WorkbookExtras
 from pyxi.agents.pixel import out_dir_for, unique_path
 
@@ -2453,10 +2455,12 @@ _ALL_KINDS = {"xlsx", "gsheet", "docx", "gdoc", "pptx", "gslides"}
 
 
 def edits_for(kinds: set[str]) -> str:
-    """The edit menu for these kinds of file only: a Doc job isn't sent the spreadsheet edits."""
+    """The edit menu for these kinds of file only: a Doc job isn't sent the spreadsheet edits.
+    A document open in Excel, Word or PowerPoint has a menu of its own (ledger_live.py)."""
+    menus = _MENUS if kinds <= _ALL_KINDS else (*_MENUS, *_live_menus())
     return (
         'Edits you can use (each is a JSON object with "file": <file number> and "op"):\n'
-        + "\n".join(menu for wanted, menu in _MENUS if wanted & kinds)
+        + "\n".join(menu for wanted, menu in menus if wanted & kinds)
     )
 
 
@@ -2526,6 +2530,9 @@ class LedgerResult:
     problems: list[str] = field(default_factory=list)
     summary: str = ""
     cost_usd: float = 0.0
+    live: list[str] = field(default_factory=list)  # documents changed in the open app, unsaved
+    sent: bool = False  # an edit's calls went to an open app (whether or not it worked)
+    declined: bool = False  # they said no on a card that asked before replacing cells
 
 
 def parse_edits(text: str) -> dict[str, Any]:
@@ -2611,10 +2618,28 @@ async def _reopened(path: Path, edits: list[dict[str, Any]]) -> Any:
 Ask = Callable[[str, str], Awaitable[tuple[str, float]]]
 
 
-async def run_ledger(
+async def run_ledger(task: str, *, live: list[Any] | None = None, **kw: Any) -> LedgerResult:
+    """Open the targets, ask the model for edits once (and once more to fix any that failed),
+    apply them, save copies. ``ask(system, prompt)`` returns (text, cost).
+
+    ``live`` holds documents open in Excel, Word or PowerPoint (ledger_live.py): edited where
+    they are, never saved, and let go when the job ends, however it ends. When one of them
+    can't be reached at the start the job stops with ``Unreachable`` and nothing changed.
+
+    An edit that worked is never applied a second time, whatever the second reply says, and
+    how long each part took is logged (live, one chart took 20.9 s and nothing said where)."""
+    try:
+        return await _run_ledger(task, live=live or [], **kw)
+    finally:
+        for t in live or []:
+            await t.close()
+
+
+async def _run_ledger(
     task: str,
     *,
     files: list[str],
+    live: list[Any],
     google: Any = None,
     google_refs: list[str] | None = None,
     ask: Ask,
@@ -2623,11 +2648,6 @@ async def run_ledger(
     context: str = "",
     progress: Callable[[str], Awaitable[None]] | None = None,
 ) -> LedgerResult:
-    """Open the targets, ask the model for edits once (and once more to fix any that failed),
-    apply them, save copies. ``ask(system, prompt)`` returns (text, cost).
-
-    An edit that worked is never applied a second time, whatever the second reply says, and
-    how long each part took is logged (live, one chart took 20.9 s and nothing said where)."""
     began = time.perf_counter()
     targets: list[Any] = []
     sources: dict[int, Path] = {}  # local files by their place in ``targets``
@@ -2638,6 +2658,7 @@ async def run_ledger(
         if google is None or not google.connected():
             raise LedgerError("Google isn't connected. Connect it in Settings, then ask again.")
         targets.append(await google.open_for_edit(ref))
+    targets.extend(live)
     if not targets:
         raise LedgerError(
             "Which file? Give me the path of the Excel, Word or PowerPoint file, or the Google Sheet or Doc."
@@ -2661,6 +2682,7 @@ async def run_ledger(
     tried = False
     pending = prompt
     unread = False  # the model's last reply was not the plan asked for
+    gone = False  # an open app stopped answering: nothing more is sent to it, or asked
 
     async def clean(index: int) -> None:
         if index in half_done:
@@ -2745,6 +2767,7 @@ async def run_ledger(
             except LedgerError as exc:
                 failed.append(f"{json.dumps(e)[:200]}: {exc}")
                 why, wrote = str(exc), _may_have_written(target, e, exc)
+                gone = gone or isinstance(exc, Unreachable)
             except Exception as exc:  # a bad cell address, a style the file lacks...
                 failed.append(f"{json.dumps(e)[:200]}: {type(exc).__name__}: {str(exc)[:160]}")
                 what = str(e.get("op") or "edit").replace("_", " ")
@@ -2763,6 +2786,8 @@ async def run_ledger(
                 time.perf_counter() - began_edit,
                 " (it failed)" if why else "",
             )
+            if gone:
+                break  # the edits after it would each wait on an app that isn't answering
         if attempt == 0:
             first = fails
             result.problems = reasons
@@ -2778,7 +2803,7 @@ async def run_ledger(
                 if scored and (_alike(scored[0][1], e) > 0 or len(on_file) == 1):
                     left.remove(scored[0])
             result.problems = list(dict.fromkeys([*(why for _, _, why in left), *reasons]))
-        if not failed:
+        if not failed or gone:
             break
         if attempt == 0:
             try:  # the outline for the second try is read fresh, never remembered
@@ -2810,10 +2835,14 @@ async def run_ledger(
         if i in sources:
             await clean(i)
         t = targets[i]
-        if hasattr(t, "save"):
+        if getattr(t, "live", False):
+            result.live.append(t.title)  # changed where it's open; saving is theirs to do
+        elif hasattr(t, "save"):
             result.outputs.append(str(await asyncio.to_thread(t.save)))
         else:
             result.links.append(t.url)
+    result.sent = any(getattr(t, "sent", False) for t in live)
+    result.declined = any(getattr(t, "declined", False) for t in live)
     log.info(
         "ledger: saved in %.1fs; %.1fs in all, %d edit(s) made, %d problem(s)",
         time.perf_counter() - saving,

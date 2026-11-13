@@ -4823,6 +4823,24 @@ class Brain:
                 audio=base64.b64encode(speech.wav).decode() if speech.wav else None,
             )
 
+    async def _hand_over(self, job: Job, data: dict[str, Any]) -> bool:
+        """Ledger was sent straight into Excel, Word or PowerPoint and changed nothing, because
+        the app stopped answering or the request isn't one the direct route can make. That is
+        not the end of it: it is done the way it was before, with the mouse and keyboard,
+        after the usual card. Said in one line, so nobody waits on a job that has moved."""
+        if job.role != "documents" or job.status != "failed" or not data.get("handover"):
+            return False
+        if not hands.available() or self._operator is not None:
+            return False  # nothing to hand it to: the notice says why it wasn't done
+        from pyxi.agents import ledger_live
+
+        ref = next((r for r in data.get("live") or [] if isinstance(r, dict)), {})
+        label = ledger_live.APPS.get(str(ref.get("app")), {}).get("label", "the app")
+        log.info("ledger: handing %s to the hands: %s", job.id, str(data["handover"])[:160])
+        await self.say_line(f"I can't do that one straight in {label}, so I'll use the mouse and keyboard.")
+        self._spawn(self._drive(f"In {label}: {job.task}"[:600], int(ref.get("hwnd") or 0) or None))
+        return True
+
     async def _job_done(self, job: Job) -> None:
         self.turns.add_spend(f"job:{job.agent_id}", job.cost_usd)
         self.activity.log(
@@ -4834,6 +4852,10 @@ class Brain:
         # with the result and the files, one short spoken line once nobody is talking, and the
         # whole result on a card when the notification can't hold it (_announce).
         data = job.data if isinstance(job.data, dict) else {}
+        if await self._hand_over(job, data):
+            return  # the open app couldn't take it directly: the mouse and keyboard do it
+        for name in data.get("edited") or []:  # a document changed where it's open, unsaved
+            self.audit.add("wrote", f"Changed {name}", agent=job.agent_name, detail=job.task[:200])
         if (note := paperwork.notice(job, data)) is not None:  # a check-in or a filled form
             await self.hub.emit(
                 "job_ready",

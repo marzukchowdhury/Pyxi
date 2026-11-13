@@ -44,13 +44,15 @@ You can pause all screen access at any time with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+
 | Teammate | What it does with the file | Sent to the AI model? |
 |---|---|---|
 | Pixel | Converts, merges, compresses, fills and compares documents | No, it all happens on your computer |
-| Ledger | Edits Excel, Word and PowerPoint files, and Google Sheets and Docs | An outline of the file, to decide the edits |
+| Ledger | Edits Excel, Word and PowerPoint files, the workbook, document or deck you have open in those apps, and Google Sheets and Docs | An outline of the file or the open document, to decide the edits |
 | Sage | Makes flashcards and quizzes from slides and notes | The text of the file |
 | Scribe | Turns a meeting recording into notes | The recording is transcribed on your computer; only the transcript is sent |
 | Patch | Explains an error in a script and proposes a small fix | The error and the lines around it |
 | Forms | Fills a job or government form from a CV or document you name | The parts the form needs. Passwords, card numbers and government ID numbers are cut out first |
 
 Results are saved as new files beside the original, or in `Documents\Pyxi`. Originals are never overwritten, with two exceptions you approve: Patch changes a script only after you press Allow on a card that shows the change (and keeps a backup), and Google Docs and Sheets are edited in place, where Google keeps every earlier version.
+
+**A document open in Excel, Word or PowerPoint.** When you ask for a change to the workbook, document or deck you have open in the app, Ledger makes it right there, through the app itself, instead of with your mouse. The same outline as for a file goes to the AI model, and nothing else: no copy is made, nothing new is stored, and Pyxi never saves, closes or deletes the document. You save it, or not. Before a change would replace or remove more than a few filled cells, a card asks you first. Word and PowerPoint can undo these changes with Ctrl+Z; Excel usually cannot, so the card says so.
 
 **LibreOffice (optional).** For exact Office layouts and old .doc, .xls and .ppt files, Pyxi can download LibreOffice from The Document Foundation, after a card asks you first. It's installed in Pyxi's own folder and changes nothing else on your PC.
 
