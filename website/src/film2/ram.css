@@ -9,7 +9,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: #06070
 .slam { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; font-size: 176px; font-weight: 800; letter-spacing: -0.055em; line-height: 1; white-space: nowrap; opacity: 0; }
 .slam em { font-style: normal; background: linear-gradient(100deg, #ffd27a, #ff9f43); -webkit-background-clip: text; background-clip: text; color: transparent; }
 #world { position: absolute; inset: 0; opacity: 0; transform-origin: 50% 50%; }
-#win { position: absolute; left: 150px; top: 58px; width: 1620px; height: 962px; border-radius: 16px; overflow: hidden; background: #f1f3f7; color: #1c2028; box-shadow: 0 60px 160px rgba(0, 0, 0, 0.6); }
+#win { will-change: filter; position: absolute; left: 150px; top: 58px; width: 1620px; height: 962px; border-radius: 16px; overflow: hidden; background: #f1f3f7; color: #1c2028; box-shadow: 0 60px 160px rgba(0, 0, 0, 0.6); }
 #win .bar { display: flex; align-items: center; gap: 12px; height: 46px; padding: 0 18px; background: #d9dee8; font-size: 15px; color: #4b5463; }
 #win .bar u { width: 14px; height: 14px; border-radius: 50%; background: #6d5df6; }
 .page { padding: 54px 0 0 120px; width: 900px; }

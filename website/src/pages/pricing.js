@@ -51,6 +51,10 @@ function init() {
   });
   show("pro");
 
+  // ---- the questions: opening one closes the others
+  const qs = [...document.querySelectorAll(".pq")];
+  qs.forEach((q) => q.addEventListener("toggle", () => q.open && qs.forEach((o) => o !== q && (o.open = false))));
+
   // ---- the jars
   const jars = plans.map((p, k) => {
     const canvas = p.querySelector("canvas");

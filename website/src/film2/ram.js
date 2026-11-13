@@ -337,6 +337,17 @@ function slam(el, t, at, until) {
   el.style.filter = `blur(${(mix(16, 0, out3(u)) + leave * 14).toFixed(2)}px)`;
 }
 
+let pillWords = -1;
+let lastWin = "";
+const pillBars = [...document.querySelectorAll("#pill s")];
+const written = new WeakMap();
+const write = (el, text) => {
+  if (written.get(el) !== text) {
+    written.set(el, text);
+    el.textContent = text;
+  }
+};
+
 export function draw(t) {
   const { s1, s3, c } = C;
   // the two slow lights
@@ -357,7 +368,8 @@ export function draw(t) {
   world.style.transform = `perspective(2400px) translate(${(-150 * punch).toFixed(1)}px, ${(-60 * punch).toFixed(1)}px) scale(${scale.toFixed(4)}) rotateY(${ry.toFixed(3)}deg) rotateX(${rx.toFixed(3)}deg)`;
   // the page steps back when the model builds over it
   const dim = io(seg(t, T.card - 0.2, T.card + 0.5));
-  $("win").style.filter = `brightness(${mix(1, 0.32, dim).toFixed(3)}) blur(${(dim * 5).toFixed(2)}px)`;
+  const winFilter = `brightness(${mix(1, 0.32, dim).toFixed(3)}) blur(${(dim * 5).toFixed(2)}px)`;
+  if (winFilter !== lastWin) $("win").style.filter = lastWin = winFilter; // the blurred page is worked out once, then left alone
   // the pointer, the firefly beside it, and the ask
   const px = 1100 + Math.sin(t * 0.8) * 6;
   const py = 560 + Math.cos(t * 0.7) * 5;
@@ -367,8 +379,15 @@ export function draw(t) {
   const pill = $("pill");
   pill.style.opacity = seg(t, T.listen - 0.1, T.listen + 0.15) * (1 - seg(t, T.card - 0.35, T.card - 0.1));
   pill.style.transform = `translate(${px - 330}px, ${py + 52}px)`;
-  pill.querySelector("span").innerHTML = WORDS.map((w, i) => (i < said ? w : `<i>${w}</i>`)).join(" ");
-  pill.querySelectorAll("s").forEach((s, i) => (s.style.height = `${(8 + 20 * Math.abs(Math.sin(t * 9 + i * 1.7)) * (said < WORDS.length ? 1 : 0.2)).toFixed(1)}px`));
+  if (t < T.card) {
+    // only while the ask is on screen
+    const n = Math.ceil(said);
+    if (n !== pillWords) {
+      pillWords = n;
+      pill.querySelector("span").innerHTML = WORDS.map((w, i) => (i < said ? w : `<i>${w}</i>`)).join(" ");
+    }
+    pillBars.forEach((s, i) => (s.style.height = `${(8 + 20 * Math.abs(Math.sin(t * 9 + i * 1.7)) * (said < WORDS.length ? 1 : 0.2)).toFixed(1)}px`));
+  }
   // the firefly: beside the pointer, then up to where it works; it glows with Pyxi's voice
   const go = io(seg(t, T.card - 0.3, T.card + 0.5));
   const fx = mix(px + 44, 640, go);
@@ -380,7 +399,7 @@ export function draw(t) {
   $("gl").style.opacity = seg(t, T.card, T.card + 0.1);
   const m = t >= T.card - 0.05 ? model(t) : { shown: 0, step: 0 };
   $("count").style.opacity = seg(t, T.card + 0.1, T.card + 0.3) * (1 - seg(t, s1 - 0.3, s1));
-  $("count").textContent = m.shown < TOTAL_PARTS ? `Building it: ${m.shown} of ${TOTAL_PARTS} parts` : `${TOTAL_PARTS} parts`;
+  write($("count"), m.shown < TOTAL_PARTS ? `Building it: ${m.shown} of ${TOTAL_PARTS} parts` : `${TOTAL_PARTS} parts`);
   const card = $("card");
   const cu = out3(seg(t, s1 - 0.25, s1 + 0.2));
   card.style.opacity = cu;
@@ -402,7 +421,7 @@ export function draw(t) {
       text = ph.text;
       o = seg(t, ph.at, ph.at + 0.12) * (1 - seg(t, ph.until - 0.12, ph.until));
     }
-  $("cap").textContent = text;
+  write($("cap"), text);
   $("cap").style.opacity = o;
   $("band").style.opacity = Math.max(o, seg(t, T.listen, T.listen + 0.3) * (1 - seg(t, c - 0.4, c)));
   // C: into the light, and the name
@@ -425,6 +444,11 @@ export function draw(t) {
 
 export function setup(cfg) {
   C = { ...C, ...cfg };
+  if (cfg.pixels) {
+    // drawn at the size it is shown: a small stage does not need a full 1920 x 1080 picture worked out and then shrunk
+    renderer.setPixelRatio(cfg.pixels);
+    renderer.setSize(1920, 1080, false);
+  }
   return { fonts: ['800 176px "Inter Variable"', '600 44px "Inter Variable"', '600 36px "Fraunces Variable"', 'italic 500 84px "Fraunces Variable"'].map((f) => document.fonts.check(f)) };
 }
 

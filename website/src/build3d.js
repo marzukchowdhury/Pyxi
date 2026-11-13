@@ -40,6 +40,7 @@ export function initBuild3D({ reduced = false } = {}) {
   const ramFrame = $(".b3-ram");
   let ramAt = 6.0; // where the RAM guide is in its own seconds (it starts as the model builds)
   let ramLast = 0;
+  let ramDrawn = 0;
   let ramRaf = 0;
   const ramWindow = () => (ramFrame.contentDocument?.body?.dataset.ready ? ramFrame.contentWindow : null);
   /** The RAM guide is its own page that draws itself from a time: step it here, round and round. */
@@ -50,8 +51,15 @@ export function initBuild3D({ reduced = false } = {}) {
     if (w) {
       if (!ramFrame.dataset.set) {
         ramFrame.dataset.set = "1";
+        ramFit();
         w.setup({ c: 999, total: 999, phrases: RAM_STEPS.map((s, i) => ({ text: s.title + ".", at: s.at - 0.1, until: (RAM_STEPS[i + 1]?.at ?? 11.4) - 0.1 })) });
       }
+      // the guide is drawn 30 times a second: its moves are slow, and it leaves the page room to scroll smoothly
+      if (!reduced && now - ramDrawn < 30) {
+        ramRaf = requestAnimationFrame(ramTick);
+        return;
+      }
+      ramDrawn = now;
       ramAt = reduced ? 11.4 : ramAt + Math.min(0.1, (now - (ramLast || now)) / 1000);
       if (ramAt > 13) ramAt = 6.0;
       w.draw(ramAt);
@@ -63,9 +71,13 @@ export function initBuild3D({ reduced = false } = {}) {
     ramLast = now;
     if (!reduced || !w) ramRaf = requestAnimationFrame(ramTick);
   };
+  let ramPixels = 0;
   const ramFit = () => {
     const k = Math.max(stageBox.clientWidth / 1920, stageBox.clientHeight / 1080);
     ramFrame.style.transform = `translate(-50%, -50%) scale(${k.toFixed(4)})`;
+    // the 3D picture is worked out at the size it is shown (sharp up to a 1.5x screen), not at full film size
+    const px = Math.min(1, Math.max(0.3, k * Math.min(1.5, devicePixelRatio || 1)));
+    if (Math.abs(px - ramPixels) > 0.02 && ramWindow()) ramWindow().setup({ pixels: (ramPixels = px) });
   };
   const showRam = () => {
     el.classList.add("is-ram", "is-live");
