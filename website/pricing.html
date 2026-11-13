@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!--include:head-->
+    <title>Pyxi pricing: Starter, Pro and Max</title>
+    <meta name="description" content="Pyxi's plans: Starter at $9 a month, Pro at $19 and Max at $39, with two months free on a yearly plan and a 14-day free trial of Pro. Paid plans start at launch." />
+    <link rel="canonical" href="{{siteUrl}}/pricing" />
+    <meta property="og:url" content="{{siteUrl}}/pricing" />
+    <meta property="og:title" content="Pyxi pricing" />
+    <meta property="og:description" content="Starter, Pro and Max. A 14-day free trial of Pro. Paid plans start at launch." />
+    <meta name="twitter:title" content="Pyxi pricing" />
+    <meta name="twitter:description" content="Starter, Pro and Max. A 14-day free trial of Pro. Paid plans start at launch." />
+    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/pages/pricing.js"></script>
+  </head>
+  <body class="page-pricing">
+    <!--include:nav-->
+    <!--include:firefly-->
+
+    <main id="main">
+      <section class="page-hero price-hero" data-say="Pick how many fireflies you need.">
+        <div class="wrap">
+          <p class="kicker reveal">Pricing</p>
+          <h1 class="display-sm reveal">Pick your light. <span class="dim">Start free.</span></h1>
+          <p class="lead reveal">Every plan starts with 14 days of Pro, free. Paid plans start at launch: today Pyxi is a free beta, and nothing here can be bought yet.</p>
+          <div class="bill reveal" role="group" aria-label="Billing">
+            <button type="button" data-bill="month" aria-pressed="true">Monthly</button>
+            <button type="button" data-bill="year" aria-pressed="false">Yearly <i>two months free</i></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="plans-wrap" aria-label="Plans">
+        <div class="wrap">
+          <div class="plans" id="plans">
+            <article class="plan reveal" data-plan="starter" data-month="9" data-year="90" data-permonth="7.50" data-flies="6">
+              <div class="jar" aria-hidden="true"><canvas></canvas></div>
+              <h2>Starter</h2>
+              <p class="plan-for">For the odd question and a few errands.</p>
+              <p class="price"><b class="amount">$9</b><span class="per">a month</span></p>
+              <p class="price-note">or $90 a year ($7.50 a month)</p>
+              <ul>
+                <li><b>40</b> questions a day</li>
+                <li><b>10</b> 3D models a month</li>
+                <li><b>30</b> agent tasks a month</li>
+                <li>Docs, sheets, PDFs and email help included</li>
+                <li><b>1</b> background teammate at a time</li>
+              </ul>
+              <a class="btn btn-ghost btn-lg" href="/download" data-track="pricing-starter">Start the free trial</a>
+            </article>
+
+            <article class="plan pro reveal" data-plan="pro" data-month="19" data-year="180" data-permonth="15" data-flies="18">
+              <p class="badge">Most popular</p>
+              <div class="jar" aria-hidden="true"><canvas></canvas></div>
+              <h2>Pro</h2>
+              <p class="plan-for">For using Pyxi through the working day.</p>
+              <p class="price"><b class="amount">$19</b><span class="per">a month</span></p>
+              <p class="price-note">or $180 a year ($15 a month)</p>
+              <ul>
+                <li><b>100</b> questions a day</li>
+                <li><b>50</b> 3D models a month</li>
+                <li><b>250</b> agent tasks a month</li>
+                <li>Docs, sheets, PDFs and email help included</li>
+                <li><b>3</b> background teammates at a time</li>
+              </ul>
+              <a class="btn btn-fly btn-lg" href="/download" data-track="pricing-pro">Start the free trial</a>
+            </article>
+
+            <article class="plan reveal" data-plan="max" data-month="39" data-year="372" data-permonth="31" data-flies="40">
+              <div class="jar" aria-hidden="true"><canvas></canvas></div>
+              <h2>Max</h2>
+              <p class="plan-for">For handing Pyxi real work, all day.</p>
+              <p class="price"><b class="amount">$39</b><span class="per">a month</span></p>
+              <p class="price-note">or $372 a year ($31 a month)</p>
+              <ul>
+                <li><b>150</b> questions a day</li>
+                <li><b>150</b> 3D models a month</li>
+                <li><b>800</b> agent tasks a month</li>
+                <li>Docs, sheets, PDFs and email help included</li>
+                <li><b>6</b> background teammates at a time</li>
+                <li>Priority support and early features</li>
+              </ul>
+              <a class="btn btn-ghost btn-lg" href="/download" data-track="pricing-max">Start the free trial</a>
+            </article>
+          </div>
+
+          <div class="gets reveal" id="gets" aria-live="polite">
+            <p class="gets-head">What you get on <b id="gets-name">Pro</b></p>
+            <div class="get"><span>Questions a day</span><i><u data-k="q"></u></i><b data-k="q">100</b></div>
+            <div class="get"><span>3D models a month</span><i><u data-k="m"></u></i><b data-k="m">50</b></div>
+            <div class="get"><span>Agent tasks a month</span><i><u data-k="t"></u></i><b data-k="t">250</b></div>
+            <div class="get"><span>Teammates at once</span><i><u data-k="b"></u></i><b data-k="b">3</b></div>
+          </div>
+
+          <p class="counts reveal"><b>What counts.</b> A question is one thing you ask: an answer, an explanation of what is on your screen, a pointer or a diagram. A 3D model is one model Pyxi builds for you. An agent task is one job Pyxi does for you, such as a task on your desktop or an errand on the web.</p>
+          <p class="counts reveal"><b>Need more?</b> A top-up is $5 for 25 more 3D models or 100 more agent tasks. There is no free plan: every plan starts with the 14-day trial of Pro.</p>
+        </div>
+      </section>
+
+      <section class="price-faq">
+        <div class="wrap narrow">
+          <h2 class="h2 reveal">Fair questions.</h2>
+          <details class="pq reveal"><summary>What happens when I run out?</summary><p>Pyxi tells you. You can top up, or wait for the next month, when your plan fills up again.</p></details>
+          <details class="pq reveal"><summary>Can I change my plan?</summary><p>Yes, at any time.</p></details>
+          <details class="pq reveal"><summary>Does my data leave my PC?</summary><p>Some of it has to, so Pyxi can answer. The <a href="/privacy">privacy page</a> says exactly what is sent, what is kept and how to delete it.</p></details>
+          <details class="pq reveal"><summary>Is there a free version?</summary><p>There is a 14-day free trial of Pro. There is no free plan after it.</p></details>
+          <details class="pq reveal"><summary>Can I pay today?</summary><p>No. Pyxi is in a free beta, and paid plans start at launch. The buttons above take you to the download.</p></details>
+          <div class="cta-row center reveal">
+            <a class="btn btn-fly btn-lg" href="/download" data-track="pricing-download">Download for Windows</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!--include:footer-->
+  </body>
+</html>

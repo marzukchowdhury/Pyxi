@@ -71,6 +71,7 @@ export default defineConfig({
         team: resolve(root, "team.html"),
         why: resolve(root, "why.html"),
         faq: resolve(root, "faq.html"),
+        pricing: resolve(root, "pricing.html"),
         privacy: resolve(root, "privacy.html"),
         terms: resolve(root, "terms.html"),
         404: resolve(root, "404.html"),
