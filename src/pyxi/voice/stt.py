@@ -175,7 +175,9 @@ def _tidy(text: str) -> str:
 
 # Words people say to Pyxi that Whisper mishears without a hint: "Hi Pyxi" came out "Hi Wes",
 # "Open Gmail" came out "OpenGL" and "open G means".
-HOTWORDS = "Pyxi, Gmail, Google Sheets, Google Docs, spreadsheet, YouTube, Notepad, alarm, timer"
+# (And the other way: with only "Pyxi" to go by, "can you create a pivot?" in a spreadsheet
+# came out "Can you create a Pyxi?". "pivot table" is in the list so both spellings are known.)
+HOTWORDS = "Pyxi, Gmail, Google Sheets, Google Docs, spreadsheet, pivot table, YouTube, Notepad, alarm, timer"
 MAX_HINT_CHARS = 320  # the model's prompt is short: the standing words, then what fits
 
 
@@ -220,7 +222,10 @@ class CloudEars:
                 f"{who}. Transcribe exactly what they say, word for word, in the language they "
                 "speak. They may say the names of programs, sites and people. This list is "
                 "only for spelling: when a word they say sounds like a word in it, spell that "
-                f"word as it is here, and never add a word they did not say: {names}. An email address "
+                f"word as it is here, and never add a word they did not say: {names}. 'Pyxi' is "
+                "only the assistant's name, said to call it: a thing they ask for is never 'a "
+                "Pyxi', so 'create a pivot', 'a pivot table' and 'a pixie cut' are written as "
+                "said. An email address "
                 "said aloud ('name at the rate of gmail dot com', 'name at gmail dot com') is "
                 "written as an address, and so is a website's name; the words before it stay "
                 "their own words ('on techland bd dot com' is 'on techlandbd.com', never "

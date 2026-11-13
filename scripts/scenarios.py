@@ -506,6 +506,27 @@ TALK_SCENARIOS = [
 ]
 SCENARIOS += TALK_SCENARIOS
 
+# 13 November, what Pyxi says and how it chooses: the card's first point said the opener
+# again; "tell me what it's about" was only put in the email; "opening a blank sheet" with
+# only windows moved; a workbook "in Microsoft Excel" turned down with "I can't launch Excel";
+# three keyboards read off a picture of the shop's page, one row filled, headed "US$".
+WORKBOOK_BRIEF = (
+    "Build me a financial workbook in Microsoft Excel with 15 sheets: Assumptions, Revenue, "
+    "Headcount, Payroll, Operating costs, Capex, Depreciation, Debt, Tax, Income statement, "
+    "Balance sheet, Cash flow, Scenarios, Charts and a Summary. Use sample numbers for a small "
+    "software company over three years, link the sheets with formulas, and send me a screenshot "
+    "of the finished file."
+)
+CHOSEN_SCENARIOS = [
+    ("chosen once post", POST, "What exactly is this post about?", "once"),
+    ("chosen once windows", FIREFOX, "Explain what this window is for and what I can do in it.", "once"),
+    ("chosen told", FIREFOX, "Find the latest email from Amazon, tell me what it's about, and email me a three-line summary.", "told"),
+    ("chosen left sheet", FIREFOX, "Can you open a blank spreadsheet on the left side of the screen?", "arrange_new"),
+    ("chosen workbook", GEN_SHEET, WORKBOOK_BRIEF, "build"),
+    ("chosen keyboards", FIREFOX, "Look up the three best rated wireless keyboards under $80, put them in a new Google Sheet with price and rating and make the cheapest one bold.", "shop_rows"),
+]
+SCENARIOS += CHOSEN_SCENARIOS
+
 # What Pyxi must never sound like, in any scenario.
 STOCK = re.compile(r"\b(roger that|copy that|aye aye|leave it with me|on the case|say no more)\b", re.I)
 
@@ -707,6 +728,10 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
 
     async def fake_arrange(args):  # never move their real windows
         background.append("arrange: " + json.dumps(args)[:160])
+        for pane in [args.get("open"), *(args.get("panes") or [])]:
+            # As the real one would: a site, a new file or a new tab named as a pane is opened.
+            if pane and re.search(r"(?i)://|\.new\b|new tab|\.com\b", str(pane)):
+                brain._arranged_open(str(pane))
         return None
 
     brain._arrange_windows = fake_arrange  # type: ignore[method-assign]
@@ -1172,7 +1197,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
 
     # Background work is quiet: a short "On it", not a running commentary.
     busy = any(b.startswith(("book", "delegate", "errand", "hands", "play", "tidy", "arrange")) for b in background)
-    if busy and len(re.findall(r"[.!?](\s|$)", said)) > 2:
+    if busy and expect != "told" and len(re.findall(r"[.!?](\s|$)", said)) > 2:  # asked to be told: it tells
         problems.append(f"talks too much while working ({len(said)} chars)")
     # "I'll look for a slot" is a kept promise when a teammate or booking really is off doing it.
     working = bool(background)  # a teammate or job really is off doing it (Atlas, Penny, Scout...)
@@ -1180,6 +1205,49 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("ends promising a search")
     if re.search(r"M4|model is finished", said):
         problems.append("mentioned an old job")
+    if expect in ("once", "told", "arrange_new", "build", "shop_rows"):
+        from pyxi.companion.brain import drop_repeats, false_cant
+
+        lines = [e["text"] for e in events if e["type"] == "say"]
+        if expect == "once":
+            for i, line in enumerate(lines):
+                if drop_repeats(line, lines[:i]) != line:
+                    problems.append(f"said again: {line[:70]}")
+            if card is None:
+                problems.append("no cue card")
+        if expect == "told":
+            if not any(b.startswith("errand") for b in background):
+                problems.append("no email errand")
+            if not re.search(r"(?i)shipped|delivered|package|order", said):
+                problems.append("did not say what the email is about")
+        if expect == "arrange_new":
+            panes = " ".join(b for b in background if b.startswith(("arrange", "open_url")))
+            opened = [c for c in brain._calls if c["tool"] == "quick_action" and "sheets.new" in str(c["arguments"])]
+            if "sheets.new" not in panes and not opened:
+                problems.append("said it without anything that opens a blank sheet")
+            if "arrange_windows" not in tools:
+                problems.append("did not put it on the left")
+        if expect == "build":
+            if false_cant(said) or re.search(r"(?i)not Microsoft Excel|isn't (?:Microsoft )?Excel", said):
+                problems.append("turned it down with an untrue reason")
+            if not any(b.startswith("delegate ledger") for b in background):
+                problems.append("did not hand the build to Ledger")
+            if not re.search(r"(?i)screenshot", said):
+                problems.append("did not say the one part it can't do")
+        if expect == "shop_rows":
+            task = " ".join(str(c["arguments"].get("task", "")) for c in brain._calls if c["tool"] == "edit_document")
+            if "look_again" in tools:
+                problems.append("read the shop off the screen")
+            if len(re.findall(r"\d+\.\d\d\b", task)) < 3:
+                problems.append(f"fewer than three priced rows in the sheet's task ({task[:120]!r})")
+            if "US$" in task.split("(The user is in")[0] or "CA$" not in task:
+                problems.append("prices not in their own money")
+            print("      task:", task[:900])
+        print("      heard:", " | ".join(lines)[:900])
+        print("      wrote:", " | ".join(str(c["arguments"].get("text", "")) for c in brain._calls if c["tool"] == "say")[:600])
+        for c in brain._calls:
+            if c.get("outcome"):
+                print(f"      {c['tool']} {c['outcome']}: {json.dumps(c['arguments'])[:300]} -> {c.get('note', '')}")
     if "807" in said:
         problems.append("OCR misread repeated")
     return {

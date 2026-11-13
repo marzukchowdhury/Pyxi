@@ -383,7 +383,9 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "the content; Pyxi lays it out, so nothing overlaps. Types: steps (a process in order), flowchart (a "
         "decision with branches), timeline (events in order, each with `when`), comparison (two `columns` "
         "with a `side` on each item, or two `axes` with x and y on each item), tree (a hierarchy), loop (a "
-        "cycle that feeds itself). Fewer is clearer: 3-7 items, never more than 9, each label 1-4 words, and "
+        "cycle that feeds itself). Fewer is clearer: 3-7 items, never more than 9, each label 1-4 words and "
+        "28 characters at most ('Valve drops pressure', not 'Expansion valve drops pressure': a longer one "
+        "is sent back and the drawing is late), and "
         "`focus` on the one or two that matter most (the answer, the turning point). Each item has a `step`; "
         "give 2-5 steps, each one short spoken sentence, so it builds with the words. For how a physical thing "
         "works (a jet hovering, a pump, a force) use sketch_diagram instead. Example, 'what happens if I miss "
@@ -516,7 +518,9 @@ COMPANION_TOOLS: list[ToolSpec] = [
     ),
     _tool(
         "read_page",
-        "Read the text of one web page (a search result, or a link on screen) when the snippet isn't enough.",
+        "Read the text of one web page (a search result, or a link on screen) when the snippet isn't enough. "
+        "Not needed for a shop's search results: open those with quick_action open_url and every result "
+        "comes back to you as a list, with its price and rating.",
         {"url": {"type": "string"}},
         ["url"],
     ),
@@ -604,7 +608,8 @@ COMPANION_TOOLS += [
         "quick_action",
         "Do a small thing for the user right now: open_url (a website), open_app (ANY program on this PC, by the "
         "name they said, even if it sounds a little off: it knows every program in their Start menu and on "
-        "their desktop, so try it before saying you can't see one; also settings pages like 'sound settings', "
+        "their desktop, so try it before saying you can't see one, and never say you can't open or launch "
+        "an app: Excel, Word and the rest open this way; also settings pages like 'sound settings', "
         "'microphone privacy'), copy (exact text to "
         "the clipboard), or insert (type a drafted message into the text field they're in, e.g. 'write a reply "
         "to this'), media (the music or video that's playing, in any app: value playpause, next, "
@@ -871,7 +876,13 @@ COMPANION_TOOLS += [
         "Arrange their windows, right now, in one call: two, three or four windows side by side, stacked or in "
         "a grid (layout 'panes'), split the screen in two ('split'), or snap, maximize, minimize or restore the "
         "window they're in. Any request to lay windows out goes here, never to use_computer: this places "
-        "every window exactly and instantly. Just do it when asked; never tell them to do it themselves.",
+        "every window exactly and instantly. Just do it when asked; never tell them to do it themselves. "
+        "It also OPENS what a pane names when that isn't open yet, so 'open X on the left' is this one call "
+        "with X as a pane: a website by its address, an app by its name, a new blank Google file by its "
+        "address (https://sheets.new, https://docs.new, https://slides.new), an empty browser tab as "
+        "'new tab'. Give each pane exactly what they asked for on that side: 'current' only for the window "
+        "they're in when they meant it, never in place of a new tab or a new file they asked for. Only say "
+        "something is being opened when a pane names it; otherwise say what goes where.",
         {
             "layout": {
                 "type": "string",
@@ -893,8 +904,10 @@ COMPANION_TOOLS += [
                 "description": "For panes: what goes in each part, in order (left to right, or top to "
                 "bottom; for a grid: top left, top right, bottom left, bottom right). Each is 'current' "
                 "(the window they're in), a website (https://stake.com, https://mail.google.com), an app "
-                "(notepad, spotify), or a window that's already open (Gmail, CapCut). Open windows are "
-                "reused; the rest open in new windows of their browser.",
+                "(notepad, spotify), a window that's already open (Gmail, CapCut), a new blank Google "
+                "file (https://sheets.new) or 'new tab' (an empty browser window). Open windows are "
+                "reused; the rest open in new windows of their browser; a new file or a new tab is "
+                "always opened new.",
             },
             "arrangement": {
                 "type": "string",
@@ -910,8 +923,9 @@ COMPANION_TOOLS += [
             },
             "open": {
                 "type": "string",
-                "description": "For split: the website (e.g. https://sheets.google.com) or app (excel, notepad) "
-                "for the other half.",
+                "description": "For split: the website (e.g. https://sheets.google.com), app (excel, notepad), "
+                "new blank Google file (https://sheets.new) or 'new tab' for the other half. It is opened "
+                "if it isn't open already.",
             },
             "current_side": {
                 "type": "string",
