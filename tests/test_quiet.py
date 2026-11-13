@@ -127,3 +127,46 @@ async def test_nothing_to_say_is_silence_not_a_filler_line(settings):
     assert shown(rec) == ["Sorry, I didn't get that.", "Say it another way?"] or shown(rec) == [
         "Sorry, I didn't get that. Say it another way?"
     ]
+
+
+async def test_you_dont_have_to_stay_quiet_gives_her_voice_back_and_does_what_was_asked(settings):
+    """Live, 12 November: "Bro, start talking. You don't have to stay quiet. Just find me this
+    thing now." was heard as "stay quiet": she muted herself again and looked for nothing."""
+    llm = Scripted(say("Looking for it now."))
+    brain, rec = make_brain(settings, llm=llm)
+    await brain.turn("Stop, don't talk. You're talking too much.")
+    assert brain._quiet()
+    await brain.turn("Bro, start talking. You don't have to stay quiet. Just find me this thing now.")
+    await settle(brain)
+    assert not brain._quiet()
+    assert len(llm.prompts) == 1 and "They told you not to talk" not in llm.prompts[-1]  # the model got the request
+    assert shown(rec) == ["Looking for it now."]  # not "Okay." and nothing more
+    assert [r["title"] for r in rec.of("job_ready")] == ["Okay, not a word"]  # only the first time
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        "You don't have to stay quiet.",
+        "Why are you so quiet?",
+        "No need to be silent, say something.",
+        "Start talking.",
+        "I can't hear you, speak up.",
+        "Why aren't you answering?",
+    ],
+)
+async def test_ways_of_asking_for_her_voice(settings, words):
+    assert not brain_mod.asks_quiet(words) and brain_mod.asks_voice(words), words
+    brain, rec = make_brain(settings, llm=Scripted(say("unused")))
+    await brain.turn("Be quiet please.")
+    await brain.turn(words)
+    assert not brain._quiet() and shown(rec) == ["Okay."]
+
+
+def test_quiet_and_voice_in_one_breath_is_quiet():
+    words = "Don't talk until I say you can talk again."
+    assert brain_mod.asks_quiet(words) and not brain_mod.asks_voice(words)
+    assert brain_mod.asks_quiet("Stay quiet.") and brain_mod.asks_quiet("Keep quiet, please.")
+    assert not brain_mod.more_than_voice("Okay, you can talk again.")
+    assert not brain_mod.more_than_voice("Bro, start talking please.")
+    assert brain_mod.more_than_voice("You can talk again. What's on my screen?")

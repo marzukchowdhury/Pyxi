@@ -191,10 +191,19 @@ async def near_site(url: str) -> str | None:
     return None
 
 
+# A program said with its maker's name: "Mozilla Firefox" is Firefox, "MS Paint" is Paint.
+# (Live: "open Mozilla Firefox" was answered "I can't find anything called Mozilla Firefox".)
+_MAKER = re.compile(r"(?i)^(?:microsoft|ms|mozilla|google|adobe|apple)\s+(?=\S)")
+
+
 def app_target(name: str) -> str | None:
     key = re.sub(r"\s+", " ", name.lower().strip()).removesuffix(".exe")
     key = key.removeprefix("my ").removeprefix("the ").removesuffix(" folder").removesuffix(" app")
-    return APPS.get(key)
+    if key in APPS:
+        return APPS[key]
+    # Without the maker, only for a program: "Apple Music" is not their Music folder.
+    bare = APPS.get(_MAKER.sub("", key))
+    return bare if bare and bare.endswith(".exe") else None
 
 
 # ---------------------------------------------------------------------- the apps on this PC
@@ -259,18 +268,25 @@ def installed_app(name: str) -> tuple[str, str] | None:
     """The installed program a spoken name means: "gen office" is GenOffice, "vs code" is
     Visual Studio Code. Its exact name first; else the only program whose name starts with
     it or holds it. None when nothing fits, or more than one does."""
-    key = _plain(re.sub(r"(?i)^(my|the)\s+|\s+(app|program)$", "", name.strip()))
-    if len(key) < 2:
+    said = re.sub(r"(?i)^(my|the)\s+|\s+(app|program)$", "", name.strip())
+    key = _plain(said)
+    if len(key) < 2 or _NOT_AN_APP.search(name):
         return None
     apps = installed_apps()
     if key in apps:
         return apps[key]
+    bare = _plain(_MAKER.sub("", said))
+    if bare != key and bare in apps:
+        return apps[bare]  # "Mozilla Firefox" where the Start menu says "Firefox"
     # Most of the name, not a word of it: "office" is not Office Language Preferences.
     most = [(k, v) for k, v in apps.items() if len(key) * 2 >= len(k)]
     for fits in (
         [v for k, v in most if k.startswith(key)],
         [v for k, v in most if key in k and len(key) >= 4],
         [v for k, v in apps.items() if _initials(v[0]) == key and len(key) >= 2],
+        # Said with more than its name ("Mozilla Firefox", "Slack desktop"): the one program
+        # whose whole name is most of what was said.
+        [v for k, v in apps.items() if len(k) >= 4 and k in key and len(k) * 2 >= len(key)],
     ):
         if len({target for _, target in fits}) == 1:
             return fits[0]

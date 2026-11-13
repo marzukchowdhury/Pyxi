@@ -264,3 +264,29 @@ async def test_a_misheard_site_is_answered_with_the_real_one_near_it(settings, m
     note = await brain._quick_action("open_url", "amaazon.ka")
     assert note and "there is no site at amaazon.ka" in note and "https://amazon.ca" in note
     assert rec.of("action") == []  # and nothing was opened
+
+
+def test_a_program_said_with_its_makers_name(monkeypatch):
+    # Live, 12 November: "open Mozilla Firefox" was answered "I can't find anything called
+    # Mozilla Firefox on this PC", with Firefox installed.
+    from pyxi.companion import actions
+
+    assert actions.app_target("Mozilla Firefox") == "firefox.exe"
+    assert actions.app_target("MS Paint") == "mspaint.exe"
+    assert actions.app_target("Microsoft Edge") == "msedge.exe"
+    assert actions.app_target("Apple Music") is None  # not their Music folder
+    assert actions.app_target("Google Photos") is None  # not the Photos app
+    start = [
+        ("Firefox", "shell:AppsFolder/firefox"),
+        ("Slack", "shell:AppsFolder/slack"),
+        ("Uninstall Firefox", "shell:AppsFolder/uninstall"),
+    ]
+    monkeypatch.setattr(actions, "_start_apps", lambda: start)
+    monkeypatch.setattr(actions, "_desktop_shortcuts", lambda: [])
+    monkeypatch.setattr(actions, "_INSTALLED", (0.0, {}))
+    found = actions.installed_app
+    assert found("Mozilla Firefox") == ("Firefox", "shell:AppsFolder/firefox")
+    assert found("the Mozilla Firefox app")[0] == "Firefox"
+    assert found("Firefox browser")[0] == "Firefox"  # its whole name is most of what was said
+    assert found("uninstall firefox") is None
+    assert found("a very long sentence about firefox") is None

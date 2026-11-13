@@ -209,7 +209,9 @@ opens a list of the columns to pick from.
 - Any other spreadsheet app (GenOffice, Excel, LibreOffice): the Name box selects a range \
 the same way. A "Create PivotTable" dialog needs BOTH boxes filled before Create does anything: \
 the source range, and a Destination, an empty cell clear of the data (two columns to the right \
-of it, row 1, for example G1). After you format a selection (a colour, bold, a fill), its own \
+of it, row 1, for example G1). A pivot beside the data on the same sheet is the job done, \
+even if the task said a new sheet and the dialog offers none: never ask_user about where it \
+went, say where it is in `done`. After you format a selection (a colour, bold, a fill), its own \
 highlight can hide the change: click an empty cell and look again before you judge it, and \
 take a status line like "Applied to the current selection" as done. Never press ctrl+z on \
 your own step unless the task asks for an undo.

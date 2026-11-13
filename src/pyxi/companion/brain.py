@@ -2769,7 +2769,10 @@ class Brain:
                 # "done" mean something then.)
                 busy = bool(getattr(self.hub, "_pending", None)) or self._ditto_watching()
                 polite = None if synthetic or hit or asked or song or busy else only_polite(user_text)
-                if not synthetic and _ASKS_QUIET.search(user_text):
+                voice_back = not synthetic and self._quiet() and asks_voice(user_text)
+                if voice_back:
+                    self._quiet_until = 0.0  # from this turn on, whatever else it asks for
+                if not synthetic and asks_quiet(user_text):
                     # Kept to from now on: her words are shown, not spoken, and nothing is said
                     # for the sake of saying something. "Stop" in the same breath still stops.
                     self._quiet_until = time.monotonic() + QUIET_FOR_S
@@ -2784,8 +2787,7 @@ class Brain:
                         title="Okay, not a word",
                         body='I will show what I do instead of saying it. Say "you can talk again" for my voice.',
                     )
-                elif not synthetic and self._quiet() and _TALK_AGAIN.search(user_text):
-                    self._quiet_until = 0.0
+                elif voice_back and not more_than_voice(user_text):
                     self._calls.append({"round": 1, "tool": "say", "arguments": {"text": "Okay."}, "instant": True})
                     self._speak("Okay.")
                 elif polite == "thanks":
@@ -4957,10 +4959,44 @@ _ASKS_QUIET = re.compile(
     r"why are you (?:still )?talking|(?:don'?t|do not) (?:want|need) you to (?:talk|speak)|"
     r"quiet,? please|stay (?:quiet|silent)|keep quiet|silent mode|mute yourself|zip it)\b"
 )
-_TALK_AGAIN = re.compile(
-    r"(?i)\b(?:you (?:can|may) (?:talk|speak)|(?:talk|speak) (?:again|to me|now)|unmute|"
-    r"start talking|use your voice|i want (?:you )?to hear you)\b"
+# Quiet said with a "not" in front of it is the opposite. Live, 12 November: "Bro, start
+# talking. You don't have to stay quiet. Just find me this thing now" was heard as "stay
+# quiet": she muted herself again and the thing was never looked for.
+_NOT_QUIET = (
+    r"(?:(?:(?:don'?t|do not|no) (?:have|need) to|no need to|(?:don'?t|do not)) (?:be|stay|keep|remain)|"
+    r"stop being|why (?:are you|you|so))(?: so| being| that)? (?:quiet|silent)"
 )
+_UNQUIET = re.compile(rf"(?i)\b{_NOT_QUIET}\b")
+_TALK_AGAIN = re.compile(
+    r"(?i)\b(?:you (?:can|may) (?:talk|speak)|(?:talk|speak) (?:again|to me|now|up|out loud|normally)|"
+    r"unmute|start (?:talking|speaking)|use your voice|i want (?:you )?to hear you|"
+    r"say (?:something|it out loud)|(?:can'?t|cannot) hear you|"
+    r"why aren'?t you (?:talking|speaking|answering|saying anything)|"
+    rf"{_NOT_QUIET})\b"
+)
+_FILLER = frozenset(["bro", "please", "pyxi", "hey", "just", "come", "on", "man", "dude", "and", "but"])
+
+
+def asks_quiet(text: str) -> bool:
+    """Do these words tell her not to talk? ("You don't have to stay quiet" does not.)"""
+    return bool(_ASKS_QUIET.search(_UNQUIET.sub(" ", text)))
+
+
+def asks_voice(text: str) -> bool:
+    """Do these words give her voice back? Not when they also tell her to be quiet ("don't
+    talk until I say you can talk again")."""
+    return bool(_TALK_AGAIN.search(text)) and not asks_quiet(text)
+
+
+def more_than_voice(text: str) -> bool:
+    """Is there a request in these words beside "you can talk again"? Then the turn goes on
+    to it, with her voice, where it used to end at "Okay"."""
+    rest = [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s and not _TALK_AGAIN.search(s)]
+    words = [
+        w for s in rest for w in re.findall(r"[a-z']+", s.lower())
+        if w not in _ONLY_POLITE and w not in _FILLER
+    ]  # fmt: skip
+    return len(words) >= 3
 # Words that are only thanks, or only "I heard you": nothing in them asks for anything.
 _ONLY_POLITE = frozenset(
     ["ok", "okay", "thanks", "thank", "you", "so", "much", "very", "a", "lot", "pyxi", "for", "your", "the", "help", "that", "that's", "thats", "all", "alright", "cool", "great", "perfect", "nice", "got", "it", "yeah", "yes", "yep", "good", "job", "beautiful", "awesome", "fine", "sure", "is", "its", "it's", "done", "now", "well", "then", "right", "i", "appreciate", "cheers", "thx"]
