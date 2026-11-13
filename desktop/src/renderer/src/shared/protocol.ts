@@ -130,7 +130,7 @@ export interface SceneSpec {
 export type Vec3 = [number, number, number];
 export type PartShape =
   | "box" | "rounded_box" | "sphere" | "cylinder" | "cone" | "capsule" | "torus" | "ring" | "wedge"
-  | "tube" | "extrude" | "lathe" | "gear" | "spring" | "plane" | "arrow" | "marker" | "kit" | "asset";
+  | "tube" | "limb" | "blob" | "extrude" | "lathe" | "gear" | "spring" | "plane" | "arrow" | "marker" | "kit" | "asset";
 export type Material =
   | "metal" | "brushed_metal" | "dark_metal" | "gold" | "plastic" | "rubber" | "glass" | "painted"
   | "fabric" | "wood" | "ceramic" | "skin" | "emissive";
@@ -157,6 +157,14 @@ export interface Part {
   profile: [number, number][] | null;
   teeth: number | null;
   turns: number | null;
+  /** shape "limb": how thick it is at each point of `path`; `squash` flattens it side to side. */
+  radii?: number[] | null;
+  squash?: number | null;
+  /** shape "blob": [x, y, z, rx, ry, rz] lumps melted into one skin; `blend` is how softly. */
+  lumps?: number[][] | null;
+  blend?: number | null;
+  /** Part of a living thing (never drawn hard-edged; set by the builder, repaired by Pyxi). */
+  organic?: boolean;
   /** shape "asset": a piece of a real model from Pyxi's library (its id, and the part's name in it). */
   asset?: string | null;
   node?: string | null;

@@ -7,11 +7,21 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Axis, Material, Part } from "../shared/protocol";
+import { blobGeometry, limbGeometry } from "./organic";
 
 export interface Built {
   geometry: THREE.BufferGeometry;
   /** Mesh scale: unit shapes are stretched to the box; shapes built at true size use [1,1,1]. */
   scale: [number, number, number];
+  /** Where a tag should point, when the middle of the part's box is not on the part (a bent limb). */
+  anchor?: [number, number, number];
+}
+
+/** The middle of a spine, on the spine. */
+function midway(path: number[][]): [number, number, number] {
+  const pts = path.map((v) => new THREE.Vector3(v[0], v[1], v[2]));
+  const m = (pts.length > 2 ? new THREE.CatmullRomCurve3(pts, false, "centripetal") : new THREE.LineCurve3(pts[0], pts[1])).getPoint(0.5);
+  return [m.x, m.y, m.z];
 }
 
 const TAU = Math.PI * 2;
@@ -165,7 +175,21 @@ export function buildGeometry(p: Part): Built {
       const pts = (p.path ?? [[0, -0.5, 0], [0, 0.5, 0]]).map((v) => new THREE.Vector3(...v));
       const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
       const r = p.radius ?? Math.max(0.01, across(p.size, p.axis) / 2);
-      return { geometry: new THREE.TubeGeometry(curve, Math.max(16, pts.length * 24), r, 14, false), scale: [1, 1, 1] };
+      return { geometry: new THREE.TubeGeometry(curve, Math.max(16, pts.length * 24), r, 14, false), scale: [1, 1, 1], anchor: p.path ? midway(p.path) : undefined };
+    }
+    case "limb": {
+      // A living thing's body, limb or tail: thick where its radii say, round at both ends.
+      const len = p.size[idx[p.axis]];
+      const path = p.path ?? [axisPoint([0, -len / 2, 0], p.axis), axisPoint([0, len / 2, 0], p.axis)];
+      const radii = p.radii?.length ? p.radii : [p.radius ?? Math.max(0.01, across(p.size, p.axis) / 2)];
+      return { geometry: limbGeometry(path, radii, p.squash ?? 1), scale: [1, 1, 1], anchor: midway(path) };
+    }
+    case "blob": {
+      const lumps = p.lumps?.length || p.path ? (p.lumps ?? []) : [[0, 0, 0, sx / 2, sy / 2, sz / 2]];
+      // Its tag points at its biggest lump: the middle of the whole can be a hollow between two.
+      const big = lumps.reduce<number[] | null>((a, l) => (!a || l[3] * (l[4] ?? l[3]) * (l[5] ?? l[3]) > a[3] * (a[4] ?? a[3]) * (a[5] ?? a[3]) ? l : a), null);
+      const anchor: [number, number, number] | undefined = big ? [big[0], big[1], big[2]] : p.path ? midway(p.path) : undefined;
+      return { geometry: blobGeometry(lumps, p.path, p.radii ?? (p.radius ? [p.radius] : null), p.blend ?? 0.5), scale: [1, 1, 1], anchor };
     }
     case "extrude": {
       const prof = p.profile ?? [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];

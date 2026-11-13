@@ -1647,6 +1647,8 @@ class Brain:
             )
             return
         self.turns.add_spend("model_3d", result.cost_usd)
+        if result.checks:  # the look before showing (scenes/check.py): what it found and did
+            log.warning("3D model %r looked over: %s", subject, "; ".join(result.checks)[:400])
         await self.jobs.settle(
             job, ok=result.model is not None, summary=subject, cost=result.cost_usd
         )
@@ -3925,6 +3927,9 @@ class Brain:
                     return "build_3d_model failed twice; explain in words instead."
                 self._scene_retry = True
                 return f"MODEL_INVALID: fix these and call build_3d_model again: {exc.errors()[:6]}"
+            from pyxi.scenes.check import tidy
+
+            model, _ = tidy(model)  # the look before showing: what has one right answer
             await self.show_object(model, restart=True)
             note = f"Showing 3D model '{model.title}' ({len(model.parts)} parts, {len(model.beats)} beats)."
             return f"{note} Repairs: {'; '.join(model.notes[:6])}" if model.notes else None

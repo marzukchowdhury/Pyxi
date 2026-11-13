@@ -442,7 +442,8 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
     } else {
       if (!mesh.current) return;
       built.geometry.computeBoundingBox();
-      center = built.geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3();
+      // A bent part's box is centred on thin air (the crook of a tail): its tag points at the part.
+      center = built.anchor ? new THREE.Vector3(...built.anchor) : (built.geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3());
       layers = [{ mesh: mesh.current, mat }];
     }
     registry.current.set(part.id, { part, group: group.current, mesh: layers[0].mesh, mat: layers[0].mat, layers, edges: asset || kit ? null : edges.current, center });
@@ -559,7 +560,9 @@ function samplePoints(registry: Map<string, Registered>, ids: Set<string> | null
       const g = mesh.geometry;
       let local = SAMPLES.get(g);
       if (!local) {
-        const pos = g.getAttribute("position");
+        // A mesh between two models (its geometry just let go) or an empty shape has no points.
+        const pos = g?.getAttribute("position");
+        if (!pos) continue;
         const n = Math.min(60, pos.count);
         local = new Float32Array(n * 3);
         for (let i = 0; i < n; i++) {

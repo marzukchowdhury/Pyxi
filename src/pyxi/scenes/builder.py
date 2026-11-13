@@ -20,8 +20,9 @@ from otto.llm.base import LLMProvider, Message, ToolSpec
 from pydantic import ValidationError
 
 from pyxi.partial_json import complete_items, partial_string
+from pyxi.scenes.check import describe, floating, tidy
 from pyxi.scenes.library import few_labels
-from pyxi.scenes.model_examples import EXAMPLES
+from pyxi.scenes.model_examples import EXAMPLES, LIVING_EXAMPLES
 from pyxi.scenes.objects import (
     Beat,
     ObjectEdit,
@@ -45,6 +46,20 @@ from one end to the other along `axis` (6-12 points, a smooth outline). Any flat
 or fin from above, hull side, blade, circuit board, phone body, key, gun frame) is ONE extrude \
 with its true outline as `profile` (8-16 points, traced like a technical drawing). Never \
 capsules or boxes for bodies or wings.
+- Living things (animals, people, organs, plants, anything grown, not made): decide this \
+first and set organic=true on every such part. They have no flat faces and no hard edges, so \
+never box, rounded_box or cylinder. A mass (torso, head, heart, fruit, a tree's crown) is ONE \
+`blob`: 2-10 overlapping `lumps` [x, y, z, rx, ry, rz] that melt into one skin, with a \
+`path` + `radii` on the same part for what grows out of it (a neck). Anything long (leg, arm, \
+tail, neck, trunk, branch, root, artery, horn, a whole fish or snake) is ONE `limb`: a `path` \
+of 3-6 spine points with `radii` at each, thick where the muscle is and thin at the joint or \
+tip; `squash` under 1 for a flat body. Thin flat things (fin, ear, leaf, wing, petal, \
+feather) are an `extrude` of their true outline, a few hundredths thick, set into the body \
+edge-on the way they grow (a tail fin stands upright in line with the body). Lump and limb \
+numbers are radii, half the width: check each against the whole (a shoulder is no wider \
+than the chest it sits on). Whatever comes in pairs (legs, ears, eyes, \
+wings, lungs) is modelled once on the +x side with mirror=true. Limbs start inside the body \
+they grow from. Label a spot on a blob with a `marker`.
 - Scale and proportion: the whole thing 8-12 units across, centred near the origin, y up. Think \
 of the real dimensions first (an F-16 is 15 m long with a 10 m span; a piston is about as tall \
 as it is wide) and keep every part in that ratio; a heart is taller than wide.
@@ -84,6 +99,20 @@ shapes):
 """
 
 
+_LIVING = re.compile(
+    r"(?i)\b(?:animal|creature|cat|dog|horse|cow|bird|fish|shark|whale|dolphin|snake|frog|"
+    r"insect|bee|ant|spider|butterfly|dinosaur|lion|tiger|bear|elephant|monkey|rabbit|mouse|"
+    r"human|person|body|anatomy|organ|heart|brain|lungs?|liver|kidneys?|stomach|intestines?|"
+    r"eye|ear|skull|skeleton|bones?|spine|muscles?|arm|leg|hand|foot|tooth|teeth|skin|"
+    r"cell|neuron|bacteri\w+|virus|plant|tree|flower|leaf|root|seed|fruit|mushroom|coral)s?\b"
+)
+
+
+def is_living(text: str) -> bool:
+    """Is this about something grown and not made? Then the builder is shown living examples."""
+    return bool(_LIVING.search(text))
+
+
 @dataclass
 class BuildResult:
     model: ObjectScene | None
@@ -91,6 +120,8 @@ class BuildResult:
     seconds: float = 0.0
     attempts: int = 0
     errors: list[str] = field(default_factory=list)
+    # What the look before showing found and did, in words (scenes/check.py).
+    checks: list[str] = field(default_factory=list)
 
 
 def builder_tool() -> ToolSpec:
@@ -99,6 +130,86 @@ def builder_tool() -> ToolSpec:
         "Build the 3D model: parts, motions and narrated beats.",
         build_tool_schema(),
     )
+
+
+MOVE_SYSTEM = (
+    "You built a 3D model and some small parts ended up hanging in the air, apart from the "
+    "rest. For each one listed, decide: if it belongs on the model (a headlight, a wheel, a "
+    "bolt, an ear, a leaf), give it a new `position` so it touches or sits slightly into what "
+    "it belongs to; if it is meant to be apart (a moon, a bird in the sky, a drop falling), "
+    "leave it out. Positions use the same space as the model; a child's position is relative "
+    "to its parent. Call move_parts once."
+)
+
+
+def move_tool() -> ToolSpec:
+    return ToolSpec(
+        "move_parts",
+        "Put parts that hang in the air back on the model.",
+        {
+            "type": "object",
+            "properties": {
+                "moves": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "position": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                        },
+                        "required": ["id", "position"],
+                    },
+                }
+            },
+            "required": ["moves"],
+        },
+    )
+
+
+async def look_over(llm: LLMProvider, model: ObjectScene, result: BuildResult) -> ObjectScene:
+    """The look before showing: mend what has one right answer, and ask the builder once about
+    small parts left hanging in the air. Never makes a model worse: a move is kept only if
+    fewer parts float after it."""
+    model, done = tidy(model)
+    result.checks += done
+    floaters = floating(model)
+    if not floaters:
+        return model
+    loose = {pid for f in floaters for pid in f.ids}
+    result.checks.append(f"hanging apart: {', '.join(sorted(loose))}")
+    try:
+        response = await llm.complete(
+            system=MOVE_SYSTEM,
+            messages=[Message.user(f"Model: {model.title}\n\nHanging apart:\n{describe(model, floaters)}")],
+            tools=[move_tool()],
+            max_tokens=1200,
+        )
+    except Exception as exc:  # the model as built is still good to show
+        result.checks.append(f"could not ask about them: {type(exc).__name__}")
+        return model
+    result.cost_usd += response.usage.cost_usd
+    call = next((c for c in response.tool_calls if c.name == "move_parts"), None)
+    moves = (call.arguments or {}).get("moves") if call else None
+    if not isinstance(moves, list):
+        return model
+    patches = [
+        {"id": m["id"], "position": m["position"]}
+        for m in moves
+        if isinstance(m, dict) and m.get("id") in loose and isinstance(m.get("position"), list)
+    ]
+    if not patches:
+        result.checks.append("left as they are: meant to be apart")
+        return model
+    try:
+        moved = apply_edit(model, ObjectEdit.model_validate({"update": patches}))
+    except ValidationError:
+        return model
+    after = {pid for f in floating(moved) for pid in f.ids}
+    if len(after) >= len(loose):
+        result.checks.append("the move did not help: kept as built")
+        return model
+    result.checks.append(f"put back on the model: {', '.join(sorted(loose - after))}")
+    return moved
 
 
 OnParts = Callable[[ObjectScene], Awaitable[None]]
@@ -163,8 +274,9 @@ async def build_model(
 
     ``on_parts``: called with the model so far as its parts stream in (only for a streaming
     model). The finished model keeps the same id, so the view carries straight on from it."""
+    examples = LIVING_EXAMPLES if is_living(f"{brief} {context[:300]}") else EXAMPLES
     system = SYSTEM.format(
-        examples="\n".join(json.dumps(e, separators=(",", ":")) for e in EXAMPLES)
+        examples="\n".join(json.dumps(e, separators=(",", ":")) for e in examples)
     )
     ask = f"Build this:\n{brief}"
     if context:
@@ -207,6 +319,8 @@ async def build_model(
                     "build_3d_model again with the complete model."
                 )
             ]
+    if result.model is not None:
+        result.model = await look_over(llm, result.model, result)
     result.seconds = time.monotonic() - started
     return result
 

@@ -1,8 +1,9 @@
 """Worked examples for the 3D builder: what a good model looks like, part by part.
 
-Two very different subjects on purpose (a machine and an organ), so the builder learns the
-rules (real outlines, see-through shells, things that move, arrows for what flows) rather
-than copying one shape.
+Very different subjects on purpose (a machine, an organ and an animal), so the builder learns
+the rules (real outlines, see-through shells, things that move, arrows for what flows, living
+forms that are never boxes) rather than copying one shape. The builder is shown two: the
+machine and the organ, or for anything alive the organ and the animal.
 """
 
 from __future__ import annotations
@@ -221,7 +222,7 @@ JET = {
     ],
 }
 
-_MUSCLE = {"material": "skin", "color": "#c8505a"}
+_MUSCLE = {"organic": True, "material": "skin", "color": "#c8505a"}
 
 HEART = {
     "title": "How your heart beats",
@@ -247,6 +248,7 @@ HEART = {
             "shape": "sphere",
             "size": [1.4, 1.2, 1.3],
             "position": [0.9, 1.0, -0.2],
+            "organic": True,
             "material": "skin",
             "color": "#b8454f",
             "label": "Left atrium",
@@ -256,24 +258,27 @@ HEART = {
             "shape": "sphere",
             "size": [1.4, 1.3, 1.3],
             "position": [-1.2, 0.9, 0.2],
+            "organic": True,
             "material": "skin",
             "color": "#b8454f",
             "label": "Right atrium",
         },
         {
             "id": "aorta",
-            "shape": "tube",
+            "shape": "limb",
+            "organic": True,
             "path": [[0.2, 0.6, 0], [0.3, 2.4, 0], [1.3, 3.0, 0], [2.0, 2.2, 0], [2.1, 0.6, 0]],
-            "radius": 0.32,
+            "radii": [0.42, 0.36, 0.32, 0.28, 0.24],
             "material": "skin",
             "color": "#d9666d",
             "label": "Aorta",
         },
         {
             "id": "pulmonary",
-            "shape": "tube",
+            "shape": "limb",
+            "organic": True,
             "path": [[-0.4, 0.5, 0.4], [-0.6, 2.2, 0.5], [-1.6, 2.8, 0.3]],
-            "radius": 0.28,
+            "radii": [0.36, 0.3, 0.24],
             "material": "skin",
             "color": "#6f86c9",
         },
@@ -343,4 +348,86 @@ HEART = {
     ],
 }
 
+_FUR = {"organic": True, "material": "fabric", "color": "#d8903c"}
+
+CAT = {
+    "title": "How a cat lands on its feet",
+    "parts": [
+        {
+            "id": "body",
+            "shape": "blob",
+            "position": [0, 3, 0],
+            "lumps": [[0, 0, 1.4, 1.1, 1.2, 1.4], [0, -0.1, -0.2, 1.15, 1.15, 1.6], [0, 0.05, -1.8, 1.05, 1.15, 1.2]],
+            "path": [[0, 0.6, 2.2], [0, 1.3, 3.0]],
+            "radii": [0.75, 0.6],
+            **_FUR,
+            "label": "Flexible spine",
+        },
+        {
+            "id": "head",
+            "shape": "blob",
+            "position": [0, 4.7, 3.5],
+            "lumps": [[0, 0, 0, 0.95, 0.85, 0.9], [0, -0.3, 0.75, 0.45, 0.35, 0.4], [0.45, -0.25, 0.45, 0.4, 0.35, 0.4], [-0.45, -0.25, 0.45, 0.4, 0.35, 0.4]],
+            **_FUR,
+            "label": "Inner ear",
+        },
+        {"id": "ear", "shape": "cone", "size": [0.5, 0.7, 0.25], "position": [0.5, 5.6, 3.3], "mirror": True, **_FUR},
+        {
+            "id": "eye",
+            "shape": "sphere",
+            "size": 0.22,
+            "position": [0.38, 4.85, 4.25],
+            "mirror": True,
+            "organic": True,
+            "material": "ceramic",
+            "color": "#9bd24a",
+        },
+        {
+            "id": "front_leg",
+            "shape": "limb",
+            "position": [0.6, 1.5, 1.6],
+            "path": [[0, 1.3, 0], [0, 0.2, 0.1], [0, -1.2, 0], [0, -1.4, 0.3]],
+            "radii": [0.5, 0.3, 0.24, 0.28],
+            "mirror": True,
+            **_FUR,
+            "label": "Front legs",
+        },
+        {
+            "id": "hind_leg",
+            "shape": "limb",
+            "position": [0.7, 1.5, -1.9],
+            "path": [[0, 1.4, 0.2], [0, 0.4, 0.5], [0, -0.3, -0.2], [0, -1.2, 0], [0, -1.4, 0.35]],
+            "radii": [0.75, 0.5, 0.28, 0.24, 0.28],
+            "mirror": True,
+            **_FUR,
+        },
+        {
+            "id": "tail",
+            "shape": "limb",
+            "position": [0, 3.4, -2.9],
+            "path": [[0, 0, 0], [0, 0.6, -1.2], [0, 1.8, -1.8], [0, 2.9, -1.4]],
+            "radii": [0.3, 0.24, 0.2, 0.14],
+            **_FUR,
+            "label": "Tail",
+        },
+        {
+            "id": "twist",
+            "shape": "arrow",
+            "path": [[1.6, 3.4, 1.4], [0, 5.0, 0], [-1.6, 3.4, -1.4]],
+            "size": [0.3, 3, 0.3],
+        },
+    ],
+    "motions": [
+        {"part": "tail", "kind": "oscillate", "prop": "rotation", "axis": "y", "amount": 14, "period": 2.4},
+        {"part": "body", "kind": "oscillate", "prop": "scale", "amount": 0.02, "period": 3},
+    ],
+    "beats": [
+        {"title": "A falling cat", "narration": "...", "at": 0, "camera": "side"},
+        {"title": "Head first", "narration": "...", "at": 2, "camera": "iso", "focus": ["head"]},
+        {"title": "Then the spine", "narration": "...", "at": 4, "camera": "side", "focus": ["body", "twist", "tail"]},
+    ],
+}
+
 EXAMPLES = (JET, HEART)
+# For anything alive: the organ and the animal.
+LIVING_EXAMPLES = (HEART, CAT)

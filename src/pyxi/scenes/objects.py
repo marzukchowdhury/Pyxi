@@ -31,6 +31,8 @@ PartShape = Literal[
     "ring",
     "wedge",
     "tube",
+    "limb",
+    "blob",
     "extrude",
     "lathe",
     "gear",
@@ -77,7 +79,9 @@ Ease = Literal["linear", "in", "out", "in_out", "spring"]
 
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 _ID = re.compile(r"[^a-zA-Z0-9_\-]")
-MAX_PARTS, MAX_MOTIONS, MAX_BEATS, MAX_POINTS = 90, 60, 10, 64
+MAX_PARTS, MAX_MOTIONS, MAX_BEATS, MAX_POINTS, MAX_LUMPS = 90, 60, 10, 64, 24
+# Shapes with hard edges, and what a living thing gets instead of each.
+SOFTER = {"box": "sphere", "rounded_box": "sphere", "cylinder": "capsule"}
 
 
 def _vec(v: Any, n: int, lo: float, hi: float) -> list[float] | None:
@@ -144,10 +148,45 @@ class Part(BaseModel):
     )
     path: list[list[float]] | None = Field(
         None,
-        description="tube: [[x,y,z], ...] centerline points. arrow: [from, to] (or a curved "
-        "run), relative to position; the head is at the last point.",
+        description="tube and limb: [[x,y,z], ...] centerline points (limb: the spine, 3-8 "
+        "points). arrow: [from, to] (or a curved run). Relative to position; an arrow's head "
+        "is at the last point.",
     )
     radius: float | None = Field(None, gt=0, le=10, description="tube: pipe radius.")
+    radii: list[float] | None = Field(
+        None,
+        description="limb: thickness (radius) at each `path` point, so it swells and tapers: a "
+        "leg [0.5,0.35,0.3,0.2], a tail [0.3,0.2,0.1,0.04], a fish body [0.2,0.9,1.0,0.6,0.15]. "
+        "Ends are rounded off. Any body, neck, limb, tail, trunk, branch, artery or horn.",
+    )
+    squash: float | None = Field(
+        None,
+        ge=0.15,
+        le=1.0,
+        description="limb: flatten the round cross-section side to side (1 round, 0.4 a fish "
+        "body or a leaf, 0.2 a fin).",
+    )
+    lumps: list[list[float]] | None = Field(
+        None,
+        description="blob: [[x, y, z, rx, ry, rz], ...] rounded lumps (centre and RADII, half its "
+        "width each way: a lump 2 wide has rx 1; relative "
+        "to position) melted into ONE smooth skin: a torso is chest + belly + hips, a head is "
+        "skull + muzzle + cheeks, a heart is two ventricles + two atria. 2-10 lumps that "
+        "overlap. A `path` with `radii` on the same part is melted in too (a neck into the body).",
+    )
+    blend: float | None = Field(
+        None, ge=0.0, le=1.0, description="blob: how far lumps melt together (default 0.5)."
+    )
+    organic: bool = Field(
+        False,
+        description="True on every part of a living thing (animal, person, organ, plant): it is "
+        "then never drawn hard-edged. Decide this before choosing the shape.",
+    )
+    mirror: bool = Field(
+        False,
+        description="Also make this part's twin on the other side (x mirrored): model the left "
+        "leg, ear, wing, eye or lung once.",
+    )
     profile: list[list[float]] | None = Field(
         None,
         description="extrude: [[x,y], ...] outline in the x-y plane, extruded along z by size[2]. "
@@ -182,6 +221,8 @@ class Part(BaseModel):
                 "radius": (0.001, 10),
                 "teeth": (3, 80),
                 "turns": (1, 40),
+                "squash": (0.15, 1),
+                "blend": (0, 1),
             },
         )
 
@@ -214,6 +255,32 @@ class Part(BaseModel):
             return None
         pts = [p for p in (_vec(x, 3, -200.0, 200.0) for x in v[:MAX_POINTS]) if p]
         return pts if len(pts) >= 2 else None
+
+    @field_validator("radii", mode="before")
+    @classmethod
+    def _radii(cls, v: Any) -> list[float] | None:
+        if isinstance(v, int | float) and not isinstance(v, bool):
+            v = [v]
+        if not isinstance(v, list):
+            return None
+        out = [max(0.005, min(10.0, float(x))) for x in v[:MAX_POINTS] if isinstance(x, int | float) and not isinstance(x, bool)]
+        return out or None
+
+    @field_validator("lumps", mode="before")
+    @classmethod
+    def _lumps(cls, v: Any) -> list[list[float]] | None:
+        if not isinstance(v, list):
+            return None
+        out: list[list[float]] = []
+        for item in v[:MAX_LUMPS]:
+            if not isinstance(item, list | tuple) or len(item) < 4:
+                continue
+            centre = _vec(item, 3, -200.0, 200.0)
+            # [x, y, z, r] is a ball; [x, y, z, rx, ry, rz] an egg.
+            radii = _vec(list(item[3:6]) if len(item) >= 6 else [item[3]] * 3, 3, 0.01, 30.0)
+            if centre and radii:
+                out.append([*centre, *radii])
+        return out or None
 
     @field_validator("profile", mode="before")
     @classmethod
@@ -351,6 +418,26 @@ class ObjectScene(BaseModel):
             if p.shape == "tube" and not p.path:
                 notes.append(f"{pid}: tube without path became a cylinder")
                 p = p.model_copy(update={"shape": "cylinder"})
+            if p.shape == "limb" and not p.path:
+                notes.append(f"{pid}: limb without a spine became a capsule")
+                p = p.model_copy(update={"shape": "capsule"})
+            if p.shape == "blob" and not p.lumps and not p.path:
+                notes.append(f"{pid}: blob without lumps became a sphere")
+                p = p.model_copy(update={"shape": "sphere"})
+            if p.organic and p.shape in SOFTER:
+                notes.append(f"{pid}: a living part is never a {p.shape}; drawn as a {SOFTER[p.shape]}")
+                p = p.model_copy(update={"shape": SOFTER[p.shape]})
+            if p.shape in ("limb", "blob"):
+                p = _fit_box(p)
+            if p.organic and p.shape == "extrude" and p.profile:
+                # A fin, an ear, a leaf, a wing: an outline with almost no thickness. Written
+                # as thick as it is wide, it is a block of wood stuck on a fish.
+                deep = "xyz".index(p.axis)
+                span = max(max(pt[i] for pt in p.profile) - min(pt[i] for pt in p.profile) for i in range(2))
+                thin = max(0.03, 0.08 * span)
+                if p.size[deep] > thin:
+                    notes.append(f"{pid}: a flat living part is thin; {p.size[deep]:.2f} thick became {thin:.2f}")
+                    p = p.model_copy(update={"size": [thin if i == deep else v for i, v in enumerate(p.size)]})
             if p.shape == "arrow" and p.color is None:
                 # Flows read best as one glowing colour, set apart from the machine.
                 p = p.model_copy(update={"color": "#7fbaff", "material": "emissive"})
@@ -367,8 +454,14 @@ class ObjectScene(BaseModel):
                 notes.append(f"{pid}: extrude without profile became a box")
                 p = p.model_copy(update={"shape": "box"})
             parts.append(p.model_copy(update={"id": pid}))
-        if len(self.parts) > MAX_PARTS:
+            if p.mirror:
+                parts[-1].mirror = False
+                twin = _twin(parts[-1], {q.id for q in parts})
+                if twin is not None:
+                    parts.append(twin)
+        if len(self.parts) > MAX_PARTS or len(parts) > MAX_PARTS:
             notes.append(f"trimmed to {MAX_PARTS} parts")
+            parts = parts[:MAX_PARTS]
         ids = {p.id for p in parts}
         for p in parts:
             if p.parent is not None:
@@ -397,6 +490,74 @@ class ObjectScene(BaseModel):
         self.parts, self.motions, self.beats = parts, motions, beats
         self.notes = [*self.notes, *notes]
         return self
+
+
+def shape_points(p: Part) -> list[tuple[list[float], list[float]]]:
+    """Where a limb or blob really is: (centre, radii) of each lump and each spine point,
+    relative to the part's position."""
+    out: list[tuple[list[float], list[float]]] = []
+    if p.shape == "blob":
+        out += [(lump[:3], lump[3:6]) for lump in p.lumps or []]
+    if p.path:
+        radii = p.radii or [p.radius or max(0.02, min(p.size) / 2)]
+        last = len(p.path) - 1
+        for i, pt in enumerate(p.path):
+            # Fewer radii than points: they are spread along the spine.
+            at = i / last * (len(radii) - 1) if last else 0.0
+            lo = int(at)
+            hi = min(len(radii) - 1, lo + 1)
+            r = radii[lo] + (radii[hi] - radii[lo]) * (at - lo)
+            out.append((pt, [r, r, r]))
+    return out
+
+
+def _fit_box(p: Part) -> Part:
+    """A limb or blob is drawn from its spine and lumps, so its `size` is worked out from them:
+    everything that reads a part's box (the camera, the checks, the labels) then sees where it
+    really is. Unrotated parts are also re-centred on their box."""
+    pts = shape_points(p)
+    if not pts:
+        return p
+    lo = [min(c[i] - r[i] for c, r in pts) for i in range(3)]
+    hi = [max(c[i] + r[i] for c, r in pts) for i in range(3)]
+    size = [max(0.005, hi[i] - lo[i]) for i in range(3)]
+    mid = [(lo[i] + hi[i]) / 2 for i in range(3)]
+    if any(p.rotation) or all(abs(m) < 1e-6 for m in mid):
+        return p.model_copy(update={"size": size})
+    shift = lambda v: [v[i] - mid[i] for i in range(3)]  # noqa: E731
+    return p.model_copy(
+        update={
+            "size": size,
+            "position": [p.position[i] + mid[i] for i in range(3)],
+            "path": [shift(pt) for pt in p.path] if p.path else None,
+            "lumps": [[*shift(lump), *lump[3:6]] for lump in p.lumps] if p.lumps else None,
+        }
+    )
+
+
+def _twin(p: Part, taken: set[str]) -> Part | None:
+    """The same part on the other side: mirrored across x (left and right)."""
+    if p.shape in ("asset", "kit", "gear", "spring", "wedge"):
+        return None  # a ready-made piece is not mirrored
+    if abs(p.position[0]) < 1e-6 and not p.path and not p.lumps:
+        return None  # on the middle line it is its own twin
+    tid = f"{p.id}_twin"
+    if tid in taken:
+        return None
+    flip = lambda v: [-v[0], *v[1:]]  # noqa: E731
+    return p.model_copy(
+        update={
+            "id": tid,
+            "position": flip(p.position),
+            "rotation": [p.rotation[0], -p.rotation[1], -p.rotation[2]],
+            "path": [flip(pt) for pt in p.path] if p.path else None,
+            "lumps": [[*flip(lump[:3]), *lump[3:6]] for lump in p.lumps] if p.lumps else None,
+            # An outline drawn across the body (not extruded across it) is drawn the other way round.
+            "profile": [[-pt[0], pt[1]] for pt in p.profile] if p.profile and p.shape == "extrude" and p.axis != "x" else p.profile,
+            "label": None,
+            "note": None,
+        }
+    )
 
 
 def _break_cycles(parts: list[Part], notes: list[str]) -> None:
