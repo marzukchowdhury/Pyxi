@@ -82,7 +82,7 @@ Against the real AI models, the planted instructions were refused every time (7 
 - **The prompt-injection attacks against the real AI models:** 7 of 7 refused.
 - **The beta server's 15 tests pass.**
 - **Dependency audit:** nothing high or critical.
-- **The browser extension** has its own 931-line test file, and has had three reviews by the session that built it. Today I checked its pairing, its cards, its private-field rules and its fencing against our safety rules, and found it solid.
+- **The browser extension** has its own test file of about 1,700 lines, and has had three reviews by the session that built it. Today I checked its pairing, its cards, its private-field rules and its fencing against our safety rules, and found it solid.
 
 ## What I changed today (13 November)
 
