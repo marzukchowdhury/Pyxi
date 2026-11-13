@@ -688,22 +688,21 @@ async def test_a_translation_that_skips_a_paragraph_is_asked_for_it_then_fails(t
     assert not list(tmp_path.glob("*translated by Pyxi) (2)*"))
 
 
-def _resume_pdf(folder: Path, line: str) -> Path:
-    from reportlab.lib.pagesizes import letter
-    from reportlab.pdfgen import canvas
-
-    path = folder / "Resume.pdf"
-    c = canvas.Canvas(str(path), pagesize=letter)
-    c.setFont("Helvetica", 11)
-    c.drawString(72, 700, line)
-    c.save()
-    return path
+def _resume_pdf(folder: Path, line: str, monkeypatch) -> Path:
+    """A scanned resume: the one kind of PDF whose fixes are still a list (a typed PDF is
+    fixed in a Word copy, see test_quill_keeps_the_form.py). The text reader reads ``line``."""
+    monkeypatch.setattr("pyxi.agents.pixel_pdf._ocr_image", lambda img: [SimpleNamespace(text=line)])
+    return _scan(folder / "Resume.pdf")
 
 
-async def test_a_pdfs_corrections_are_worked_out_when_the_model_does_not_list_them(tmp_path):
+async def test_a_pdfs_corrections_are_worked_out_when_the_model_does_not_list_them(
+    tmp_path, monkeypatch
+):
     """The model fixed the paragraph but left "changes" empty, and the corrections file said
     "Nothing to correct."."""
-    pdf = _resume_pdf(tmp_path, "Video Editor2020 to 2023. Managed a team of five people's.")
+    pdf = _resume_pdf(
+        tmp_path, "Video Editor2020 to 2023. Managed a team of five people's.", monkeypatch
+    )
     model = Model(edit(0, "Video Editor 2020 to 2023. Managed a team of five."))
     result = await fix_document(pdf, "fix", model)
     said = result.path.read_text(encoding="utf-8")
@@ -783,7 +782,7 @@ def test_numbers_are_compared_by_what_they_are_worth():
     assert not same("3/5/2024", "March 5, 2024") and not same("3 years", "four years")
 
 
-async def test_a_grammar_fix_that_changes_a_number_is_not_made(tmp_path):
+async def test_a_grammar_fix_that_changes_a_number_is_not_made(tmp_path, monkeypatch):
     """A fix keeps amounts and dates. An edit that changes one is left out, with a note; the
     grammar in the same paragraph, and the other paragraphs, are still fixed."""
     doc = Document()
@@ -821,7 +820,9 @@ async def test_a_grammar_fix_that_changes_a_number_is_not_made(tmp_path):
     result = await fix_document(src, "make it formal", Model(edit(2, "Call 555 0199.")), mode="rewrite")
     assert Document(str(result.path)).paragraphs[2].text == "Call 555 0199."
 
-    pdf = _resume_pdf(tmp_path, "Mr. Rahman owe $1,200 by March 3, 2026, as agreed before.")
+    pdf = _resume_pdf(
+        tmp_path, "Mr. Rahman owe $1,200 by March 3, 2026, as agreed before.", monkeypatch
+    )
     reply = {"edits": [], "changes": [{"from": "$1,200", "to": "$1,300"}, {"from": "owe", "to": "owes"}]}
     listed = await fix_document(pdf, "fix", Model(reply))
     said = listed.path.read_text(encoding="utf-8")

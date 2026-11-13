@@ -1,9 +1,10 @@
 """Quill's document work: fix (grammar, spelling, clarity), translate, rewrite or summarize,
 keeping the file a file. Word documents keep their paragraph styles (headings stay headings) and are saved as a
 copy beside the original, "<name> (fixed by Pyxi).docx", so nothing is ever overwritten. Plain
-text and Markdown stay text. A PDF's layout can't be edited: a translation or a rewrite of one
-comes back as a Word copy, and a fix (grammar, spelling) comes back as the list of corrections
-to make in the original, never as the page typed out again.
+text and Markdown stay text. A PDF's own text can't be edited, so a PDF comes back as a Word
+copy beside it: for a fix (grammar, spelling) Pixel's converter turns it into Word first, with
+its headings, lists and pictures, and the corrections are made there. Only a scan, which has
+no text in it at all, comes back as the list of corrections to make.
 
 A fix in a Word file changes only the words that changed: each edit is put into the run it
 belongs to, so bold stays bold, a link stays a link, and a picture, a tab or a page break in
@@ -12,6 +13,7 @@ the same paragraph is never touched.
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import json
 import re
@@ -217,7 +219,21 @@ class FixResult:
     changes: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # worth a look, but not changed without asking
     cost_usd: float = 0.0
-    listed: bool = False  # a PDF: its corrections are listed, nothing was typed out again
+    listed: bool = False  # a scanned PDF: its corrections are listed, nothing was typed out
+    converted: bool = False  # a typed PDF: fixed in a Word copy of it
+
+
+PARALLEL = 4  # parts of one document with the model at the same time
+
+
+@dataclass
+class _Part:
+    """What came of one part of a document, kept apart until every part is back."""
+
+    changes: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    held: list[str] = field(default_factory=list)
+    lost: list[int] = field(default_factory=list)
 
 
 def _read(path: Path) -> tuple[list[str], object | None]:
@@ -695,7 +711,12 @@ async def fix_document(
         raise ValueError(f"I can work on {', '.join(sorted(SUPPORTED))} files, not {path.suffix}.")
     system = {"translate": TRANSLATOR, "rewrite": REWRITER}.get(mode, EDITOR)
     passes = 2 if mode == "fix" else 1
-    texts, handle = _read(path)
+    # A PDF to fix is fixed in a Word copy of it, made by Pixel's own converter (a scan has no
+    # text to convert: its corrections are listed instead).
+    as_word = None
+    if mode == "fix" and path.suffix.lower() == ".pdf":
+        as_word = await asyncio.to_thread(_pdf_as_word, path)
+    texts, handle = as_word or _read(path)
     if not any(t.strip() for t in texts):
         scan = " If it's a scan, it may be too faint to read." if path.suffix.lower() == ".pdf" else ""
         raise ValueError(f"I couldn't find any text in {path.name}.{scan}")
@@ -707,9 +728,13 @@ async def fix_document(
     order = [i for chunk in _chunks(texts) for i in chunk]
     lost: list[int] = []  # paragraphs whose answer couldn't be read, twice
     read_some = False
-    queue = [(chunk, False) for chunk in _chunks(texts)]
-    while queue:
-        chunk, second_try = queue.pop(0)
+    # The parts of a long document are sent to the model side by side, a few at a time: one
+    # after another, a ten-page proposal took 102 seconds, nearly all of it waiting in line.
+    gate = asyncio.Semaphore(PARALLEL)
+
+    async def work(chunk: list[int], second_try: bool) -> list[_Part]:
+        nonlocal cost, read_some
+        part = _Part()
         # Two passes: edit with a checklist, then review the result for anything still wrong.
         current = {i: texts[i] for i in chunk}
         said: list[str] = []
@@ -724,9 +749,10 @@ async def fix_document(
                 else "Review this edited text as a second editor. Fix anything still wrong; if it is all correct, "
                 f"return empty edits.\n\n{numbered}"
             )
-            response = await llm.complete(
-                system=system, messages=[Message.user(ask)], max_tokens=8000
-            )
+            async with gate:
+                response = await llm.complete(
+                    system=system, messages=[Message.user(ask)], max_tokens=8000
+                )
             cost += response.usage.cost_usd
             data = _parse(response.text)
             if data is None:
@@ -757,18 +783,19 @@ async def fix_document(
                 elif _describe(c):
                     said.append(_describe(c))
             more = data.get("notes")
-            notes += [str(n) for n in (more if isinstance(more, list) else []) if str(n).strip()]
+            part.notes += [str(n) for n in (more if isinstance(more, list) else []) if str(n).strip()]
         if unread:
             if len(chunk) > 1 and not second_try:
                 half = len(chunk) // 2  # a shorter answer may fit where the long one was cut off
-                queue[:0] = [(chunk[:half], True), (chunk[half:], True)]
-                continue
+                first, second = await _together(work(chunk[:half], True), work(chunk[half:], True))
+                return [*first, *second]
             if mode == "translate":  # a translation with a part left out is not a translation
                 raise RuntimeError(
                     f"The answer for {path.name} came back cut off, so nothing was saved. Ask again."
                 )
-            lost += chunk  # this part stays as it was, said in a note; the rest is still done
-            continue
+            part.lost += chunk  # this part stays as it was, said in a note; the rest is still done
+            return [part]
+        held = part.held
         fresh: list[int] = []
         left = 0  # paragraphs with an edit that was not made
         for i in chunk:
@@ -814,10 +841,11 @@ async def fix_document(
             fresh.append(i)
         if not left:
             held += unlisted
+        again: list[int] = []
         if mode == "translate":
             missing = [i for i in chunk if i not in answered and _has_words(texts[i])]
             if missing and not second_try:
-                queue.insert(0, (missing, True))  # asked once more, for just those
+                again = missing  # asked once more, for just those
             elif missing:
                 raise RuntimeError(
                     f"The translation of {path.name} came back with {len(missing)} "
@@ -828,7 +856,15 @@ async def fix_document(
             # was not made: work the list out from the words. (A PDF's corrections are this
             # list; empty, the file said "Nothing to correct.")
             said = [c for i in fresh for c in _diff_changes(texts[i].strip(), edits[i].strip())]
-        changes += said
+        part.changes = said
+        return [part, *(await work(again, True) if again else [])]
+
+    for parts in await _together(*(work(chunk, False) for chunk in _chunks(texts))):
+        for part in parts:  # put together in the document's own order, whichever came back first
+            changes += part.changes
+            held += part.held
+            notes += part.notes
+            lost += part.lost
 
     if lost and not read_some:
         raise RuntimeError(
@@ -856,11 +892,12 @@ async def fix_document(
             )
     notes = list(dict.fromkeys(held + notes))
     label = {"translate": "translated by Pyxi", "rewrite": "rewritten by Pyxi"}.get(mode, "fixed by Pyxi")
-    listed = mode == "fix" and path.suffix.lower() == ".pdf"
+    listed = mode == "fix" and path.suffix.lower() == ".pdf" and as_word is None
     if listed:
-        # A PDF is a picture of a page: its words can't be changed where they are, and typing
-        # them out again loses the columns, the spacing and the fonts (live: a resume came
-        # back as one block of text in a Word file, twice). So the corrections are listed.
+        # A scan is a picture of each page: there are no words in it to change, and typing
+        # out what a text reader made of it is not their document. So the corrections are
+        # listed. (A typed PDF used to get the list too: "why is it a txt file that she
+        # gave me?" It is fixed in a Word copy now, which is a file they can send.)
         out = _list_corrections(path, changes, notes)
     else:
         out = _write(path, texts, edits, handle, label)
@@ -872,7 +909,40 @@ async def fix_document(
         notes=notes[:5],
         cost_usd=cost,
         listed=listed,
+        converted=as_word is not None,
     )
+
+
+def _pdf_as_word(path: Path) -> tuple[list[str], object] | None:
+    """A typed PDF as a Word document, by Pixel's own converter (headings, paragraphs, lists,
+    bold and pictures come through): its paragraphs and the document itself, as :func:`_read`
+    gives them for a .docx. None for a scan, a PDF with no typed text on any page. A locked or
+    broken PDF says so in a sentence."""
+    import shutil
+    import tempfile
+
+    from pyxi.agents.pixel_pdf import page_texts, pdf_to_word
+
+    typed, _ = page_texts(path, ocr=False)
+    if not any(len(re.sub(r"\s", "", t)) >= 25 for t in typed):
+        return None
+    tmp = Path(tempfile.mkdtemp(prefix="pyxi_quill_"))
+    try:  # read into memory: the copy that is kept is saved once, with the fixes in it
+        return _read(pdf_to_word([path], tmp).outputs[0])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+async def _together(*jobs: Any) -> list[Any]:
+    """These at once, their results in the order given. If one fails the rest are stopped
+    (left running, they would go on spending on a document that is not going to be saved)."""
+    tasks = [asyncio.ensure_future(j) for j in jobs]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for t in tasks:
+            t.cancel()
+        raise
 
 
 def _list_corrections(path: Path, changes: list[str], notes: list[str]) -> Path:
@@ -884,8 +954,9 @@ def _list_corrections(path: Path, changes: list[str], notes: list[str]) -> Path:
         lines += ["", "Worth a look:"] + [f"- {n}" for n in notes]
     lines += [
         "",
-        "A PDF's layout can't be edited, so nothing in it was changed. Make these in the file "
-        "the PDF was made from (Word, Google Docs, Canva), and export it again.",
+        "This PDF is a scan: a picture of each page, with no text in it that can be changed. "
+        "The words above were read off the picture, so check them against the page. Make the "
+        "corrections in the file it was printed or scanned from.",
     ]
     out = unique_path(out_dir_for(path), f"{path.stem} (corrections by Pyxi).txt")
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -900,7 +971,7 @@ def _write(
     stem = path.stem
     ext = path.suffix.lower()
     folder = out_dir_for(path)
-    if ext == ".docx" and handle is not None:
+    if handle is not None:  # a Word file, or the Word copy of a PDF
         doc, _ = handle  # the edits are already in its paragraphs (see _patch)
         out = unique_path(folder, f"{stem} ({label}).docx")
         doc.save(str(out))
