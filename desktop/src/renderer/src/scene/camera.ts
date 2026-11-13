@@ -32,6 +32,26 @@ export function nearestAngle(from: number, to: number): number {
   return from + d;
 }
 
+/** Much wider and deeper than it is tall: a chip, a circuit board, a phone lying down. */
+export function isFlat(span: [number, number, number]): boolean {
+  return span[1] > 0 && span[1] < 0.3 * Math.min(span[0], span[2]);
+}
+
+/** From in front, to one side, and well above: the top face and two edges all show. */
+export const THREE_QUARTER: [number, number, number] = [0.7, 0.85, 1.1];
+
+/**
+ * The direction to look at a flat thing from, or null to keep the beat's own view. From the
+ * usual low angle a flat thing is a sliver, and straight from above it is a diagram with no
+ * depth (live: an AI chip that opened as flat coloured tiles). So its three-quarter views are
+ * lifted, and it never opens seen from straight above; a later beat may still look down on it.
+ */
+export function flatView(camera: string, span: [number, number, number], firstBeat: boolean): [number, number, number] | null {
+  if (!isFlat(span)) return null;
+  if (camera === "iso" || camera === "wide" || camera === "close") return THREE_QUARTER;
+  return camera === "top" && firstBeat ? THREE_QUARTER : null;
+}
+
 export interface Orbit {
   radius: number;
   /** Around the vertical axis, radians (0 = looking down -z from +z). */

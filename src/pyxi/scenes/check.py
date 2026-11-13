@@ -9,6 +9,8 @@ box in the model's space), and does two things:
   labelled one becomes a see-through shell.
 * ``floating`` lists small parts that hang apart from everything else. Those have no one right
   answer (a moon is meant to be apart from its planet), so the builder is asked once.
+* ``apart_on_purpose`` says when that question must not be asked at all: the model was asked
+  for taken apart, or is laid out as an exploded view.
 
 It is deliberately only about boxes. An outline match was tried elsewhere and scored a model
 with its face missing at 0.88, so nothing here pretends to judge the look.
@@ -16,6 +18,7 @@ with its face missing at 0.88, so nothing here pretends to judge the look.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from pyxi.scenes.objects import ObjectScene, Part, shape_points
@@ -87,13 +90,8 @@ class Floater:
     gap: float
 
 
-def floating(scene: ObjectScene) -> list[Floater]:
-    """Small groups of parts that touch each other and nothing else."""
-    found = boxes(scene)
-    judged = [b for b in found.values() if b.judged]
-    if len(judged) < 3:
-        return []
-    extent = _extent(found)
+def _clusters(judged: list[Box], extent: float) -> list[list[Box]]:
+    """The parts in groups that touch each other (within a little of the model's size)."""
     touch = 0.04 * extent
     group = {b.part.id: b.part.id for b in judged}
 
@@ -110,10 +108,62 @@ def floating(scene: ObjectScene) -> list[Floater]:
     groups: dict[str, list[Box]] = {}
     for b in judged:
         groups.setdefault(root(b.part.id), []).append(b)
-    main = max(groups.values(), key=lambda g: sum(b.volume for b in g))
+    return list(groups.values())
+
+
+# "take it apart", "taken apart into its parts", "an exploded view", "disassembled", "in pieces".
+_APART = re.compile(
+    r"(?i)\b(?:t(?:ake|akes|aken|aking|ook)\b.{0,30}?\bapart|pull(?:ed|ing|s)?\b.{0,30}?\bapart|"
+    r"com(?:e|es|ing)\b.{0,12}?\bapart|explod\w*|disassembl\w*|dismantl\w*|tear ?downs?|"
+    r"torn down|in(?:to)? (?:its |their |separate |all its )?(?:pieces|components)|"
+    r"into (?:its |their |separate )parts|piece by piece|part by part)\b"
+)
+
+
+def asked_apart(text: str) -> bool:
+    """Do these words ask for the thing taken apart?"""
+    return bool(_APART.search(text or ""))
+
+
+def spread_out(scene: ObjectScene) -> bool:
+    """Is the model laid out like an exploded view: four or more groups of parts, one after
+    another along one axis with clear air between each and the next? One headlight hanging
+    off a car is a mistake; a row of parts in a line is how the model was meant to be."""
+    found = boxes(scene)
+    judged = [b for b in found.values() if b.judged]
+    groups = _clusters(judged, _extent(found)) if len(judged) >= 4 else []
+    if len(groups) < 4:
+        return False
+    for i in range(3):
+        spans = sorted((min(b.lo[i] for b in g), max(b.hi[i] for b in g)) for g in groups)
+        if all(nxt[0] > cur[1] for cur, nxt in zip(spans, spans[1:])):
+            return True
+    return False
+
+
+def apart_on_purpose(scene: ObjectScene, brief: str = "") -> str | None:
+    """Why this model's parts are meant to be apart (in words, for the log), or None. Then
+    nothing is "hanging in the air" and nothing may be moved back (live: a refrigerator asked
+    for taken apart had its condenser and valve put back on the model)."""
+    if asked_apart(brief) or asked_apart(f"{scene.title} {scene.subtitle or ''}"):
+        return "asked for taken apart"
+    if spread_out(scene):
+        return "laid out as an exploded view"
+    return None
+
+
+def floating(scene: ObjectScene) -> list[Floater]:
+    """Small groups of parts that touch each other and nothing else."""
+    found = boxes(scene)
+    judged = [b for b in found.values() if b.judged]
+    if len(judged) < 3:
+        return []
+    extent = _extent(found)
+    groups = _clusters(judged, extent)
+    main = max(groups, key=lambda g: sum(b.volume for b in g))
     main_volume = sum(b.volume for b in main)
     out: list[Floater] = []
-    for g in groups.values():
+    for g in groups:
         if g is main or sum(b.volume for b in g) > 0.15 * main_volume:
             continue  # two big things apart are two things (a planet and its moon), not a mistake
         gap, near = min(((_gap(a, b), b.part.id) for a in g for b in main), key=lambda x: x[0])

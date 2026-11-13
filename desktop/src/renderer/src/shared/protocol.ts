@@ -133,7 +133,8 @@ export type PartShape =
   | "tube" | "limb" | "blob" | "extrude" | "lathe" | "gear" | "spring" | "plane" | "arrow" | "marker" | "kit" | "asset";
 export type Material =
   | "metal" | "brushed_metal" | "dark_metal" | "gold" | "plastic" | "rubber" | "glass" | "painted"
-  | "fabric" | "wood" | "ceramic" | "skin" | "emissive";
+  | "fabric" | "wood" | "ceramic" | "skin" | "emissive"
+  | "silicon" | "pcb" | "solder" | "copper" | "anodized";
 export type Axis = "x" | "y" | "z";
 
 export interface Part {
@@ -157,6 +158,10 @@ export interface Part {
   profile: [number, number][] | null;
   teeth: number | null;
   turns: number | null;
+  /** Fine detail drawn on the part (scene/surface.ts): pins, traces, cells, fins, brushed,
+   * vents, grille, knurl, panel_lines. `density` makes it finer (2) or coarser (0.5). */
+  surface?: string | null;
+  density?: number | null;
   /** shape "limb": how thick it is at each point of `path`; `squash` flattens it side to side. */
   radii?: number[] | null;
   squash?: number | null;

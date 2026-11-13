@@ -14,12 +14,12 @@ import { type MutableRefObject, Suspense, useEffect, useMemo, useRef, useState }
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { Beat, ObjectScene, Part } from "../shared/protocol";
-import { fromOrbit, orbitSpring, type OrbitSpring, smoothDamp, stepOrbit, toOrbit } from "./camera";
+import { flatView, fromOrbit, orbitSpring, type OrbitSpring, smoothDamp, stepOrbit, toOrbit } from "./camera";
 import { children, evaluate } from "./motion";
 import { usePace } from "./pace";
 import { useAsset } from "./assets";
 import { buildKit } from "./kit";
-import { buildGeometry, makeMaterial, prepareAssetMaterial } from "./parts";
+import { buildGeometry, makeMaterial, prepareAssetMaterial, surfaceOf } from "./parts";
 
 export interface Clock {
   story: number;
@@ -410,7 +410,7 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const kit = useMemo(() => (part.shape === "kit" && part.kit ? buildKit(part.kit, part.size, part.axis, part.teeth) : null), [sig]);
   const kitMats = useMemo(
-    () => kit?.map((l) => makeMaterial({ ...part, shape: "box", material: l.material, color: l.main ? (part.color ?? l.color ?? null) : (l.color ?? null) }, style)) ?? null,
+    () => kit?.map((l) => makeMaterial({ ...part, shape: "box", surface: l.surface ?? null, material: l.material, color: l.main ? (part.color ?? l.color ?? null) : (l.color ?? null) }, style)) ?? null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [kit, style],
   );
@@ -461,7 +461,8 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
   const click = onPick ? (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); if (e.delta > 4) return; onPick(part); } : undefined;
   const hover = onPick ? (on: boolean) => (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); document.body.style.cursor = on ? "pointer" : ""; } : undefined;
   const lineColor = style === "blueprint" ? "#9ecbff" : "#dbe9ff";
-  const rounded = part.shape === "rounded_box";
+  // With surface detail it is drawn from our own geometry, which carries the detail's mapping.
+  const rounded = part.shape === "rounded_box" && !surfaceOf(part);
   const radius = Math.min(...part.size) * 0.2;
   return (
     <group ref={group}>
@@ -659,7 +660,9 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
     // "side" means a profile view: look across the object's longest axis, not down it.
     const whole = boundsOf(registry.current, null, new THREE.Box3());
     const span = whole.isEmpty() ? new THREE.Vector3(1, 1, 1) : whole.getSize(new THREE.Vector3());
-    let view = VIEWS[beat.camera];
+    // A flat thing (a chip, a board, a phone) is shown from three quarters, never edge-on, and
+    // never opens seen from straight above.
+    let view = flatView(beat.camera, [span.x, span.y, span.z], beatIndex === 0) ?? VIEWS[beat.camera];
     if (beat.camera === "side" || beat.camera === "left") {
       const sign = beat.camera === "side" ? 1 : -1;
       view = span.x >= span.z ? [0, 0.16, sign] : [sign, 0.16, 0.02];

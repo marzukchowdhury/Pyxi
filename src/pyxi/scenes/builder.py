@@ -20,9 +20,9 @@ from otto.llm.base import LLMProvider, Message, ToolSpec
 from pydantic import ValidationError
 
 from pyxi.partial_json import complete_items, partial_string
-from pyxi.scenes.check import describe, floating, tidy
+from pyxi.scenes.check import apart_on_purpose, describe, floating, tidy
 from pyxi.scenes.library import few_labels
-from pyxi.scenes.model_examples import EXAMPLES, LIVING_EXAMPLES
+from pyxi.scenes.model_examples import ELECTRONIC_EXAMPLES, EXAMPLES, LIVING_EXAMPLES
 from pyxi.scenes.objects import (
     Beat,
     ObjectEdit,
@@ -74,11 +74,35 @@ chips (CPUs, AI chips), PC fans, screens, seats, people, bolts and houses are `k
 (shape kit, kit=<name>, sized and placed like any part): detailed and real-looking, never \
 rebuild them from boxes. A computer is boards, chips and fans from the kit; a vehicle is a body \
 extrude or lathe plus kit wheels (a wheel's size is [diameter, diameter, width] with its thin \
-side across the vehicle); a fighter is its outline plus kit missiles and a seat.
-- Materials: real ones, in contrast (painted body, dark_metal workings, brushed_metal moving \
-parts, rubber seals, glass); give painted and plastic parts a real colour, not default grey.
+side across the vehicle); a fighter is its outline plus kit missiles and a seat. But when one \
+of these IS the subject (an AI chip, a graphics card), build it from its own parts with real \
+materials and `surface` detail, so its inside can be shown.
+- Made things look made, not like toys: real materials in real colours. A chip die is dark \
+`silicon`; a circuit board is `pcb` (green, or black "#16181c"); contacts, pins and connector \
+fingers are `gold`; solder balls are `solder`; heat pipes and coils are `copper`; lids, heat \
+sinks and frames are `brushed_metal` or dark `anodized`; housings are black or dark grey \
+`plastic` or `painted` in the product's real colour; `rubber`, `glass`. Pastel and bright \
+colours are ONLY for arrows and flows, never for a part of the thing.
+- Surface detail is free: set `surface` on a part and the fine detail is drawn on it, so never \
+leave a big face blank and never model these from little boxes. pins (pin grid, solder balls, \
+gold contacts under a chip or on a connector), traces (any circuit board), cells (a chip die: \
+its grid of blocks), fins (heat sink, radiator, cooling fins, condenser), brushed (bare \
+aluminium or steel), vents (cooling slots in a housing), grille (speaker, intake, mesh), knurl \
+(grips, knobs), panel_lines (the casing of an appliance, vehicle, aircraft or machine: seams \
+and access panels). `density` 2 is finer, 0.5 coarser.
 - Inside and outside: outer shells get casing=true and the model gets cutaway=true when the \
-inside is the point, so the shell becomes a see-through ghost and the workings show.
+inside is the point, so the shell becomes a see-through ghost and the workings show. Better \
+still for a product: leave the model's cutaway off and set cutaway=true on the second beat, so \
+it is first seen whole and real, then opens.
+- The thing itself is always there. Explaining how an appliance, vehicle or device works (a \
+refrigerator, a washing machine, a car, a phone), build its recognisable outside first, in its \
+real proportions (the fridge cabinet with its door, the car body, the phone body), as \
+casing=true parts with cutaway=true, and put the working parts inside it where they really \
+sit. A compressor, a coil and some pipes hanging in the air are not a refrigerator.
+- Taken apart (exploded view, disassembled, in pieces): spread the parts out along ONE axis in \
+the order they come off, each clear of the next with even gaps, and keep the casing (cabinet, \
+body, housing) as one of the parts, drawn solid (casing=false, cutaway=false) so the thing is \
+still recognisable.
 - 16-36 parts: enough to be convincing, each one meaningful. Group assemblies with `parent`.
 - Alive: fans, rotors, turbines, wheels and gears spin; beating or pumping parts oscillate on \
 scale; latches, pistons, triggers and slides move with keyframes; whatever travels (air, \
@@ -89,7 +113,8 @@ opacity 1, hidden, casing false, plastic material, axis y, style studio, auto_pl
 model is drawn while the user waits, so every extra field is time they wait.
 - Beats: 3-5, rising `at` times (2-3 s apart), each focusing the parts it is about, with the \
 camera that shows them best (side for vehicles, iso for depth, front for faces, close for a \
-detail). Narration: one vivid spoken sentence each, a concrete fact or analogy, never a \
+detail). A flat thing (a chip, a board, a phone lying down) opens on iso, never top or front. \
+Narration: one vivid spoken sentence each, a concrete fact or analogy, never a \
 description of the picture; the last one lands the "so that's why", adds one related fun \
 fact, and offers one specific thing to show next (inside a part, how it's assembled, a diagram).
 
@@ -111,6 +136,39 @@ _LIVING = re.compile(
 def is_living(text: str) -> bool:
     """Is this about something grown and not made? Then the builder is shown living examples."""
     return bool(_LIVING.search(text))
+
+
+_ELECTRONIC = re.compile(
+    r"(?i)\b(?:(?:micro)?chip|cpu|gpu|npu|processor|microprocessor|microcontroller|semiconductor|"
+    r"transistor|wafer|silicon|circuit(?: board)?|pcb|motherboard|mainboard|logic board|"
+    r"graphics card|video card|ram|dimm|memory (?:stick|module|chip)|ssd|solid.state drive|"
+    r"hard (?:drive|disk)|hdd|flash drive|usb|(?:smart|i|cell ?|mobile )?phone|laptop|"
+    r"computer|pc|tablet|ipad|games? console|console|controller|router|modem|server|data ?centre|"
+    r"data ?center|sensor|camera|oled|lcd|display|monitor|television|tv|speaker|earbud|"
+    r"headphone|headset|smart ?watch|drone|electronic|charger|power supply|inverter|"
+    r"arduino|raspberry pi|antenna|radio|remote control)s?\b"
+)
+# A made thing called by a living thing's name.
+_NOT_ALIVE = re.compile(r"(?i)\bcell ?phones?\b|\b(?:solar|fuel|battery|memory|load) cells?\b")
+
+
+def is_electronic(text: str) -> bool:
+    """Is this about electronics? Then the builder is shown a machine and a chip, so it reaches
+    for silicon, boards, gold contacts and surface detail and not coloured blocks. What the ask
+    names first decides it: "a hard drive, the head on its arm" is a hard drive, and "the eye,
+    like a camera" is an eye."""
+    made = _ELECTRONIC.search(text)
+    if not made:
+        return False
+    alive = _LIVING.search(_NOT_ALIVE.sub(lambda m: " " * len(m.group()), text))
+    return alive is None or made.start() <= alive.start()
+
+
+def examples_for(text: str) -> tuple[dict[str, Any], ...]:
+    """The two worked examples the builder is shown for this ask."""
+    if is_electronic(text):
+        return ELECTRONIC_EXAMPLES
+    return LIVING_EXAMPLES if is_living(text) else EXAMPLES
 
 
 @dataclass
@@ -166,12 +224,18 @@ def move_tool() -> ToolSpec:
     )
 
 
-async def look_over(llm: LLMProvider, model: ObjectScene, result: BuildResult) -> ObjectScene:
+async def look_over(
+    llm: LLMProvider, model: ObjectScene, result: BuildResult, brief: str = ""
+) -> ObjectScene:
     """The look before showing: mend what has one right answer, and ask the builder once about
     small parts left hanging in the air. Never makes a model worse: a move is kept only if
-    fewer parts float after it."""
+    fewer parts float after it. A model that was asked for taken apart is never put back
+    together: its parts being apart is the point (``brief`` is what was asked for)."""
     model, done = tidy(model)
     result.checks += done
+    if why := apart_on_purpose(model, brief):
+        result.checks.append(f"{why}: parts left where they are")
+        return model
     floaters = floating(model)
     if not floaters:
         return model
@@ -274,7 +338,10 @@ async def build_model(
 
     ``on_parts``: called with the model so far as its parts stream in (only for a streaming
     model). The finished model keeps the same id, so the view carries straight on from it."""
-    examples = LIVING_EXAMPLES if is_living(f"{brief} {context[:300]}") else EXAMPLES
+    # The ask decides; what happens to be on screen only when the ask says nothing either way.
+    examples = examples_for(brief)
+    if examples is EXAMPLES:
+        examples = examples_for(f"{brief} {context[:300]}")
     system = SYSTEM.format(
         examples="\n".join(json.dumps(e, separators=(",", ":")) for e in examples)
     )
@@ -320,7 +387,7 @@ async def build_model(
                 )
             ]
     if result.model is not None:
-        result.model = await look_over(llm, result.model, result)
+        result.model = await look_over(llm, result.model, result, brief)
     result.seconds = time.monotonic() - started
     return result
 

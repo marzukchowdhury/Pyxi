@@ -106,6 +106,7 @@ from pyxi.routines import RoutineStore
 from pyxi.scenes import SceneSpec, build_exploded_scene, get_scene, parse_scene
 from pyxi.scenes import library as model_library
 from pyxi.scenes.builder import build_model, explain_library_model
+from pyxi.scenes.check import asked_apart
 from pyxi.scenes.diagram import Diagram, DiagramError, parse_diagram
 from pyxi.scenes.object_gallery import OBJECT_GALLERY
 from pyxi.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summary
@@ -1675,6 +1676,10 @@ class Brain:
         brief = f"{subject}. {args.get('show', '')}".strip()
         if args.get("beats"):
             brief += "\nBeats: " + "; ".join(str(b) for b in args["beats"][:6])
+        if asked_apart(self._user_text or "") and not asked_apart(brief):
+            # They said "take it apart" and the brief lost it: the builder, and the look
+            # before showing, have to know the parts are meant to be apart.
+            brief += "\nShow it taken apart: an exploded view."
         ctx = self._ctx
         context = ""
         if ctx is not None:
@@ -2770,6 +2775,7 @@ class Brain:
         explaining it). Gone by itself when its story ended: Pyxi just knows it is no longer
         showing (live: "the earbud cutaway is still up", a minute after it had gone)."""
         self._object_showing = False
+        self._placed.put("model", None, 0)  # its spot is free again for cards and diagrams
         if not by_them:
             return
         self._object_shut = True
@@ -4638,12 +4644,13 @@ class Brain:
 
     async def show_scene(self, scene: SceneSpec) -> None:
         self._visual_turn = True
+        self._placed.put("model", None, 0)  # a plate takes a 3D model's place on screen
         place = (
             None
             if scene.anchor
-            else place_stage(self._ctx, self._placed.others("stage"), PLATE_SIZE)
+            else place_stage(self._ctx, self._placed.others("plate"), PLATE_SIZE)
         )
-        self._placed.put("stage", place, 90.0)
+        self._placed.put("plate", place, 90.0)
         await self.hub.emit(
             "scene",
             scene=scene.model_dump(by_alias=True, mode="json"),
@@ -4693,8 +4700,9 @@ class Brain:
             self._visual_turn = True
         place = getattr(self, "_object_place", None) if keep_place else None
         if place is None:
-            place = place_stage(self._ctx, self._placed.others("stage"))
-            self._placed.put("stage", place, 90.0)
+            place = await self._place_model()
+        # The model has its own entry: a card or a diagram drawn later keeps clear of it.
+        self._placed.put("model", place, 90.0)
         self._object_place = place
         audio_key = (
             f"{model.id}:{secrets.token_hex(3)}"
@@ -4711,6 +4719,22 @@ class Brain:
         )
         if restart:
             self._spawn(self._narrate_beats(audio_key, [b.narration for b in model.beats]))
+
+    async def _place_model(self) -> tuple[int, int, int, int] | None:
+        """Where a 3D model goes: clear of any card or diagram Pyxi has up. A diagram and a
+        model asked for in one breath ("draw the cycle first, then build it in 3D") used to
+        land on the same spot, the model's tags over the diagram's words, because both were
+        the one "stage". If the screen has no room left for both, what is in the way is put
+        away: the model is what was asked for last."""
+        self._placed.put("plate", None, 0)  # a model takes an explain_in_3d plate's place
+        taken = self._placed.others("model")
+        place = place_stage(self._ctx, taken)
+        if place is not None and any(_overlap(place, r) > 0.15 for r in taken):
+            await self.hub.emit("clear")
+            self._placed.put("card", None, 0)
+            self._placed.put("stage", None, 0)
+            place = place_stage(self._ctx, self._placed.others("model"))
+        return place
 
     async def _narrate_beats(self, key: str, lines: list[str]) -> None:
         for i, line in enumerate(lines):
@@ -5234,6 +5258,17 @@ _A_QUESTION = re.compile(
 )
 # The words the 3D panel sends when a part of the model is clicked (ObjectPanel.tsx).
 _PART_CLICKED = re.compile(r"(?i)^in the .+ model, tell me more about the .+")
+
+
+def _overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    """How much two [x, y, w, h] boxes cover each other: the share of the smaller one, 0..1."""
+    w = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+    h = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+    if w <= 0 or h <= 0:
+        return 0.0
+    return w * h / max(1, min(a[2] * a[3], b[2] * b[3]))
+
+
 _SCREEN_MARKS = {"explain_on_screen", "point", "circle", "highlight", "arrow"}
 # The end of Ledger's summary for a Google file: where it is, as an address.
 _LINK_TAIL = re.compile(
