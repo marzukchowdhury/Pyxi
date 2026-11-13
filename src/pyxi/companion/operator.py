@@ -71,15 +71,23 @@ _TARGET = {
 
 ACT = ToolSpec(
     "act",
-    "Do the next 1-4 actions, in order, then look at the screen again. Batch only actions whose "
-    "targets are already visible (click a field, type, press enter); anything after a page change "
-    "waits for the next look.",
+    "Do the next 1-8 actions, in order, then look at the screen again. Batch every action whose "
+    "target is already visible or needs none (click a field, type, press enter, a shortcut on the "
+    "selection); anything after a page change or a menu that has to open waits for the next look.",
     {
         "type": "object",
         "properties": {
             "thinking": {
                 "type": "string",
                 "description": "One line: what you see and why these actions.",
+            },
+            "finish": {
+                "type": "string",
+                "description": "Set ONLY when these actions complete the whole task and each one is "
+                "certain (a shortcut on a selection made in this same act, typing into a box clicked in "
+                "this act, a named button): the one short sentence to tell them, as in `done`. The task "
+                "then ends after these actions with no further look. Leave it out when anything has to "
+                "load or open, when you must choose from what appears, or when a click is on a guessed spot.",
             },
             "actions": {
                 "type": "array",
@@ -162,10 +170,17 @@ keyboard, the way a careful person would. They asked for it and allowed it.
 
 Each turn you get the task, what you've done so far, and the screen now: the window, its UI \
 elements with [ids] and the OCR text lines with [ids], plus a screenshot. Then call `act` with \
-the next 1-4 actions, or `done` when the screen shows the task is finished, or `ask_user` when \
+the next 1-8 actions, or `done` when the screen shows the task is finished, or `ask_user` when \
 only they can decide.
 
 How to be fast and right:
+- Every look costs them about five seconds of waiting, and a task is judged by how long it \
+took. Do as much as is certain in ONE `act`: when the whole run can be done from this screen \
+(type a range into the Name box, enter, ctrl+b, then the colour button), it is one `act`, not \
+four. And when that `act` completes the task, set its `finish` so no further look is needed.
+- Formatting is a shortcut, not a toolbar hunt, in every spreadsheet and document app: ctrl+b \
+bold, ctrl+i italic, ctrl+u underline, ctrl+z undo, ctrl+c/x/v, ctrl+a all, on whatever is \
+selected. Select first (the Name box for a range), then the shortcut, in the same `act`.
 - Aim with element ids or OCR quotes; a box only for icons with no id or words.
 - Prefer the quickest sure way: keyboard shortcuts (ctrl+l to the address bar, ctrl+t new tab, \
 ctrl+s, win to search apps), `open` for a web address or an app, typing into search boxes.
@@ -468,7 +483,7 @@ class Operator:
                 return Outcome(
                     False, str(call.arguments.get("question", "What should I do next?")), steps
                 )
-            actions = [a for a in call.arguments.get("actions", []) if isinstance(a, dict)][:4]
+            actions = [a for a in call.arguments.get("actions", []) if isinstance(a, dict)][:8]
             if (
                 actions
                 and steps
@@ -514,6 +529,7 @@ class Operator:
                     notes.append(note)
                 if note and (note.startswith(("skipped", "failed", "declined"))):
                     break  # the rest of the batch assumed this worked
+            clean = len(done_here) == len(actions) and not notes
             if _finishes(task, done_here):
                 # Live: it clicked Play, then spent a minute alt+tabbing to "check". Say so plainly.
                 notes.append(
@@ -524,6 +540,16 @@ class Operator:
             if any(note.startswith("declined") for note in notes):
                 return Outcome(False, "Okay, I left that for you.", steps)
             await asyncio.sleep(0.35)  # let the app react before looking again
+            finish = str(call.arguments.get("finish") or "").strip()
+            if finish and clean:
+                # The model said this act completes the task. A look by Pyxi itself (under a
+                # second, no model) checks that the screen answered: then it is done, and the
+                # five seconds of asking "is it done?" are not spent. A screen that did not
+                # move is not taken on trust: the loop goes on and the model looks.
+                after = _glance(await self.capture())
+                if look is None or after is None or not _same(look, after):
+                    return Outcome(True, finish, steps)
+                steps[-1].note = "The screen did not change after these. Look before calling it done."
         return Outcome(
             False, "That took more steps than I expected, so I stopped where it is.", steps
         )
@@ -584,7 +610,7 @@ class Operator:
                 f"How it ended: {'done' if out.ok else 'not done'}. {out.summary}\n\n"
                 "Notes you were given for this place:\n" + ("\n".join(f"- {n}" for n in had) or "(none)")
             )
-            res = await self.llm.complete(system=LEARN_SYSTEM, messages=[Message("user", [TextPart(text)])], tools=[NOTES], max_tokens=400)
+            res = await self.llm.complete(system=LEARN_SYSTEM, messages=[Message("user", [TextPart(text)])], tools=[NOTES], max_tokens=1500)
             self.usage = res.usage if self.usage is None else self.usage + res.usage
             call = next((c for c in res.tool_calls if c.name == "notes"), None)
             if call is None:

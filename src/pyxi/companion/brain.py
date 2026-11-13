@@ -732,12 +732,17 @@ class Brain:
         # watched it happen. Live: 'The "MY 2x RANK 1 RTTK CHAMPS REWARDS!" video by AuzioMF is
         # open in Firefox and playing', read out over the founder's next request. And it waits
         # for a quiet moment like any other background line.
-        plain = out.ok and not answers._CAVEAT.search(out.summary or "")
+        # And never on the front of the next answer. Live, 13 November: asked for a table,
+        # Pyxi began "I clicked the AI Sheets AI .xlsx button in GenOffice, and the AI Sheets
+        # spreadsheet workspace is now open, still streaming some data in", the last job's
+        # story, word for word. A job that worked is "Done." unless it comes with a real
+        # reservation or a question; once they have asked for something else it is not said
+        # at all (they saw it); and one that did not work waits for a real silence.
+        moved_on = self._lock.locked()
+        plain = out.ok and not _RESERVATION.search(out.summary or "")
         line = "Done." if plain or not out.summary else split_sentences(out.summary)[0][:140]
-        if plain:
+        if not (plain and moved_on):
             self._spawn(self._say_when_free(line))
-        else:
-            await self.say_line(line, result=True)
 
     def _screens_note(self) -> str:
         """With two or three monitors, what's on each, so 'my left screen' means something and
@@ -2808,6 +2813,7 @@ class Brain:
             self._spoken = {"all": 0, "answer": 0}  # sentences said this turn (fit_to_say)
             self._price_sent_back = False  # a pick's price was sent to be checked at a shop
             self._price_nudged = False  # ... and it was told once more to go and look
+            self._claim_nudged = False  # said it was on it with nothing started: told once
             self._round_kind = "answer"  # what the model is doing this round: see _note_kind
             self._answer_before_round = 0
             self._long_form = asks_long(user_text)
@@ -3389,6 +3395,26 @@ class Brain:
                 self._price_nudged = True
                 unsaid = needs_more = True
                 notes.append(answers.shop_first(self))
+            if (
+                not getattr(self, "_claim_nudged", False)
+                and says_on_it(self._round_say)
+                and all(c.name in QUIET_NOTES for c in calls)
+                and self._operator is None
+                and not self.jobs.active()
+                and not any(k.get("tool") not in QUIET_NOTES for k in self._calls)
+                and round_no < self.settings.budget.max_tool_rounds
+            ):
+                # "Already on it." with a highlight and nothing else (live: half a minute later,
+                # "Are you doing the work? I don't see you doing it."). Said only when a job
+                # has started: once, the model is told to start it or to say it cannot.
+                self._claim_nudged = True
+                unsaid = needs_more = True
+                notes.append(
+                    "You told them you are doing it, and started nothing: pointing at or "
+                    "highlighting something shows it, it changes nothing. Call the tool that does "
+                    "the work now (use_computer in an app, edit_document for a file or a Google "
+                    "doc), with no line of your own before it, or tell them plainly that you can't."
+                )
             for call in calls:
                 if self._speech_gen != self._turn_gen:
                     # They spoke again mid-round: the rest of it is not done behind their back.
@@ -5750,6 +5776,31 @@ def vary_ack(text: str, recent: list[str], pick: Any = random.choice) -> str:
 # is spoken, whatever was written.
 #
 # Tools that start work. A line said beside one is about that work: its first sentence.
+# A job that worked, with something they still need to hear: a real "but", or a question.
+_RESERVATION = re.compile(
+    r"(?i)\?|\b(?:but|however|although|except|instead|couldn'?t|can'?t|didn'?t|wasn'?t|won'?t|"
+    r"failed|unable|warn\w*|errors?|wrong|mistake|only|not (?:able|sure|found|saved|changed|done))\b"
+)
+# Saying the work is under way: "On it." as a sentence of its own (not "her name is on it"),
+# or a job named as being done right now.
+_ON_IT = re.compile(
+    r"(?i)^\W*(?:(?:okay|ok|sure|yes|yep|right|got it)[,.!]?\s+)*"
+    r"(?:(?:i'?m|i am)\s+)?(?:(?:already|right)\s+)?on it\b[\s.!]*$"
+)
+_DOING_NOW = re.compile(
+    r"(?i)\b(?:doing (?:it|that|this)(?: right)? now|working on (?:it|that|this)\b|"
+    r"i'?ll (?:do|get) (?:it|that|this) (?:done )?(?:now|right away)|"
+    r"(?:making|changing|fixing|adding|setting|renaming|bolding|formatting|moving|deleting) "
+    r"(?:it|that|them|those|the \w+)(?: \w+){0,6} now)\b"
+)
+
+
+def says_on_it(text: str) -> bool:
+    """Does this line tell them, in so many words, that Pyxi is doing the job right now? Narrower
+    than claims_work on purpose: an answer with "now" in it is not a promise of work."""
+    return any(_ON_IT.match(part) or _DOING_NOW.search(part) for part in split_sentences(text or ""))
+
+
 ACTS = CAN_REFUSE | {
     "subscriptions", "returns", "fill_form", "check_in_flight", "play_music", "tidy_folder",
     "arrange_windows", "schedule_routine", "travel", "money", "meeting_notes", "make_flashcards",

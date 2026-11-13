@@ -109,7 +109,7 @@ _BLANK_RE = re.compile(
 )
 _SITE_RE = re.compile(
     _LEAD
-    + rf"(?:open(?: up)?|go to|pull up|bring up|launch)\s+(?:up\s+)?"
+    + r"(?:open(?: up)?|go to|pull up|bring up|launch)\s+(?:up\s+)?"
     + r"(?:(?:a\s+)?new\s+(?:tab|window)\s+(?:with|to|for|on|of)\s+)?"  # "open a new tab with Google Maps"
     + rf"({_alts(list(_SITES))})"
     + _TAIL,
@@ -262,12 +262,19 @@ def play_request(text: str) -> tuple[str, str] | None:
 
 
 # "Stop.", "okay stop stop", "cancel that", "never mind": the same as the Stop everything hotkey,
-# at once. A longer sentence ("stop the music", "stop sharing my screen") goes elsewhere.
+# at once. So is stopping the work itself, however it is put ("just stop the work", "stop
+# what you're doing"): live, that one got "Stopping. I won't start anything else." while
+# the hands carried on. A longer sentence about something else ("stop the music", "stop
+# sharing my screen") goes elsewhere.
+_WORK = (
+    r"(?:the\s+(?:work|task|job)|working|doing\s+(?:it|that|this)|"
+    r"what(?:ever)?\s+you(?:'re|\s+are)\s+doing|all\s+of\s+(?:it|that)|everything\s+you(?:'re|\s+are)\s+doing)"
+)
 _STOP = re.compile(
-    r"^\W*(?:(?:ok|okay|no|hey|pyxi|wait|hold on|please)[,.!]?\s+)*"
-    r"(?:stop(?:[,.!]?\s+(?:it|that|now|everything|please|stop|right now))*"
-    r"|cancel(?:\s+(?:it|that|everything))?|never\s*mind|that'?s enough|enough)"
-    r"(?:[,.!]?\s+(?:please|pyxi))?[\s.!]*$",
+    r"^\W*(?:(?:ok|okay|no|hey|pyxi|wait|hold on|please|just|can you|could you)[,.!]?\s+)*"
+    rf"(?:stop(?:[,.!]?\s+(?:it|that|now|everything|please|stop|right now|{_WORK}))*"
+    rf"|cancel(?:\s+(?:it|that|everything|the\s+(?:work|task|job)))?|never\s*mind|that'?s enough|enough)"
+    r"(?:[,.!]?\s+(?:please|pyxi|now|right now))*[\s.!?]*$",
     re.I,
 )
 
