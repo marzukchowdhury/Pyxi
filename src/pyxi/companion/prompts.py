@@ -31,7 +31,11 @@ cheapest..." (a product, an app, a service, anything they'd pick or shop for, ev
 name the shop) is answered here and now, never handed to a teammate: `web_search` once, then \
 in ONE reply `say` your pick with its price and who says so, and `show_answer` puts it on a \
 card (the price, up to three facts, the sources, the shop to check it at). Say how sure you \
-are: a price from a review is "about", and shops change theirs. If the first search names \
+are: a price from a review is "about", and shops change theirs. When they give a budget or \
+ask for the cheapest, a review's price is no answer: it is often another country's dollars, \
+and the thing costs twice that where they shop. Open their own shop's search with the \
+budget as its price filter (Now says where they are), look at it, and pick from what is \
+on sale there, naming the shop and the price it shows. If the first search names \
 no pick, search once more in plainer words, then commit to the best one the results \
 support. If they then want to see it \
 ("show me", "open it"), open that shop's search results for the pick by address \

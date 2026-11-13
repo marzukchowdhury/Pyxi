@@ -1768,7 +1768,7 @@ class Brain:
             result = await run_errand(
                 task=task,
                 user_text=user_text,
-                now=await self._now(),
+                now=(await self._now()) + answers.where_line(),
                 llm=self._errand_llm(),
                 tools=self.connectors.tools(),
                 approve=approve,
@@ -2742,6 +2742,8 @@ class Brain:
                 self._guide_fresh = True  # a new request: a guide in it counts from step 1
             self._pending_say = ""  # an answer held back during a lookup round
             self._spoken = {"all": 0, "answer": 0}  # sentences said this turn (fit_to_say)
+            self._price_sent_back = False  # a pick's price was sent to be checked at a shop
+            self._price_nudged = False  # ... and it was told once more to go and look
             self._round_kind = "answer"  # what the model is doing this round: see _note_kind
             self._answer_before_round = 0
             self._long_form = asks_long(user_text)
@@ -3088,7 +3090,7 @@ class Brain:
                     )
                     if x
                 ),
-                now=await self._now(),
+                now=(await self._now()) + answers.where_line(),
                 language=self._reply_language(),
                 budget_line=f"spent today ${self.turns.spent_today():.3f} of ${budget.daily_cost_usd:.2f}; this turn ${self._usage.cost_usd:.3f} of ${budget.max_cost_usd:.2f}",
             )
@@ -3162,7 +3164,9 @@ class Brain:
                     elif name not in CAN_REFUSE:
                         await speak_early(waiting, wait=False)  # nothing here says no: say it now
                 if rest["say"] is not None and name != "say":
-                    if name not in ("explain_on_screen", "explain_on_picture"):
+                    if name == "show_answer" and answers.price_bound(self._user_text or ""):
+                        pass  # the pick's line waits for its card: the price may be sent back
+                    elif name not in ("explain_on_screen", "explain_on_picture"):
                         waiting, rest["say"] = rest["say"], None
                         await speak_early(waiting, wait=False)  # no card follows: say all of it
                     elif points := complete_items(raw):  # its first point is in: we know now
@@ -3174,7 +3178,12 @@ class Brain:
                     first = first_chunk(got[0]) if got and not got[1] else ""
                     # (A long one waits until what follows shows what it is: a thought said
                     # before a search is not said at all.)
-                    if first and not claims_work(first) and len(first.split()) <= EARLY_WORDS:
+                    if (
+                        first
+                        and not claims_work(first)
+                        and len(first.split()) <= EARLY_WORDS
+                        and not (_HAS_PRICE.search(first) and answers.price_bound(self._user_text or ""))
+                    ):
                         head["text"] = first
                         self._noted |= {
                             int(m.group(2))
@@ -3292,12 +3301,29 @@ class Brain:
             )
             # A line said with a tool that can refuse waits for that tool's answer: "Putting a
             # table into your doc now." is never said and then taken back in the next sentence.
-            gate = max((i for i, c in enumerate(calls) if c.name in CAN_REFUSE), default=-1)
+            # A pick whose price is the point waits for its card too: the card is sent back
+            # when the price was not seen at a shop they can buy at (answers.unchecked_price).
+            can_refuse = CAN_REFUSE | (
+                {"show_answer"} if answers.price_bound(self._user_text or "") else set()
+            )
+            gate = max((i for i, c in enumerate(calls) if c.name in can_refuse), default=-1)
             waits = [c for c in calls[: max(gate, 0)] if c.name == "say" and c.id not in early]
             if waits:
                 rest = [c for c in calls[: gate + 1] if all(c is not w for w in waits)]
                 calls = [*rest, *waits, *calls[gate + 1 :]]
             unsaid = False  # the tool refused, or said its own line: this round's line is dropped
+            if (
+                getattr(self, "_price_sent_back", False)
+                and not getattr(self, "_price_nudged", False)
+                and not answers.looked_at_shop(self)
+                and not any(c.name in ("quick_action", "look_again", "read_tab", "use_tab") for c in calls)
+                and round_no < self.settings.budget.max_tool_rounds
+            ):
+                # A pick sent to their shop for its price, and said again without going there
+                # (live: "my pick under $30", with no card this time). Once: go and look.
+                self._price_nudged = True
+                unsaid = needs_more = True
+                notes.append(answers.shop_first(self))
             for call in calls:
                 if self._speech_gen != self._turn_gen:
                     # They spoke again mid-round: the rest of it is not done behind their back.
@@ -3367,12 +3393,24 @@ class Brain:
                 except Exception as exc:
                     log.exception("tool %s failed", call.name)
                     note = f"{call.name} failed: {exc}"
+                if (
+                    call.name == "show_answer"
+                    and note
+                    and note.startswith("show_answer: not shown")
+                    and (url := answers.shop_url_for(self, args))
+                ):
+                    # The pick's price was not seen where they shop: their shop's own search
+                    # for it is opened here, not left to the model (live, it was asked to go
+                    # and said the pick again half the time).
+                    calls.append(
+                        ToolCall(id="shop", name="quick_action", arguments={"action": "open_url", "value": url})
+                    )
                 if note and note.startswith((f"{call.name}:", f"{call.name} failed:")):
                     # It said no, or broke. Kept on the call, so a turn that picks this one up
                     # is never told the job was "already started or done" (_done_so_far).
                     failed = note.startswith(f"{call.name} failed:")
                     entry["outcome"], entry["note"] = ("failed" if failed else "refused"), note[:200]
-                if call.name in CAN_REFUSE:
+                if call.name in can_refuse:
                     if note and note.startswith(f"{call.name} failed:"):
                         needs_more = True  # it broke: the model says so, instead of the claim
                     self._refused = bool(
@@ -5616,6 +5654,7 @@ ACTS = CAN_REFUSE | {
     "arrange_windows", "schedule_routine", "travel", "money", "meeting_notes", "make_flashcards",
     "fix_code", "watch_me", "check_prices", "create_agent",
 }  # fmt: skip
+_HAS_PRICE = re.compile(r"[$£€]\s?\d|\d\s?(?:dollars|bucks)", re.I)
 OPENER_WORDS = 10  # a line said before a lookup: this short, or it is "On it."
 EARLY_WORDS = 12  # a first sentence this short is spoken as it arrives; a longer one waits
 SAY_LIMIT = {False: (3, 2), True: (6, 5)}  # sentences a turn, and of them the answer's
@@ -5657,14 +5696,12 @@ def fit_to_say(text: str, kind: str, spoken: dict[str, int], long_form: bool) ->
         else:
             return "On it.", 1
     elif kind == "action":
-        keep = plain[:1]
+        keep = plain[:1] if room > 0 or not spoken.get("all", 0) else []
     else:
         n = min(of_answer - spoken.get("answer", 0), room)
         if spoken.get("answer", 0) == 0:
             n = max(n, 1)
         keep = plain[: max(n, 0)]
-        if not long_form and len(keep) == 2 and sum(len(parts[i].split()) for i in keep) > 45:
-            keep = keep[:1]
     if len(keep) == len(plain):
         return text, len(keep)
     kept = set(keep)

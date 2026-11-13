@@ -238,9 +238,151 @@ def shop_search(shop: str, query: str, where: str | None = None) -> CardLink | N
 # ---------------------------------------------------------------------------------- the tool
 
 
+# ------------------------------------------------------------------- a price they can pay
+# Live, 12 November: "the best IEM earphones, my budget is $30" was answered "the Tangzu
+# Waner 2 at about $25", a US review's price. On Amazon.ca, where they shop, it was $56. A
+# review's price is another country's dollars and another month's: when the price is the
+# point (a budget, "the cheapest"), it has to come from a shop they can buy at.
+COUNTRIES = {"ca": "Canada", "uk": "the UK", "au": "Australia", "us": "the US"}
+_MONEY_WORD = r"(?:bucks|dollars?|cad|usd|pounds?|quid)"
+_BUDGET = re.compile(
+    r"(?i)\b(?:budget|under|below|less than|max(?:imum)?|up to|no more than|at most|within|"
+    rf"around|about)\b[^.?!\d$£]{{0,25}}([$£])?\s?(\d[\d,]*(?:\.\d+)?)\s?({_MONEY_WORD})?"
+    rf"|([$£])\s?(\d[\d,]*(?:\.\d+)?)|\b(\d[\d,]*(?:\.\d+)?)\s?({_MONEY_WORD})\b"
+)
+_CHEAPEST = re.compile(r"(?i)\b(?:cheapest|lowest price|best price|best deal|least expensive)\b")
+_SHOPPING = re.compile(r"(?i)\b(?:budget|afford|spend|cheap|price|cost|buy|get|find|best|good)\b")
+_PRICE = re.compile(r"[$£]\s?\d|\d\s?(?:dollars|bucks)", re.I)
+_OWN_MONEY = {"ca": r"CA\$|C\$|CAD", "au": r"A\$|AU\$|AUD", "uk": r"£|GBP", "us": r"\$"}
+_LOOKED = {"look_again", "read_tab", "use_tab", "check_prices"}
+
+
+def where_line() -> str:
+    """A line for the turn's notes: where they are, so a price is read in their money."""
+    cc = country()
+    if cc == "us":
+        return ""
+    return (
+        f"\nThey are in {COUNTRIES[cc]}: a price they say is in their own money, and their "
+        f"shops are the .{_TLDS[cc]} ones (amazon.{_TLDS[cc]}). A US site's $ is not theirs."
+    )
+
+
+def budget_in(text: str) -> float | None:
+    """The most they said they'd pay ("my budget is 30 bucks", "under $50"), if they said."""
+    for m in _BUDGET.finditer(text or ""):
+        sign, number, word = (m.group(1), m.group(2), m.group(3)) if m.group(2) else (
+            (m.group(4), m.group(5), "") if m.group(5) else ("", m.group(6), m.group(7))
+        )
+        said_budget = bool(re.search(r"(?i)\bbudget\b", text))
+        if m.group(2):
+            if not (sign or word or said_budget):
+                continue  # "under 30 minutes" is not money
+        elif not said_budget:
+            continue  # "I paid $20 for this" names a price, not a limit
+        try:
+            amount = float(number.replace(",", ""))
+        except ValueError:
+            continue
+        if amount > 0:
+            return amount
+    return None
+
+
+def price_bound(text: str) -> bool:
+    """Is the price the point of what they asked: a budget, or the cheapest?"""
+    return budget_in(text) is not None or bool(_CHEAPEST.search(text or ""))
+
+
+def _host(url: str) -> str:
+    return urlparse(url if "://" in url else "https://" + url).netloc.lower().removeprefix("www.")
+
+
+def price_from_their_shops(args: dict[str, Any], cc: str) -> bool:
+    """Does the card's price come from where they can buy: a source on their country's sites,
+    or a figure in their own currency by name?"""
+    words = f"{args.get('figure') or ''} {args.get('note') or ''}"
+    if cc == "us":
+        return not re.search(r"CA\$|C\$|CAD|£|€|AUD|A\$", words)
+    if re.search(_OWN_MONEY[cc], words):
+        return True
+    ending = "." + _TLDS[cc]
+    sources = args.get("sources") if isinstance(args.get("sources"), list) else []
+    hosts = [_host(str(s.get("url") or "")) for s in sources if isinstance(s, dict)]
+    return any(h.endswith(ending) for h in hosts if h)
+
+
+def shop_filter_url(cc: str, budget: float | None) -> str:
+    """Amazon's own search in their country, with the budget as its price filter (or sorted
+    cheapest first), for the model to open: ``{q}`` is where what they want goes."""
+    tld = _TLDS.get(cc, "com")
+    tail = f"&rh=p_36%3A-{round(budget * 100)}&s=review-rank" if budget else "&s=price-asc-rank"
+    return f"https://www.amazon.{tld}/s?k={{q}}{tail}"
+
+
+def looked_at_shop(brain: Brain) -> bool:
+    """Has this turn looked at a page (the screen, a tab), or opened their shop's results?"""
+    ending = "." + _TLDS.get(country(), "com")
+    opened = getattr(brain, "_opened_urls", None) or ()
+    return any(c.get("tool") in _LOOKED for c in getattr(brain, "_calls", [])) or any(
+        _host(str(url)).endswith(ending) for url in opened
+    )
+
+
+def shop_first(brain: Brain) -> str:
+    """Said to the model when its pick was sent to the shop and it answered again without going."""
+    cc = country()
+    url = shop_filter_url(cc, budget_in(getattr(brain, "_user_text", "") or ""))
+    return (
+        "You were sent to their shop for the price and haven't looked yet, so your line was not "
+        f"said. Call quick_action open_url {url} now (put what they want, in plain words, for "
+        "{q}), then answer from what that page shows, naming the shop and its price. If it "
+        "can't be opened, say you couldn't check the price where they shop, and give no price."
+    )
+
+
+def unchecked_price(brain: Brain, args: dict[str, Any]) -> str | None:
+    """The note that sends a pick back when its price is the point and was not seen at a shop
+    they can buy at. Once a turn: after it, the model has looked, or says what it couldn't."""
+    text = getattr(brain, "_user_text", "") or ""
+    if getattr(brain, "_price_sent_back", False) or not price_bound(text):
+        return None
+    cc = country()
+    if looked_at_shop(brain):
+        return None  # it looked at a page this turn: the price is what the page shows
+    if price_from_their_shops(args, cc):
+        return None
+    budget = budget_in(text)
+    sources = args.get("sources") if isinstance(args.get("sources"), list) else []
+    seen_at = next((_host(str(s.get("url") or "")) for s in sources if isinstance(s, dict) and s.get("url")), "")
+    brain._price_sent_back = True  # type: ignore[attr-defined]
+    limit = f"a budget of {budget:g}" if budget else "the cheapest"
+    return (
+        f"show_answer: not shown, and your line with it was not said. They asked for {limit} and "
+        f"they are in {COUNTRIES.get(cc, 'their country')}, where the price is in their own money at "
+        f"their own shops. {args.get('figure') or 'That pick'} is from {seen_at or 'a review'}, not from a shop "
+        "they can buy at: it may be another country's dollars or an old price (live, a '$25' "
+        "pick was $56 at their shop). Don't say that price. Their shop's own search for your "
+        "pick, with the price built in, is being opened for you now. When it is on their "
+        "screen, answer from what that page shows is on sale, naming the shop and its price. "
+        "If your pick isn't there at that price, say so and give the best that is."
+    )
+
+
+def shop_url_for(brain: Brain, args: dict[str, Any]) -> str:
+    """Their shop's search for the pick on this card, with the budget as its price filter."""
+    query = " ".join(str(args.get("query") or args.get("title") or "").split())[:120]
+    if not query:
+        return ""
+    budget = budget_in(getattr(brain, "_user_text", "") or "")
+    return shop_filter_url(country(), budget).replace("{q}", quote_plus(query))
+
+
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
     if name != "show_answer":
         return None
+    if no := unchecked_price(brain, args):
+        return no
     button = shop_search(
         str(args.get("shop") or ""), str(args.get("query") or args.get("title") or "")
     )

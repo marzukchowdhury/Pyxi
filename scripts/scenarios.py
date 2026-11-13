@@ -49,6 +49,7 @@ _actions._resolves = _every_site_exists  # type: ignore[assignment]
 
 DB = ".pyxi/pyxi.db"
 MAPS_SCREEN = "turn_7252307e"  # Google Maps showing coffee places open now
+AMAZON_SCREEN = "turn_2261e56c"  # Amazon.ca results for wired IEMs, price filter $15 to $30
 EL = re.compile(r'^\s*\[(\d+)\] (\w+)(?: "(.*)")? @\((-?\d+),(-?\d+),(\d+)x(\d+)\)')
 OCR = re.compile(r'^\[(\d+)\] "(.*)" @\((-?\d+),(-?\d+),(\d+)x(\d+)\)')
 
@@ -488,7 +489,7 @@ SCENARIOS += NEXT_STEP_SCENARIOS
 # "brief": three sentences and 55 words at most for the whole turn.
 TALK_SCENARIOS = [
     ("talk small", "turn_7a0f943b", "Pyxi, how are you?", "brief"),
-    ("talk pick", "turn_195ecc89", "Can you find me the best IEM earphones? My budget is $30.", "brief"),
+    ("talk pick", "turn_195ecc89", "Can you find me the best IEM earphones? My budget is $30.", "brief:shop"),
     ("talk cheapest", "turn_bfa96ecc", "Can you see this earphone? Can you find me the cheapest place where I can get this?", "brief"),
 ]
 SCENARIOS += TALK_SCENARIOS
@@ -654,6 +655,11 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         if action in ("media", "volume", "open_app", "insert", "tabs"):  # nor close their tabs
             background.append(f"{action}: {value}")
             return None
+        if action == "open_url" and "amazon." in value and "/s?" in value:
+            # Their shop's own search: not opened for real, the screen becomes its results.
+            background.append(f"open_url: {value}")
+            brain.screen.ctx = screen_from(AMAZON_SCREEN)
+            return None
         if action == "open_url" and "google.com/maps" in value:
             brain.screen.ctx = screen_from(MAPS_SCREEN)  # what Maps shows once it has loaded
         return await real_quick(action, value)
@@ -802,7 +808,9 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append(f"stock phrase ({STOCK.search(said).group(0)})")
     if rep := repeated_sentence(said):
         problems.append(f"said twice: {rep[:60]}")
-    if expect == "brief":
+    if expect == "brief:shop" and not any("amazon.ca/s?" in b and "p_36" in b for b in background):
+        problems.append("a budget, and the price was not looked for at their shop")
+    if expect.startswith("brief"):
         from pyxi.voice.tts import split_sentences
 
         count, words = len(split_sentences(said, max_chars=10_000)), len(said.split())

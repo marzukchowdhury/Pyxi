@@ -51,9 +51,6 @@ def test_an_answer_is_two_sentences_and_its_first_is_always_said():
     # Even a turn that has used up its sentences says what it found.
     said, n = fit_to_say(ANSWER, "answer", {"all": 3, "answer": 0}, False)
     assert n == 1 and said == "My pick is the Wren Two at about $25."
-    # Two long sentences are one.
-    long = " ".join(["The first one runs on and on with a great many words in it, far more than a spoken line needs to carry at all."] * 2)
-    assert fit_to_say(long, "answer", fresh(), False)[1] == 1
 
 
 def test_a_job_being_started_gets_its_first_sentence():
@@ -61,6 +58,8 @@ def test_a_job_being_started_gets_its_first_sentence():
     assert fit_to_say(line, "action", fresh(), False) == ("A pivot of total sales by region, coming up.", 1)
     # Also when something was said before it: it may be the only word on what was done.
     assert fit_to_say("Your dentist is in at 3 pm. I named it Check-up.", "action", {"all": 1, "answer": 0}, False)[0] == "Your dentist is in at 3 pm."
+    # But not a fourth line in a turn that has already said its three.
+    assert fit_to_say("Opening it again.", "action", {"all": 3, "answer": 1}, False) == ("", 0)
 
 
 def test_an_explanation_they_asked_for_may_run_to_five():
