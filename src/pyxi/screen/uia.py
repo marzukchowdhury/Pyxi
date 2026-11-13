@@ -14,8 +14,10 @@ import ctypes
 import ctypes.wintypes
 import logging
 import sys
+import threading
 import time
 from dataclasses import dataclass
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -329,6 +331,125 @@ def read_foreground(
     return unread_window(follow_mouse, hwnd), []
 
 
+# UI Automation property ids (UIAutomationClient.h), and "this control and everything under it".
+_P_RECT, _P_TYPE, _P_NAME, _P_AUTOMATION_ID, _P_PASSWORD, _P_OFFSCREEN = 30001, 30003, 30005, 30011, 30019, 30022
+_WHOLE_TREE = 1 | 2 | 4  # TreeScope_Element | Children | Descendants
+# A window whose one-call read did not come back in time is walked the old way for a while.
+_ONE_CALL_OFF_S = 60.0
+_one_call_off: dict[int, float] = {}
+
+
+def _keep(role: str, offscreen: bool, w: int, h: int, name: str) -> bool:
+    """Is this control worth showing the model? The same rule for both ways of reading."""
+    if role not in INTERACTIVE and role not in STRUCTURAL and role not in LABELS:
+        return False
+    if offscreen or w < 3 or h < 3:
+        return False
+    if role in LABELS and not name:
+        return False
+    return not (role in STRUCTURAL and not name and w * h < 2_000)
+
+
+def _cached_elements(auto, hwnd: int, max_elements: int, max_depth: int) -> list[RawElement]:
+    """Every control of a window from ONE call across to its program.
+
+    The walk below asks the program a separate question for each property of each control
+    (its kind, its place, its name, ...) and for each step to the next control: thousands of
+    round trips for a web page. Measured on a browser window: 8 s, where the app's budget is
+    1.5 s, so Pyxi saw the top of the page and nothing else. Asked once for the whole tree
+    with those properties attached, the same window came back in 0.3 s. Reading the answer
+    costs nothing: it is all on this side already.
+    """
+    ui = auto.uiautomation._AutomationClient.instance().IUIAutomation
+    request = ui.CreateCacheRequest()
+    for prop in (_P_RECT, _P_TYPE, _P_NAME, _P_AUTOMATION_ID, _P_PASSWORD, _P_OFFSCREEN):
+        request.AddProperty(prop)
+    request.TreeScope = _WHOLE_TREE
+    # The raw view, as the walk below uses: a browser page marks many of its groups and texts
+    # as "not controls", and the control view drops them (and shifts every depth).
+    request.TreeFilter = ui.RawViewCondition
+    root = ui.ElementFromHandle(hwnd).BuildUpdatedCache(request)
+    names = auto.ControlTypeNames
+    out: list[RawElement] = []
+    kept_above: list[tuple[int, int | None]] = []  # depth -> index of the last kept ancestor
+
+    def children(node, depth: int) -> list[tuple[Any, int]]:
+        try:
+            kids = node.GetCachedChildren()
+        except Exception:
+            return []
+        return [(kids.GetElement(i), depth) for i in reversed(range(kids.Length if kids else 0))]
+
+    todo = children(root, 1)
+    while todo and len(out) < max_elements:
+        node, depth = todo.pop()
+        if depth < max_depth:
+            todo += children(node, depth + 1)
+        try:
+            role = names.get(node.CachedControlType, "")
+            rect = node.CachedBoundingRectangle
+            w, h = rect.right - rect.left, rect.bottom - rect.top
+            name = (node.CachedName or "").strip()
+            if not _keep(role, bool(node.CachedIsOffscreen), w, h, name):
+                continue
+        except Exception:
+            continue
+        while kept_above and kept_above[-1][0] >= depth:
+            kept_above.pop()
+        is_password, automation_id = False, ""
+        try:
+            is_password = bool(node.GetCachedPropertyValue(_P_PASSWORD))
+        except Exception:
+            pass
+        try:
+            automation_id = (node.CachedAutomationId or "")[:80]
+        except Exception:
+            pass
+        out.append(
+            RawElement(
+                name=name[:160],
+                role=role.removesuffix("Control"),
+                rect=(rect.left, rect.top, w, h),
+                depth=depth,
+                parent=kept_above[-1][1] if kept_above else None,
+                is_password=is_password,
+                automation_id=automation_id,
+            )
+        )
+        kept_above.append((depth, len(out) - 1))
+    return out
+
+
+def read_in_one_call(auto, hwnd: int, budget_s: float, max_elements: int, max_depth: int) -> list[RawElement] | None:
+    """The window's controls from one call, or None to walk it the old way: the call failed,
+    found nothing, or did not come back within the budget (it cannot be stopped part-way, so
+    it runs on a thread of its own and that window is left to the walk for a minute)."""
+    if not hwnd or _one_call_off.get(hwnd, 0.0) > time.monotonic():
+        return None
+    got: dict[str, Any] = {}
+
+    def work() -> None:
+        try:
+            with auto.UIAutomationInitializerInThread(debug=False):
+                got["out"] = _cached_elements(auto, hwnd, max_elements, max_depth)
+        except Exception as exc:  # a program that will not answer this way still gets the walk
+            got["failed"] = exc
+
+    worker = threading.Thread(target=work, daemon=True, name="pyxi-uia-read")
+    started = time.monotonic()
+    worker.start()
+    worker.join(budget_s)
+    if got.get("out"):
+        log.debug("read %d controls in one call, %.2f s", len(got["out"]), time.monotonic() - started)
+        return got["out"]
+    if worker.is_alive():
+        _one_call_off[hwnd] = time.monotonic() + _ONE_CALL_OFF_S
+        log.info("reading a window in one call took over %.1f s: walking it instead", budget_s)
+    elif "failed" in got:
+        log.info("reading a window in one call failed (%s): walking it instead", got["failed"])
+    return None
+
+
 def _walk(
     auto,
     budget_s: float,
@@ -371,6 +492,9 @@ def _walk(
         hwnd=top.NativeWindowHandle,
     )
 
+    whole = read_in_one_call(auto, int(window.hwnd or hwnd or 0), budget_s, max_elements, max_depth)
+    if whole is not None:
+        return window, whole
     deadline = time.monotonic() + budget_s
     out: list[RawElement] = []
     stack: list[tuple[int, int | None]] = []  # depth -> index of last kept ancestor
@@ -400,9 +524,7 @@ def _walk(
             if w < 3 or h < 3:
                 continue
             name = (control.Name or "").strip()
-            if role in LABELS and not name:
-                continue
-            if role in STRUCTURAL and not name and w * h < 2_000:
+            if not _keep(role, False, w, h, name):
                 continue
         except Exception:
             continue
