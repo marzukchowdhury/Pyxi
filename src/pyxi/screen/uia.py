@@ -21,6 +21,67 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+_WRAPPERS = threading.Lock()
+_wrappers_checked = False
+
+
+def _auto() -> Any:
+    """uiautomation, once its wrappers are known to load (ImportError when it isn't there).
+
+    comtypes writes a Python module for each Windows component, and makes it again when it
+    will not import. First tester, 13 November: several threads did that at the same
+    moment, one read a module another was half way through writing, and every look at the
+    screen from then on failed with "cannot import name 'OLE_YSIZE_HIMETRIC'". So the
+    first use is one thread at a time, and wrappers that will not load are made afresh."""
+    global _wrappers_checked
+    import uiautomation as auto
+
+    if not _wrappers_checked:
+        with _WRAPPERS:
+            if not _wrappers_checked:
+                mend_wrappers()
+                _wrappers_checked = True
+    return auto
+
+
+def mend_wrappers() -> bool:
+    """Load the automation wrappers; if they will not load, clear comtypes' own generated
+    modules (nothing of the user's) and make them again. True when they load."""
+    import importlib
+    from pathlib import Path
+
+    import comtypes.client
+
+    try:
+        comtypes.client.GetModule("UIAutomationCore.dll")
+        return True
+    except Exception as exc:
+        log.warning("the automation wrappers would not load (%s): making them again", exc)
+    import comtypes.gen
+
+    folder = Path(getattr(comtypes.client, "gen_dir", None) or Path(comtypes.gen.__file__).parent)
+    for made in folder.glob("*.py*"):
+        if made.name != "__init__.py":
+            try:
+                made.unlink()
+            except OSError:
+                pass
+    for cached in (folder / "__pycache__").glob("*.pyc") if (folder / "__pycache__").is_dir() else []:
+        try:
+            cached.unlink()
+        except OSError:
+            pass
+    for name in [m for m in sys.modules if m.startswith("comtypes.gen.")]:
+        del sys.modules[name]
+        vars(comtypes.gen).pop(name.rsplit(".", 1)[1], None)
+    importlib.invalidate_caches()
+    try:
+        comtypes.client.GetModule("UIAutomationCore.dll")
+        return True
+    except Exception:
+        log.warning("the automation wrappers could not be made", exc_info=True)
+        return False
+
 # Control types worth showing the model: things you can act on, plus structure and labels.
 INTERACTIVE = {
     "ButtonControl",
@@ -250,7 +311,7 @@ def read_window(
         window.tree = "failed"
         return window, []
     try:
-        import uiautomation as auto
+        auto = _auto()
 
         got = read_in_one_call(auto, hwnd, budget_s, max_elements, max_depth)
     except Exception as exc:
@@ -407,7 +468,7 @@ def read_foreground(
     if not available():
         return None, []
     try:
-        import uiautomation as auto
+        auto = _auto()
     except ImportError:
         return None, []
 
@@ -658,7 +719,7 @@ def read_taskbar(budget_s: float = 0.4) -> list[RawElement]:
     if not available():
         return []
     try:
-        import uiautomation as auto
+        auto = _auto()
 
         out: list[RawElement] = []
         deadline = time.monotonic() + budget_s
@@ -711,7 +772,7 @@ def read_focus() -> RawFocus | None:
     if not available():
         return None
     try:
-        import uiautomation as auto
+        auto = _auto()
 
         with auto.UIAutomationInitializerInThread(debug=False):
             c = auto.GetFocusedControl()
@@ -745,7 +806,7 @@ def browser_url(hwnd: int, budget_s: float = 0.5) -> str | None:
     if not available():
         return None
     try:
-        import uiautomation as auto
+        auto = _auto()
 
         deadline = time.monotonic() + budget_s
         with auto.UIAutomationInitializerInThread(debug=False):
