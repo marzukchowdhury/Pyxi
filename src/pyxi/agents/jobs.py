@@ -48,6 +48,17 @@ LLMFactory = Callable[[AgentProfile], LLMProvider]
 SceneMaker = Callable[[str, str, AgentProfile], Awaitable[dict[str, Any]]]
 
 
+def _answers_at_once(llm: Any) -> Any:
+    """This chat model set to answer without thinking first, or None when it isn't one that
+    can be asked that way (a local model, a test's script) or already has a setting of its
+    own. The model and everything else about it stay the same."""
+    from pyxi.stream_llm import StreamingChat
+
+    if isinstance(llm, StreamingChat) and not llm.reasoning:
+        return StreamingChat(llm.model, reasoning={"enabled": False})
+    return None
+
+
 class Handoff(BaseModel):
     agent: str
     task: str
@@ -973,6 +984,27 @@ class JobManager:
             )
             return response.text, response.usage.cost_usd
 
+        # The same model answering straight away, for the sheets of a big workbook only
+        # (ledger_build.py). Left to think first, each of those replies spent most of its
+        # time, and sometimes its whole length limit, before it wrote a cell.
+        quick = _answers_at_once(llm)
+
+        async def ask_quick(system: str, prompt: str) -> tuple[str, float]:
+            nonlocal quick
+            if quick is not None:
+                try:
+                    response = await quick.complete(
+                        system=system + UNTRUSTED_RULE, messages=[Message.user(prompt)], max_tokens=8000
+                    )
+                    return response.text, response.usage.cost_usd
+                except Exception as exc:
+                    if getattr(exc, "status_code", None) not in (400, 404, 422):
+                        raise
+                    # This model can't be asked that way: the usual way, from here on.
+                    log.warning("ledger: the model refused a no-thinking call; using the usual one")
+                    quick = None
+            return await ask(system, prompt)
+
         async def progress(line: str) -> None:
             await self._status(job, line[:1].upper() + line[1:])
 
@@ -1002,6 +1034,7 @@ class JobManager:
                 context=job.context,
                 progress=progress,
                 new=[n for n in job.params.get("new") or [] if isinstance(n, dict)],
+                ask_quick=ask_quick if quick is not None else None,
             )
         except ledger_live.Unreachable as exc:
             # The app went away or got busy between the look and the job. Nothing was changed,

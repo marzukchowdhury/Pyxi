@@ -410,15 +410,21 @@ BRIEF = (
 
 
 def plan_reply(names: list[str] = SHEETS) -> str:
+    """The plan: where everything is on every sheet, so each can be written without seeing
+    the others. The first sheet holds the inputs, the second reads it, the last reads the
+    second."""
     return json.dumps(
         {
             "sheets": [
                 {
                     "name": n,
                     "purpose": f"The {n.lower()} figures",
-                    "columns": ["Item", "Year 1", "Year 2"],
-                    "rows": 3,
-                    "needs": ["Assumptions"] if n == "Revenue" else [],
+                    "columns": (
+                        ["Input", "Value"] if n == names[0] and len(names) > 2 else ["Item", "Year 1", "Year 2"]
+                    ),
+                    "each_row": "one line",
+                    "rows": 1,
+                    "needs": [names[0]] if [n] == names[1:2] else names[1:2] if n == names[-1] else [],
                 }
                 for n in names
             ]
@@ -426,20 +432,25 @@ def plan_reply(names: list[str] = SHEETS) -> str:
     )
 
 
-def sheet_reply(name: str) -> str:
-    cells: dict[str, Any] = {"A1": "Item", "B1": "Year 1", "C1": "Year 2", "A2": f"{name} line", "B2": 100}
-    cells["C2"] = "=B2*(1+'Assumptions'!B2)" if name == "Revenue" else "=B2*1.1"
-    if name == "Assumptions":
-        cells = {"A1": "Input", "B1": "Value", "A2": "Growth rate", "B2": 0.2}
-    return json.dumps(
+def sheet_reply(name: str, names: list[str] = SHEETS) -> str:
+    """One sheet, in the compact edits a build's reply may use: a block of rows, and a
+    formula filled down a column. No "sheet" on them, and nothing for the header's look."""
+    second = names[1] if len(names) > 2 else ""
+    edits: list[dict[str, Any]] = [
+        {"op": "set_cells", "start": "A1", "rows": [["Item", "Year 1", "Year 2"], [f"{name} line", 100]]},
         {
-            "edits": [
-                {"op": "set_cells", "sheet": name, "cells": cells},
-                {"op": "format", "sheet": name, "range": "A1:C1", "bold": True},
-            ],
-            "more": False,
-        }
-    )
+            "op": "fill",
+            "range": "C2:C2",
+            "formula": f"=B{{r}}*(1+'{names[0]}'!B2)" if name == second else "=B{r}*1.1",
+        },
+    ]
+    if name == names[0] and second:
+        edits = [{"op": "set_cells", "start": "A1", "rows": [["Input", "Value"], ["Growth rate", 0.2]]}]
+    if name == names[-1] and second:
+        edits.append(
+            {"op": "set_cells", "cells": {"A4": "Total revenue", "B4": f"=SUM('{second}'!B2:C2)"}}
+        )
+    return json.dumps({"edits": edits, "more": False})
 
 
 class Planner:
@@ -449,33 +460,36 @@ class Planner:
     def __init__(self, names: list[str] = SHEETS, cut: dict[str, str] | None = None) -> None:
         self.names = names
         self.cut = cut or {}
-        self.asked: list[str] = []  # "plan", a sheet's name, "part:<sheet>", "finish", "whole"
+        self.asked: list[str] = []  # "plan", a sheet's name, "part:<sheet>", "mend:<sheet>", "whole"
         self.sizes: list[int] = []
         self.prompts: list[str] = []
+        self.flying = self.most = 0  # calls in flight now, and the most there ever were
 
     async def __call__(self, system: str, prompt: str) -> tuple[str, float]:
         self.prompts.append(prompt)
-        reply = self.reply(system, prompt)
+        self.flying += 1
+        self.most = max(self.most, self.flying)
+        try:
+            await asyncio.sleep(0.01)
+            reply = self.reply(system, prompt)
+        finally:
+            self.flying -= 1
         self.sizes.append(len(reply))
         return reply, 0.001
+
+    def sheet(self, name: str) -> str:
+        return sheet_reply(name, self.names)
+
+    def mend(self, name: str, prompt: str) -> str:
+        return json.dumps({"edits": []})
 
     def reply(self, system: str, prompt: str) -> str:
         if "plan it first" in system:
             self.asked.append("plan")
             return plan_reply(self.names)
-        if "This is the last step" in prompt:
-            self.asked.append("finish")
-            return json.dumps(
-                {
-                    "edits": [
-                        {
-                            "op": "set_cells",
-                            "sheet": self.names[-1],
-                            "cells": {"A4": "Total revenue", "B4": "=SUM('Revenue'!B2:C2)"},
-                        }
-                    ]
-                }
-            )
+        if m := re.search(r"This is the last step, for the sheet '([^']+)' only", prompt):
+            self.asked.append(f"mend:{m.group(1)}")
+            return self.mend(m.group(1), prompt)
         if m := re.search(r"The sheet '([^']+)' \(number \d+ of \d+\) is too long", prompt):
             name = m.group(1)
             self.asked.append(f"part:{name}")
@@ -495,8 +509,8 @@ class Planner:
             name = m.group(1)
             self.asked.append(name)
             if name in self.cut:  # cut off at the length limit, mid-cell
-                return sheet_reply(name)[:60]
-            return sheet_reply(name)
+                return self.sheet(name)[:60]
+            return self.sheet(name)
         self.asked.append("whole")
         return json.dumps({"edits": [{"file": 0, "op": "totals_row"}], "summary": "Totals added."})
 
@@ -521,7 +535,10 @@ def test_only_a_big_build_is_planned_first(task, big):
     assert ledger_build.looks_big(task) is big
 
 
-async def test_fifteen_sheets_are_built_a_sheet_at_a_time(tmp_path):
+async def test_fifteen_sheets_are_built_all_at_the_same_time(tmp_path):
+    """Live, 13 November: the same workbook took 172.8 s (and 285 s the next time) with the
+    sheets written one after another, each shown the ones it reads. Written against the
+    plan, none waits for another: about 20 s."""
     model = Planner()
     said: list[str] = []
 
@@ -540,24 +557,314 @@ async def test_fifteen_sheets_are_built_a_sheet_at_a_time(tmp_path):
     wb = load_workbook(r.outputs[0])
     assert wb.sheetnames == SHEETS  # all fifteen, in order, and no leftover "Sheet"
     for name in SHEETS[1:-1]:
+        # The header's look is done with no model: bold, and frozen above the data.
         assert wb[name]["A1"].value == "Item" and wb[name]["A1"].font.bold, name
+        assert wb[name].freeze_panes == "A2" and wb[name].column_dimensions["B"].width > 12
         assert wb[name]["A2"].value == f"{name} line"
     assert wb["Assumptions"]["B2"].value == 0.2
     assert wb["Revenue"]["C2"].value == "=B2*(1+'Assumptions'!B2)"  # a live formula across sheets
-    assert wb["Dashboard"]["B4"].value == "=SUM('Revenue'!B2:C2)"  # the last step
-    # One small call for the plan, one a sheet, one to tie them together: none of them big.
-    assert model.asked[0] == "plan" and model.asked[-1] == "finish"
-    assert sorted(model.asked[1:-1]) == sorted(SHEETS) and "whole" not in model.asked
+    assert wb["Dashboard"]["B4"].value == "=SUM('Revenue'!B2:C2)"
+    # One small call for the plan and one a sheet, none of them big. Every formula between
+    # sheets reads a cell that is there, so nothing went back to the model after that.
+    assert model.asked[0] == "plan" and sorted(model.asked[1:]) == sorted(SHEETS)
     assert max(model.sizes) < 2500
-    # A sheet that reads from another was written after it, and shown its cells.
-    assert model.asked.index("Revenue") > model.asked.index("Assumptions")
+    # No sheet waited for another: all fifteen were with the model at once.
+    assert model.most == 15
+    # A sheet that reads another is told where that sheet's cells are by the plan, not shown them.
     revenue = next(p for p in model.prompts if "ONLY the sheet 'Revenue'" in p)
-    assert "Sheets this one reads from" in revenue and "B2=0.2" in revenue
+    assert "1. Assumptions: The assumptions figures. Row 1 (headers): A=Input | B=Value. Data: rows 2 to 2" in revenue
+    assert "It takes its figures from Assumptions with formulas" in revenue
+    assert "B2=0.2" not in revenue
+    # The part every sheet's prompt shares comes first and is the same in all of them.
+    shared = revenue[: revenue.index("Now write ONLY")]
+    assert all(p.startswith(shared) for p in model.prompts[1:])
+    # Which way the figures run: Assumptions is read by Revenue, and through it by Dashboard.
+    first = next(p for p in model.prompts if "ONLY the sheet 'Assumptions'" in p)
+    assert "no formula here may read them (that would go round in a circle): Revenue, Dashboard." in first
     assert r.headline.startswith("Built all 15 sheets: Assumptions, Revenue")
     assert r.built == {"done": SHEETS, "not_done": []} and not r.problems
-    assert "Built the Cash Flow sheet" in r.changes and round(r.cost_usd, 3) == 0.017
+    assert "Built the Cash Flow sheet" in r.changes and round(r.cost_usd, 3) == 0.016
     assert "planning the sheets" in said and "building 15 sheets" in said
     assert any(line.startswith("built ") and "of 15)" in line for line in said)
+    assert "checking the formulas between sheets" in said
+
+
+class Shifted(Planner):
+    """A model whose Revenue sheet doesn't keep to the plan: a title in row 1, so its header
+    and everything under it is one row lower than the other sheets were told."""
+
+    def sheet(self, name: str) -> str:
+        if name != "Revenue":
+            return super().sheet(name)
+        rows = [["NEXORA revenue"], ["Item", "Year 1", "Year 2"], ["Revenue line", 100, "=B3*(1+'Assumptions'!B2)"]]
+        return json.dumps({"edits": [{"op": "set_cells", "start": "A1", "rows": rows}], "more": False})
+
+
+async def test_a_sheet_that_left_its_plan_has_its_readers_moved_with_no_model(tmp_path):
+    """Dashboard was written against the plan: Revenue's figures in B2:C2. Revenue came out
+    with a title above its header, so they are in B3:C3. Found and put right here."""
+    model = Shifted()
+    r = await run_ledger(
+        BRIEF, files=[], new=[{"kind": "xlsx", "title": "NEXORA"}], new_dir=tmp_path, ask=model
+    )
+    wb = load_workbook(r.outputs[0])
+    assert wb["Revenue"]["B3"].value == 100 and wb["Revenue"]["A1"].value == "NEXORA revenue"
+    assert wb["Dashboard"]["B4"].value == "=SUM('Revenue'!B3:C3)"
+    assert not [a for a in model.asked if a.startswith("mend:")] and not r.problems
+
+
+class Astray(Planner):
+    """A model whose Dashboard reads a cell of Revenue that nothing is in, and a name that
+    nobody defined. Asked again with the real cells in front of it, it reads the right one."""
+
+    def sheet(self, name: str) -> str:
+        if name != "Dashboard":
+            return super().sheet(name)
+        cells = {"A1": "Item", "B1": "Year 1", "A2": "Revenue", "B2": "='Revenue'!F9", "B3": "=Growth_Placeholder"}
+        return json.dumps({"edits": [{"op": "set_cells", "cells": cells}], "more": False})
+
+    def mend(self, name: str, prompt: str) -> str:
+        cells = {"B2": "='Revenue'!C2", "B3": "='Assumptions'!B2"}
+        return json.dumps({"edits": [{"op": "set_cells", "cells": cells}]})
+
+
+async def test_a_formula_that_reads_nothing_goes_back_with_the_real_cells(tmp_path):
+    model = Astray()
+    r = await run_ledger(
+        BRIEF, files=[], new=[{"kind": "xlsx", "title": "NEXORA"}], new_dir=tmp_path, ask=model
+    )
+    wb = load_workbook(r.outputs[0])
+    assert wb["Dashboard"]["B2"].value == "='Revenue'!C2" and wb["Dashboard"]["B3"].value == "='Assumptions'!B2"
+    # Only the sheet with the trouble went back, once, and was shown what is really there.
+    assert [a for a in model.asked if a.startswith("mend:")] == ["mend:Dashboard"]
+    mend = model.prompts[-1]
+    assert "- B2: ='Revenue'!F9  ('Revenue'!F9 is empty)" in mend
+    assert "- B3: =Growth_Placeholder  (nothing is called Growth_Placeholder)" in mend
+    assert "C2==B2*(1+'Assumptions'!B2)" in mend  # Revenue as it really is
+    assert r.headline.startswith("Built all 15 sheets") and not r.problems
+
+    class Stubborn(Astray):
+        def mend(self, name: str, prompt: str) -> str:
+            return json.dumps({"edits": []})
+
+    r = await run_ledger(
+        BRIEF, files=[], new=[{"kind": "xlsx", "title": "NEXORA 2"}], new_dir=tmp_path, ask=Stubborn()
+    )
+    assert r.headline.startswith("Built all 15 sheets")  # it is built; what is still wrong is said
+    assert r.problems == ["2 formulas on Dashboard still read a cell with nothing in it (B2, B3)."]
+
+
+async def test_a_call_turned_away_is_made_again_not_written_in_parts(tmp_path, monkeypatch):
+    """Fifteen calls at once can be too many for the service. The one it turns away waits a
+    moment and goes again; it is not taken for a reply that was cut off."""
+    monkeypatch.setattr(ledger_build, "BACKOFF", 0.01)
+
+    class Busy(Exception):
+        status_code = 429
+
+    class Crowded(Planner):
+        turned = 0
+
+        def sheet(self, name: str) -> str:
+            if name == "Opex" and self.turned < 2:
+                self.turned += 1
+                raise Busy("Too many requests")
+            return super().sheet(name)
+
+    model = Crowded()
+    r = await run_ledger(
+        BRIEF, files=[], new=[{"kind": "xlsx", "title": "NEXORA"}], new_dir=tmp_path, ask=model
+    )
+    assert model.asked.count("Opex") == 3 and not [a for a in model.asked if a.startswith("part:")]
+    assert r.headline.startswith("Built all 15 sheets") and not r.problems
+    assert load_workbook(r.outputs[0])["Opex"]["A2"].value == "Opex line"
+
+
+async def test_only_what_needs_thought_goes_to_the_model_that_thinks(tmp_path):
+    """Left to think, a call takes as long as it likes (live: a plan that thought for 30 s
+    and hit its length limit; 285 s for the workbook). So when the caller has the same
+    model with thinking off (``ask_quick``), the plan and the sheets of typed-in rows go
+    there, and only a sheet that reads other sheets is given time to think."""
+    usual, quick = Planner(), Planner()
+    r = await run_ledger(
+        BRIEF, files=[], new=[{"kind": "xlsx", "title": "NEXORA"}], new_dir=tmp_path,
+        ask=usual, ask_quick=quick,
+    )  # fmt: skip
+    assert sorted(usual.asked) == ["Dashboard", "Revenue"]  # the two that read another sheet
+    assert quick.asked[0] == "plan" and len(quick.asked) == 14 and usual.most == 2
+    assert r.headline.startswith("Built all 15 sheets") and not r.problems
+    # A small edit never asks the quick one.
+    usual, quick = Planner(), Planner()
+    await run_ledger("add a totals row", files=[str(budget(tmp_path / "b.xlsx"))], ask=usual, ask_quick=quick)
+    assert usual.asked == ["whole"] and quick.asked == []
+
+
+async def test_a_sheet_whose_thinking_ate_its_reply_is_asked_again_whole(tmp_path):
+    """A reply that thought until its length limit has no cells in it at all. That is not a
+    sheet too long for one reply: it is asked for once more, straight away and whole, and
+    is not written a few rows at a time."""
+    usual = Planner(cut={"Revenue": "once"})
+    quick = Planner()
+    r = await run_ledger(
+        BRIEF, files=[], new=[{"kind": "xlsx", "title": "NEXORA"}], new_dir=tmp_path,
+        ask=usual, ask_quick=quick,
+    )  # fmt: skip
+    assert usual.asked.count("Revenue") == 1 and quick.asked.count("Revenue") == 1
+    assert sum("Your last reply could not be read" in p for p in quick.prompts) == 1
+    assert not [a for a in usual.asked + quick.asked if a.startswith("part:")]
+    assert load_workbook(r.outputs[0])["Revenue"]["C2"].value == "=B2*(1+'Assumptions'!B2)"
+    assert r.headline.startswith("Built all 15 sheets") and not r.problems
+
+
+def test_the_quick_model_is_the_same_model_with_thinking_off():
+    from pyxi.agents.jobs import _answers_at_once
+    from pyxi.stream_llm import StreamingChat
+
+    quick = _answers_at_once(StreamingChat("anthropic/claude-haiku-5.5"))
+    assert quick.model == "anthropic/claude-haiku-5.5" and quick.reasoning == {"enabled": False}
+    # A model with a setting of its own keeps it, and a model that isn't this kind has none.
+    assert _answers_at_once(StreamingChat("x", reasoning={"effort": "low"})) is None
+    assert _answers_at_once(SimpleNamespace(model="x")) is None
+
+
+async def test_a_model_that_cannot_be_asked_without_thinking_builds_the_usual_way(
+    settings, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("pyxi.agents.pixel_common.pyxi_folder", lambda: tmp_path)
+    monkeypatch.setattr(filework, "open_path", lambda path: None)
+    model = Planner()
+    refused: list[str] = []
+
+    class Refused(Exception):
+        status_code = 400
+
+    class NoSuchSetting:
+        async def complete(self, *, system, messages, **_):
+            refused.append(system[:20])
+            raise Refused("reasoning.enabled is not supported by this model")
+
+    class AsLLM:
+        async def complete(self, *, system, messages, **_):
+            text, cost = await model(system, messages[-1].parts[0].text)
+            return SimpleNamespace(text=text, usage=SimpleNamespace(cost_usd=cost))
+
+    monkeypatch.setattr("pyxi.agents.jobs._answers_at_once", lambda llm: NoSuchSetting())
+    brain, _ = make_brain(settings, llm=AsLLM())
+    job = await brain.jobs.start("ledger", BRIEF, params={"new": [{"kind": "xlsx", "title": "NEXORA"}]})
+    job = await brain.jobs.wait(job.id)
+    await settle(brain)
+    assert job.status == "done" and job.summary.startswith("Built all 15 sheets"), job.summary
+    assert len(refused) == 1  # asked that way once, refused, and never again
+    assert model.asked[0] == "plan" and sorted(model.asked[1:]) == sorted(SHEETS)
+
+
+def test_compact_edits_become_plain_set_cells():
+    block = {"op": "set_cells", "sheet": "Tax", "start": "B2", "rows": [[1, None, "x"], ["=A1"]]}
+    assert ledger_build.expand(block) == {
+        "op": "set_cells", "sheet": "Tax", "cells": {"B2": 1, "D2": "x", "B3": "=A1"}
+    }  # fmt: skip
+    fill = {"op": "fill", "range": "H3:H5", "formula": "=H{r-1}+F{r}-G{r}"}
+    assert ledger_build.expand(fill)["cells"] == {
+        "H3": "=H2+F3-G3", "H4": "=H3+F4-G4", "H5": "=H4+F5-G5"
+    }  # fmt: skip
+    # Over several columns the letters move along, as a formula dragged to the right does.
+    # Live, F2:G25 filled with ='General Journal'!F{r} put the debits in the credits column
+    # too, and the trial balance came to nothing on both sides.
+    across = {"op": "fill", "range": "F2:G3", "formula": "='Q1 2026'!F{r}+$A{r}+LOG10(F$1)"}
+    assert ledger_build.expand(across)["cells"] == {
+        "F2": "='Q1 2026'!F2+$A2+LOG10(F$1)", "G2": "='Q1 2026'!G2+$A2+LOG10(G$1)",
+        "F3": "='Q1 2026'!F3+$A3+LOG10(F$1)", "G3": "='Q1 2026'!G3+$A3+LOG10(G$1)",
+    }  # fmt: skip
+    plain = {"op": "format", "range": "A1:C1", "bold": True}
+    assert ledger_build.expand(plain) is plain
+    for bad in (
+        {"op": "fill", "range": "H2:H9", "formula": "=IF(A{r}=A{p},H{p},0)"},  # live: {p} went in as typed
+        {"op": "fill", "range": "nowhere", "formula": "=A{r}"},
+        {"op": "fill", "range": "A1:ZZ9999", "formula": "=1"},
+        {"op": "set_cells", "start": "A1", "rows": [[None]]},
+    ):
+        with pytest.raises(ValueError):
+            ledger_build.expand(bad)
+
+
+def test_one_bracket_too_many_is_still_a_reply_and_a_cut_off_one_is_not():
+    # Live, with thinking off: two replies in fifteen ended like these, whole but for a bracket.
+    whole = {"edits": [{"op": "fill", "range": "B2:B9", "formula": '=IF(A{r}="(x)]","",1)'}], "more": False}
+    text = json.dumps(whole)
+    assert ledger_build.read_json(text.replace('], "more"', ']), "more"')) == whole
+    assert ledger_build.read_json(text.replace('], "more"', ']], "more"')) == whole
+    assert ledger_build.read_json(text[:70]) is None  # cut off: nothing is made up to close it
+
+
+def test_where_a_sheet_really_is_and_the_formulas_that_follow():
+    S = ledger_build.Sheet
+    names = {"general journal": "General Journal", "trial balance": "Trial Balance"}
+    # A journal planned at 12 rows that took 24: its Total is on row 26, not 14.
+    journal = S("General Journal", columns=["No", "Date", "Code", "Debit", "Credit"], rows=12, total=True)
+    grid: dict[tuple[int, int], Any] = {(1, c): h for c, h in enumerate(journal.columns, 1)}
+    for row in range(2, 26):
+        grid[(row, 1)], grid[(row, 4 if row % 2 == 0 else 5)] = row, 100
+    grid[(26, 3)], grid[(26, 4)] = "Total", "=SUM(D2:D13)"
+    moved = ledger_build.moves(journal, grid)
+    assert moved.rows == {14: 26} and moved.end == (13, 25) and not moved.shift
+    reads = "=SUMIFS('General Journal'!D2:D13,'General Journal'!C2:C13,A2)+'General Journal'!D14"
+    assert ledger_build.remap(reads, "Trial Balance", names, {"General Journal": moved}) == (
+        "=SUMIFS('General Journal'!D2:D25,'General Journal'!C2:C25,A2)+'General Journal'!D26"
+    )
+    assert ledger_build.to_the_end("=SUM(D2:D13)", moved.end) == "=SUM(D2:D25)"
+    # A sheet as planned moves nothing, and a formula with nothing to move is left alone.
+    assert not ledger_build.moves(S("Tax", columns=["Item", "Amount"], rows=1), {(1, 1): "Item", (1, 2): "Amount", (2, 1): "VAT"})
+    assert ledger_build.remap("='Trial Balance'!C5*2", "Tax", names, {}) == "='Trial Balance'!C5*2"
+    # A sheet called by a name that is nearly its own (live: 'General Journal' for Journal,
+    # 144 formulas) is the sheet that was meant, when only one could be.
+    short = {"journal": "Journal", "ledger": "Ledger", "tax": "Tax"}
+    assert ledger_build.remap("=SUM('General Journal'!F:F)+'general ledger'!B2+Taxes!A1", "Tax", short, {}) == (
+        "=SUM('Journal'!F:F)+'Ledger'!B2+Taxes!A1"
+    )
+    # A named line that sits one row lower than planned is found by its name.
+    tb = S("Trial Balance", columns=["Code", "Debit"], lines=["1000", "1100", "1200"])
+    lower = {(1, 1): "Code", (1, 2): "Debit", (2, 1): 1000, (3, 1): "Assets", (4, 1): 1100, (5, 1): 1200}
+    assert ledger_build.moves(tb, lower).rows == {3: 4, 4: 5}
+    # What a formula reads that isn't there; a blank inside a table of records is not that.
+    cells = {"General Journal": grid, "Trial Balance": lower}
+    bad = ledger_build.broken(
+        "='General Journal'!E2+'General Journal'!Z9+Nope!A1+'Trial Balance'!B3+SUM('General Journal'!H2:H9)",
+        "Tax", names, cells, frozenset({"General Journal"}),
+    )  # fmt: skip
+    assert bad == [
+        "there is no sheet Nope", "'General Journal'!Z9 is empty", "'Trial Balance'!B3 is empty",
+        "'General Journal'!H2:H9 has nothing in it",
+    ]  # fmt: skip
+    assert ledger_build.broken('=IF(A1="Done!","x",1)', "Tax", names, cells) == []
+    assert ledger_build.reads_itself("=SUM(B2:B4)", 4, 2) and not ledger_build.reads_itself("='Tax'!B4+B3", 4, 2)
+    # Counting rows reads none of them (live: 24 such formulas went back to the model for 18 s).
+    assert not ledger_build.reads_itself("=INDEX('Tax'!$C$2:$C$25,ROWS($B$2:B4))", 4, 2)
+    assert ledger_build.made_up_names("=Cash_Flow_Placeholder+SUM(B4:B6)*TRUE") == ["Cash_Flow_Placeholder"]
+    assert ledger_build.made_up_names("=IFERROR(VLOOKUP(A2,'Chart of Accounts'!$A$2:$B$23,2,FALSE),\"n/a\")") == []
+
+
+def test_the_plan_fixes_where_everything_is():
+    plan = ledger_build.read_plan(
+        {
+            "sheets": [
+                {"name": "Chart of Accounts", "columns": ["Code", "Name"], "lines": ["1000", "1100"], "needs": ["Trial Balance"]},
+                {"name": "General Journal", "columns": ["No", "Code", "Debit", "Credit"], "each_row": "one debit or credit line", "rows": 24, "total": True},
+                {"name": "Trial Balance", "columns": ["Code", "Debit", "Credit"], "lines": ["same as Chart of Accounts"], "total": True, "needs": ["Chart of Accounts", "General Journal"]},
+            ]
+        },
+        "xlsx",
+    )
+    chart, journal, tb = plan
+    assert tb.lines == ["1000", "1100"] and (tb.last, tb.total_row) == (3, 4)
+    assert (journal.last, journal.total_row) == (25, 26)
+    assert journal.line(2) == (
+        "2. General Journal: . Row 1 (headers): A=No | B=Code | C=Debit | D=Credit. "
+        "Data: rows 2 to 25, each row one debit or credit line. Total: row 26 (A26 says Total)."
+    )
+    assert "Column A: A2=1000 | A3=1100." in tb.line(3)
+    # Two sheets that read each other: the earlier one's need is dropped, so figures run one way.
+    assert chart.needs == [] and tb.needs == ["Chart of Accounts", "General Journal"]
+    assert chart.read_by == ["Trial Balance"] and tb.read_by == []
 
 
 async def test_a_cut_off_sheet_is_asked_for_again_in_parts_not_the_whole_job(tmp_path):
@@ -702,9 +1009,10 @@ async def test_a_google_sheet_is_built_the_same_way():
     brief = "Build a five-tab plan: " + ", ".join(names) + ". Each with a header row and figures."
     r = await run_ledger(brief, files=[], google=g, google_refs=["new sheet: NEXORA"], ask=model)
     assert list(g.tabs) == names  # Sheet1 became the first, the rest were added in order
-    assert g.tabs["Sales"]["cells"]["A2"] == "Sales line" and g.tabs["Sales"]["cells"]["C2"] == "=B2*1.1"
+    assert g.tabs["Sales"]["cells"]["A2"] == "Sales line" and g.tabs["Staff"]["cells"]["C2"] == "=B2*1.1"
     assert g.tabs["Costs"]["cells"]["A3"] == "Costs line 2"  # the cut-off sheet, in parts
-    assert g.tabs["Summary"]["cells"]["B4"] == "=SUM('Revenue'!B2:C2)"
+    assert g.tabs["Summary"]["cells"]["B4"] == "=SUM('Sales'!B2:C2)"
+    assert g.tabs["Sales"]["cells"]["C2"] == "=B2*(1+'Inputs'!B2)" and not r.problems
     assert g.formats >= 4
     assert r.links == ["https://docs.google.com/spreadsheets/d/sheet123/edit"]
     assert r.headline.startswith("Built all 5 sheets: Inputs, Sales, Costs, Staff, Summary.")
