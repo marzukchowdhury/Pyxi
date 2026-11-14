@@ -1798,6 +1798,7 @@ async def main(opts: argparse.Namespace) -> int:
         print(f"(written to {opts.out})")
         return 0
     tmp = Path(tempfile.mkdtemp(prefix="pyxi-screen-tab-"))
+    __import__("atexit").register(__import__("shutil").rmtree, tmp, ignore_errors=True)  # a GB a run was left in Temp
     site = Site()
     names = [n.strip() for n in opts.browsers.split(",") if n.strip()]
     browsers: list[Browser] = []

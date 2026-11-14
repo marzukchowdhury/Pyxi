@@ -1329,6 +1329,7 @@ async def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "errands":  # python scripts/scenarios.py errands [filter]
         only = sys.argv[2] if len(sys.argv) > 2 else ""
         tmp = Path(tempfile.mkdtemp(prefix="pyxi_errands_"))
+        __import__("atexit").register(__import__("shutil").rmtree, tmp, ignore_errors=True)  # a GB a run was left in Temp
         results = []
         for name, said, expect in ERRANDS:
             if only and not re.search(only, name):
@@ -1344,6 +1345,7 @@ async def main() -> None:
     repeats = int(sys.argv[1]) if len(sys.argv) > 1 else 2
     only = sys.argv[2] if len(sys.argv) > 2 else ""  # run just the scenarios whose name matches this (a regex)
     tmp = Path(tempfile.mkdtemp(prefix="pyxi_scen_"))
+    __import__("atexit").register(__import__("shutil").rmtree, tmp, ignore_errors=True)  # a GB a run was left in Temp
     results = []
     for r in range(repeats):
         for name, turn_id, q, expect in SCENARIOS:
