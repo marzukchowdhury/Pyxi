@@ -424,7 +424,7 @@ export interface Hello {
  * and tells the brain where it is; the brain keeps the marker, voices the lines, hands over
  * their first spoken words, and saves what they chose to tell it. Nothing here leaves the PC.
  */
-export type OnboardingStep = "arrival" | "talk" | "screen" | "about" | "google" | "demos" | "landing";
+export type OnboardingStep = "code" | "arrival" | "talk"| "screen" | "about" | "google" | "demos" | "landing";
 export type OnboardingEnding = "finished" | "skipped" | "underage" | "failed";
 /** What they told the tour. Every field is optional; the brain keeps only what looks right. */
 export interface OnboardingDetails {
@@ -436,8 +436,9 @@ export interface OnboardingDetails {
   use?: string;
 }
 export type OnboardingEvent =
-  /** Play it. `have`: what is already saved (someone updating), so the card can show it. */
-  | { type: "onboarding"; event: "start"; replay: boolean; have: Partial<Record<"first_name" | "email" | "date_of_birth", string>> }
+  /** Play it. `have`: what is already saved (someone updating), so the card can show it.
+   * `code`: it opens with the invite code step (the brain agrees they need one). */
+  | { type: "onboarding"; event: "start"; replay: boolean; code?: boolean; have:Partial<Record<"first_name" | "email" | "date_of_birth", string>> }
   /** Which step it is on, told to every screen (the notch and the firefly may be on another). */
   | { type: "onboarding"; event: "step"; step: OnboardingStep }
   /** One of the tour's lines in Pyxi's voice (`audio` null: quiet was asked for, or no voice yet). */
@@ -448,8 +449,9 @@ export type OnboardingEvent =
   | { type: "onboarding"; event: "saved"; ok: boolean; underage: boolean; errors: Record<string, string>; saved: string[] }
   | { type: "onboarding"; event: "ended"; how: OnboardingEnding };
 export type OnboardingMessage =
-  /** The overlay is about to play it (ignored when it isn't due); `replay` from Settings. */
-  | { type: "onboarding"; action: "start" | "replay" }
+  /** The overlay is about to play it (ignored when it isn't due); `replay` from Settings.
+   * `code`: it would open with the invite code step, which is not yet a try at the tour. */
+  | { type: "onboarding"; action: "start" | "replay"; code?: boolean }
   | { type: "onboarding"; action: "step"; step: OnboardingStep }
   | { type: "onboarding"; action: "say"; line: string; text: string }
   | { type: "onboarding"; action: "save"; details: OnboardingDetails }

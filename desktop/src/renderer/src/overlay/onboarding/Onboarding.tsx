@@ -15,7 +15,7 @@ import type { ConnectorStatus, OnboardingEnding } from "../../shared/protocol";
 import { brain } from "../../shared/socket";
 import { Interactive } from "../Interactive";
 import { isPrimary, useOverlay, voice } from "../store";
-import { begin, type Demo, DEMOS, lineFor, reduce, screenClear, spoken, STEPS, type Tour, type TourEvent } from "./machine";
+import { begin, type Demo, DEMOS, lineFor, needsCode, reduce, screenClear, spoken, STEPS, type Tour, type TourEvent } from "./machine";
 import { type About, birthdayFromIso, details, EMPTY_ABOUT, lights, LIKES, MONTHS, problems, tooYoung, USES } from "./validate";
 import "./onboarding.css";
 
@@ -23,8 +23,11 @@ const TICK_MS = 100;
 const START_DELAY_MS = 1200; // after the brain says hello: let the app settle first
 const LEAVE_MS = 700; // the fade once it has ended
 /** Lines that are shown but not spoken (Pyxi is listening or answering then). */
-const UNSPOKEN = new Set(["screen-working", "about-thanks"]);
+const UNSPOKEN = new Set(["screen-working", "about-thanks", "code-joined"]);
 const VOICE_OWNER = "tour";
+/** "Start the tour": with the invite code first, for someone who needs one (never in the
+ * developer build, as in Settings). The brain has the last word on it. */
+const askToStart = () => brain.send({ type: "onboarding", action: "start", code: needsCode(useOverlay.getState().beta, import.meta.env.DEV) });
 /** It starts by itself in the app. A browser preview (used by checks and recordings against a
  * brain with an empty data folder) only does when asked: ?tour=1. */
 const AUTO = bridge.electron || new URLSearchParams(location.search).get("tour") === "1";
@@ -39,7 +42,7 @@ bridge.onCursor((p) => {
 });
 
 export function Onboarding() {
-  const [run, setRun] = useState<{ id: number; have: Have; anchor: [number, number] } | null>(null);
+  const [run, setRun] = useState<{ id: number; have: Have; code: boolean; anchor: [number, number] } | null>(null);
   const runs = useRef(0);
   const asked = useRef(false);
   const due = useOverlay((s) => s.tourDue);
@@ -49,7 +52,7 @@ export function Onboarding() {
   useEffect(() => {
     if (!due || !isPrimary || asked.current || !AUTO) return;
     asked.current = true;
-    window.setTimeout(() => brain.send({ type: "onboarding", action: "start" }), START_DELAY_MS);
+    window.setTimeout(askToStart, START_DELAY_MS);
   }, [due]);
 
   useEffect(
@@ -60,7 +63,7 @@ export function Onboarding() {
         const mine = pointer.heard ? pointer.at !== null : isPrimary;
         if (!mine) return;
         const at = pointer.at;
-        setRun((now) => now ?? { id: ++runs.current, have: e.have ?? {}, anchor: at ? [at[0] + 36, at[1] - 30] : [innerWidth * 0.5 - 300, innerHeight * 0.26] });
+        setRun((now) => now ?? { id: ++runs.current, have: e.have ?? {}, code: !!e.code && !e.replay, anchor: at ? [at[0] + 36, at[1] - 30] : [innerWidth * 0.5 - 300, innerHeight * 0.26] });
       }),
     [],
   );
@@ -75,7 +78,7 @@ export function Onboarding() {
   };
   return (
     <Guard key={run.id} onError={() => over("failed", true)}>
-      <Play have={run.have} anchor={run.anchor} onOver={over} />
+      <Play have={run.have} code={run.code} anchor={run.anchor} onOver={over} />
     </Guard>
   );
 }
@@ -95,8 +98,8 @@ class Guard extends Component<{ children: ReactNode; onError: () => void }, { br
   }
 }
 
-function Play({ have, anchor, onOver }: { have: Have; anchor: [number, number]; onOver: (how: OnboardingEnding, tell: boolean) => void }) {
-  const [tour, setTour] = useState<Tour>(begin);
+function Play({ have, code, anchor, onOver }: { have: Have; code: boolean; anchor: [number, number]; onOver: (how: OnboardingEnding, tell: boolean) => void }) {
+  const [tour, setTour] = useState<Tour>(() => begin({ code, demo: useOverlay.getState().demo }));
   const send = (e: TourEvent) => setTour((t) => reduce(t, e));
   const [about, setAbout] = useState<About>(() => ({ ...EMPTY_ABOUT, email: have.email ?? "", birthday: birthdayFromIso(have.date_of_birth) }));
   const [google, setGoogle] = useState<{ status: ConnectorStatus | null; note: string }>({ status: null, note: "" });
@@ -131,8 +134,18 @@ function Play({ have, anchor, onOver }: { have: Have; anchor: [number, number]; 
       bridge.onPttDown(() => send({ type: "keys", down: true })),
       bridge.onPttUp(() => send({ type: "keys", down: false })),
       bridge.onPttCancel(() => send({ type: "keys", down: false })),
-      brain.onStatus((up) => !up && send({ type: "fail" })), // the brain went away: try next start
+      // The brain went away: try next start. Not in the invite code step: a code that worked
+      // restarts the brain, and the tour waits there for it to come back.
+      brain.onStatus((up) => !up && tourRef.current.step !== "code" && send({ type: "fail" })),
       brain.on((e) => {
+        if (tourRef.current.step === "code") {
+          // The beta server's answer to their code (the same one Settings shows).
+          if (e.type === "beta") send(e.ok ? { type: "joined" } : { type: "join_failed", message: e.message });
+          // The brain is back from its restart: ask for the tour again. Joined now, it starts
+          // with no code step, and the tour here carries on from "You're in." to its hello.
+          else if (e.type === "hello") brain.send({ type: "onboarding", action: "start", code: needsCode(e.beta, import.meta.env.DEV) });
+          else if (e.type === "onboarding" && e.event === "start" && !e.replay && (!e.code || tourRef.current.phase === "joined")) send({ type: "ready", demo: useOverlay.getState().demo });
+        }
         if (e.type === "user") send({ type: "asked" });
         else if (e.type === "turn_done" || e.type === "error") send({ type: "answered" });
         else if (e.type === "connectors") {
@@ -160,7 +173,7 @@ function Play({ have, anchor, onOver }: { have: Have; anchor: [number, number]; 
   useEffect(() => {
     brain.send({ type: "onboarding", action: "step", step: tour.step });
     if (tour.step === "google") brain.send({ type: "connectors" });
-    const typed = tour.step === "about" || tour.step === "google" || tour.step === "demos";
+    const typed = tour.step === "code" || tour.step === "about" || tour.step === "google" || tour.step === "demos";
     if (typed) bridge.focusOverlay();
     else if (tour.step !== "arrival") bridge.releaseFocus();
   }, [tour.step]);
@@ -214,7 +227,7 @@ function Play({ have, anchor, onOver }: { have: Have; anchor: [number, number]; 
     const fit = () => {
       const { width, height } = el.getBoundingClientRect();
       // Asking about their screen: the words step aside to the bottom corner, out of the way.
-      const aside = tourRef.current.step === "screen";
+      const aside = screenClear(tourRef.current) && tourRef.current.step === "screen";
       const x = aside ? 64 : Math.max(40, Math.min(anchor[0], innerWidth - width - 40));
       const y = aside ? innerHeight - height - 96 : Math.max(120, Math.min(anchor[1], innerHeight - height - 64));
       setPlace((p) => (Math.abs(p[0] - x) < 0.5 && Math.abs(p[1] - y) < 0.5 ? p : [x, y]));
@@ -248,7 +261,8 @@ function Play({ have, anchor, onOver }: { have: Have; anchor: [number, number]; 
     send({ type: "skip_step" });
   };
 
-  const flying = tour.step === "arrival" && tour.phase === "fly";
+  const flying = tour.phase === "fly";
+  const dots: Tour["step"][] = code ? ["code", ...STEPS] : STEPS;
   const rising = tour.step === "landing";
   const clear = screenClear(tour) || leaving;
   return (
@@ -264,6 +278,23 @@ function Play({ have, anchor, onOver }: { have: Have; anchor: [number, number]; 
             </div>
           )}
         </div>
+
+        {tour.step === "code" && (tour.phase === "enter" || tour.phase === "joining") && (
+          <CodeBox
+            busy={tour.phase === "joining"}
+            note={tour.note}
+            onCode={(invite) => {
+              brain.send({ type: "beta_join", code: invite }); // the same message Settings sends
+              send({ type: "join" });
+            }}
+            onNone={() => send({ type: "no_code" })}
+          />
+        )}
+        {((tour.step === "code" && tour.phase === "without") || (tour.step === "screen" && tour.phase === "demo")) && (
+          <Interactive className="ob-row ob-go">
+            <button className="ob-btn" onClick={() => send({ type: "next" })}>Continue</button>
+          </Interactive>
+        )}
 
         {tour.step === "arrival" && tour.phase === "ask" && <NameBox onName={(name) => send({ type: "name", name })} />}
 
@@ -307,8 +338,8 @@ function Play({ have, anchor, onOver }: { have: Have; anchor: [number, number]; 
 
         {tour.step !== "landing" && tour.phase !== "underage" && (
           <div className="ob-foot">
-            <span className="ob-dots" aria-label={`Step ${STEPS.indexOf(tour.step) + 1} of ${STEPS.length}`}>
-              {STEPS.map((s, i) => <i key={s} className={i < STEPS.indexOf(tour.step) ? "done" : i === STEPS.indexOf(tour.step) ? "on" : ""} />)}
+            <span className="ob-dots" aria-label={`Step ${dots.indexOf(tour.step) + 1} of ${dots.length}`}>
+              {dots.map((s, i) => <i key={s} className={i < dots.indexOf(tour.step) ? "done" : i === dots.indexOf(tour.step) ? "on" : ""} />)}
             </span>
             <Interactive className="ob-skip">
               <button onClick={() => send({ type: "skip_tour" })}>Skip tour</button>
@@ -361,6 +392,40 @@ function NameBox({ onName }: { onName: (name: string) => void }) {
         />
         <button type="submit" className="ob-enter" aria-label="Continue"><kbd>Enter</kbd></button>
       </form>
+    </Interactive>
+  );
+}
+
+/** One box for the invite code (shown in capitals; any case and stray spaces are fine), the
+ * beta server's own words when it says no, and a quiet way on without one. */
+function CodeBox({ busy, note, onCode, onNone }: { busy: boolean; note: string; onCode: (code: string) => void; onNone: () => void }) {
+  const [code, setCode] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    bridge.focusOverlay(); // the overlay can't take typing on its own
+    const id = window.setTimeout(() => input.current?.focus(), 80);
+    return () => window.clearTimeout(id);
+  }, []);
+  const tidy = code.replace(/\s+/g, "");
+  return (
+    <Interactive className="ob-name ob-code">
+      <form onSubmit={(e) => { e.preventDefault(); if (tidy && !busy) onCode(tidy); }}>
+        <input
+          ref={input}
+          value={code}
+          maxLength={60}
+          placeholder="FIREFLY-ANNA"
+          aria-label="Your invite code"
+          autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          onMouseDown={() => bridge.focusOverlay()}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+        />
+        <button type="submit" className="ob-enter" aria-label="Join" disabled={busy}><kbd>Enter</kbd></button>
+      </form>
+      <p className={note ? "ob-wrong" : "ob-code-wait"} role="status">{busy ? "Checking your code." : note}</p>
+      <button type="button" className="ob-none" disabled={busy} onClick={onNone}>I don't have one</button>
     </Interactive>
   );
 }

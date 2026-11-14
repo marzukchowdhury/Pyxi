@@ -3,9 +3,11 @@
  * way out can be tested without a screen (machine.test.ts). Onboarding.tsx feeds it what
  * happens (a key held, words heard, a clock tick) and draws what it says.
  *
+ *   code     only for someone who needs one (needsCode): "First, your invite code."
  *   arrival  the firefly flies in, says hello, asks what to call them
  *   talk     "Hold Ctrl and Alt, and say hello": their first words, answered by name
- *   screen   "point me at something": one real question about their screen
+ *   screen   "point me at something": one real question about their screen (in demo mode,
+ *            where the brain is scripted, one honest line instead)
  *   about    the jar: email, date of birth, what they like, what the PC is for
  *   google   connect Google, or maybe later
  *   demos    three tiny demos to tap, or skip
@@ -15,14 +17,17 @@
  * waits forever: a step that needs them offers "Next" after a while.
  */
 
-export type Step = "arrival" | "talk" | "screen" | "about" | "google" | "demos" | "landing";
+export type Step = "code" | "arrival" | "talk" | "screen" | "about" | "google" | "demos" | "landing";
+/** The tour itself. The invite code step ("code") comes before it, for those who need one. */
 export const STEPS: Step[] = ["arrival", "talk", "screen", "about", "google", "demos", "landing"];
 
 export type Phase =
-  // arrival
+  // code: the box, asking the beta server, "You're in." (the brain restarts), going on without one
+  | "enter" | "joining" | "joined" | "without"
+  // arrival (and "fly" opens the code step when there is one)
   | "fly" | "hello" | "ask"
-  // talk and screen
-  | "wait" | "working" | "answered"
+  // talk and screen ("demo": the scripted brain can't answer about their screen, and says so)
+  | "wait" | "working" | "answered" | "demo"
   // about
   | "form" | "saving" | "thanks" | "underage"
   // google
@@ -51,6 +56,10 @@ export interface Tour {
   again: boolean;
   demo: Demo | null;
   played: Demo[];
+  /** Demo mode: no invite code and no key, so the brain is scripted and can't really answer. */
+  demoMode: boolean;
+  /** Why the invite code did not work, in the beta server's own words. */
+  note: string;
   /** Set once: the tour is over, and how. */
   ended: Ending | null;
 }
@@ -58,6 +67,13 @@ export interface Tour {
 export type TourEvent =
   /** The clock. `speaking`: one of Pyxi's lines is still being said. */
   | { type: "tick"; ms: number; speaking?: boolean }
+  /** The invite code step: sent, refused (with the reason), accepted, "I don't have one". */
+  | { type: "join" }
+  | { type: "join_failed"; message: string }
+  | { type: "joined" }
+  | { type: "no_code" }
+  /** The brain is ready for the tour itself (back from its restart after a join). */
+  | { type: "ready"; demo: boolean }
   | { type: "name"; name: string }
   | { type: "keys"; down: boolean }
   /** Their words in the talk step, as the brain heard them ("" when it could not). */
@@ -95,16 +111,32 @@ export const T = {
   rise: 2600, // up into the notch
   glow: 2400,
   maxSpeaking: 15000, // a line still being said holds a phase this long at most
+  joining: 25000, // the beta server not answering never holds the code step
+  restart: 90000, // "You're in.": the brain restarts; one that never comes back ends the tour
+  screenDemo: 6000, // "That one needs your invite code."
 } as const;
 
-export function begin(): Tour {
-  return { step: "arrival", phase: "fly", name: "", elapsed: 0, hint: false, keys: false, again: false, demo: null, played: [], ended: null };
+/** Is the invite code asked for first? Only from someone who needs one: they could join, have
+ * not, and have no AI key of their own on this PC. Never in the developer build. */
+export function needsCode(beta: { joined: boolean; can_join: boolean; own_key?: boolean } | null | undefined, dev: boolean): boolean {
+  return !dev && !!beta && beta.can_join && !beta.joined && !beta.own_key;
 }
 
-const FIRST_PHASE: Record<Step, Phase> = { arrival: "fly", talk: "wait", screen: "wait", about: "form", google: "offer", demos: "pick", landing: "rise" };
+export function begin(opts: { code?: boolean; demo?: boolean } = {}): Tour {
+  return { step: opts.code ? "code" : "arrival", phase: "fly", name: "", elapsed: 0, hint: false, keys: false, again: false, demo: null, played: [], demoMode: !!opts.demo, note: "", ended: null };
+}
+
+const FIRST_PHASE: Record<Step, Phase> = { code: "fly", arrival: "fly", talk: "wait", screen: "wait", about: "form", google: "offer", demos: "pick", landing: "rise" };
 
 function enter(t: Tour, step: Step): Tour {
-  return { ...t, step, phase: FIRST_PHASE[step], elapsed: 0, hint: false, again: false, demo: null };
+  // A scripted brain would only pretend to look at their screen: it says so instead.
+  const first = step === "screen" && t.demoMode ? "demo" : FIRST_PHASE[step];
+  return { ...t, step, phase: first, elapsed: 0, hint: false, again: false, demo: null };
+}
+
+/** From the code step into the tour: the firefly is already here, so it says hello at once. */
+function arrive(t: Tour): Tour {
+  return { ...enter(t, "arrival"), phase: "hello", note: "" };
 }
 
 function phase(t: Tour, to: Phase): Tour {
@@ -113,6 +145,7 @@ function phase(t: Tour, to: Phase): Tour {
 
 /** The step after this one. */
 function onward(t: Tour): Tour {
+  if (t.step === "code") return arrive(t);
   const i = STEPS.indexOf(t.step);
   return i < STEPS.length - 1 ? enter(t, STEPS[i + 1]) : { ...t, ended: "finished" };
 }
@@ -125,9 +158,13 @@ export function tidyName(raw: string): string {
 /** Phases that end by themselves once their time is up (and the line has been said). */
 function timeout(t: Tour): number | null {
   switch (`${t.step}/${t.phase}`) {
+    case "code/fly":
     case "arrival/fly": return T.fly;
+    case "code/joining": return T.joining;
+    case "code/joined": return T.restart;
     case "arrival/hello": return T.hello;
     case "talk/answered": return T.talkAnswered;
+    case "screen/demo": return T.screenDemo;
     case "screen/working": return T.screenWorking;
     case "screen/answered": return T.screenAnswered;
     case "about/saving": return T.saving;
@@ -143,6 +180,9 @@ function timeout(t: Tour): number | null {
 
 function timedOut(t: Tour): Tour {
   switch (`${t.step}/${t.phase}`) {
+    case "code/fly": return phase(t, "enter");
+    case "code/joining": return { ...phase(t, "enter"), note: "I couldn't get an answer. Check your internet and try again." };
+    case "code/joined": return { ...t, ended: "failed" };
     case "arrival/fly": return phase(t, "hello");
     case "arrival/hello": return phase(t, "ask");
     case "screen/working": return phase(t, "answered");
@@ -151,7 +191,7 @@ function timedOut(t: Tour): Tour {
     case "demos/play": return { ...phase(t, "pick"), demo: null };
     case "landing/rise": return phase(t, "glow");
     case "landing/glow": return { ...t, ended: "finished" };
-    default: return onward(t); // talk/answered, screen/answered, about/thanks, google/connected
+    default: return onward(t); // talk/answered, screen/demo, screen/answered, about/thanks, google/connected
   }
 }
 
@@ -177,6 +217,17 @@ export function reduce(t: Tour, e: TourEvent): Tour {
       return { ...t, ended: t.phase === "underage" ? "underage" : "skipped" };
     case "keys":
       return { ...t, keys: e.down };
+    case "join":
+      return t.step === "code" && t.phase === "enter" ? { ...phase(t, "joining"), note: "" } : t;
+    case "join_failed":
+      // Their code stays in the box, with the reason under it: they can try again.
+      return t.step === "code" && t.phase === "joining" ? { ...phase(t, "enter"), note: e.message } : t;
+    case "joined":
+      return t.step === "code" && t.phase !== "joined" ? { ...phase(t, "joined"), note: "" } : t;
+    case "no_code":
+      return t.step === "code" && (t.phase === "enter" || t.phase === "fly") ? { ...phase(t, "without"), note: "" } : t;
+    case "ready":
+      return t.step === "code" ? arrive({ ...t, demoMode: e.demo }) : t;
     case "name":
       return t.step === "arrival" ? enter({ ...t, name: tidyName(e.name) }, "talk") : t;
     case "heard":
@@ -200,6 +251,7 @@ export function reduce(t: Tour, e: TourEvent): Tour {
       return t.step === "demos" ? { ...phase(t, "play"), demo: e.demo, played: t.played.includes(e.demo) ? t.played : [...t.played, e.demo] } : t;
     case "next":
       if (t.phase === "underage") return { ...t, ended: "underage" };
+      if (t.step === "code") return t.phase === "fly" ? phase(t, "enter") : t.phase === "without" ? arrive(t) : t; // the box's own form sends the code
       if (t.step === "arrival" && t.phase !== "ask") return phase(t, "ask"); // straight to the question
       if (t.step === "arrival") return enter(t, "talk"); // no name given
       if (t.step === "about" && t.phase === "form") return t; // the card's own button submits it
@@ -208,6 +260,8 @@ export function reduce(t: Tour, e: TourEvent): Tour {
       return onward(t);
     case "skip_step":
       if (t.phase === "underage") return { ...t, ended: "underage" };
+      // Esc on the code: first what going without one means, then on. Never while it is joining.
+      if (t.step === "code") return t.phase === "without" ? arrive(t) : t.phase === "joining" || t.phase === "joined" ? t : { ...phase(t, "without"), note: "" };
       if (t.step === "demos" && t.phase === "play") return { ...phase(t, "pick"), demo: null };
       if (t.step === "landing") return { ...t, ended: "finished" };
       return onward(t);
@@ -227,6 +281,11 @@ export function lineFor(t: Tour, keys: string[] = ["Ctrl", "Alt"]): Line | null 
   const hold = keys.length ? `Hold ${keys.join(" and ")}` : "Click the notch";
   const named = t.name ? `, ${t.name}` : "";
   switch (`${t.step}/${t.phase}`) {
+    case "code/enter":
+    case "code/joining": return { id: "code", text: "First, your invite code.", sub: "It came with your invitation. It lets me think." };
+    case "code/joined": return { id: "code-joined", text: "You're in.", sub: "One moment while I get ready." };
+    case "code/without": return { id: "code-without", text: "That's fine.", sub: "I'll run as a demo until you enter a code in Settings." };
+    case "screen/demo": return { id: "screen-demo", text: "Next, you'd ask me about your screen.", sub: "That one needs your invite code. You can add it in Settings any time." };
     case "arrival/hello": return { id: "hello", text: "Hi. I'm Pyxi.", sub: "I live in the corner of your screen." };
     case "arrival/ask": return { id: "ask-name", text: "What should I call you?" };
     case "talk/wait":
@@ -259,5 +318,5 @@ export function spoken(line: Line): string {
 
 /** Does this moment leave the screen clear (no dim), so they can use what is under it? */
 export function screenClear(t: Tour): boolean {
-  return t.step === "screen" || (t.step === "landing" && t.phase === "glow");
+  return (t.step === "screen" && t.phase !== "demo") || (t.step === "landing" && t.phase === "glow");
 }

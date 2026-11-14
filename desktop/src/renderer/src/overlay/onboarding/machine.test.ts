@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { begin, lineFor, reduce, screenClear, spoken, STEPS, T, type Tour, type TourEvent } from "./machine";
+import { begin, lineFor, needsCode, reduce, screenClear, spoken, STEPS, T, type Tour, type TourEvent } from "./machine";
 
 const run = (t: Tour, ...events: TourEvent[]) => events.reduce(reduce, t);
 const wait = (ms: number, speaking = false): TourEvent => ({ type: "tick", ms, speaking });
@@ -214,6 +214,104 @@ describe("the lines", () => {
   it("names the keys this PC really uses", () => {
     expect(lineFor(at("talk"), ["Ctrl", "Shift", "Space"])?.text).toBe("Hold Ctrl and Shift and Space, and say hello.");
     expect(lineFor(at("talk"), [])?.text).toBe("Click the notch, and say hello.");
+  });
+});
+
+describe("the invite code step", () => {
+  const NEW_TESTER = { joined: false, can_join: true, own_key: false };
+  /** The code step with its box showing. */
+  const box = () => run(begin({ code: true, demo: true }), wait(T.fly));
+
+  it("is only for someone who needs a code", () => {
+    expect(needsCode(NEW_TESTER, false)).toBe(true);
+    expect(needsCode({ joined: false, can_join: true }, false)).toBe(true); // an older brain: no own_key
+    expect(needsCode({ joined: true, can_join: false, own_key: false }, false)).toBe(false); // already joined
+    expect(needsCode({ joined: false, can_join: true, own_key: true }, false)).toBe(false); // a key of their own
+    expect(needsCode({ joined: false, can_join: false, own_key: false }, false)).toBe(false);
+    expect(needsCode(null, false)).toBe(false);
+    expect(needsCode(undefined, false)).toBe(false);
+  });
+
+  it("is never shown in the developer build", () => {
+    expect(needsCode(NEW_TESTER, true)).toBe(false);
+  });
+
+  it("comes first when it is needed, and not at all otherwise", () => {
+    expect(begin().step).toBe("arrival");
+    expect(begin({ code: false, demo: true }).step).toBe("arrival");
+    const t = begin({ code: true });
+    expect([t.step, t.phase]).toEqual(["code", "fly"]);
+    expect(lineFor(box())).toEqual({ id: "code", text: "First, your invite code.", sub: "It came with your invitation. It lets me think." });
+    expect(run(box(), wait(600_000)).phase).toBe("enter"); // the box waits for them
+  });
+
+  it("a code that works goes on to the name once the brain is back", () => {
+    let t = run(box(), { type: "join" });
+    expect(t.phase).toBe("joining");
+    t = run(t, { type: "joined" });
+    expect([t.step, t.phase, lineFor(t)?.text]).toEqual(["code", "joined", "You're in."]);
+    // The brain restarts: nothing here ends the tour or moves it on while it is away.
+    t = run(t, wait(20_000), { type: "next" }, { type: "skip_step" });
+    expect([t.step, t.phase, t.ended]).toEqual(["code", "joined", null]);
+    t = run(t, { type: "ready", demo: false });
+    expect([t.step, t.phase, t.demoMode]).toEqual(["arrival", "hello", false]);
+    t = run(t, wait(T.hello));
+    expect([t.step, t.phase]).toEqual(["arrival", "ask"]);
+    t = run(t, { type: "name", name: "Sam" }, { type: "heard", text: "hello" }, wait(T.talkAnswered));
+    expect([t.step, t.phase]).toEqual(["screen", "wait"]); // joined: the real question
+  });
+
+  it("a brain that never comes back ends the tour for another start", () => {
+    const t = run(box(), { type: "join" }, { type: "joined" }, wait(T.restart));
+    expect(t.ended).toBe("failed");
+  });
+
+  it("a code that fails stays there with the server's message, to try again", () => {
+    let t = run(box(), { type: "join" }, { type: "join_failed", message: "That invite code isn't valid." });
+    expect([t.step, t.phase, t.note]).toEqual(["code", "enter", "That invite code isn't valid."]);
+    t = run(t, { type: "join" });
+    expect([t.phase, t.note]).toEqual(["joining", ""]);
+    t = run(t, { type: "joined" });
+    expect(t.phase).toBe("joined");
+  });
+
+  it("no answer from the server gives the box back", () => {
+    const t = run(box(), { type: "join" }, wait(T.joining));
+    expect([t.phase, t.note]).toEqual(["enter", "I couldn't get an answer. Check your internet and try again."]);
+  });
+
+  it("\"I don't have one\" says what that means and continues in demo mode", () => {
+    let t = run(box(), { type: "no_code" });
+    expect([t.step, t.phase]).toEqual(["code", "without"]);
+    expect(spoken(lineFor(t)!)).toBe("That's fine. I'll run as a demo until you enter a code in Settings.");
+    t = run(t, wait(600_000)); // it waits to be read
+    expect(t.phase).toBe("without");
+    t = run(t, { type: "next" });
+    expect([t.step, t.phase, t.demoMode]).toEqual(["arrival", "hello", true]);
+  });
+
+  it("Esc explains first, then goes on; the whole tour can still be skipped", () => {
+    let t = run(box(), { type: "skip_step" });
+    expect(t.phase).toBe("without");
+    expect(run(t, { type: "skip_step" }).step).toBe("arrival");
+    expect(run(box(), { type: "skip_tour" }).ended).toBe("skipped");
+    t = run(box(), { type: "join" }, { type: "skip_step" }, { type: "no_code" });
+    expect(t.phase).toBe("joining"); // not while the code is on its way
+  });
+
+  it("never pretends to look at the screen in demo mode", () => {
+    let t = run(begin({ demo: true }), { type: "next" }, { type: "name", name: "Sam" }, { type: "heard", text: "hello" }, wait(T.talkAnswered));
+    expect([t.step, t.phase]).toEqual(["screen", "demo"]);
+    expect(lineFor(t)?.sub).toBe("That one needs your invite code. You can add it in Settings any time.");
+    expect(screenClear(t)).toBe(false);
+    t = run(t, { type: "asked" }, { type: "answered" }); // a canned answer is not taken for a real one
+    expect(t.phase).toBe("demo");
+    expect(run(t, wait(T.screenDemo)).step).toBe("about");
+    expect(run(t, { type: "next" }).step).toBe("about");
+  });
+
+  it("keeps its lines free of em dashes and emoji", () => {
+    for (const t of [box(), run(box(), { type: "join" }, { type: "joined" }), run(box(), { type: "no_code" })]) expect(spoken(lineFor(t)!)).not.toMatch(/[—–]|\p{Extended_Pictographic}/u);
   });
 });
 

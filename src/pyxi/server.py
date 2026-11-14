@@ -112,7 +112,12 @@ def create_app(
     ambient: asyncio.Task[None] | None = None
     # The first-run tour (pyxi/onboarding.py). Its "say hello" step answers their first words
     # itself, so the brain hands them over instead of asking the model.
-    tour = onboarding.Tour(settings.data_dir, brain.memory)
+    # It asks for an invite code first only when this PC needs one: not joined, no key of its own.
+    tour = onboarding.Tour(
+        settings.data_dir,
+        brain.memory,
+        needs_code=lambda: not cloud.in_beta() and not cloud.had_own_key(),
+    )
 
     async def _tour_heard(text: str) -> bool:
         return await onboarding.heard(tour, hub, text)

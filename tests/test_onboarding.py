@@ -86,6 +86,75 @@ def test_asked_to_start_again_while_playing_is_the_same_try(tour):
     assert onboarding.load(tour.data_dir)["attempts"] == 1
 
 
+# The invite code step: before the tour, for someone who needs a code. A code that works
+# restarts the brain, which must not look like a tour that broke off.
+def _needing_a_code(tour: Tour, needs: bool = True) -> Tour:
+    return Tour(tour.data_dir, tour.memory, needs_code=lambda: needs)
+
+
+def test_the_invite_code_step_is_not_a_try_and_a_join_restart_resumes(tour):
+    first = _needing_a_code(tour)
+    assert first.start(code=True) and first.active and first.step == "code"
+    first.enter("code")
+    assert onboarding.load(tour.data_dir) == {}  # nothing written: not a try yet
+    # Their code worked and the brain restarted (nothing more from this one). The next brain
+    # is joined: the tour is still due, opens on the tour itself, and this is the first try.
+    after = _needing_a_code(tour, needs=False)
+    assert after.due() and after.start(code=True) and after.step == "arrival"
+    marker = onboarding.load(tour.data_dir)
+    assert marker["status"] == "started" and marker["attempts"] == 1
+    after.finish("finished")
+    assert not Tour(tour.data_dir, tour.memory).due()
+
+
+def test_many_restarts_in_the_invite_code_step_never_use_up_the_tries(tour):
+    for _ in range(5):
+        fresh = _needing_a_code(tour)
+        assert fresh.due() and fresh.start(code=True) and fresh.step == "code"
+    assert onboarding.load(tour.data_dir) == {}
+
+
+def test_going_on_without_a_code_is_when_the_try_begins(tour):
+    t = _needing_a_code(tour)
+    assert t.start(code=True)
+    t.enter("arrival")  # "I don't have one": the tour itself, in demo mode
+    assert onboarding.load(tour.data_dir)["attempts"] == 1
+    t.enter("talk")
+    assert t.start(code=True)  # the overlay was rebuilt: the same try
+    assert onboarding.load(tour.data_dir)["attempts"] == 1
+
+
+def test_skipping_the_tour_from_the_invite_code_step_is_kept(tour):
+    t = _needing_a_code(tour)
+    assert t.start(code=True)
+    t.finish("skipped")
+    assert onboarding.load(tour.data_dir)["status"] == "skipped" and not t.due()
+
+
+def test_breaking_off_in_the_invite_code_step_is_still_a_try(tour):
+    for attempt in (1, 2, 3):
+        t = _needing_a_code(tour)
+        assert t.start(code=True)
+        t.finish("failed")
+        assert onboarding.load(tour.data_dir)["attempts"] == attempt
+    assert not _needing_a_code(tour).due()
+
+
+def test_someone_joined_or_with_their_own_key_is_never_asked_for_a_code(tour):
+    # The overlay may ask (an old hello); the brain has the last word.
+    t = _needing_a_code(tour, needs=False)
+    assert t.start(code=True) and t.step == "arrival"
+    assert onboarding.load(tour.data_dir)["attempts"] == 1
+    plain = Tour(tour.data_dir, tour.memory)  # no way to tell: never asks
+    assert plain.start(code=True) and plain.step == "arrival"
+
+
+def test_a_replay_never_asks_for_the_code(tour):
+    t = _needing_a_code(tour)
+    assert t.start(replay=True, code=True) and t.step == "arrival"
+    assert onboarding.load(tour.data_dir) == {}
+
+
 def test_checks_and_recordings_can_switch_it_off(tour, monkeypatch):
     monkeypatch.setenv("PYXI_TOUR", "0")
     assert not tour.due() and not tour.start()
@@ -427,6 +496,74 @@ def test_a_tour_message_that_breaks_ends_it_quietly_for_a_retry(settings, monkey
         and marker["attempts"] == 1
         and onboarding.due(settings.data_dir)
     )
+
+
+def test_the_invite_code_then_a_restart_then_the_tour_over_the_socket(settings, monkeypatch):
+    """A new tester: the code step, a wrong code, the right one, the brain's restart, and the
+    tour itself on the brain that comes back. The beta server is a fake; no code is real."""
+    from pyxi import cloud, server
+    from pyxi.server import create_app
+
+    monkeypatch.delenv("PYXI_BETA", raising=False)
+    monkeypatch.setenv("PYXI_OWN_KEY", "0")
+    tried: list[str] = []
+    exits: list[int] = []
+
+    async def fake_join(data_dir, code):
+        tried.append(code)
+        return "ok" if code.strip().upper() == "FIREFLY-TEST" else "That invite code isn't valid."
+
+    monkeypatch.setattr(cloud, "join", fake_join)
+    monkeypatch.setattr(server.os, "_exit", exits.append)  # the restart, not this test run
+
+    def start(ws, **extra):
+        ws.send_text(json.dumps({"type": "onboarding", "action": "start", **extra}))
+        return _until(ws, "onboarding", event="start")
+
+    app = create_app(settings, demo=True, brain=_brain(settings), key=KEY)
+    with TestClient(app) as client, client.websocket_connect(f"/ws?key={KEY}") as ws:
+        hello = json.loads(ws.receive_text())
+        assert hello["beta"] == {"joined": False, "can_join": True, "own_key": False}
+        assert hello["onboarding"] == {"due": True, "active": False}
+        assert start(ws, code=True)["code"] is True
+        ws.send_text(json.dumps({"type": "onboarding", "action": "step", "step": "code"}))
+        assert _until(ws, "onboarding", event="step")["step"] == "code"
+        ws.send_text(json.dumps({"type": "beta_join", "code": "FIREFLY-NOPE"}))
+        refused = _until(ws, "beta")
+        assert refused["ok"] is False and refused["message"] == "That invite code isn't valid."
+        ws.send_text(json.dumps({"type": "beta_join", "code": "FIREFLY-TEST"}))
+        assert _until(ws, "beta")["ok"] is True
+        ws.send_text(json.dumps({"type": "memories_get"}))  # the socket is still answering
+        _until(ws, "memories")
+    assert tried == ["FIREFLY-NOPE", "FIREFLY-TEST"]
+    assert onboarding.load(settings.data_dir) == {}  # the restart is not a tour that broke off
+
+    # The brain the app starts again: joined now (cloud.apply set this before settings loaded).
+    monkeypatch.setenv("PYXI_BETA", "1")
+    app = create_app(settings, demo=False, brain=_brain(settings), key=KEY)
+    with TestClient(app) as client, client.websocket_connect(f"/ws?key={KEY}") as ws:
+        hello = json.loads(ws.receive_text())
+        assert hello["beta"]["joined"] is True and hello["onboarding"]["due"] is True
+        assert start(ws, code=True)["code"] is False  # not asked again, whatever the overlay says
+        ws.send_text(json.dumps({"type": "onboarding", "action": "step", "step": "arrival"}))
+        _until(ws, "onboarding", event="step")
+        ws.send_text(json.dumps({"type": "onboarding", "action": "finish", "how": "finished"}))
+        _until(ws, "onboarding", event="ended")
+    marker = onboarding.load(settings.data_dir)
+    assert marker["status"] == "finished" and marker["attempts"] == 1
+
+
+def test_a_key_of_their_own_never_gets_the_invite_code_step_over_the_socket(settings, monkeypatch):
+    from pyxi.server import create_app
+
+    monkeypatch.delenv("PYXI_BETA", raising=False)
+    monkeypatch.setenv("PYXI_OWN_KEY", "1")
+    app = create_app(settings, demo=False, brain=_brain(settings), key=KEY)
+    with TestClient(app) as client, client.websocket_connect(f"/ws?key={KEY}") as ws:
+        assert json.loads(ws.receive_text())["beta"]["own_key"] is True
+        ws.send_text(json.dumps({"type": "onboarding", "action": "start", "code": True}))
+        assert _until(ws, "onboarding", event="start")["code"] is False
+    assert onboarding.load(settings.data_dir)["attempts"] == 1
 
 
 def test_spoken_words_in_the_hello_step_never_reach_the_model(settings):
