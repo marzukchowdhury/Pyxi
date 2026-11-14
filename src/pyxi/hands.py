@@ -147,6 +147,14 @@ GRACE_MS = 150
 # Input sent this lately is still "going out" (keys are typed 14 ms apart, a glide's moves
 # 12 to 16): until it is older than this, Windows' clock can't tell the user's input from it.
 SENDING_MS = 40
+# A hand that is on the mouse NOW. Live, 13 November: 13 pauses in a week, most of them a few
+# thousandths of a second after Pyxi announced a step. The pointer had been nudged while Pyxi
+# was thinking (five seconds a step, with someone watching and a hand resting on the mouse),
+# and that was read as taking over, costing seven seconds each time. A nudge that ended more
+# than this long ago is not a hand on the mouse: Pyxi carries on from where the pointer is.
+ACTIVE_MS = 500
+# How long the mouse and keyboard must be left alone before Pyxi carries on after a real pause.
+RESUME_S = 1.0
 
 
 def _tick_now() -> int:
@@ -336,6 +344,11 @@ class Hands:
             # Nobody has touched anything since Pyxi last did: not a hand on the mouse.
             self._trail.append((x, y))
             return False
+        if seen is not None and _after(now, seen) > ACTIVE_MS:
+            # They moved it a while ago and let go: carry on from where it is now. A hand that
+            # is still on the mouse is caught at the next check, and Esc always stops.
+            self._trail.append((x, y))
+            return False
         late = "no reading" if seen is None else f"{_after(seen, own)} ms after Pyxi's own act"
         ago = "?" if own is None else str(_after(now, own))
         self.reason = (
@@ -361,7 +374,7 @@ class Hands:
             return 0.0
         return max(0, _after(self._tick(), seen)) / 1000
 
-    def wait_idle(self, quiet_s: float = 3.0, timeout_s: float = 300.0) -> bool:
+    def wait_idle(self, quiet_s: float = RESUME_S, timeout_s: float = 300.0) -> bool:
         """Wait until the user has left the mouse and keyboard alone for ``quiet_s``. False if
         they pressed Esc (stop for good) or it never got quiet."""
         import time

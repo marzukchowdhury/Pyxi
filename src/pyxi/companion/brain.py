@@ -1974,13 +1974,24 @@ class Brain:
 
     async def _watch_subscriptions(self) -> None:
         """Find every recurring charge in their receipts; one card with the monthly total."""
-        from pyxi.mailwatch import find_subscriptions, subscriptions_query, subscriptions_report
+        from pyxi.mailwatch import (
+            find_subscriptions,
+            merged,
+            subscriptions_report,
+            subscriptions_scans,
+        )
 
         job = None
         try:
-            job, mails = await self._scan(
-                "Looking for subscriptions in your receipts", subscriptions_query(), 300
-            )
+            (query, n), *more = subscriptions_scans()
+            job, first = await self._scan("Looking for subscriptions in your receipts", query, n)
+            scans = [first]
+            for query, n in more:  # one after another: Gmail's per-second limit
+                try:
+                    scans.append(await self.connectors.google.gmail_fetch(query, n))
+                except Exception:
+                    log.warning("a subscription scan could not be read", exc_info=True)
+            mails = merged(scans)
             subs = find_subscriptions(
                 mails, datetime.now().astimezone(), ignore=self.mailwatch.ignored()
             )

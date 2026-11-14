@@ -235,3 +235,28 @@ def test_the_clock_wrapping_round_is_not_input_from_the_user(h, desk):
     desk.app_moves_pointer_to(900, 620)
     assert not h.interrupted()
     assert hands._after(5, 0xFFFFFFF0) == 21 and hands._after(0xFFFFFFF0, 5) == -21
+
+
+def test_a_nudge_while_pyxi_was_thinking_is_not_taking_the_mouse(h, desk):
+    # Live: most pauses came a few thousandths of a second after a step was announced. The
+    # pointer had been moved during the five seconds Pyxi spent thinking, by someone watching
+    # with a hand resting on the mouse, and each one cost seven seconds.
+    h.click(300, 300)
+    desk.pass_ms(1500)
+    desk.user_moves_to(700, 650)  # a nudge, and then they let go
+    desk.pass_ms(3000)  # Pyxi is still thinking
+    assert not h.interrupted()  # carries on from where the pointer is
+    assert not h.interrupted()  # and that place is now where it expects it
+
+
+def test_a_hand_still_on_the_mouse_when_pyxi_needs_it_does_pause(h, desk):
+    h.click(300, 300)
+    desk.pass_ms(1500)
+    desk.user_moves_to(700, 650)
+    desk.pass_ms(hands.ACTIVE_MS - 100)  # they are using it right now
+    assert h.interrupted()
+    # ... and it carries on a second after they stop, not three.
+    assert hands.RESUME_S <= 1.0
+    assert h.wait_idle(timeout_s=30.0)
+    assert h.idle_seconds() >= hands.RESUME_S and h.idle_seconds() < 2.0
+    assert not h.interrupted()
