@@ -9,6 +9,7 @@ import { guideClick } from "./guideMarks";
 import { NotesCard } from "./NotesCard";
 import { Notch } from "./Notch";
 import { ObjectPanel } from "./ObjectPanel";
+import { Onboarding } from "./onboarding/Onboarding";
 import { SketchBoard } from "./SketchBoard";
 import { Presence } from "./Presence";
 import { PriceTag } from "./PriceTag";
@@ -193,6 +194,7 @@ export function Overlay() {
       <PriceTag />
       <Team />
       <Requests />
+      <Onboarding />
       <Presence micLevel={micLevel} />
       {isPrimary && <Notch micLevel={micLevel} />}
       {/* The main screen shows connection and privacy state in the notch. */}
