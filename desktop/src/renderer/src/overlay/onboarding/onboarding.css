@@ -61,6 +61,15 @@
 .ob-name form { display: flex; align-items: center; gap: 12px; width: 380px; padding: 0 6px 8px; border-bottom: 2px solid rgba(255, 200, 97, .7); }
 .ob-name input { flex: 1; min-width: 0; height: 44px; background: none; border: 0; outline: none; color: #fffaf0; font: 500 26px/1 "Inter", sans-serif; letter-spacing: -.01em; caret-color: var(--fly); user-select: text; }
 .ob-name input::placeholder { color: rgba(255, 244, 222, .34); }
+/* The invite code: the same one box, in capitals, with the server's answer and a quiet way on. */
+.ob-code input { text-transform: uppercase; letter-spacing: .04em; }
+.ob-code input::placeholder { letter-spacing: .04em; }
+.ob-code p { min-height: 20px; margin: 10px 0 0 6px; max-width: 420px; font: 500 14px/1.4 "Inter", sans-serif; color: rgba(255, 244, 222, .7); }
+.ob-code p.ob-wrong { font-size: 14px; color: #ffb9a3; }
+.ob-none { margin: 8px 0 0 6px; padding: 0; background: none; border: 0; font: 500 14px/1.4 "Inter", sans-serif; color: rgba(255, 244, 222, .62); text-decoration: underline; text-underline-offset: 3px; }
+.ob-none:hover { color: #fffaf0; }
+.ob-none:disabled { opacity: .5; }
+.step-screen.phase-demo .ob-go { margin-left: 0; }
 .ob-enter { background: none; border: 0; padding: 0; opacity: .75; }
 .ob-enter:hover { opacity: 1; }
 .ob kbd { font: 600 12px/1 "Inter", sans-serif; padding: 6px 9px; border-radius: 8px; color: rgba(255, 244, 222, .85); background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .18); box-shadow: 0 2px 0 rgba(0, 0, 0, .5); }

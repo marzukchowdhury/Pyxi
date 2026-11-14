@@ -6,6 +6,9 @@ The overlay plays it (desktop/src/renderer/src/overlay/onboarding); this is the 
   tour has never been seen, which is true of a new install and of anyone updating from a
   version that had no tour. Finished, skipped or ended for age: never again by itself. A tour
   that broke off (an error, the app closed) is tried again on the next start, twice at most.
+  Someone who needs an invite code is asked for it first, before any of that: the brain
+  restarts when the code works, so that step is not yet a try, and the tour starts when the
+  brain is back (joined now, so the code is not asked for again).
   "Replay the tour" in Settings plays it again without touching the marker.
 * **what it keeps**: the name, email and date of birth go into the saved details Pyxi already
   keeps for forms and bookings (booking.py, ``profile.json``). What to call them, what they
@@ -27,6 +30,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -39,7 +43,8 @@ FILE = "onboarding.json"
 VERSION = 1
 MAX_RETRIES = 2  # a tour that broke off is offered again on the next two starts
 MIN_AGE = 13  # docs/PRIVACY.md, "Children"
-STEPS = ("arrival", "talk", "screen", "about", "google", "demos", "landing")
+CODE_STEP = "code"  # before the tour, for someone who needs an invite code: not yet a try
+STEPS = (CODE_STEP, "arrival", "talk", "screen", "about", "google", "demos", "landing")
 ENDED = ("finished", "skipped", "underage")  # never shown again by itself
 TALK_STEP_S = 120.0  # how long the "say hello" step may take their words for itself
 
@@ -149,9 +154,14 @@ def due(data_dir: Path) -> bool:
 class Tour:
     """One brain's tour: the marker, the step it is on, and what it saves."""
 
-    def __init__(self, data_dir: Path, memory: Any) -> None:
+    def __init__(
+        self, data_dir: Path, memory: Any, needs_code: Callable[[], bool] | None = None
+    ) -> None:
         self.data_dir = Path(data_dir)
         self.memory = memory
+        # Does this install need an invite code (not in the beta, no AI key of its own)?
+        self.needs_code = needs_code or (lambda: False)
+        self.counted = False  # this run has been written to the marker as a try
         self.active = False
         self.replay = False
         self.step: str | None = None
@@ -166,27 +176,48 @@ class Tour:
         leave every later question answered by a tour nobody is watching."""
         return self.active and self.step == "talk" and time.monotonic() - self.step_at < TALK_STEP_S
 
-    def start(self, *, replay: bool = False) -> bool:
+    def start(self, *, replay: bool = False, code: bool = False) -> bool:
         """The overlay is about to play it. False: not this time (it has been seen). Asked for
         again while it plays (the overlay was rebuilt: a monitor plugged in), it starts over
-        and counts as the same try."""
-        if not replay and not self.active:
-            if not self.due():
-                return False
-            state = load(self.data_dir)
-            state.update(
-                version=VERSION,
-                status="started",
-                attempts=int(state.get("attempts") or 0) + 1,
-                at=time.time(),
-            )
-            _write(self.data_dir, state)
-        self.active, self.replay, self.step = True, replay, STEPS[0]
+        and counts as the same try.
+
+        ``code``: the overlay would ask for the invite code first. Only when this install
+        needs one; then the tour opens on that step and is not a try yet. A code that works
+        restarts the brain, and that must not look like a tour that broke off: the marker is
+        written when the tour itself begins (:meth:`enter`), or when it ends."""
+        code = code and not replay and self.needs_code()
+        if replay:
+            self.counted = True  # a replay never counts
+        else:
+            if not self.active:
+                if not self.due():
+                    return False
+                self.counted = False
+            if not code:
+                self._count()
+        self.active, self.replay = True, replay
+        self.step = CODE_STEP if code else STEPS[1]
         self.step_at = time.monotonic()
         return True
 
+    def _count(self) -> None:
+        """Write this run to the marker as a try, once."""
+        if self.counted:
+            return
+        self.counted = True
+        state = load(self.data_dir)
+        state.update(
+            version=VERSION,
+            status="started",
+            attempts=int(state.get("attempts") or 0) + 1,
+            at=time.time(),
+        )
+        _write(self.data_dir, state)
+
     def enter(self, step: str) -> None:
         if self.active and step in STEPS:
+            if step != CODE_STEP:
+                self._count()  # past the invite code: the tour itself has begun
             self.step, self.step_at = step, time.monotonic()
 
     def finish(self, how: str) -> None:
@@ -199,6 +230,9 @@ class Tour:
         state = load(self.data_dir)
         if replay and state.get("status") in ENDED and how != "underage":
             return  # a replay never changes how the first tour ended
+        if how not in ENDED:
+            self._count()  # it broke off in the invite code step: that is a try too
+            state = load(self.data_dir)
         state.update(version=VERSION, status=how if how in ENDED else "failed", at=time.time())
         _write(self.data_dir, state)
 
@@ -327,13 +361,14 @@ async def handle(tour: Tour, brain: Any, hub: Any, msg: dict[str, Any]) -> None:
     action = msg.get("action")
     if action in ("start", "replay"):
         replay = action == "replay"
-        if tour.start(replay=replay):
+        if tour.start(replay=replay, code=bool(msg.get("code"))):
             brain.warm_voice()  # so the first line can be spoken, if the voice is on this PC
             profile = booking.load(tour.data_dir)
             await hub.emit(
                 "onboarding",
                 event="start",
                 replay=replay,
+                code=tour.step == CODE_STEP,  # it opens by asking for their invite code
                 # What is already saved, so someone updating isn't asked for it twice.
                 have={
                     k: profile[k] for k in ("first_name", "email", "date_of_birth") if k in profile

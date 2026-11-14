@@ -135,6 +135,9 @@ interface OverlayState {
   touring: boolean;
   /** The brain said the tour has not been seen yet (or broke off last time). */
   tourDue: boolean;
+  /** From the brain's hello, for the tour: could they join the beta, and is the brain scripted (demo mode)? */
+  beta: { joined: boolean; can_join: boolean; own_key?: boolean } | null;
+  demo: boolean;
   /** The tour is drawing its own firefly, so the one beside the cursor steps aside. */
   tourFirefly: boolean;
   /** When the tour's firefly landed in the notch: it glows once. */
@@ -190,6 +193,8 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   toasts: [],
   touring: false,
   tourDue: false,
+  beta: null,
+  demo: false,
   tourFirefly: false,
   notchGlow: 0,
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.job_id !== id) }),
@@ -375,6 +380,7 @@ brain.on((e: BrainEvent) => {
     case "settings":
       // The first-run tour is due (only "hello" says so): the main screen asks for it (overlay/onboarding).
       if (e.onboarding) useOverlay.setState({ tourDue: e.onboarding.due || e.onboarding.active });
+      if (e.type === "hello") useOverlay.setState({ beta: e.beta ?? null, demo: !!e.demo });
       useOverlay.setState({ state: e.state, paused: e.privacy_paused, watching: !!e.ambient_memory && !e.privacy_paused, captions: e.voice?.captions ?? true, jobs: Object.fromEntries(e.jobs.map((j) => [j.id, j])) });
       break;
     case "state":
