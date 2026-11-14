@@ -2663,7 +2663,9 @@ async def run_ledger(task: str, *, live: list[Any] | None = None, **kw: Any) -> 
 
     A big spreadsheet build doesn't fit in one reply, so it is planned first and written a
     sheet at a time (ledger_build.py); ``new`` starts it in a workbook that doesn't exist
-    yet, saved under its own name in ``new_dir``."""
+    yet, saved under its own name in ``new_dir``. ``ask_quick``, when given, is the same
+    model answering without thinking first: the build uses it for its plan, for the sheets
+    of typed-in rows and for its last check. Nothing else uses it."""
     try:
         return await _run_ledger(task, live=live or [], **kw)
     finally:
@@ -2685,6 +2687,7 @@ async def _run_ledger(
     progress: Callable[[str], Awaitable[None]] | None = None,
     new: list[dict[str, Any]] | None = None,
     new_dir: Path | None = None,
+    ask_quick: Ask | None = None,
 ) -> LedgerResult:
     began = time.perf_counter()
     targets: list[Any] = []
@@ -2782,7 +2785,7 @@ async def _run_ledger(
 
         builder = ledger_build.Builder(
             task, target=now, put=put, ask=ask, system=system, name=name, context=context,
-            progress=progress, least=least,
+            progress=progress, least=least, quick=ask_quick,
         )  # fmt: skip
         try:
             built = await builder.run()
