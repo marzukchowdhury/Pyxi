@@ -1,6 +1,6 @@
 # Pyxi privacy policy
 
-*Draft for the Pyxi beta, last updated 7 November 2026. It describes how the software works today. It isn't legal advice: have a lawyer review it before the public launch.*
+*Draft for the Pyxi beta, last updated 13 November 2026. It describes how the software works today. It isn't legal advice: have a lawyer review it before the public launch.*
 
 Pyxi is a desktop assistant that can see your screen, read the files you point it at and work in the accounts you connect, so privacy is the core of the product, not a footnote. This page says plainly what Pyxi looks at, what leaves your computer, what is kept, and how to delete it.
 
@@ -81,7 +81,7 @@ Pyxi never sends an email, posts, messages, invites someone or cancels anything 
 
 | What | Where it goes | Why |
 |---|---|---|
-| Your request, the masked screenshot and on-screen text, recent conversation, and the parts of files or emails a job needs | The AI model, through OpenRouter (during the beta, through the Pyxi beta server), or the provider of your own key if you added one | To understand your screen and answer |
+| Your request, the masked screenshot and on-screen text, recent conversation, what Pyxi remembers about you (what to call you and what you like, and other memories that fit the request), and the parts of files or emails a job needs | The AI model, through OpenRouter (during the beta, through the Pyxi beta server), or the provider of your own key if you added one | To understand your screen and answer |
 | What you say to Pyxi (the sound of each request, and dictation) | Google's Gemini model, through OpenRouter (during the beta, through the Pyxi beta server) | To turn your speech into text. With "Turn my speech into text on this PC only" switched on in the Voice panel, nothing you say is sent: your computer listens (Bengali then needs the offline Bengali model, which Pyxi offers to download) |
 | Web searches you ask for, and price checks | DuckDuckGo or Bing, then the store websites that come up | To look things up and compare prices |
 | Pages a teammate opens | Those websites, in a browser on your computer | To do the research, booking or form you asked for |
@@ -112,6 +112,10 @@ Everything lives in `%APPDATA%\Pyxi\.pyxi`:
 - short notes on how apps and websites work ("the PivotTable button is on the Insert tab"), which Pyxi writes after doing a task in one so the next task there is quicker. At most six per app or site, in `learned.json`. They are about the app, not about you: what you typed, your files, names and numbers are kept out. "Wipe everything" clears them, and you can open or delete the file yourself;
 - teammates' task records, flashcard decks and budgets;
 - the booking details you saved (name, email, phone, date of birth, city and preferences). Health card, passport and other ID numbers are never saved;
+- what you told Pyxi in the welcome tour, the first time it ran. Every answer is optional, and none of it is sent to us or to any server to be stored:
+  - your name, email and date of birth go into the booking details above (`profile.json`), so forms and bookings you ask for can use them;
+  - what to call you, a few things you like and what you mostly use the PC for are kept as three memories ("Call them Sam."), with the other things Pyxi remembers. Like every memory, they go along with your requests to the AI model, so its answers fit you;
+  - a small marker, `onboarding.json`, records that the tour was shown, how it ended, and which booking details it filled in (their names, never their values);
 - your settings, including which folders Pyxi may search;
 - encrypted sign-in tokens for accounts you connected, and your beta token.
 
@@ -125,8 +129,9 @@ Pyxi controls your mouse and keyboard only after you press **Allow** on its requ
 
 - **See it:** the Memory tab shows what Pyxi and the teammates remember. The activity log in the panel lists everything Pyxi did on your behalf, with the time and the teammate (emails sent, buttons pressed, files moved, scripts changed), and can undo what can be undone. Settings shows what's connected, which folders Pyxi may search and which "always allow" grants are active.
 - **Delete it:**
-  - "Wipe everything" in the Memory tab forgets every memory, the Memory Palace and the conversations with their screenshots. It asks first.
+  - "Wipe everything" in the Memory tab forgets every memory (what you told the welcome tour included), the Memory Palace, the conversations with their screenshots, and your booking details. It asks first.
   - "Forget …" removes a memory.
+  - "Delete what I told the tour" in Settings removes the tour's three memories and the booking details it filled in. You can also change or clear any booking detail in Settings, Booking details.
   - Disconnect an account in Settings to remove its tokens.
   - Turn off "Let Pyxi search my files" in Settings.
   - Uninstalling Pyxi and deleting `%APPDATA%\Pyxi` removes everything.
@@ -138,7 +143,7 @@ The Pyxi website uses no cookies, no analytics and no trackers. It's hosted on V
 
 ## Children
 
-Pyxi isn't meant for children under 13, and we don't knowingly collect their information.
+Pyxi isn't meant for children under 13, and we don't knowingly collect their information. If the date of birth given in the welcome tour is that of someone under 13, Pyxi keeps none of what was typed there and the tour ends.
 
 ## Changes
 

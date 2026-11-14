@@ -225,6 +225,7 @@ def launch(args: argparse.Namespace) -> dict:
         "PYXI_DATA_DIR": str(data),
         "PYXI_BRAIN_KEY": key,
         "PYXI_AUTO_VOICE": "0",
+        "PYXI_TOUR": "0",  # an empty data folder: no first-run tour over what is measured
         **args.env,
     }
     log = open(tmp / "brain.log", "w", encoding="utf-8")  # noqa: SIM115 (open while the brain runs)
@@ -310,6 +311,7 @@ def launch_desktop(args: argparse.Namespace) -> dict:
         "PYXI_ARGS": f"--demo --port {port}",
         "PYXI_DATA_DIR": str(data),
         "PYXI_AUTO_VOICE": "0",
+        "PYXI_TOUR": "0",  # an empty data folder: no first-run tour over what is measured
         **args.env,
     }
     env.pop("ELECTRON_RUN_AS_NODE", None)

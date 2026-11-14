@@ -362,6 +362,19 @@ const DETAILS: [string, string, string][] = [
   ["preferences", "Preferences (mornings, aisle seats, Dr. Lee)", "off"],
 ];
 
+/** The first-run tour: play it again, or delete what it was told (pyxi/onboarding.py). */
+function TourSettings() {
+  return (
+    <div className="tour-settings">
+      <p className="muted">The firefly's tour of Pyxi takes about two minutes. What you told it stays on this PC: your name, email and date of birth are in Booking details below, and what you like is in the Memory tab.</p>
+      <div className="booking-row">
+        <button className="primary" onClick={() => brain.send({ type: "onboarding", action: "replay" })}>Replay the tour</button>
+        <button className="ghost" onClick={() => brain.send({ type: "onboarding", action: "forget" })}>Delete what I told the tour</button>
+      </div>
+    </div>
+  );
+}
+
 /** What Scout may fill in when it books something for you. Kept only on this PC. */
 function BookingDetails() {
   const [profile, setProfile] = useState<Record<string, string>>({});
@@ -505,6 +518,8 @@ export function Settings() {
       <label><input type="checkbox" checked={hello.privacy_paused} onChange={(e) => set("privacy_paused", e.target.checked)} /> Pause screen sharing (Ctrl+Alt+P)</label>
       <label><input type="checkbox" defaultChecked onChange={(e) => set("jobs_headed", e.target.checked)} /> Show teammates' browser windows</label>
       <ShareToggle />
+      <h4>The tour</h4>
+      <TourSettings />
       <h4>Booking details</h4>
       <BookingDetails />
       <h4>Your files</h4>

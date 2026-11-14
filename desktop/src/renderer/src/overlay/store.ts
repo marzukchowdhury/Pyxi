@@ -127,6 +127,14 @@ interface OverlayState {
   cheer: { x: number; y: number; at: number } | null;
   /** Finished background jobs, shown quietly as cards (newest first). */
   toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null }[];
+  /** The first-run tour is playing on some screen (overlay/onboarding): the notch keeps its own hint back. */
+  touring: boolean;
+  /** The brain said the tour has not been seen yet (or broke off last time). */
+  tourDue: boolean;
+  /** The tour is drawing its own firefly, so the one beside the cursor steps aside. */
+  tourFirefly: boolean;
+  /** When the tour's firefly landed in the notch: it glows once. */
+  notchGlow: number;
   dismissToast(id: string): void;
   closeNotes(): void;
   closeAnswer(): void;
@@ -176,6 +184,10 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   driving: null,
   cheer: null,
   toasts: [],
+  touring: false,
+  tourDue: false,
+  tourFirefly: false,
+  notchGlow: 0,
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.job_id !== id) }),
   closeNotes: () => set({ notes: null }),
   closeAnswer: () => {
@@ -314,7 +326,8 @@ brain.onStatus((up) => {
   useOverlay.setState({ connected: up });
   if (!up) {
     document.documentElement.classList.remove("capturing");
-    useOverlay.setState({ capturing: false });
+    // (A tour that was playing ends with the brain: the cursor's firefly must not stay hidden.)
+    useOverlay.setState({ capturing: false, touring: false, tourFirefly: false });
   }
 });
 
@@ -356,6 +369,8 @@ brain.on((e: BrainEvent) => {
   switch (e.type) {
     case "hello":
     case "settings":
+      // The first-run tour is due (only "hello" says so): the main screen asks for it (overlay/onboarding).
+      if (e.onboarding) useOverlay.setState({ tourDue: e.onboarding.due || e.onboarding.active });
       useOverlay.setState({ state: e.state, paused: e.privacy_paused, watching: !!e.ambient_memory && !e.privacy_paused, captions: e.voice?.captions ?? true, jobs: Object.fromEntries(e.jobs.map((j) => [j.id, j])) });
       break;
     case "state":
@@ -535,6 +550,18 @@ brain.on((e: BrainEvent) => {
       break;
     case "pins":
       useOverlay.setState({ pins: e.pins.filter((p) => onThisDisplay(p.rect[0], p.rect[1])) });
+      break;
+    case "onboarding":
+      // Every screen knows the tour is on (it plays on one of them); see overlay/onboarding.
+      if (e.event === "start") useOverlay.setState({ touring: true, tourFirefly: true });
+      // The tour draws its own firefly, except while they talk and point (the cursor's own does that).
+      else if (e.event === "step") useOverlay.setState({ touring: true, tourFirefly: e.step !== "talk" && e.step !== "screen" });
+      else if (e.event === "ended") {
+        useOverlay.setState({ touring: false, tourFirefly: false });
+        // Played on another screen: the notch (here, on the main one) still glows at its end.
+        const last = useOverlay.getState().notchGlow;
+        if (isPrimary && e.how === "finished" && performance.now() - last > 10000) useOverlay.setState({ notchGlow: performance.now() });
+      }
       break;
   }
 });

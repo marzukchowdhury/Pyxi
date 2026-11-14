@@ -32,7 +32,8 @@ export function Presence({ micLevel }: { micLevel: () => number }) {
   const working = useOverlay((s) => Object.values(s.jobs).some((j) => j.status === "running"));
   const target = useOverlay((s) => s.flyTo);
   const driving = useOverlay((s) => s.driving);
-  const capturing = useOverlay((s) => s.capturing);
+  // Hidden for Pyxi's own screenshots, and while the first-run tour draws a firefly of its own.
+  const capturing = useOverlay((s) => s.capturing || s.tourFirefly);
   const tags = !!driving || (!!caption && !isPrimary);
   const tagsRef = useRef(tags);
   tagsRef.current = tags;

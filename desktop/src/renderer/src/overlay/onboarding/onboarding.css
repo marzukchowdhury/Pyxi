@@ -1,0 +1,226 @@
+/* The first-run tour (Onboarding.tsx): a near-black stage over the real desktop, the firefly as
+   the character, big confident type, and things that land with a little overshoot. Nothing
+   here catches the mouse except the cards (Interactive turns the window on under them). */
+.ob { position: fixed; inset: 0; z-index: 58; pointer-events: none; transition: opacity .6s var(--ease); }
+.ob.leaving { opacity: 0; }
+.ob-dim { position: absolute; inset: 0; background: radial-gradient(90% 80% at calc(var(--ax) + 240px) calc(var(--ay) + 120px), rgba(6, 7, 11, .9) 0%, rgba(6, 7, 11, .74) 45%, rgba(6, 7, 11, .56) 100%); opacity: 1; transition: opacity .9s var(--ease); animation: ob-fade 1.1s var(--ease); }
+.ob-dim.clear { opacity: 0; }
+/* Asking about the screen: the screen is the point, so only the words keep a soft dark behind them. */
+.ob-say { text-shadow: 0 2px 18px rgba(0, 0, 0, .8), 0 0 2px rgba(0, 0, 0, .8); }
+.ob.clear:not(.leaving) .ob-stage::before { content: ""; position: absolute; inset: -22px -30px; border-radius: 30px; background: rgba(8, 9, 13, .88); border: 1px solid var(--hair-hi); box-shadow: 0 24px 70px rgba(0, 0, 0, .45); z-index: -1; animation: ob-fade .6s var(--ease); }
+/* Stepped aside in the corner, the words are a size smaller. */
+.step-screen .ob-line { font-size: clamp(26px, 2.1vw, 34px); }
+.step-screen .ob-sub { font-size: clamp(15px, 1.1vw, 18px); max-width: 460px; }
+.step-screen .ob-keys > kbd { min-width: 60px; padding: 12px 12px; font-size: 14px; border-radius: 11px; }
+.step-screen .ob-keys { min-height: 44px; }
+
+.ob-stage { position: absolute; display: flex; flex-direction: column; gap: 18px; width: max-content; max-width: min(940px, calc(100vw - 80px)); transition: left .7s var(--ease), top .7s var(--ease); }
+.ob-stage > * { pointer-events: none; }
+.ob-head { display: flex; align-items: flex-start; gap: 14px; min-height: 64px; }
+
+/* ---------------------------------------------------------------- the firefly */
+.ob-fly { flex: none; width: 64px; height: 64px; margin: -6px 0 0 -10px; transition: opacity .5s var(--ease), width .5s var(--ease), margin .5s var(--ease); animation: ob-hover 3.4s ease-in-out infinite; }
+.ob-fly.away { opacity: 0; width: 0; margin-left: -14px; }
+.ob-fly svg { display: block; overflow: visible; filter: drop-shadow(0 0 10px rgba(255, 190, 80, .7)); }
+.ob-bug-halo { animation: ob-breathe 2.8s ease-in-out infinite; transform-origin: center; }
+.ob-bug-wing { fill: rgba(255, 252, 242, .55); stroke: rgba(255, 236, 190, .5); stroke-width: .5; transform-box: fill-box; transform-origin: center; animation: ob-buzz .11s linear infinite alternate; }
+.ob-bug-body { fill: #2b2416; stroke: rgba(255, 236, 190, .55); stroke-width: .6; }
+.ob-bug-tail { filter: drop-shadow(0 0 4px #ffd27a); }
+/* In from the left edge on a curve, a touch past its place, then back: it lands. */
+.ob-fly.flying { animation: ob-fly-in 1.7s cubic-bezier(.3, .1, .2, 1) both; }
+/* Up into the notch at the end. */
+.ob-fly.rising { animation: ob-rise 2.2s cubic-bezier(.5, 0, .2, 1) .3s both; }
+@keyframes ob-fly-in {
+  0% { transform: translate(calc(-1 * var(--ax) - 90px), 190px) scale(.5); opacity: 0; }
+  12% { opacity: 1; }
+  45% { transform: translate(calc(-.35 * var(--ax)), -70px) scale(.9); }
+  72% { transform: translate(26px, 14px) scale(1.12); }
+  88% { transform: translate(-6px, -4px) scale(.97); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+@keyframes ob-rise {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
+  25% { transform: translate(-30px, 26px) scale(1.08); opacity: 1; }
+  92% { opacity: 1; }
+  100% { transform: translate(calc(50vw - var(--ax) - 22px), calc(-1 * var(--ay) - 26px)) scale(.3); opacity: 0; }
+}
+@keyframes ob-hover { 0%, 100% { transform: translate(0, 0); } 30% { transform: translate(2px, -4px); } 65% { transform: translate(-2px, 3px); } }
+@keyframes ob-breathe { 50% { opacity: .55; transform: scale(.9); } }
+@keyframes ob-buzz { to { transform: scaleY(.4); } }
+@keyframes ob-fade { from { opacity: 0; } }
+
+/* ---------------------------------------------------------------- the words */
+.ob-say { animation: ob-land .6s var(--spring) both; max-width: 860px; }
+.phase-hello .ob-say, .phase-ask .ob-say { animation-delay: .05s; }
+.ob-line { font: 600 clamp(32px, 2.9vw, 50px)/1.08 "Fraunces", Georgia, serif; letter-spacing: -.02em; color: #fffaf0; text-wrap: balance; }
+.ob-sub { margin-top: 8px; font: 500 clamp(17px, 1.35vw, 22px)/1.35 "Inter", sans-serif; color: rgba(255, 244, 222, .8); text-wrap: balance; }
+@keyframes ob-land { 0% { opacity: 0; transform: translateY(14px) scale(.96); } 60% { opacity: 1; transform: translateY(-3px) scale(1.012); } 100% { transform: none; } }
+
+/* ---------------------------------------------------------------- the name */
+.ob-name { pointer-events: auto !important; margin-left: 68px; animation: ob-land .55s var(--spring) .25s both; }
+.ob-name form { display: flex; align-items: center; gap: 12px; width: 380px; padding: 0 6px 8px; border-bottom: 2px solid rgba(255, 200, 97, .7); }
+.ob-name input { flex: 1; min-width: 0; height: 44px; background: none; border: 0; outline: none; color: #fffaf0; font: 500 26px/1 "Inter", sans-serif; letter-spacing: -.01em; caret-color: var(--fly); user-select: text; }
+.ob-name input::placeholder { color: rgba(255, 244, 222, .34); }
+.ob-enter { background: none; border: 0; padding: 0; opacity: .75; }
+.ob-enter:hover { opacity: 1; }
+.ob kbd { font: 600 12px/1 "Inter", sans-serif; padding: 6px 9px; border-radius: 8px; color: rgba(255, 244, 222, .85); background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .18); box-shadow: 0 2px 0 rgba(0, 0, 0, .5); }
+
+/* ---------------------------------------------------------------- the keys */
+.ob-keys { display: flex; align-items: center; gap: 12px; min-height: 58px; animation: ob-land .55s var(--spring) .3s both; }
+.ob-keys > kbd { min-width: 78px; padding: 17px 16px; border-radius: 14px; text-align: center; font-size: 17px; transition: background .12s, color .12s, box-shadow .12s, transform .12s var(--spring), border-color .12s; }
+.ob-keys > kbd.held { background: var(--fly); border-color: #fff3cf; color: #2b1c00; transform: translateY(2px); box-shadow: 0 0 0 rgba(0, 0, 0, .5), 0 0 26px rgba(255, 200, 97, .75); }
+.ob-listening { font: 600 15px/1 "Inter", sans-serif; color: var(--fly-hi); animation: ob-fade .2s; }
+.ob-hint { pointer-events: auto !important; display: flex; align-items: center; gap: 14px; margin-left: 10px; font: 500 15px/1 "Inter", sans-serif; color: rgba(255, 244, 222, .7); animation: ob-land .5s var(--spring) both; }
+.ob-hint kbd { margin: 0 2px; }
+.ob-link { padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .06); font: 600 14px/1 "Inter", sans-serif; color: #fffaf0; }
+.ob-link:hover { background: rgba(255, 255, 255, .14); }
+
+/* ---------------------------------------------------------------- cards */
+.ob-card { pointer-events: auto !important; padding: 20px 22px 18px; border-radius: 24px; background: rgba(14, 15, 21, .96); border: 1px solid rgba(255, 213, 158, .2); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 30px 90px rgba(0, 0, 0, .55); animation: ob-land .6s var(--spring) .15s both; }
+.ob-card input[type="text"], .ob-card input:not([type]), .ob-card select { height: 36px; width: 100%; min-width: 0; padding: 0 11px; border-radius: 10px; border: 1px solid var(--hair-hi); background: rgba(255, 255, 255, .05); color: var(--ink); font: 500 14px/1 "Inter", sans-serif; outline: none; user-select: text; }
+.ob-card select { appearance: none; padding-right: 6px; }
+.ob-card select option { background: #15171f; color: var(--ink); }
+.ob-card input:focus, .ob-card select:focus { border-color: rgba(255, 200, 97, .7); box-shadow: 0 0 0 3px rgba(255, 200, 97, .14); }
+.ob-card input::placeholder { color: var(--ink-3); }
+.ob-fields { display: grid; grid-template-columns: 286px 268px 140px; gap: 22px; align-items: start; }
+.ob-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ob-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ob-label { font: 600 14px/1.25 "Inter", sans-serif; color: var(--ink); }
+.ob-label em { margin-left: 6px; font: 500 11px/1 "Inter", sans-serif; font-style: normal; letter-spacing: .04em; color: var(--ink-3); }
+.ob-why { margin-bottom: 3px; font: 400 12.5px/1.35 "Inter", sans-serif; color: var(--ink-2); }
+.ob-wrong { font: 500 12.5px/1.35 "Inter", sans-serif; color: #ffb9a3; }
+.ob-date { display: grid; grid-template-columns: 62px 1fr 76px; gap: 8px; }
+.ob-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 4px; }
+.ob-chips button { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--hair-hi); background: rgba(255, 255, 255, .04); font: 500 13px/1 "Inter", sans-serif; color: var(--ink-2); transition: background .15s, color .15s, border-color .15s, transform .2s var(--spring); }
+.ob-chips button:hover { color: var(--ink); border-color: rgba(255, 255, 255, .3); }
+.ob-chips button.on { background: rgba(255, 200, 97, .18); border-color: rgba(255, 200, 97, .7); color: #fff3cf; transform: scale(1.04); }
+.ob-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--hair); }
+.ob-private { flex: 1; font: 400 12.5px/1.4 "Inter", sans-serif; color: var(--ink-2); }
+.ob-private.strong { font: 600 17px/1.3 "Fraunces", Georgia, serif; color: #fffaf0; }
+.ob-btn { pointer-events: auto; height: 38px; padding: 0 18px; border-radius: 12px; border: 1px solid var(--hair-hi); background: rgba(255, 255, 255, .05); font: 600 14px/1 "Inter", sans-serif; color: var(--ink); white-space: nowrap; transition: background .15s, transform .2s var(--spring); }
+.ob-btn:hover { background: rgba(255, 255, 255, .12); }
+.ob-btn:active { transform: scale(.97); }
+.ob-btn.quiet { border-color: transparent; background: none; color: var(--ink-2); }
+.ob-btn.quiet:hover { color: var(--ink); background: rgba(255, 255, 255, .06); }
+.ob-btn.primary { background: var(--fly); border-color: #fff3cf; color: #2b1c00; }
+.ob-btn.primary:hover { background: #ffd684; }
+.ob-btn:disabled { opacity: .6; cursor: default; }
+.ob-row { pointer-events: auto !important; margin-left: 68px; }
+
+/* ---------------------------------------------------------------- the jar */
+.ob-jar { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ob-jar span { font: 500 12px/1 "Inter", sans-serif; color: var(--ink-3); }
+.ob-jar-lid { fill: rgba(255, 236, 190, .28); stroke: rgba(255, 244, 222, .5); stroke-width: 1; }
+.ob-jar-glass { fill: rgba(255, 255, 255, .035); stroke: rgba(255, 244, 222, .42); stroke-width: 1.4; }
+.ob-jar-shine { fill: none; stroke: rgba(255, 255, 255, .28); stroke-width: 3; stroke-linecap: round; }
+.ob-jar-warm { transition: opacity .8s var(--ease); }
+.ob-jar-fly { animation: ob-drift 4.2s ease-in-out var(--d) infinite; }
+.ob-jar-pop { animation: ob-pop .7s var(--spring) both; transform-box: fill-box; transform-origin: center; }
+.ob-jar-fly .h { fill: rgba(255, 200, 97, .28); }
+.ob-jar-fly .c { fill: #fff3cf; filter: drop-shadow(0 0 4px #ffc861) drop-shadow(0 0 10px rgba(255, 190, 80, .9)); }
+@keyframes ob-pop { 0% { transform: scale(0); opacity: 0; } 60% { transform: scale(1.5); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes ob-drift { 0%, 100% { translate: 0 0; } 33% { translate: 5px -6px; } 66% { translate: -4px 4px; } }
+
+/* ---------------------------------------------------------------- Google */
+.ob-google { width: 560px; max-width: 100%; }
+.ob-google ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.ob-google li { position: relative; padding-left: 20px; font: 400 14.5px/1.4 "Inter", sans-serif; color: var(--ink-2); }
+.ob-google li::before { content: ""; position: absolute; left: 2px; top: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--fly); box-shadow: 0 0 8px rgba(255, 200, 97, .9); }
+.ob-google li b { display: inline-block; min-width: 124px; font-weight: 600; color: var(--ink); }
+.ob-promise { margin: 14px 0 0; padding: 10px 12px; border-radius: 12px; background: rgba(158, 203, 255, .08); border: 1px solid rgba(158, 203, 255, .22); font: 500 13.5px/1.4 "Inter", sans-serif; color: var(--ice-hi); }
+.ob-google .ob-wrong { margin: 10px 0 0; }
+
+/* ---------------------------------------------------------------- the demos */
+.ob-tiles { display: grid; grid-template-columns: repeat(3, 200px); gap: 14px; }
+.ob-tile { display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 12px; border-radius: 16px; border: 1px solid var(--hair-hi); background: rgba(255, 255, 255, .035); text-align: left; transition: border-color .2s, background .2s, transform .25s var(--spring); }
+.ob-tile:hover { border-color: rgba(255, 200, 97, .55); transform: translateY(-2px); }
+.ob-tile.playing { border-color: rgba(255, 200, 97, .8); background: rgba(255, 200, 97, .06); }
+.ob-tile b { display: flex; align-items: center; justify-content: space-between; font: 600 14px/1.2 "Inter", sans-serif; color: var(--ink); }
+/* A small play mark beside the title (a drawn triangle), gone while it plays. */
+.ob-play { width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 8px; border-color: transparent transparent transparent var(--fly); filter: drop-shadow(0 0 4px rgba(255, 200, 97, .8)); transition: opacity .2s; }
+.ob-tile.played .ob-play { opacity: .45; }
+.ob-tile.playing .ob-play { opacity: 0; }
+.ob-ask { font: 400 12px/1.3 "Inter", sans-serif; color: var(--ink-2); }
+.ob-screen { position: relative; display: block; height: 112px; border-radius: 10px; overflow: hidden; background: #0b0c11; border: 1px solid var(--hair); }
+/* explain: a page, one line picked out, a note pinned to it by a thread */
+.d-page { position: absolute; left: 10px; top: 12px; width: 84px; display: flex; flex-direction: column; gap: 7px; }
+.d-page i, .d-note i { display: block; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .16); }
+.d-page i.hit { background: rgba(255, 255, 255, .16); }
+.d-note { position: absolute; right: 9px; top: 20px; width: 78px; padding: 8px; border-radius: 8px; background: rgba(22, 24, 32, .98); border: 1px solid rgba(158, 203, 255, .45); display: flex; flex-direction: column; gap: 5px; opacity: 0; }
+.d-note u { text-decoration: none; font: 600 8.5px/1 "Inter", sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--ice); }
+.d-thread { position: absolute; left: 86px; top: 39px; width: 20px; height: 1.5px; background: linear-gradient(90deg, #fff3cf, var(--ice)); transform-origin: left; transform: scaleX(0); }
+.playing .d-page i.hit { animation: d-hit 5s var(--ease) both; }
+.playing .d-thread { animation: d-thread 5s var(--ease) both; }
+.playing .d-note { animation: d-note 5s var(--spring) both; }
+.playing .d-note i { animation: d-write 5s var(--ease) both; transform-origin: left; }
+.playing .d-note i:nth-of-type(2) { animation-delay: .35s; }
+.playing .d-note i:nth-of-type(3) { animation-delay: .7s; }
+@keyframes d-hit { 0%, 8% { background: rgba(255, 255, 255, .16); } 16%, 100% { background: var(--fly); box-shadow: 0 0 8px rgba(255, 200, 97, .8); } }
+@keyframes d-thread { 0%, 16% { transform: scaleX(0); } 26%, 100% { transform: scaleX(1); } }
+@keyframes d-note { 0%, 22% { opacity: 0; transform: translateY(8px) scale(.9); } 32% { opacity: 1; transform: translateY(-2px) scale(1.04); } 38%, 100% { opacity: 1; transform: none; } }
+@keyframes d-write { 0%, 36% { transform: scaleX(0); } 48%, 100% { transform: scaleX(1); } }
+/* build: a small wind turbine that appears and turns */
+.d-model { position: absolute; inset: 0; perspective: 300px; }
+.d-tower { position: absolute; left: 50%; bottom: 20px; width: 6px; height: 50px; margin-left: -3px; border-radius: 3px 3px 1px 1px; background: linear-gradient(90deg, #cfd6e4, #7f8797); }
+.d-ground { position: absolute; left: 50%; bottom: 14px; width: 90px; height: 12px; margin-left: -45px; border-radius: 50%; background: radial-gradient(closest-side, rgba(158, 203, 255, .34), transparent); }
+.d-hub { position: absolute; left: 50%; bottom: 66px; width: 10px; height: 10px; margin: 0 0 0 -5px; border-radius: 50%; background: #eef2f8; box-shadow: 0 0 10px rgba(158, 203, 255, .7); }
+.d-hub i { position: absolute; left: 3.5px; bottom: 5px; width: 3px; height: 30px; border-radius: 3px 3px 1px 1px; background: linear-gradient(#f4f7fb, #9aa3b5); transform-origin: 50% 100%; }
+.d-model { opacity: .45; }
+.playing .d-model { animation: d-appear 5s var(--spring) both; }
+.playing .d-hub { animation: d-spin 2.2s linear .6s infinite; }
+@keyframes d-appear { 0% { opacity: 0; transform: scale(.4) rotateY(-70deg); } 14% { opacity: 1; transform: scale(1.1) rotateY(10deg); } 22% { transform: scale(1) rotateY(0); opacity: 1; } 60% { transform: scale(1) rotateY(28deg); opacity: 1; } 100% { transform: scale(1) rotateY(-18deg); opacity: 1; } }
+@keyframes d-spin { to { rotate: 360deg; } }
+/* tidy: loose files fold into two folders */
+.d-file { position: absolute; width: 16px; height: 20px; border-radius: 3px; background: linear-gradient(#f4f7fb, #b9c1d0); }
+/* Placed in shares of the little screen, so they sit right at either tile width. */
+.d-file.f0 { left: 8%; top: 10px; } .d-file.f1 { left: 36%; top: 6px; rotate: 8deg; } .d-file.f2 { left: 66%; top: 12px; rotate: -6deg; }
+.d-file.f3 { left: 82%; top: 36px; rotate: 12deg; } .d-file.f4 { left: 20%; top: 38px; rotate: -10deg; } .d-file.f5 { left: 52%; top: 34px; rotate: 4deg; }
+.d-file.f1, .d-file.f3, .d-file.f5 { background: linear-gradient(#ffe2a6, #ffc861); }
+.d-folder { position: absolute; bottom: 9px; width: 38%; height: 24px; border-radius: 6px; background: rgba(158, 203, 255, .16); border: 1px solid rgba(158, 203, 255, .5); display: grid; place-items: center; }
+.d-folder.a { left: 8%; } .d-folder.b { right: 8%; }
+.d-folder u { text-decoration: none; font: 600 9.5px/1 "Inter", sans-serif; color: var(--ice-hi); }
+.playing .d-file { animation: d-tidy 5s var(--ease) both; }
+/* White files go to the left folder, amber ones to the right. */
+.playing .d-file.f0 { --tx: 28px; --ty: 58px; } .playing .d-file.f2 { --tx: -64px; --ty: 56px; animation-delay: .2s; } .playing .d-file.f4 { --tx: 8px; --ty: 30px; animation-delay: .4s; }
+.playing .d-file.f1 { --tx: 52px; --ty: 62px; animation-delay: .1s; } .playing .d-file.f3 { --tx: -22px; --ty: 32px; animation-delay: .3s; } .playing .d-file.f5 { --tx: 26px; --ty: 34px; animation-delay: .5s; }
+.playing .d-folder { animation: d-catch 5s var(--spring) both; }
+@keyframes d-tidy { 0%, 14% { translate: 0 0; scale: 1; opacity: 1; } 40% { translate: var(--tx) var(--ty); scale: .5; opacity: 1; } 46%, 100% { translate: var(--tx) var(--ty); scale: .2; opacity: 0; } }
+@keyframes d-catch { 0%, 44% { scale: 1; } 52% { scale: 1.12; border-color: var(--fly); } 60%, 100% { scale: 1; } }
+
+/* ---------------------------------------------------------------- the foot */
+.ob-foot { display: flex; align-items: center; gap: 16px; margin-left: 68px; animation: ob-fade 1s var(--ease) .8s both; }
+.step-talk .ob-foot, .step-screen .ob-foot { margin-left: 0; }
+.ob-dots { display: flex; gap: 6px; }
+.ob-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, .2); transition: background .3s, box-shadow .3s; }
+.ob-dots i.done { background: rgba(255, 200, 97, .55); }
+.ob-dots i.on { background: var(--fly); box-shadow: 0 0 8px rgba(255, 200, 97, .9); }
+.ob-skip { pointer-events: auto !important; }
+.ob-skip button { padding: 7px 12px; border-radius: 999px; border: 1px solid transparent; background: none; font: 500 13px/1 "Inter", sans-serif; color: rgba(255, 244, 222, .62); }
+.ob-skip button:hover { color: #fffaf0; border-color: rgba(255, 255, 255, .2); background: rgba(255, 255, 255, .06); }
+
+/* The notch glows once when the firefly lands in it. */
+.notch.tour-glow { animation: ob-notch-glow 2.4s var(--ease) both; }
+@keyframes ob-notch-glow { 0% { box-shadow: 0 0 0 rgba(255, 200, 97, 0); } 25% { box-shadow: 0 0 0 2px rgba(255, 213, 158, .9), 0 6px 46px 10px rgba(255, 200, 97, .75); } 100% { box-shadow: 0 0 0 rgba(255, 200, 97, 0); } }
+
+/* Small screens (1366 x 768): the same stage, a little tighter. */
+@media (max-height: 820px), (max-width: 1400px) {
+  .ob-stage { gap: 14px; }
+  .ob-card { padding: 16px 18px 14px; }
+  .ob-fields { grid-template-columns: 270px 256px 124px; gap: 18px; }
+  .ob-col { gap: 11px; }
+  .ob-tiles { grid-template-columns: repeat(3, 184px); }
+  .ob-screen { height: 100px; }
+  .ob-actions { margin-top: 12px; padding-top: 12px; }
+}
+
+/* Reduce motion: no flying, no drifting; things simply fade in. */
+@media (prefers-reduced-motion: reduce) {
+  .ob-fly, .ob-fly.flying, .ob-bug-halo, .ob-bug-wing, .ob-jar-fly, .ob-jar-pop { animation: none; }
+  .ob-fly.flying, .ob-say, .ob-name, .ob-keys, .ob-card, .ob-hint { animation: ob-fade .5s ease both; }
+  .ob-fly.rising { animation: ob-fade .8s ease .4s reverse both; }
+  .ob-stage { transition: none; }
+  .notch.tour-glow { animation: ob-notch-quiet 2.4s ease both; }
+  .playing .d-model, .playing .d-hub, .playing .d-file, .playing .d-folder, .playing .d-note, .playing .d-thread, .playing .d-note i, .playing .d-page i.hit { animation-duration: .01s; animation-iteration-count: 1; animation-delay: 0s; }
+  .ob-chips button.on, .ob-tile:hover { transform: none; }
+}
+@keyframes ob-notch-quiet { 30% { box-shadow: 0 0 0 2px rgba(255, 213, 158, .8); } }

@@ -276,6 +276,9 @@ class Brain:
         self.routines = RoutineStore(settings.data_dir / "routines.json")
         self.mailwatch = MailWatchStore(settings.data_dir / "mailwatch.json")
         tabwork.setup(self)  # Pyxi in your browser: self.browser, the extension's bridge
+        # Set by the server for the first-run tour (pyxi/onboarding.py): given what was just
+        # heard, it answers True when the tour takes those words for itself.
+        self.heard_hook: Any = None
 
     # ================================================================== entry points
     async def set_state(self, state: State) -> None:
@@ -367,6 +370,12 @@ class Brain:
 
         text = wakename.normalize(text)  # "Your pixxit split my screen" -> "Pyxi, split my screen"
         await self.hub.emit("transcript", text=text, seconds=round(took, 2))
+        if self.heard_hook is not None and await self.heard_hook(text):
+            # The first-run tour's "say hello" (pyxi/onboarding.py): the tour answers it.
+            self._prefetch = None
+            self._release_hands()
+            await self.set_state("idle")
+            return
         if not text.strip():
             self._prefetch = None  # the next question looks at the screen afresh
             self._release_hands()
@@ -2691,7 +2700,8 @@ class Brain:
             action="Wipe everything Pyxi remembers?",
             reason=(
                 f"This forgets {len(mems)} memor{'y' if len(mems) == 1 else 'ies'}, your Memory "
-                "Palace history, and your conversations with Pyxi (with their screenshots). It "
+                "Palace history, your conversations with Pyxi (with their screenshots), and "
+                "the details you saved for forms and bookings (name, email, date of birth and the rest). It"
                 "can't be undone. Your settings, connected accounts, files and the activity log "
                 "stay."
             ),
@@ -2701,6 +2711,8 @@ class Brain:
         for _, store in self._memory_stores():
             for scope in {m.scope for m in store.all(None, 100000)}:
                 store.forget(scope)
+        # The saved details too (what the first-run tour asked for, and Settings' own form).
+        booking.save(self.settings.data_dir, {})
         self.spatial.forget_all()
         self.activity.forget_all()
         if (learned := self._learned()) is not None:
@@ -3284,8 +3296,11 @@ class Brain:
                 for j in self.jobs.recent(6)
                 if j.role != "model" and (j.ended_at is None or now_t - j.ended_at < 120)
             )
+            from pyxi import onboarding
+
+            # What they told Pyxi in the tour (their name, what they like) is always there.
             memories = "\n".join(
-                m.render() for m in self.memory.search("agent:pyxi", cfg["user_text"], 6)
+                m.render() for m in onboarding.memories_for(self.memory, cfg["user_text"], 6)
             )
             text = prompts.turn_prompt(
                 user_text=cfg["user_text"],

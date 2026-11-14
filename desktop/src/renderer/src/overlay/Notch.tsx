@@ -82,6 +82,8 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const jobStatus = useOverlay((s) => s.jobStatus);
   const toasts = useOverlay((s) => s.toasts);
   const dismissToast = useOverlay((s) => s.dismissToast);
+  const touring = useOverlay((s) => s.touring);
+  const notchGlow = useOverlay((s) => s.notchGlow);
   const result = toasts[0];
   // A new file gets its own card: the file itself, Open file, Open file location, drag it out.
   const fileResult = !!result && result.ok && result.files.length > 0 && !result.link && !result.actions.includes("update");
@@ -134,7 +136,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     : state === "speaking" && caption ? "speaking"
     : notice && now - notice.at < NOTICE_MS ? "notice"
     : !connected ? "offline"
-    : now < hintUntil ? "hint"
+    : now < hintUntil && !touring ? "hint" // the first-run tour teaches the gesture itself
     : running.length ? "working"
     : paused ? "paused"
     : "idle";
@@ -189,6 +191,9 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [full]);
+
+  // "Replay the tour" (Settings): fold away, so the tour has the screen.
+  useEffect(() => brain.on((e) => e.type === "onboarding" && e.event === "start" && close()), []);
 
   // Double-tap Ctrl: open with the text box ready.
   useEffect(
@@ -262,7 +267,8 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
         onLeave={() => leave("body")}
       >
       <div
-        className={`notch mode-${mode}`}
+        // The tour's firefly lands here at its end: the notch glows once.
+        className={`notch mode-${mode} ${notchGlow && now - notchGlow < 2600 ? "tour-glow" : ""}`}
         style={{ width: mode === "speaking" && !captions ? 210 : mode === "result" && fileResult ? FILE_WIDTH : WIDTH[mode], height }}
         onClick={() => mode !== "open" && mode !== "full" && openFull()}
       >
