@@ -227,7 +227,7 @@ function Play({ have, code, anchor, onOver }: { have: Have; code: boolean; ancho
     const fit = () => {
       const { width, height } = el.getBoundingClientRect();
       // Asking about their screen: the words step aside to the bottom corner, out of the way.
-      const aside = screenClear(tourRef.current) && tourRef.current.step === "screen";
+      const aside = screenClear(tourRef.current) && (tourRef.current.step === "screen" || tourRef.current.step === "google");
       const x = aside ? 64 : Math.max(40, Math.min(anchor[0], innerWidth - width - 40));
       const y = aside ? innerHeight - height - 96 : Math.max(120, Math.min(anchor[1], innerHeight - height - 64));
       setPlace((p) => (Math.abs(p[0] - x) < 0.5 && Math.abs(p[1] - y) < 0.5 ? p : [x, y]));
@@ -240,7 +240,7 @@ function Play({ have, code, anchor, onOver }: { have: Have; code: boolean; ancho
       ro.disconnect();
       window.removeEventListener("resize", fit);
     };
-  }, [anchor, tour.step]);
+  }, [anchor, tour.step, tour.phase]);
 
   const saveAbout = (e?: FormEvent) => {
     e?.preventDefault();

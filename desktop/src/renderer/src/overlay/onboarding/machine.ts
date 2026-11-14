@@ -318,5 +318,8 @@ export function spoken(line: Line): string {
 
 /** Does this moment leave the screen clear (no dim), so they can use what is under it? */
 export function screenClear(t: Tour): boolean {
+  // Signing in to Google happens in their browser, under this: the dark hid the page and the
+  // card sat on the list of accounts, so a tester could not see what to click.
+  if (t.step === "google" && t.phase === "connecting") return true;
   return (t.step === "screen" && t.phase !== "demo") || (t.step === "landing" && t.phase === "glow");
 }
