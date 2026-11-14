@@ -324,6 +324,24 @@ def handoff(brain: Brain, tool: str, starting: str, args: dict[str, Any]) -> tup
     )
 
 
+def _just_made(brain: Brain, drafts_only: bool = False) -> tuple[list[str], str]:
+    """The files the last finished job made, if that was recent, and where a new file from
+    them should be saved ("" for beside them). A writer's draft comes under a real name."""
+    from pyxi.agents.jobs import named_draft
+    from pyxi.agents.pixel_common import pyxi_folder
+
+    now = time.time()
+    for job in reversed(brain.jobs.recent(12)):
+        if job.status != "done" or job.ended_at is None or now - job.ended_at > _RECENT_S:
+            continue
+        if draft := named_draft(job):
+            return [str(draft)], str(pyxi_folder())
+        made = [o for o in job.outputs if Path(o).is_file()]
+        if made:
+            return ([], "") if drafts_only else (made, "")
+    return [], ""
+
+
 _NEW_FILE = re.compile(
     r"(?i)^\s*new\s+(xlsx|excel(?: file| workbook)?|workbook|spreadsheet)\s*[:\-]\s*(.+?)\s*$"
 )
@@ -336,6 +354,16 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             return f"convert_files: operation must be one of {', '.join(OPERATIONS)}."
         files = _paths(args.get("files"))
         missing = [f for f in files if not Path(f).is_file()]
+        save_in = ""
+        if not files or missing:
+            # "Just convert it to PDF", about the plan Quill wrote a minute ago: the file
+            # is one Pyxi made, so it needs no search of theirs to find it. (Live: "I
+            # can't find the Word plan without file search, and I need its location".)
+            # A path that isn't there (the model's guess at "the Word plan") is taken to
+            # mean a draft only, and only on its way to a PDF: never some other file.
+            found, where = _just_made(brain, drafts_only=bool(missing))
+            if found and (not missing or op in ("to_pdf", "word_to_pdf")):
+                files, save_in, missing = found, where, []
         if not files or missing:
             return (
                 f"convert_files: I can't find {', '.join(Path(f).name for f in missing) or 'the file'}. "
@@ -355,7 +383,7 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             "pixel",
             f"{op.replace('_', ' ')}: {names}",
             files=files,
-            params={"operation": op, "options": options},
+            params={"operation": op, "options": options, **({"save_in": save_in} if save_in else {})},
             then=then,
         )
         if then is not None:

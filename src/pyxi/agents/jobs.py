@@ -125,6 +125,34 @@ def plain_markdown(text: str) -> str:
     return re.sub(r"(?m)^([ \t]*)[*+][ \t]+", r"\1- ", text).strip()
 
 
+def draft_title(text: str, task: str = "") -> str:
+    """A file name for a draft: its first heading or line, else the first words of the task."""
+    for line in [*text.splitlines(), task]:
+        name = re.sub(r"[^\w\s'&,()-]", " ", line.strip().lstrip("#").strip())
+        name = " ".join(name.split())[:60].strip(" .-,")
+        if len(name) >= 3:
+            return name
+    return "Draft"
+
+
+def named_draft(job: Any) -> Path | None:
+    """A writer's draft under a name a person would give it, for a teammate that works on
+    files. The draft itself is saved as "<job id>-quill.md" in Pyxi's own folder: turned
+    into a PDF as it stands, the PDF would carry that name and sit where nobody looks."""
+    made = [Path(o) for o in job.outputs if Path(o).is_file()]
+    if job.role != "writer" or job.files or len(made) != 1 or made[0].suffix.lower() != ".md":
+        return None
+    try:
+        text = made[0].read_text(encoding="utf-8")
+        folder = made[0].parent / "named" / job.id
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{draft_title(text, job.task)}.md"
+        path.write_text(text, encoding="utf-8")
+    except OSError:
+        return None
+    return path
+
+
 def describe_failure(exc: BaseException) -> str:
     """What went wrong, the way you'd tell a person (the notch shows this, never a stack)."""
     text = str(exc)
@@ -465,6 +493,12 @@ class JobManager:
         had nothing to open and wrote a draft about the conversion instead.) Only document
         work passes files on: what Scout found is still context for Quill to write from."""
         nxt = self.registry.get(job.then.agent) if job.then else None
+        if nxt is not None and nxt.role == "files" and (draft := named_draft(job)):
+            # "Plan the trip and make it a PDF": Quill wrote the plan, Pixel was handed no
+            # file, and all the first tester heard was "Pixel couldn't finish that."
+            from pyxi.agents.pixel_common import pyxi_folder
+
+            return [str(draft)], {"save_in": str(pyxi_folder())}
         document_work = job.role in ("files", "documents") or (job.role == "writer" and job.files)
         if nxt is None or not document_work:
             return [], {}
@@ -742,6 +776,9 @@ class JobManager:
             for k, v in (job.params.get("options") or {}).items()
             if k not in ("password", "details", "out_dir", "placed", "labels")
         }
+        if job.params.get("save_in"):  # set by Pyxi itself, never by the model
+            Path(str(job.params["save_in"])).mkdir(parents=True, exist_ok=True)
+            options["out_dir"] = str(job.params["save_in"])
         if op in pixel.NEEDS_PASSWORD:
             password = await self._ask_password(job, agent, op, names)
             if not password:
