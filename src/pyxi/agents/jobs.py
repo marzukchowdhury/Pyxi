@@ -423,12 +423,52 @@ class JobManager:
             await self.hub.emit(
                 "handoff", source=job.agent_name, target=job.then.agent, task=job.then.task
             )
+            files, params = self._handed_on(job)
             try:
-                await self.start(job.then.agent, job.then.task, context=context, parent=job.id)
-            except Exception:
+                await self.start(
+                    job.then.agent,
+                    job.then.task,
+                    context=context,
+                    parent=job.id,
+                    files=files,
+                    params=params,
+                )
+            except Exception as exc:
+                # The second step never started. Said on this job's own notice: with ``then``
+                # still set, the brain would wait for a teammate that is not coming.
                 log.exception("hand-off from %s to %s failed", job.agent_name, job.then.agent)
+                job.summary = (
+                    f"{job.summary.rstrip()} But I couldn't hand it on to {job.then.agent}: "
+                    f"{describe_failure(exc)}"
+                ).strip()
+                job.then = None
+                await self._update(job)
         if self.on_done:
             await self.on_done(job)
+
+    def _handed_on(self, job: Job) -> tuple[list[str], dict[str, Any]]:
+        """The files a finished job passes to the teammate after it, and the Google files.
+
+        "Turn it into Word, then fix the grammar": Quill is handed the Word file Pixel made,
+        as a file. (The next job used to get only a description of the result, so a writer
+        had nothing to open and wrote a draft about the conversion instead.) Only document
+        work passes files on: what Scout found is still context for Quill to write from."""
+        nxt = self.registry.get(job.then.agent) if job.then else None
+        document_work = job.role in ("files", "documents") or (job.role == "writer" and job.files)
+        if nxt is None or not document_work:
+            return [], {}
+        made = [o for o in job.outputs if Path(o).is_file()]
+        if nxt.role == "writer":
+            return [o for o in made if Path(o).suffix.lower() in SUMMARY_EXTS], {}
+        if nxt.role == "files":
+            return made, {}
+        if nxt.role == "documents":
+            from pyxi.agents.ledger import LOCAL_EXTS
+
+            links = job.data.get("links") if isinstance(job.data, dict) else None
+            params = {"google": [str(x) for x in links]} if links else {}
+            return [o for o in made if Path(o).suffix.lower() in LOCAL_EXTS], params
+        return [], {}
 
     async def _run_browser(self, job: Job, agent: AgentProfile) -> None:
         booking = job.kind == "booking"
@@ -600,16 +640,14 @@ class JobManager:
         failed: list[str] = []
         last: Exception | None = None
         count = 0
+        from_pdf = False  # a PDF came back as a fixed Word copy
         all_changes: list[str] = []
         all_notes: list[str] = []
         for doc in docs:
-            await self.hub.emit(
-                "job_event",
-                job_id=job.id,
-                agent=job.agent_name,
-                event="status",
-                data={"message": f"{'Translating' if mode == 'translate' else 'Editing'} {doc.name}"},
-            )
+            doing = "Translating" if mode == "translate" else "Editing"
+            if mode == "fix" and doc.suffix.lower() == ".pdf":
+                doing = "Turning it into Word, then editing"
+            await self._status(job, f"{doing} {doc.name}")
             try:
                 result = await fix_document(doc, job.task, llm, mode=mode)
             except Exception as exc:
@@ -620,17 +658,27 @@ class JobManager:
                 continue
             cost += result.cost_usd
             count += result.changed
+            converted = bool(getattr(result, "converted", False))
+            from_pdf = from_pdf or converted
             outputs.append(str(result.path))
             all_changes += result.changes
             all_notes += result.notes
             notes = "; ".join(result.changes[:5])
             verb = {"translate": "translated", "rewrite": "rewrote"}.get(mode, "fixed")
             if result.listed:
+                # Only a scan now: a typed PDF is fixed in a Word copy (see below).
                 lines.append(
-                    f"{doc.name} is a PDF, and a PDF's layout can't be edited, so nothing in it "
-                    f"was changed or typed out again. {result.changed} correction"
-                    f"{'' if result.changed == 1 else 's'} to make in the file it was made "
-                    f"from, listed in {result.path}" + (f": {notes}" if notes else ".")
+                    f"{doc.name} is a scan: a picture of each page, with no text in it to "
+                    f"change, so there is no corrected copy. {result.changed} correction"
+                    f"{'' if result.changed == 1 else 's'} to make, read off the pages, "
+                    f"listed in {result.path}" + (f": {notes}" if notes else ".")
+                )
+                continue
+            if converted:
+                lines.append(
+                    f"{doc.name}: made a Word copy of it and fixed {result.changed} of "
+                    f"{result.total} paragraphs there, saved as {result.path}. The PDF is untouched"
+                    + (f". Notable: {notes}" if notes else "")
                 )
                 continue
             lines.append(
@@ -646,6 +694,7 @@ class JobManager:
             "changes": all_changes[:12],
             "notes": [*failed, *all_notes][:5],
             "count": count,  # every fix, where the list of them is cut at twelve
+            **({"from_pdf": True} if from_pdf else {}),
         }
         job.outputs, job.cost_usd, job.status = outputs, cost, "done"
 
@@ -702,6 +751,15 @@ class JobManager:
             if got is None:
                 return  # an old Office file, and no converter: the job says why
             note = got
+        if op == "compress_pdf" and not any(k.startswith(("target", "max_", "reduce", "less")) for k in options):
+            # Handed over in words ("get it under 80 KB"): the size is still aimed at.
+            from pyxi.agents.pixel_shrink import aim_from_words
+
+            aim = aim_from_words(job.task)
+            if aim.get("target"):
+                options["target_size"] = f"{aim['target']} bytes"
+            elif aim.get("less"):
+                options["reduce_by"] = f"{aim['less']} bytes"
         await self._status(job, f"Working on {names}")
         if op in ("extract_text", "make_searchable", "pdf_to_word"):
             from pyxi.agents import pixel_ocr
@@ -943,6 +1001,7 @@ class JobManager:
                 persona=agent.persona,
                 context=job.context,
                 progress=progress,
+                new=[n for n in job.params.get("new") or [] if isinstance(n, dict)],
             )
         except ledger_live.Unreachable as exc:
             # The app went away or got busy between the look and the job. Nothing was changed,
@@ -978,7 +1037,18 @@ class JobManager:
             n = len(result.problems)
             first += f", but {n} edit{'s' if n != 1 else ''} didn't work"
         parts = [first.rstrip(".") + "."]
-        if result.outputs:
+        if result.headline:
+            # A workbook built sheet by sheet: which sheets are done and which are not, by
+            # name, in place of a tally of edits.
+            parts = [result.headline]
+            job.data["sheets"] = result.built
+            if result.problems and not result.built.get("not_done"):
+                n = len(result.problems)
+                parts.append(f"{n} edit{'s' if n != 1 else ''} in it didn't work.")
+        if result.made:  # a new file, not a copy of one: where it is, so it can be opened
+            made = Path(result.made[0])
+            parts.append(f"It's a new file, {made.name}, in {made.parent}.")
+        elif result.outputs:
             names = ", ".join(Path(o).name for o in result.outputs)
             parts.append(f"Saved as {names}, beside the original.")
         if result.live:

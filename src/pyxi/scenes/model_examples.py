@@ -428,6 +428,112 @@ CAT = {
     ],
 }
 
+# Electronics: real materials in real colours, and the fine detail (pins, traces, a die's cells)
+# asked for by name with `surface`, never modelled. The only bright things are the flows.
+CHIP = {
+    "title": "Inside an AI chip",
+    "parts": [
+        {
+            "id": "board",
+            "size": [9, 0.3, 9],
+            "material": "pcb",
+            "surface": "traces",
+            "label": "Package board",
+        },
+        {
+            "id": "contacts",
+            "size": [8.4, 0.1, 8.4],
+            "position": [0, -0.2, 0],
+            "material": "pcb",
+            "surface": "pins",
+            "density": 1.5,
+            "label": "Contacts",
+        },
+        {
+            "id": "pads",
+            "size": [0.5, 0.04, 7],
+            "position": [4.1, 0.17, 0],
+            "material": "gold",
+            "surface": "pins",
+            "density": 2,
+            "mirror": True,
+        },
+        {
+            "id": "interposer",
+            "size": [7, 0.1, 4.4],
+            "position": [0, 0.2, 0],
+            "material": "silicon",
+            "color": "#3a3f4a",
+        },
+        {
+            "id": "die",
+            "size": [3.2, 0.22, 3.2],
+            "position": [0, 0.36, 0],
+            "material": "silicon",
+            "surface": "cells",
+            "label": "Compute die",
+        },
+        {
+            "id": "memory",
+            "size": [1.3, 0.3, 2.8],
+            "position": [2.6, 0.4, 0],
+            "material": "silicon",
+            "color": "#23262e",
+            "surface": "cells",
+            "density": 2,
+            "mirror": True,
+            "label": "Memory stack",
+        },
+        {
+            "id": "caps",
+            "size": [5.6, 0.14, 0.3],
+            "position": [0, 0.22, 3.2],
+            "material": "ceramic",
+            "color": "#8a6a4a",
+            "surface": "vents",
+            "density": 2,
+        },
+        {
+            "id": "lid",
+            "shape": "rounded_box",
+            "size": [8, 0.6, 6.2],
+            "position": [0, 0.5, -0.4],
+            "material": "brushed_metal",
+            "surface": "brushed",
+            "casing": True,
+            "label": "Metal lid",
+        },
+        {
+            "id": "data",
+            "shape": "arrow",
+            "path": [[1.9, 0.75, 0.6], [0.6, 0.75, 0.6]],
+            "radius": 0.07,
+            "color": "#6fd3ff",
+            "material": "emissive",
+            "mirror": True,
+        },
+        {
+            "id": "heat",
+            "shape": "arrow",
+            "path": [[0, 0.6, 0], [0, 2.2, 0]],
+            "radius": 0.09,
+            "color": "#ff8a4c",
+            "material": "emissive",
+        },
+    ],
+    "motions": [
+        {"part": "die", "kind": "pulse", "period": 1.2},
+        {"part": "data", "kind": "pulse", "period": 0.6},
+    ],
+    "beats": [
+        {"title": "Under a metal lid", "narration": "...", "at": 0, "camera": "iso"},
+        {"title": "A city in silicon", "narration": "...", "at": 2.5, "camera": "close", "focus": ["die", "memory"], "cutaway": True},
+        {"title": "Thousands of contacts", "narration": "...", "at": 5, "camera": "below", "focus": ["contacts"]},
+    ],
+}
+
 EXAMPLES = (JET, HEART)
 # For anything alive: the organ and the animal.
 LIVING_EXAMPLES = (HEART, CAT)
+# For electronics: the machine and the chip.
+ELECTRONIC_EXAMPLES = (JET, CHIP)

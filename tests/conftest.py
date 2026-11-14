@@ -88,12 +88,27 @@ def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     every_site_exists.real = actions_mod._resolves  # for the test of the real one
     monkeypatch.setattr(actions_mod, "_resolves", every_site_exists)
+    from pyxi.companion import answers as answers_mod
+
+    async def no_shop_page(url, limit):  # a shop's results are never fetched from the real web
+        return b"", ""
+
+    monkeypatch.setattr(answers_mod, "_shop_page", no_shop_page)
     monkeypatch.setattr(browsersetup, "_addon", None)
     monkeypatch.setattr(browsersetup, "last_fault", None)
     clip = {"text": "what I had copied"}
     monkeypatch.setattr(browsersetup, "CLIP", clip, raising=False)
     monkeypatch.setattr(browsersetup, "clip_get", lambda: clip["text"])
     monkeypatch.setattr(browsersetup, "clip_set", lambda text: clip.__setitem__("text", text) or True)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_windows_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test reads the other windows that are really on this PC's screen: a look at the
+    screen finds none besides the one it is given (a test of several gives its own)."""
+    from pyxi.screen import uia
+
+    monkeypatch.setattr(uia, "other_windows", lambda screen, main=0, limit=3: [])
 
 
 @pytest.fixture

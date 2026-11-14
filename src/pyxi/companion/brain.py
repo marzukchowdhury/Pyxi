@@ -42,7 +42,6 @@ from pydantic import ValidationError
 
 from pyxi import alarms, booking, hands, media, safety, tidy, weather, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
-from pyxi.agents.jobs import Handoff
 from pyxi.companion import (
     addresscheck,
     answers,
@@ -76,16 +75,24 @@ from pyxi.companion.filework import FILE_TOOLS
 from pyxi.companion.layout import Placed
 from pyxi.companion.notes import (
     BOARD_SIZES,
+    EMPTY_CARD,
+    EMPTY_CARD_NOTE,
     PLATE_SIZE,
     Guide,
+    NoteCard,
     build_card,
     card_size,
+    covers_marks,
     guide_left,
+    has_points,
+    merge_calls,
     near_point,
     picture_rect,
+    place_again,
     place_stage,
     result_card,
     scroll_area,
+    settle_marks,
     step_rect,
     target_rect,
     where_they_were,
@@ -107,6 +114,7 @@ from pyxi.routines import RoutineStore
 from pyxi.scenes import SceneSpec, build_exploded_scene, get_scene, parse_scene
 from pyxi.scenes import library as model_library
 from pyxi.scenes.builder import build_model, explain_library_model
+from pyxi.scenes.check import asked_apart
 from pyxi.scenes.diagram import Diagram, DiagramError, parse_diagram
 from pyxi.scenes.object_gallery import OBJECT_GALLERY
 from pyxi.scenes.objects import ObjectEdit, ObjectScene, apply_edit, object_summary
@@ -141,6 +149,15 @@ _SITE_WORDS = {
     "maps": "https://maps.google.com",
     "google maps": "https://maps.google.com",
 }
+
+
+# A pane that is something new, never a window already open: an empty tab or window...
+_NEW_TAB = re.compile(
+    r"(?i)(?:an?\s+)?(?:new|blank|empty|fresh)[\s-]?(?:tab|window|browser tab|browser window)"
+    r"|newtab|about:(?:blank|newtab|home)"
+)
+# ...or a new Google file by its address (sheets.new, docs.new, slides.new, forms.new, cal.new).
+_NEW_FILE = re.compile(r"(?i)^(?:https?://)?(?:www\.)?[a-z]+\.new(?:/|$)")
 
 
 class TurnState(TypedDict, total=False):
@@ -260,6 +277,9 @@ class Brain:
         self.routines = RoutineStore(settings.data_dir / "routines.json")
         self.mailwatch = MailWatchStore(settings.data_dir / "mailwatch.json")
         tabwork.setup(self)  # Pyxi in your browser: self.browser, the extension's bridge
+        # Set by the server for the first-run tour (pyxi/onboarding.py): given what was just
+        # heard, it answers True when the tour takes those words for itself.
+        self.heard_hook: Any = None
 
     # ================================================================== entry points
     async def set_state(self, state: State) -> None:
@@ -351,6 +371,12 @@ class Brain:
 
         text = wakename.normalize(text)  # "Your pixxit split my screen" -> "Pyxi, split my screen"
         await self.hub.emit("transcript", text=text, seconds=round(took, 2))
+        if self.heard_hook is not None and await self.heard_hook(text):
+            # The first-run tour's "say hello" (pyxi/onboarding.py): the tour answers it.
+            self._prefetch = None
+            self._release_hands()
+            await self.set_state("idle")
+            return
         if not text.strip():
             self._prefetch = None  # the next question looks at the screen afresh
             self._release_hands()
@@ -615,9 +641,21 @@ class Brain:
 
     async def _use_computer(self, args: dict[str, Any]) -> str | None:
         """Do a task with the mouse and keyboard, in the background, after they allow it."""
-        task = str(args.get("task") or "").strip()[:600]
+        # The whole task, never a cut one. Live, 13 November: a 15-sheet brief reached the
+        # hands ending "On General Journal, enter 12", cut at 600 characters with no word to
+        # anybody, and the hands set off on half a job.
+        task = str(args.get("task") or "").strip()
         if not task:
             return "use_computer: say what to do."
+        if len(task) > HANDS_TASK_CHARS:
+            return (
+                f"use_computer: nothing was started. That job is too large for the mouse and "
+                f"keyboard ({len(task)} characters; the most is {HANDS_TASK_CHARS}), and it was "
+                "not cut short to fit. Building or filling a whole workbook, document or deck "
+                "is edit_document's work (one call, in seconds). If it really has to be done by "
+                "hand in an app, give use_computer one small part at a time, each with its own "
+                "'done looks like'."
+            )
         if not hands.available():
             return "use_computer: this only works on Windows."
         if self._operator is not None:
@@ -702,6 +740,7 @@ class Brain:
             ),
             direct=getattr(self.settings, "hands_direct", True),
             learned=self._learned(),
+            glance=getattr(self.screen, "glance", None),
         )
         try:
             out = await self._operator.run(task, window, come_back)
@@ -762,6 +801,12 @@ class Brain:
         note = self._screens_text or ""
         return f"\n\n# All their screens\n{note}\n{_MULTI_SCREEN_NOTE}" if note else ""
 
+    def _arranged_open(self, what: str) -> None:
+        """A pane that arrange_windows opened (not one it only moved), kept on the call's
+        record: a line that says "opening..." is true only then (undone_promise)."""
+        if self._calls and self._calls[-1].get("tool") == "arrange_windows":
+            self._calls[-1].setdefault("opened", []).append(what)
+
     async def _arrange_windows(self, args: dict[str, Any]) -> str | None:
         """Lay windows out (two, three or four panes), or snap, maximize, minimize or restore the
         window they're in."""
@@ -817,7 +862,12 @@ class Brain:
             if item.lower() in ("current", "this", "this window", "here"):
                 win: int | None = hwnd
             else:
-                win = windows.window_like(item, open_now, used)
+                # Something new (a blank sheet, an empty tab) is never a window that is already
+                # open: live, "a blank spreadsheet on the left" could be given the sheet they
+                # already had, and was called a blank one.
+                empty_tab = bool(_NEW_TAB.fullmatch(item.strip()))
+                fresh = empty_tab or bool(_NEW_FILE.search(item))
+                win = None if fresh else windows.window_like(item, open_now, used)
                 if win is None:
                     word = item.lower()
                     site = _SITE_WORDS.get(word) or (
@@ -826,10 +876,14 @@ class Brain:
                     url, app = (
                         (None, app_target(item)) if app_target(item) else (safe_url(site), None)
                     )
+                    if empty_tab:
+                        url, app = "about:blank", None  # an empty window of their browser
                     if url:
                         win = await windows.open_new_window(url, like=hwnd, is_url=True)
                     elif app:
                         win = await windows.open_new_window(app, is_url=False)
+                    if win is not None:
+                        self._arranged_open(item)  # opened by this call, not just moved
             if win is None:
                 missing.append(item)
                 continue
@@ -1595,15 +1649,17 @@ class Brain:
         """Show the points that have arrived so far, and say the new ones."""
         args = {**(head or {}), "title": title, "items": items}
         found = await self._survey_result() if args.get("style") == "on_picture" else None
-        card = build_card(self._ctx, args, self._placed.others("card"), found, self._turn_card)
+        # Room for four points from the first one on: live, a card placed for one point grew
+        # down over the post's header as the other three arrived.
+        card = build_card(
+            self._ctx, args, self._placed.others("card"), found, self._turn_card, rows=4
+        )
         if not card.items:
             return
+        await self._settle_card(self._ctx, args, card, self._turn_card, rows=4)
         first = self._turn_card is None
         if not first:
-            card.id, card.place = (
-                self._turn_card.id,
-                self._turn_card.place,
-            )  # stays put as it fills in
+            self._same_card(card, self._turn_card)  # stays put as it fills in
         self._turn_card = card
         await self.hub.emit("notes", card=card.model_dump(mode="json"))
         if first:
@@ -1616,6 +1672,42 @@ class Brain:
                 continue  # on the card to be read, not read out: see _card_is_read
             line = (it.say or it.text).strip()
             self._speak(f"[note:{it.n}] {line if line[-1:] in '.!?' else line + '.'}")
+
+    @staticmethod
+    def _same_card(card: NoteCard, shown: NoteCard) -> None:
+        """``card`` is ``shown`` with more of it arrived: the same card, in the same spot,
+        unless there it would now sit on something one of its own points marks."""
+        card.id = shown.id
+        if shown.place and card.style == shown.style and not covers_marks(shown.place, card):
+            card.place = shown.place
+
+    async def _settle_card(
+        self,
+        ctx: ScreenContext | None,
+        args: dict[str, Any],
+        card: NoteCard,
+        keep: NoteCard | None = None,
+        rows: int = 0,
+    ) -> list[int]:
+        """Before a card is drawn: are the things its points mark still where the look had
+        them? The look is from when they pressed talk, and live a card drawn 15 s later had
+        its marks 100 to 500 px off, the page having moved under them. So once the look is
+        no longer fresh the words on screen are read again (pixels and OCR, a fraction of a
+        second, one read for every mark), the marks go where their words are now, a mark
+        whose words can't be found again is left off, and the card is placed clear of where
+        the marks ended up. Returns the points that lost their mark."""
+        if ctx is None or not ctx.text or time.time() - ctx.captured_at <= self.STALE_LOOK_S:
+            return []
+        if not any(it.rect or it.at for it in card.items) and not card.sketches:
+            return []
+        lines = await self._text_now(ctx)
+        if not lines:
+            return []  # couldn't look again
+        dropped = settle_marks(ctx, args, card, lines, keep)
+        place_again(ctx, card, self._placed.others("card"), rows)
+        if dropped:
+            log.info("card points %s: their words are not on screen now, so no mark", dropped)
+        return dropped
 
     def _card_is_read(self) -> bool:
         """Are a cue card's points said aloud this turn? When they asked for an explanation
@@ -1677,6 +1769,10 @@ class Brain:
         brief = f"{subject}. {args.get('show', '')}".strip()
         if args.get("beats"):
             brief += "\nBeats: " + "; ".join(str(b) for b in args["beats"][:6])
+        if asked_apart(self._user_text or "") and not asked_apart(brief):
+            # They said "take it apart" and the brief lost it: the builder, and the look
+            # before showing, have to know the parts are meant to be apart.
+            brief += "\nShow it taken apart: an exploded view."
         ctx = self._ctx
         context = ""
         if ctx is not None:
@@ -1889,13 +1985,24 @@ class Brain:
 
     async def _watch_subscriptions(self) -> None:
         """Find every recurring charge in their receipts; one card with the monthly total."""
-        from pyxi.mailwatch import find_subscriptions, subscriptions_query, subscriptions_report
+        from pyxi.mailwatch import (
+            find_subscriptions,
+            merged,
+            subscriptions_report,
+            subscriptions_scans,
+        )
 
         job = None
         try:
-            job, mails = await self._scan(
-                "Looking for subscriptions in your receipts", subscriptions_query(), 300
-            )
+            (query, n), *more = subscriptions_scans()
+            job, first = await self._scan("Looking for subscriptions in your receipts", query, n)
+            scans = [first]
+            for query, n in more:  # one after another: Gmail's per-second limit
+                try:
+                    scans.append(await self.connectors.google.gmail_fetch(query, n))
+                except Exception:
+                    log.warning("a subscription scan could not be read", exc_info=True)
+            mails = merged(scans)
             subs = find_subscriptions(
                 mails, datetime.now().astimezone(), ignore=self.mailwatch.ignored()
             )
@@ -2595,7 +2702,8 @@ class Brain:
             action="Wipe everything Pyxi remembers?",
             reason=(
                 f"This forgets {len(mems)} memor{'y' if len(mems) == 1 else 'ies'}, your Memory "
-                "Palace history, and your conversations with Pyxi (with their screenshots). It "
+                "Palace history, your conversations with Pyxi (with their screenshots), and "
+                "the details you saved for forms and bookings (name, email, date of birth and the rest). It"
                 "can't be undone. Your settings, connected accounts, files and the activity log "
                 "stay."
             ),
@@ -2605,6 +2713,8 @@ class Brain:
         for _, store in self._memory_stores():
             for scope in {m.scope for m in store.all(None, 100000)}:
                 store.forget(scope)
+        # The saved details too (what the first-run tour asked for, and Settings' own form).
+        booking.save(self.settings.data_dir, {})
         self.spatial.forget_all()
         self.activity.forget_all()
         if (learned := self._learned()) is not None:
@@ -2704,6 +2814,8 @@ class Brain:
             return None
         self._promise_nudged = True
         line, opened = found
+        if any(c.get("tool") == "arrange_windows" for c in self._calls):
+            return only_arranged(line, said=True)
         return (
             f'You told them: "{line}" Nothing in this turn has done that yet'
             + (" (opening it is not doing it)" if opened else "")
@@ -2712,6 +2824,55 @@ class Brain:
             "what you have already said."
             # "Writing one now." and then the haiku itself: the words were the job.
             + ("" if opened else " If what you said was itself the whole job, add nothing.")
+        )
+
+    def _told_nudge(self, round_no: int) -> str | None:
+        """The turn is about to end. They asked to be told something as well as to have things
+        done ("download it, tell me what it's about, and email me a summary"), Pyxi read what
+        it needed, and everything said aloud was about the work (it is starting, where the
+        files went). Live, the summary went into the email and was never said. Once a turn."""
+        if (
+            self._told_nudged
+            or not getattr(self, "_wants_told", False)
+            or round_no >= self.settings.budget.max_tool_rounds
+        ):
+            return None
+        lookups = INFO_TOOLS | {t.spec.name for t in self.connectors.tools() if t.info}
+        read = any(c["tool"] in lookups and not c.get("outcome") for c in self._calls)
+        if not read or not self._done_so_far():
+            return None  # nothing was read to tell them about, or nothing was done besides
+        if not only_about_the_work(getattr(self, "_told", [])):
+            return None
+        self._told_nudged = True
+        return (
+            "They also asked you to TELL them something, and so far you have only said what "
+            f'you did. Their words: "{(self._user_text or "")[:300]}". Say it to them now, '
+            "aloud, in one or two sentences, from what you read this turn: the thing itself "
+            "(what it is about, what it says), not where it was saved or sent. It goes in your "
+            "spoken line even when the same thing is also in an email or a document. Call no "
+            "other tool, and don't repeat what you have already said."
+        )
+
+    def _cant_nudge(self, text: str, round_no: int, acted: bool) -> str | None:
+        """A reply that turns a job down because Pyxi "can't open" or "can't launch" an app, with
+        nothing done. It can (quick_action open_app), and a spreadsheet, document or deck is
+        built by Ledger as a file, whatever app they named. Live: a 15-sheet workbook "in
+        Microsoft Excel" was refused with "I can't launch Excel or capture a screenshot of the
+        finished file myself". Once a turn: do the job, and say at the end the one part that
+        really can't be done."""
+        if self._cant_nudged or acted or round_no >= self.settings.budget.max_tool_rounds:
+            return None
+        if not false_cant(text):
+            return None
+        self._cant_nudged = True
+        return (
+            "Your reply was not said: it turned the job down for a reason that isn't true. You "
+            "CAN open any app on this PC (quick_action open_app), and a spreadsheet, document "
+            "or deck is built by edit_document as a real file (or a new Google file), whatever "
+            "app they named and whether or not that app is open: the file opens in it "
+            "afterwards. Start the job now, with their whole brief in the task. If one part of "
+            "it really can't be done (a screenshot of the finished file, say), do everything "
+            "else and name that one part plainly, in a few words, at the end of your line."
         )
 
     def _pick_up(self, user_text: str, behind: str) -> tuple[str, list[str]]:
@@ -2773,6 +2934,7 @@ class Brain:
         explaining it). Gone by itself when its story ended: Pyxi just knows it is no longer
         showing (live: "the earbud cutaway is still up", a minute after it had gone)."""
         self._object_showing = False
+        self._placed.put("model", None, 0)  # its spot is free again for cards and diagrams
         if not by_them:
             return
         self._object_shut = True
@@ -2819,10 +2981,18 @@ class Brain:
             self._price_sent_back = False  # a pick's price was sent to be checked at a shop
             self._price_nudged = False  # ... and it was told once more to go and look
             self._claim_nudged = False  # said it was on it with nothing started: told once
+            self._card_sent_back = False  # an explaining call with nothing in it: asked again once
             self._round_kind = "answer"  # what the model is doing this round: see _note_kind
             self._answer_before_round = 0
             self._long_form = asks_long(user_text)
             self._promise_nudged = False  # "you said you'd do it, so do it": once a turn at most
+            self._cant_nudged = False  # said it can't open an app, which it can: told once
+            self._gave_up = False  # a tool said no twice and was not tried a third time: told once
+            self._silent_nudged = False  # a long brief's job started without a word: told once
+            self._told_nudged = False  # asked to be told something, and only did things: told once
+            self._wants_told = False  # set below, from the words this turn answers
+            self._told: list[str] = []  # what was said this turn outside a lookup's opener
+            self._shops_read: list[str] = []  # shop result pages read as text this turn
             self._refused = False  # a tool that can refuse did, this turn
             self._unsaid_pick = None  # an answer card shown this round, until its pick is said
             self._cut_short = False  # a round was dropped because they spoke again
@@ -2854,6 +3024,7 @@ class Brain:
                 user_text = wakename.normalize(user_text)  # typed or heard: "Your pixxit..." -> "Pyxi, ..."
                 user_text, cut_off = self._pick_up(user_text, behind)
                 self._user_text = user_text
+                self._wants_told = asks_told(user_text)
             try:
                 hit = None if synthetic else instant.match(user_text)
                 asked = None if synthetic or hit else weather.simple_question(user_text)
@@ -3130,8 +3301,11 @@ class Brain:
                 for j in self.jobs.recent(6)
                 if j.role != "model" and (j.ended_at is None or now_t - j.ended_at < 120)
             )
+            from pyxi import onboarding
+
+            # What they told Pyxi in the tour (their name, what they like) is always there.
             memories = "\n".join(
-                m.render() for m in self.memory.search("agent:pyxi", cfg["user_text"], 6)
+                m.render() for m in onboarding.memories_for(self.memory, cfg["user_text"], 6)
             )
             text = prompts.turn_prompt(
                 user_text=cfg["user_text"],
@@ -3177,6 +3351,7 @@ class Brain:
 
             head = {"text": ""}  # the first sentence(s) of `say`, already being spoken
             live_items = {"n": 0}
+            live_cards: dict[int, dict[str, Any]] = {}  # explaining calls of this answer, as they arrive
             scene_preview = {"shown": False}
 
             held = {"say": None}  # a later round's reply, waiting to go just before its card
@@ -3296,12 +3471,22 @@ class Brain:
                     if head_args:
                         self._start_survey(head_args)
                     # Each cue-card point is shown, and said, as soon as it has fully arrived.
-                    items = complete_items(raw)
+                    # Two explaining calls in one answer are one card (the overlay shows one):
+                    # the second one's points follow the first one's, they never replace them.
+                    title = partial_string(raw, "title")
+                    live_cards[i] = {
+                        **(head_args or {}),
+                        "title": title[0] if title and title[1] else "",
+                        "items": complete_items(raw),
+                    }
+                    so_far = merge_calls([live_cards[k] for k in sorted(live_cards)])
+                    items = so_far.get("items") or []
                     if len(items) > live_items["n"]:
                         live_items["n"] = len(items)
-                        title = partial_string(raw, "title")
                         await self._show_card_so_far(
-                            title[0] if title and title[1] else "", items, head_args
+                            str(so_far.get("title") or ""),
+                            items,
+                            {k: v for k, v in so_far.items() if k not in ("title", "items")},
                         )
 
             first_round = state.get("round", 0) == 0
@@ -3340,9 +3525,16 @@ class Brain:
                             "now, or give your answer without promising anything.",
                         ],
                     }
+                if nudge := self._cant_nudge(text, round_no, bool(self._done_so_far())):
+                    # "I can't launch Excel": not said. It can, so it is sent back to do the job.
+                    return {
+                        "round": round_no,
+                        "needs_more": True,
+                        "notes": [*state.get("notes", []), nudge],
+                    }
                 if text:
                     self._speak(text)
-                if nudge := self._promise_nudge(round_no):
+                if nudge := self._promise_nudge(round_no) or self._told_nudge(round_no):
                     return {
                         "round": round_no,
                         "needs_more": True,
@@ -3363,8 +3555,22 @@ class Brain:
                 "show_scene",
             }
             calls = sorted(response.tool_calls, key=lambda c: c.name not in visual)
+            calls = one_card(calls)
             for c in calls:
                 self._note_kind(c.name, {t.spec.name for t in connector_tools if t.info})
+            card = answers.current(self)
+            if any(
+                c.name == "quick_action"
+                and c.arguments.get("action") == "open_url"
+                and answers.shop_results_page(str(c.arguments.get("value") or ""))
+                and not (card and card.button and card.button.url == c.arguments.get("value"))
+                for c in calls
+            ) and not _JUST_OPEN.match(self._user_text or ""):
+                # Opening their shop's search to read its results is a lookup like a web
+                # search: the answer isn't known yet, so a line said beside it is a remark
+                # (one short line, else "On it."), never a thought about what to look for.
+                self._round_kind = "lookup"
+                self._spoken["answer"] = self._answer_before_round
             # The spoken reply of this round, in case a drawing arrives without its own steps.
             self._round_say = " ".join(
                 str(c.arguments.get("text", "")) for c in calls if c.name == "say"
@@ -3420,6 +3626,12 @@ class Brain:
                     "the work now (use_computer in an app, edit_document for a file or a Google "
                     "doc), with no line of your own before it, or tell them plainly that you can't."
                 )
+            if all(c.name in QUIET_NOTES for c in calls) and (
+                nudge := self._cant_nudge(self._round_say, round_no, bool(self._done_so_far()))
+            ):
+                # "I can't launch Excel or capture a screenshot", with nothing started.
+                unsaid = needs_more = True
+                notes.append(nudge)
             for call in calls:
                 if self._speech_gen != self._turn_gen:
                     # They spoke again mid-round: the rest of it is not done behind their back.
@@ -3441,6 +3653,41 @@ class Brain:
                     continue  # the same thing again, in the same or other words: said once
                 if call.name == "say" and unsaid:
                     continue  # it would claim the job is under way; the model speaks next, knowing
+                if call.name in ONE_DRAWING and any(
+                    k.get("tool") == call.name and k.get("round", 0) < round_no and not k.get("outcome")
+                    for k in self._calls
+                ):
+                    # One request draws one diagram. Drawn and shown in an earlier round of
+                    # this turn (live: a second `draw_diagram` in the round after the first),
+                    # the same kind of drawing again would replace what they are looking at.
+                    # A first try that was refused (a label too long) was never shown, so its
+                    # second try is still the one drawing.
+                    notes.append(
+                        f"{call.name}: your drawing from earlier in this turn is already on "
+                        "screen, so this one was not drawn. Don't draw it again."
+                    )
+                    continue
+                refusals = [
+                    k
+                    for k in self._calls
+                    if k.get("tool") == call.name
+                    and k.get("outcome") == "refused"
+                    and k.get("round", 0) < round_no
+                ]
+                if len(refusals) >= 2 and call.name != "say":
+                    # It has said no twice this turn. Live (a scenario, 13 November): a new
+                    # workbook was asked of edit_document six times, "which file?" six times,
+                    # 48 seconds, and then "I couldn't do that just now."
+                    notes.append(
+                        f"{call.name}: it has said no twice in this turn "
+                        f"({str(refusals[-1].get('note') or '')[:160]}), so it was not tried a "
+                        "third time. Stop calling it. Tell them plainly, in one short line, "
+                        "what is in the way and what you can do instead, or do it another way."
+                    )
+                    needs_more = needs_more or not self._gave_up
+                    self._gave_up = True
+                    unsaid = unsaid or call.name in can_refuse  # nothing started: nothing to claim
+                    continue
                 entry = {"round": round_no, "tool": call.name, "arguments": call.arguments}
                 self._calls.append(entry)
                 if call.arguments.get("__unparseable__"):
@@ -3484,6 +3731,10 @@ class Brain:
                         # opener is its first sentence, and the points say the rest once.
                         keep, said = opener_only(str(call.arguments.get("text", ""))), head["text"]
                         args["text"] = keep[len(said) :].strip() if keep.startswith(said) else ""
+                # A job for a teammate carries where they are: the teammate sees only its task.
+                args = answers.in_their_money(self, call.name, args)
+                if call.name in answers.MONEY_TASKS and args.get("task") != call.arguments.get("task"):
+                    entry["arguments"] = args  # the record shows the task as the teammate got it
                 try:
                     note = await self._act(call.name, args)
                 except Exception as exc:
@@ -3506,6 +3757,29 @@ class Brain:
                     # is never told the job was "already started or done" (_done_so_far).
                     failed = note.startswith(f"{call.name} failed:")
                     entry["outcome"], entry["note"] = ("failed" if failed else "refused"), note[:200]
+                elif note and note.startswith(VISUAL_INVALID):
+                    # Drawn wrong and sent back: it was never shown, and the turn's record says
+                    # so (live, a refused diagram and its second try read as two diagrams).
+                    entry["outcome"], entry["note"] = "refused", note[:200]
+                if (
+                    call.name == "arrange_windows"
+                    and not note
+                    and not entry.get("opened")
+                    and not self._promise_nudged
+                    and round_no < self.settings.budget.max_tool_rounds
+                    and not any(
+                        k.get("tool") == "quick_action" and not k.get("outcome") for k in self._calls
+                    )
+                    and not any(c.name == "quick_action" for c in calls)  # opened beside it
+                    and (line := says_opening(self._round_say))
+                ):
+                    # "Opening a blank Google Sheet on the left", and the windows that were
+                    # already open were moved about: nothing was opened. The line is not said
+                    # (it waits for this tool); the model opens the thing, or says what is
+                    # really on each side.
+                    self._promise_nudged = True
+                    unsaid = needs_more = True
+                    notes.append(only_arranged(line, said=line in " ".join(self._said)))
                 if call.name in can_refuse:
                     if note and note.startswith(f"{call.name} failed:"):
                         needs_more = True  # it broke: the model says so, instead of the claim
@@ -3539,6 +3813,14 @@ class Brain:
                 # back to the model, so the user hears what happened instead of silence.
                 if note and note.startswith(f"{call.name}:") and call.name not in QUIET_NOTES:
                     needs_more = True
+                if note and note.startswith(EMPTY_CARD):
+                    # An explaining call with nothing in it (live: explain_on_picture with no
+                    # arguments at all, one sentence said and nothing drawn). The model is
+                    # told so and asked for it again, once a turn.
+                    entry["outcome"], entry["note"] = "refused", note[:200]
+                    if not getattr(self, "_card_sent_back", False):
+                        self._card_sent_back = True
+                        needs_more = True
                 if note and call.name == "point" and note.startswith("point:"):
                     # A pointer that was not drawn is heard too: the line that went with it
                     # ("it's on the Pivot tab, here") promised something to look at.
@@ -3557,6 +3839,44 @@ class Brain:
             )
             pick_opened = answers.opened_note(self, calls) if opened else ""
             second = _SECOND_PART.search(self._user_text or "")
+            # A shop's own search, opened by this round (by the model, or for it after a pick's
+            # price was sent back): its results are read as text here and now, every one with
+            # its price and rating, so the next round can answer or fill a sheet from them.
+            # Live, they were read off a picture of the page, over two more rounds, and one
+            # row of three could be filled. ("Show me" on a card's link is not this: there
+            # the pick is marked on the page, which needs the look.)
+            shop_url = next(
+                (
+                    str(k["arguments"].get("value") or "")
+                    for k in reversed(self._calls)
+                    if k.get("round") == round_no
+                    and k.get("tool") == "quick_action"
+                    and not k.get("outcome")
+                    and (k.get("arguments") or {}).get("action") == "open_url"
+                    and answers.shop_results_page(str(k["arguments"].get("value") or ""))
+                ),
+                "",
+            )
+            if (
+                shop_url
+                and not pick_opened
+                and shop_url not in self._shops_read
+                and not _JUST_OPEN.match(self._user_text or "")
+                and round_no < self.settings.budget.max_tool_rounds
+                and (listing := await answers.read_shop(self, shop_url))
+            ):
+                source = "read_tab" if "tab in their browser" in listing[:160] else "read_page"
+                self._calls.append(
+                    {"round": round_no, "tool": source, "arguments": {"url": shop_url}, "shop": True}
+                )
+                self._turn_reads.append((safety.SOURCE_LABEL[source], listing))
+                notes.append(safety.fence(source, listing))
+                notes.append(
+                    "Those results are open in their browser too. The picture you have is from "
+                    "before the page opened, so don't mark anything on it and don't look again: "
+                    "answer, or hand the rows to a teammate, straight from the list."
+                )
+                needs_more = True
             if (
                 opened
                 and all(c.name in ("say", "quick_action") for c in calls)
@@ -3614,6 +3934,36 @@ class Brain:
                 # "Heading to Display to lower the brightness." and then only Settings opened.
                 needs_more = True
                 notes.append(nudge)
+            if not needs_more and (nudge := self._told_nudge(round_no)):
+                # "Download it, tell me what it's about...": downloaded, and nothing told.
+                needs_more = True
+                notes.append(nudge)
+            if (
+                not needs_more
+                and not self._silent_nudged
+                and not self._said
+                and not self._pending_say
+                and not self._quiet()
+                and not self._synthetic
+                and not self._visual_turn  # a model being built narrates itself
+                and len((self._user_text or "").split()) >= LONG_BRIEF_WORDS
+                and any(
+                    c.get("tool") in _BACKGROUND_TOOLS and not c.get("outcome") for c in self._calls
+                )
+                and round_no < self.settings.budget.max_tool_rounds
+            ):
+                # A long brief, a job started, and not a word: "On it." would be all they hear,
+                # with nothing about the part of it that can't be done (live, a screenshot of
+                # the finished workbook) or where it is being made.
+                self._silent_nudged = True
+                needs_more = True
+                notes.append(
+                    "The job is started, and you said nothing. Say one short line now that names "
+                    "the job and where it is being made. If any part of what they asked can't "
+                    "be done by you or the teammate (a screenshot of the result, something that "
+                    "needs their password), say that one part plainly at the end of the line. "
+                    "Call no other tool."
+                )
             return {
                 "round": round_no,
                 "notes": [*state.get("notes", []), *notes],
@@ -3779,13 +4129,23 @@ class Brain:
             keep = self._turn_card if self._narrated_items else None
             card = build_card(ctx, args, self._placed.others("card"), found, keep)
             if not card.items:
-                return "explain_on_screen: give at least one point with text."
-            if self._turn_card is not None and self._narrated_items:
+                # Nothing is drawn, and nothing already drawn is touched: a card shown
+                # earlier this turn stays exactly as it is.
+                if self._turn_card is not None:
+                    return (
+                        "explain_on_screen: that call had no points in it and was left out. "
+                        "The card already on screen stays as it is."
+                    )
+                return EMPTY_CARD_NOTE
+            await self._settle_card(ctx, args, card, keep)
+            if keep is not None:
                 # It was shown point by point while streaming: same card, same spot, now complete.
-                card.id, card.place = self._turn_card.id, self._turn_card.place
+                self._same_card(card, keep)
             await self.hub.emit("notes", card=card.model_dump(mode="json"))
             if card.place:
-                w, h = card_size([it.text for it in card.items], card.title)
+                w, h = card_size(
+                    [it.text for it in card.items], card.title, card.diagram is not None
+                )
                 linger = min(22.0, 7.0 + 1.8 * len(card.items)) + 8.0  # reading time, plus speech
                 self._placed.put("card", (*card.place, w, h), linger)
             self._turn_card = card
@@ -4101,11 +4461,6 @@ class Brain:
                 await self.show_scene(scene)
             return None
         if name == "delegate":
-            then = (
-                Handoff(agent=args["then_agent"], task=args.get("then_task") or "Use the result.")
-                if args.get("then_agent") and self.registry.get(str(args["then_agent"]))
-                else None
-            )
             # A file that isn't there is said, not dropped: with the path mistyped by one
             # letter, Quill was started with no file at all, wrote a "draft" from the task
             # line alone, and the card said "Your draft is ready".
@@ -4123,6 +4478,14 @@ class Brain:
                     "delegate: Ditto repeats what it has watched them do once. Use watch_me so "
                     "they can show it, or do the task another way."
                 )
+            # The teammate after this one (then_agent), or the call sent back once when the
+            # line being said promises one and the call names none (companion/filework.py).
+            starting = self.registry.get(str(args["agent"]))
+            then, note = filework.handoff(
+                self, "delegate", starting.name if starting else str(args["agent"]), args
+            )
+            if note:
+                return note
             job = await self.jobs.start(
                 str(args["agent"]),
                 str(args["task"]),
@@ -4130,6 +4493,11 @@ class Brain:
                 then=then,
                 files=files,
             )
+            if then is not None:
+                return (
+                    f"Started {job.id}: {job.agent_name} is on it, and what it makes goes "
+                    f"straight to {then.agent} when it's done."
+                )
             return f"Started {job.id}: {job.agent_name} is on it."
         if name == "weather":
             place = str(args.get("place") or "").strip() or await self._home_city()
@@ -4143,7 +4511,12 @@ class Brain:
                 return "web_search: that's enough searching. Answer now from what you've found, and say how sure you are."
             return await web.search_text(str(args.get("query", ""))[:200])
         if name == "read_page":
-            page = await web.read_text(str(args.get("url", ""))[:500])
+            address = str(args.get("url", ""))[:500]
+            if answers.shop_results_page(address) and (
+                listing := await answers.read_shop(self, address, tab=False)
+            ):
+                return listing  # a shop's results: every one, with its price and rating
+            page = await web.read_text(address)
             # Every extra page is another model round (4-5 s): one page answers one fact.
             return (page or "") + (
                 "\n(If this answers their question, answer now. Don't read another page for the same fact.)"
@@ -4427,6 +4800,11 @@ class Brain:
         what came of a job, which is never dropped as a repeat of the line that started it."""
         if record and agent == "Pyxi":
             kind = "answer" if result else getattr(self, "_round_kind", "answer")
+            if kind == "action" and getattr(self, "_wants_told", False):
+                # "Download it, tell me what it's about, and email me a summary": the line said
+                # beside the job is also the answer they asked to hear. Live, it was cut to its
+                # first sentence (where the files went), and what the mail was about went unsaid.
+                kind = "answer"
             spoken = getattr(self, "_spoken", None)
             if spoken is not None:
                 text, n = fit_to_say(text, kind, spoken, getattr(self, "_long_form", False))
@@ -4442,6 +4820,10 @@ class Brain:
             return
         if record:
             self._said.append(split_markers(text)[0])
+            if agent == "Pyxi" and getattr(self, "_round_kind", "answer") != "lookup":
+                told = getattr(self, "_told", None)
+                if told is not None:
+                    told.append(split_markers(text)[0])  # not a lookup's opener: see _told_nudge
         previous, gen, ctx = self._speech, self._speech_gen, self._ctx
 
         async def run() -> None:
@@ -4645,12 +5027,13 @@ class Brain:
 
     async def show_scene(self, scene: SceneSpec) -> None:
         self._visual_turn = True
+        self._placed.put("model", None, 0)  # a plate takes a 3D model's place on screen
         place = (
             None
             if scene.anchor
-            else place_stage(self._ctx, self._placed.others("stage"), PLATE_SIZE)
+            else place_stage(self._ctx, self._placed.others("plate"), PLATE_SIZE)
         )
-        self._placed.put("stage", place, 90.0)
+        self._placed.put("plate", place, 90.0)
         await self.hub.emit(
             "scene",
             scene=scene.model_dump(by_alias=True, mode="json"),
@@ -4700,8 +5083,9 @@ class Brain:
             self._visual_turn = True
         place = getattr(self, "_object_place", None) if keep_place else None
         if place is None:
-            place = place_stage(self._ctx, self._placed.others("stage"))
-            self._placed.put("stage", place, 90.0)
+            place = await self._place_model()
+        # The model has its own entry: a card or a diagram drawn later keeps clear of it.
+        self._placed.put("model", place, 90.0)
         self._object_place = place
         audio_key = (
             f"{model.id}:{secrets.token_hex(3)}"
@@ -4718,6 +5102,22 @@ class Brain:
         )
         if restart:
             self._spawn(self._narrate_beats(audio_key, [b.narration for b in model.beats]))
+
+    async def _place_model(self) -> tuple[int, int, int, int] | None:
+        """Where a 3D model goes: clear of any card or diagram Pyxi has up. A diagram and a
+        model asked for in one breath ("draw the cycle first, then build it in 3D") used to
+        land on the same spot, the model's tags over the diagram's words, because both were
+        the one "stage". If the screen has no room left for both, what is in the way is put
+        away: the model is what was asked for last."""
+        self._placed.put("plate", None, 0)  # a model takes an explain_in_3d plate's place
+        taken = self._placed.others("model")
+        place = place_stage(self._ctx, taken)
+        if place is not None and any(_overlap(place, r) > 0.15 for r in taken):
+            await self.hub.emit("clear")
+            self._placed.put("card", None, 0)
+            self._placed.put("stage", None, 0)
+            place = place_stage(self._ctx, self._placed.others("model"))
+        return place
 
     async def _narrate_beats(self, key: str, lines: list[str]) -> None:
         for i, line in enumerate(lines):
@@ -4928,12 +5328,18 @@ class Brain:
             names = ", ".join(Path(f).name for f in fixed)
             n = int(data.get("count") or len(data.get("changes") or []))
             if all("(corrections by Pyxi)" in Path(f).name for f in fixed):
-                # A PDF can't be edited: what Quill made is the list of corrections, not a fixed file.
+                # A scan has no text in it to change: what Quill made is the list of
+                # corrections, not a fixed file. (A typed PDF comes back as a fixed Word copy.)
                 title = "Corrections for your PDF"
-                body = f"The corrections to make are listed in {names}. The PDF itself is unchanged."
+                body = (
+                    f"It's a scan, so there is no text in it to change: the corrections to "
+                    f"make are listed in {names}. The PDF itself is unchanged."
+                )
             else:
                 title = "Your document is fixed"
-                body = f"{n} fix{'es' if n != 1 else ''} in {names}. The original is untouched."
+                # A PDF comes back as Word: said, so the new file's type is no surprise.
+                copy = ", a Word copy of your PDF" if data.get("from_pdf") else ""
+                body = f"{n} fix{'es' if n != 1 else ''} in {names}{copy}. The original is untouched."
             actions = ["open", "folder", "send_back"]
         elif job.status == "done":
             title = f"{job.agent_name} finished"
@@ -5241,6 +5647,17 @@ _A_QUESTION = re.compile(
 )
 # The words the 3D panel sends when a part of the model is clicked (ObjectPanel.tsx).
 _PART_CLICKED = re.compile(r"(?i)^in the .+ model, tell me more about the .+")
+
+
+def _overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    """How much two [x, y, w, h] boxes cover each other: the share of the smaller one, 0..1."""
+    w = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+    h = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+    if w <= 0 or h <= 0:
+        return 0.0
+    return w * h / max(1, min(a[2] * a[3], b[2] * b[3]))
+
+
 _SCREEN_MARKS = {"explain_on_screen", "point", "circle", "highlight", "arrow"}
 # The end of Ledger's summary for a Google file: where it is, as an address.
 _LINK_TAIL = re.compile(
@@ -5254,6 +5671,9 @@ _HALF_SAID = re.compile(
     r"should|will|also)$"
 )
 _MOUSE_JUST_S = 120.0  # how long after Pyxi's own mouse work a paste there starts with a click
+# The longest task the mouse and keyboard are given. A longer one is refused in words, never
+# cut: the hands do a job of some thirty steps, and a brief past this is not one.
+HANDS_TASK_CHARS = 2000
 # The longest a dictation is held (the app stops recording at a minute), with some room.
 _DICTATION_S = 90.0
 _BACKGROUND_TOOLS = {
@@ -5395,7 +5815,13 @@ CAN_REFUSE = {
     "use_computer",
     "paste_table",
     "quick_action",
+    # "Opening a blank sheet on the left" waits for the windows too: a pane that would not
+    # open is said as that, not as done and then taken back.
+    "arrange_windows",
 }
+LONG_BRIEF_WORDS = 25  # a request this long, started in silence, gets its one line asked for
+# The drawing tools of which one request gets one: see the turn loop.
+ONE_DRAWING = {"draw_diagram", "sketch_diagram"}
 # "Find coffee near me": opening Maps isn't the answer, so Pyxi looks at what opened and
 # answers from it. "I said open Gmail, not GL" asks nothing: one model call, not two.
 # "Go there AND look for earphones": something to do on the page once it is open.
@@ -5582,6 +6008,7 @@ def drop_repeats(text: str, earlier: list[str]) -> str:
     text = _TOOL_TAG.sub("", text)
     seen = [set(_WORD.findall(s.lower())) for e in earlier for s in split_sentences(e)]
     said_words: set[str] = set().union(*(_content(s) for e in earlier for s in split_sentences(e)))
+    said_parts = [_content(s) for e in earlier for s in split_sentences(e)]
     kept = []
     for sentence in split_sentences(text):
         words = set(_WORD.findall(split_markers(sentence)[0].lower()))
@@ -5607,10 +6034,65 @@ def drop_repeats(text: str, earlier: list[str]) -> str:
             if marks:
                 kept.append(marks)  # the card point or pointer still appears; only the words go
             continue
-        kept.append(sentence)
+        # New on the whole, with a part that is not: the part goes, the news stays.
+        kept.append(without_restated(sentence, said_parts))
         seen.append(words)
         said_words |= content
+        said_parts.append(content)
     return " ".join(kept)
+
+
+# A part of a sentence: up to a comma, a semicolon or a colon.
+_PART = re.compile(r"[^,;:]+(?:[,;:]+\s*|$)")
+# "..., so this is his own post": the joining word goes with the part it joins on.
+_JOINER = re.compile(r"^\s*(?:and|so|but|which means|meaning|that is)\s+", re.IGNORECASE)
+# A part that turns it round ("so it is not his own post") says something new with old words.
+_TURNS = re.compile(r"\b(?:not|no|never|neither|nor|without|hardly|barely|only|except|unless)\b|n't\b", re.I)
+RESTATED_WORDS = 4  # a part this long, with two words that carry meaning, can be a restatement
+
+
+def without_restated(sentence: str, said: list[set[str]]) -> str:
+    """A sentence without the parts of it that say again what one earlier sentence said.
+
+    Live, 13 November: "Facebook is a social feed, and WriteHumanly is a text tool, so they just
+    share your screen." and then the card's first point, "On the left, Facebook is a social
+    feed, where you see...". And on a post: "this is his own verified post pitching..." and
+    then "It's his verified page, posted four hours ago, so this is his own post." Each point
+    was new on the whole, so it was said whole, and they heard the opener twice. A part goes
+    when every word of it that carries meaning was in ONE sentence already said (words from
+    here and there do not make a restatement), and it turns nothing round. What is left has
+    to still say something: otherwise the sentence stays as it was written."""
+    parts = _PART.findall(sentence)
+    if len(parts) < 2 or not said:
+        return sentence
+    keep: list[str] = []
+    marks: list[str] = []
+    dropped = False
+    for part in parts:
+        plain = split_markers(part)[0]
+        content = _content(part)
+        if (
+            len(content) >= 2
+            and len(_WORD.findall(plain.lower())) >= RESTATED_WORDS
+            and not _TURNS.search(plain)
+            and any(content <= earlier for earlier in said)
+        ):
+            dropped = True
+            marks += [m.group(0) for m in MARKER.finditer(part)]  # its mark still draws
+            continue
+        keep.append(part)
+    left = set().union(*(_content(p) for p in keep)) if keep else set()
+    if not dropped or len(left) < 2:
+        return sentence
+    body = "".join(keep).strip()
+    end = sentence.rstrip()[-1:] if sentence.rstrip()[-1:] in ".!?" else "."
+    body = body.rstrip(",;: ")
+    body = body if body[-1:] in ".!?" else body + end
+    lead = LEADING_NOTES.match(body)
+    head, tail = (lead.group(0), body[lead.end():]) if lead else ("", body)
+    tail = _JOINER.sub("", tail, count=1)
+    tail = tail[:1].upper() + tail[1:]
+    return " ".join([*marks, f"{head}{tail}"]).strip()
 
 
 # A line that only says the work is under way: "Putting it in now.", "The table's going in.",
@@ -5748,6 +6230,41 @@ _NO_PROMISE = re.compile(
 )
 
 
+# "Opening a blank Google Sheet on the left", "a new tab on the right": something that was not
+# there before. ("Your open tabs on the right" is not: "open" there is what they already are.)
+_SAYS_OPENING = re.compile(
+    r"(?i)\b(?:opening|launching|starting up|i'?ll open|i'?ve opened|i opened|let me open|now open(?:s|ed)?)\b"
+    r"|\b(?:a|an|one|another)\s+(?:brand[- ])?(?:new|blank|fresh|empty)\s+"
+    r"(?:\w+\s+){0,2}(?:tab|window|sheet|spreadsheet|doc|document|deck|page|file|note)\b"
+)
+
+
+def says_opening(text: str) -> str:
+    """The sentence of this line that says something new is being opened, or ''."""
+    return next(
+        (
+            s
+            for s in split_sentences(text or "")
+            if _SAYS_OPENING.search(s) and not _NO_PROMISE.search(s)
+        ),
+        "",
+    )
+
+
+def only_arranged(line: str, *, said: bool) -> str:
+    """The note for a line that says something is being opened, when arrange_windows only
+    moved windows that were already open."""
+    lead = f'You told them: "{line}" But' if said else f'Your line "{line}" was not said:'
+    return (
+        f"{lead} arrange_windows only moved windows that were already open, and nothing new "
+        "was opened. Open it now (quick_action open_url, e.g. https://sheets.new for a blank "
+        "sheet; quick_action tabs 'new' for a new tab in the browser in front; or "
+        "arrange_windows again with that address, an app's name or 'new tab' as the pane), "
+        "or tell them plainly, in one short line, what is on each side now. Don't repeat what "
+        "you have already said."
+    )
+
+
 def undone_promise(
     said: list[str], calls: list[dict[str, Any]], user_text: str
 ) -> tuple[str, bool] | None:
@@ -5759,6 +6276,13 @@ def undone_promise(
     call (a teammate, an errand, a drawing, the mouse) counts as carrying it out."""
     did = [c for c in calls if c.get("tool") != "say" and c.get("tool") not in INFO_TOOLS]
     opened = bool(did)
+    if did and all(c.get("tool") == "arrange_windows" for c in did):
+        # Windows were only moved about. A line that says something is being opened ("Opening
+        # a blank sheet on the left") is true only if a pane was opened by that call.
+        if any(c.get("opened") or c.get("outcome") for c in did):
+            return None  # something was opened, or it said no and the model has been told
+        line = next((found for text in said if (found := says_opening(text))), "")
+        return (line, False) if line else None
     if any(
         c.get("tool") != "quick_action"
         or (c.get("arguments") or {}).get("action") not in ("open_url", "open_app")
@@ -5849,9 +6373,79 @@ _ASKS_LONG = re.compile(
 )
 
 
+# Said beside a job that started: the part of the request that is out of reach.
+_CANT_PART = re.compile(
+    r"(?i)\b(?:can'?t|cannot|couldn'?t|won'?t be able to|not able to|unable to|"
+    r"the one (?:part|thing|bit) (?:i|that)|out of (?:my )?reach)\b"
+)
+
+
 def asks_long(text: str) -> bool:
     """Did they ask for something that takes more than two sentences to say?"""
     return bool(_ASKS_LONG.search(text or ""))
+
+
+# Asked to be told something, as well as to have things done: "download it, tell me what it's
+# about, and email me a summary". Not "tell me when it's done" (that is the job's own ending),
+# and not "email me a summary" (that is a thing to do).
+_ASKS_TOLD = re.compile(
+    r"(?i)\b(?:tell|show|give|remind)\s+me\s+(?:(?:again|quickly|briefly|first|also)\s+)?"
+    r"(?:what|who|whose|why|how|where|which|whether|if|about|the|a|an|its|their|his|her|your)\b"
+    r"|\blet me know\s+(?:what|who|why|how|where|which|whether|if|about)\b"
+    r"|\b(?:and|then|also)\s+(?:tell|explain|describe|summari[sz]e)\b(?!\s+(?:it|this|that|them)\s+(?:in|into|to|as)\s+(?:an?\s+)?(?:email|mail|doc|document|sheet|file|note|message)\b)"
+    r"|\bwhat(?:'s| is| are| was)?\s+(?:it|this|that|they|he|she)(?:'s| is| are| was)?\s+(?:all\s+)?(?:about|saying|says|say)\b"
+    r"|\b(?:read|say) (?:it|this|that|them) (?:out|aloud|to me)\b"
+)
+_TOLD_LATER = re.compile(r"(?i)\b(?:tell|let) me (?:know )?(?:when|once|as soon as|if (?:it|that|this) (?:fails|breaks))\b")
+
+
+def asks_told(text: str) -> bool:
+    """Did they ask to be told, shown or summarised something (aloud, to them)? Then the spoken
+    reply carries it, even when the same thing also goes into an email or a document."""
+    text = text or ""
+    return bool(_ASKS_TOLD.search(_TOLD_LATER.sub(" ", text)))
+
+
+# "I can't launch Excel", "I'm not able to open Word from here", "I have no way to start it".
+_CANT_OPEN = re.compile(
+    r"(?i)\b(?:can'?t|cannot|can not|couldn'?t|am not able to|'m not able to|unable to|"
+    r"not able to|have no way (?:to|of)|don'?t have a way to|no way for me to)\s+"
+    r"(?:just\s+|actually\s+|really\s+)?(?:launch|open|start|run|bring up|fire up)(?:ing)?\b"
+)
+# ...unless it is a real "no" from this turn: a file that isn't there, a private app, their say-so.
+_REAL_NO = re.compile(r"(?i)\b(?:private|password|locked|permission|isn'?t installed|not installed|said no|declined)\b")
+
+
+def false_cant(text: str) -> bool:
+    """Does this reply turn the job down by saying Pyxi cannot open or launch something?"""
+    return any(
+        _CANT_OPEN.search(s) and not _REAL_NO.search(s) for s in split_sentences(text or "")
+    )
+
+
+def only_about_the_work(lines: list[str]) -> bool:
+    """Is everything in these spoken lines about the work itself (it is starting, it is done,
+    where a file went), with nothing that tells them what they asked to be told?"""
+    parts = [s for line in lines for s in split_sentences(line)]
+    return all(
+        _WILL_DO.search(s)
+        or _ACK.match(s)
+        or _ON_IT.match(s)
+        or _TEAMMATE_ON_IT.search(s)
+        or _WHERE_IT_WENT.search(s)
+        for s in parts
+    )
+
+
+# "Quill's on the summary.", "Scout is off to check."
+_TEAMMATE_ON_IT = re.compile(r"(?i)^\W*\w+(?:'s| is) (?:on (?:it|the|your|that|those)|off to)\b")
+
+
+# "The files are saved in your Documents folder.", "Done.", "It's in your Downloads."
+_WHERE_IT_WENT = re.compile(
+    r"(?i)^\W*(?:done|all done|finished|sent|saved|downloaded)\b[^,]{0,40}$"
+    r"|^[^,;]{0,60}\b(?:is|are|it's|they're|were|was)\s+(?:now\s+)?(?:saved|downloaded|stored|in your|in the)\b[^,;]{0,60}$"
+)
 
 
 def fit_to_say(text: str, kind: str, spoken: dict[str, int], long_form: bool) -> tuple[str, int]:
@@ -5878,6 +6472,11 @@ def fit_to_say(text: str, kind: str, spoken: dict[str, int], long_form: bool) ->
             return "On it.", 1
     elif kind == "action":
         keep = plain[:1] if room > 0 or not spoken.get("all", 0) else []
+        # ...and the one part of the request that can't be done, when the line names it: that
+        # is not chatter. Live, "the screenshot is the one part I can't take" was cut off a
+        # line whose first sentence said the workbook was being built.
+        if keep and (cant := next((i for i in plain[1:] if _CANT_PART.search(parts[i])), None)) is not None:
+            keep.append(cant)
     else:
         n = min(of_answer - spoken.get("answer", 0), room)
         if spoken.get("answer", 0) == 0:
@@ -6060,6 +6659,34 @@ def whole_sentences(text: str) -> list[str]:
         if ln.strip()
         for s in split_sentences(ln, max_chars=10_000)
     ]
+
+
+CARD_TOOLS = ("explain_on_screen", "explain_on_picture", "explain_picture")
+
+
+def one_card(calls: list[ToolCall]) -> list[ToolCall]:
+    """Several explaining calls in one answer become one, in the first one's place.
+
+    The overlay shows one card at a time. Live, an answer had two explain_on_screen calls,
+    one with four points and one with none, and the user saw nothing. So an empty call
+    beside a real one is dropped (it is never run, so it can neither refuse nor replace),
+    and the points of two real ones go onto one card, in order (notes.merge_calls). A lone
+    call is left alone, empty or not: the tool answers that one itself."""
+    cards = [c for c in calls if c.name in CARD_TOOLS]
+    if len(cards) < 2:
+        return calls
+
+    def as_given(c: ToolCall) -> dict[str, Any]:
+        on_picture = c.name != "explain_on_screen"
+        return {**({"style": "on_picture"} if on_picture else {}), **c.arguments}
+
+    real = [c for c in cards if has_points(c.arguments) and not c.arguments.get("__unparseable__")]
+    if not real:
+        return [c for c in calls if c not in cards[1:]]  # one empty call says it all
+    merged = ToolCall(
+        id=real[0].id, name=real[0].name, arguments=merge_calls([as_given(c) for c in real])
+    )
+    return [merged if c is real[0] else c for c in calls if c is real[0] or c not in cards]
 
 
 def card_talks(items: Any) -> bool:

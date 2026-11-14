@@ -609,6 +609,12 @@ class Subscription:
     cancel_url: str | None = None
     cancel_from: str | None = None  # "email" (a link in their receipt) or "known" (our list)
     every_days: float = 0.0  # for "repeating": the usual gap between its charges
+    # "bill": a utility or a phone company's bill that comes round (gas, power, internet).
+    # It is not a subscription and nobody "charged" it: it is listed apart, never in the
+    # subscriptions' total. Live: a gas bill that had not been paid was read out as
+    # "CA$519.63 a month, last charged 6 Nov".
+    kind: str = "subscription"
+    unpaid: bool = False  # the latest bill has no word that it was paid
 
     @property
     def monthly(self) -> float:
@@ -633,6 +639,9 @@ class Subscription:
 
     def line(self) -> str:
         last = datetime.fromisoformat(self.last_charged)
+        if self.kind == "bill":
+            paid = ", not marked as paid" if self.unpaid else ""
+            return f"{self.service}: a bill of {money(self.amount, self.currency)}, sent {last.day} {last:%b}{paid}"
         return f"{self.service}: {self.price()}, last charged {last.day} {last:%b}"
 
 
@@ -656,12 +665,44 @@ def _cancel_link(service: str, emails: list[dict[str, Any]]) -> tuple[str | None
     return None, None
 
 
+# A service that is not being paid for right now, by its own mail: the account is on hold, the
+# membership is paused. (FAILED and ENDED cover a payment that did not go through and a plan
+# that was cancelled or has ended.)
+ON_HOLD = re.compile(r"\b(?:account|membership|subscription|plan|service)\b[^.\n]{0,30}?\bon hold\b", re.I)
+PAUSED = re.compile(r"\b(?:membership|subscription|plan)\b[^.\n]{0,30}?\b(?:has been |was |is )?paused\b", re.I)
+# How long such a notice is news: after this it is history, not something to tell them.
+LAPSE_DAYS = 75
+
+
+@dataclass
+class Lapsed:
+    """A subscription that, by its own mail, is not being charged now."""
+
+    service: str
+    state: str  # "ended", "paused", "on hold", "payment not going through"
+    when: str  # ISO date of the mail that said so
+    last_paid: str | None = None  # ISO date of the last charge that did go through
+
+    def line(self) -> str:
+        at = datetime.fromisoformat(self.when)
+        said = {
+            "ended": f"ended {said_day(at)}",
+            "paused": f"paused since {said_day(at)}",
+            "on hold": f"on hold since {said_day(at)}, the payment did not go through",
+            "payment not going through": f"the payment did not go through ({said_day(at)})",
+        }[self.state]
+        paid = f", last paid {said_day(datetime.fromisoformat(self.last_paid))}" if self.last_paid else ""
+        return f"{self.service}: {said}{paid}"
+
+
 class Found(list):  # type: ignore[type-arg]
     """The subscriptions a scan found. ``read_back_to``: set when Gmail had more receipts than
     the scan read, to the date of the oldest one it did read."""
 
     read_back_to: datetime | None = None
     not_read: str = ""  # "3 mails couldn't be read just now, ..." when some fetches failed
+    # Not being paid for now, by their own mail (see Lapsed). Never in the total.
+    lapsed: list[Lapsed] = []
 
 
 @dataclass
@@ -678,6 +719,7 @@ class _Seen:
     one_off: bool  # an order, a ride, a ticket: bought each time
     receipt: bool  # the subject says invoice or receipt
     unpaid_bill: bool = False  # a bill that is ready or due, with no word that it was paid
+    bill: bool = False  # the subject calls it a bill or a statement, and nothing calls it a plan
 
 
 def said_day(d: datetime, now: datetime | None = None) -> str:
@@ -720,15 +762,30 @@ def find_subscriptions(
         if _key(service) in skip:
             continue
         g = groups.setdefault(
-            _key(service), {"name": service, "charges": [], "ended": None, "mails": []}
+            _key(service), {"name": service, "charges": [], "ended": None, "mails": [], "trouble": None, "paid": None}
         )
         g["mails"].append(e)
+        # What the service itself says of the account, newest wins. Only when the mail is
+        # plainly about a plan or its payment: a declined card on a one-off order is not this.
+        head = f"{subject}\n{body[:400]}"
+        state = (
+            "ended" if ENDED.search(text)
+            else "on hold" if ON_HOLD.search(head)
+            else "paused" if PAUSED.search(head)
+            else "payment not going through" if FAILED.search(head) and not ONE_OFF.search(subject)
+            else None
+        )
+        if state:
+            g["troubles"] = g.get("troubles", 0) + 1
+        if state and (g["trouble"] is None or e["date"] >= g["trouble"][1]):
+            g["trouble"] = (state, e["date"])
         if ENDED.search(text):
             g["ended"] = max(g["ended"] or e["date"], e["date"])
             continue
         got = charge_in(sender, subject, body)
         if got is None or not_spending(sender, text, got.amount):
             continue
+        g["paid"] = max(g["paid"] or e["date"], e["date"])  # a charge that went through
         part = got.part  # the receipt itself
         about = bool(SUB_WORD.search(part) or RENEWS.search(text))
         bill = bool(BILL.search(subject))
@@ -741,6 +798,7 @@ def find_subscriptions(
                 currency="USD" if got.currency == "$" and US_DOLLARS.search(part) else got.currency,
                 says=about or bill or bool(RECURRING.search(part)),
                 unpaid_bill=bill and not about and not (PAID_NOTICE.search(text) or PAID_CLEARLY.search(text)),
+                bill=bill and not about,
                 cadence=_cadence(part) or (_stated_cadence(text) if about else None),
                 in_head=got.in_head,
                 about_sub=bool(SUB_WORD.search(subject)),
@@ -820,6 +878,10 @@ def find_subscriptions(
                 cancel_url=url,
                 cancel_from=source,
                 every_days=round(every, 1),
+                # A bill by any of its mails (the others are its reminders and "payment
+                # received" notes), unless one of them calls it a subscription or membership.
+                kind="bill" if any(c.bill for c in charges) and not any(c.about_sub for c in charges) else "subscription",
+                unpaid=charges[0].unpaid_bill,
             )
         )
     # A Canadian's receipts print "$" and "CA$" for the same dollars: one currency, one total.
@@ -830,7 +892,33 @@ def find_subscriptions(
             s.currency = own
         elif s.currency == "USD" and not own:
             s.currency = "$"
-    found = Found(sorted(subs, key=lambda s: s.monthly, reverse=True))
+    found = Found(sorted(subs, key=lambda s: (s.kind == "bill", -s.monthly)))  # subscriptions first
+    listed = {_key(sub.service) for sub in subs}
+    lapsed = []
+    for key, g in groups.items():
+        if key in listed or g["trouble"] is None:
+            continue
+        state, when = g["trouble"]
+        if (now - when).days > LAPSE_DAYS:
+            continue  # old news
+        if g["paid"] and g["paid"] > when:
+            continue  # it was paid since: whatever was wrong is over
+        # A service is only "theirs" when something says they had a plan with it: a charge
+        # that went through, or the notice itself speaks of a membership, plan or account.
+        about = any(SUB_WORD.search(f"{m.get('subject') or ''}\n{m.get('text') or ''}"[:1500]) or ON_HOLD.search(str(m.get("subject") or "")) for m in g["mails"])
+        # ... or it has told them more than once: a payment tried again and again is a
+        # plan's renewal, whatever words the notice uses.
+        if not (g["paid"] or about or g.get("troubles", 0) >= 2):
+            continue
+        lapsed.append(
+            Lapsed(
+                service=g["name"],
+                state=state,
+                when=when.date().isoformat(),
+                last_paid=g["paid"].date().isoformat() if g["paid"] else None,
+            )
+        )
+    found.lapsed = sorted(lapsed, key=lambda item: item.when, reverse=True)
     found.read_back_to = read_back_to(emails)
     found.not_read = not_read(emails)
     return found
@@ -842,6 +930,33 @@ def subscriptions_report(subs: list[Subscription]) -> tuple[str, str, list[str]]
     the scan read when it couldn't read it all, and how many mails it couldn't fetch."""
     since = getattr(subs, "read_back_to", None)
     failed = getattr(subs, "not_read", "")
+    lapsed: list[Lapsed] = list(getattr(subs, "lapsed", []) or [])
+    # Said, never left out: "only Adobe" was the whole answer to someone whose Netflix was
+    # on hold, whose Claude payment had failed three times that month and whose Prime had
+    # just ended. They asked what they pay for; what they stopped paying for is the news.
+    not_now = (
+        f"{len(lapsed)} more {'is' if len(lapsed) == 1 else 'are'} not being charged right now "
+        f"(listed below): {', '.join(item.service for item in lapsed)}. "
+        if lapsed
+        else ""
+    )
+    bills = [s for s in subs if s.kind == "bill"]
+    subs_only = [s for s in subs if s.kind != "bill"]
+    billed = (
+        f"{len(bills)} regular bill{'s' if len(bills) != 1 else ''} (listed below) "
+        f"{'is' if len(bills) == 1 else 'are'} not in that total. "
+        if bills
+        else ""
+    )
+    if not subs_only and (lapsed or bills):
+        return (
+            "Nothing is being charged right now",
+            not_now
+            + (billed.replace(" not in that total", " bills, not subscriptions") if bills else "")
+            + "I only see what sends mail to this mailbox."
+            + (f" {failed}" if failed else ""),
+            [s.line() for s in bills] + [item.line() for item in lapsed],
+        )
     if not subs:
         return (
             "No subscriptions found",
@@ -857,11 +972,11 @@ def subscriptions_report(subs: list[Subscription]) -> tuple[str, str, list[str]]
             [],
         )
     by_currency: dict[str, float] = {}
-    for s in subs:
+    for s in subs_only:
         if s.cadence != "once":
             by_currency[s.currency] = by_currency.get(s.currency, 0.0) + s.monthly
-    once = len([s for s in subs if s.cadence == "once"])
-    n = len(subs)
+    once = len([s for s in subs_only if s.cadence == "once"])
+    n = len(subs_only)
     others: list[str] = []
     if by_currency:
         main = max(by_currency, key=by_currency.get)  # type: ignore[arg-type]
@@ -879,6 +994,8 @@ def subscriptions_report(subs: list[Subscription]) -> tuple[str, str, list[str]]
             if once and by_currency
             else ""
         )
+        + billed
+        + not_now
         + "I only see what sends a receipt to this mailbox, so a service that mails none "
         "(or mails another address) isn't here. "
         + 'Say "cancel" and the name, and I\'ll open its cancel page.'
@@ -889,7 +1006,47 @@ def subscriptions_report(subs: list[Subscription]) -> tuple[str, str, list[str]]
         )
         + (f" {failed}" if failed else "")
     )
-    return title, body, [s.line() for s in subs]
+    return title, body, [s.line() for s in subs] + [item.line() for item in lapsed]
+
+
+# Mail whose SUBJECT is about money, a plan or its payment. In a busy mailbox the wide
+# search below is used up by a month of mail that merely mentions a payment somewhere
+# (live, 13 November: 300 mails reached back to 12 October, so a receipt from September
+# was never read and a monthly charge could not be told from a single one). The same
+# number of mails chosen by their subject reached back seven months.
+_BY_SUBJECT = (
+    "-category:promotions subject:(receipt OR invoice OR payment OR subscription OR membership "
+    'OR renewal OR renewed OR billing OR bill OR unsuccessful OR declined OR "on hold" OR paused '
+    "OR cancelled OR canceled OR ended)"
+)
+
+
+def subscriptions_scans() -> list[tuple[str, int]]:
+    """The searches a subscription scan makes, with how many mails each may read: the wide
+    one (anything that says receipt, bill, renewal... anywhere), then the year by subject in
+    two halves, so the older half is not crowded out by the newer."""
+    return [
+        (subscriptions_query(), 300),
+        (f"newer_than:200d {_BY_SUBJECT}", 500),
+        (f"older_than:200d newer_than:400d {_BY_SUBJECT}", 400),
+    ]
+
+
+def merged(scans: list[Any]) -> Fetched:
+    """Several scans as one: each mail once. It counts as cut short only when the by-subject
+    scans were (the wide one always is, in a busy mailbox, and the others cover for it)."""
+    out = Fetched()
+    seen: set[str] = set()
+    for mails in scans:
+        for m in mails:
+            key = str(m.get("id") or id(m))
+            if key not in seen:
+                seen.add(key)
+                out.append(m)
+        out.failed += int(getattr(mails, "failed", 0) or 0)
+    focused = scans[1:] or scans
+    out.cut = any(getattr(mails, "cut", False) for mails in focused)
+    return out
 
 
 def subscriptions_query() -> str:
@@ -898,7 +1055,8 @@ def subscriptions_query() -> str:
     fetched.)"""
     return (
         "newer_than:400d -category:promotions {receipt invoice bill subscription renewal renewed "
-        'membership payment billed charged "amount due" "your plan" dues cancelled canceled}'
+        'membership payment billed charged "amount due" "your plan" dues cancelled canceled '
+        'unsuccessful declined paused "on hold"}'
     )
 
 

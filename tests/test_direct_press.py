@@ -246,6 +246,7 @@ def operator(llm, box: list, answers, capture=None, allow=True, asked=None):
 
     op = Operator(llm, cap, confirm, report, make_hands=make, aim_llm=llm, press=pretend_press)
     op.targets = targets
+    op.settle, op.settle_click = (0.0, 0.0), (0.0,)  # no waiting for a pretend app
     return op
 
 
@@ -331,14 +332,27 @@ async def test_greyed_out_is_said_once_then_clicked_if_asked_again():
     assert box[0].did == [("click", 930, 115)]  # the second time
 
 
-async def test_a_press_that_shows_nothing_is_a_click_the_next_time():
+async def test_a_press_that_shows_nothing_is_a_click_at_once_and_never_a_third_try():
+    # It used to be clicked only on a later look, and only if the model asked again: live,
+    # one menu button was pressed four times running and never opened.
     box = []
     same = screen("white")
     op = operator(Scripted(click(1), click(1)), box, {"Bluetooth": Result("invoke", (900, 100, 60, 30))}, capture=lambda: same)
     out = await op.run("turn bluetooth on")
     assert len(op.targets) == 1  # pressed once
+    assert box[0].did == [("click", 930, 115)]  # then clicked, in the same step, and only once
+    assert "nothing happened" in out.steps[0].note and "NOT done" in out.steps[0].note
+    assert out.steps[1].note.startswith("skipped") and "another way" in out.steps[1].note
+
+
+async def test_a_press_that_can_not_be_checked_is_left_to_the_next_look_as_before():
+    # One that sends or deletes is never done a second time on a guess.
+    box = []
+    same = screen("white")
+    op = operator(Scripted(click(2)), box, {"Send": Result("invoke", (100, 100, 80, 30))}, capture=lambda: same)
+    out = await op.run("send the email")
+    assert len(op.targets) == 1 and box[0].did == []
     assert "without the mouse" in out.steps[0].note
-    assert box[0].did == [("click", 930, 115)]  # then clicked
 
 
 async def test_a_press_that_was_sure_is_not_doubted_when_the_picture_barely_changes():

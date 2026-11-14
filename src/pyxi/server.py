@@ -18,7 +18,7 @@ from typing import Any, get_args
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
-from pyxi import __version__, booking, brainkey, cloud, files_access
+from pyxi import __version__, booking, brainkey, cloud, files_access, onboarding
 from pyxi.companion import browsersetup, pricecheck
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
@@ -110,6 +110,14 @@ def create_app(
             llm, otto_llm = DemoLLM(demo_site.url + "/apply"), demo_provider()
         brain = Brain(settings, hub, llm=llm, otto_llm=otto_llm)
     ambient: asyncio.Task[None] | None = None
+    # The first-run tour (pyxi/onboarding.py). Its "say hello" step answers their first words
+    # itself, so the brain hands them over instead of asking the model.
+    tour = onboarding.Tour(settings.data_dir, brain.memory)
+
+    async def _tour_heard(text: str) -> bool:
+        return await onboarding.heard(tour, hub, text)
+
+    brain.heard_hook = _tour_heard
 
     async def _routine_clock() -> None:
         while True:
@@ -266,6 +274,7 @@ def create_app(
                 "can_join": not cloud.in_beta(),
                 "own_key": cloud.had_own_key(),
             },
+            "onboarding": tour.public(),  # is the first-run tour due at this start?
             "version": __version__,
             "demo": demo,
             "gallery": {**TITLES, **OBJECT_TITLES},
@@ -419,6 +428,15 @@ def create_app(
         kind = msg.get("type")
         if kind == "e2e_card" and demo and os.environ.get("PYXI_E2E") == "1":
             brain._spawn(_e2e_card())
+        elif kind == "onboarding":
+            try:
+                await onboarding.handle(tour, brain, hub, msg)
+            except Exception:  # the tour never gets in the way of the app: end it, try next start
+                log.exception("the first-run tour failed")
+                tour.finish("failed")
+                await hub.emit("onboarding", event="ended", how="failed")
+        elif kind == "text" and msg.get("text", "").strip() and await _tour_heard(msg["text"]):
+            pass  # typed instead of spoken, in the tour's "say hello" step
         elif kind == "text" and msg.get("text", "").strip():
             brain._spawn(brain.turn(msg["text"].strip()))
         elif kind == "ptt_start":

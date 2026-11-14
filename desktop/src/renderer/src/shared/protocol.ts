@@ -133,7 +133,8 @@ export type PartShape =
   | "tube" | "limb" | "blob" | "extrude" | "lathe" | "gear" | "spring" | "plane" | "arrow" | "marker" | "kit" | "asset";
 export type Material =
   | "metal" | "brushed_metal" | "dark_metal" | "gold" | "plastic" | "rubber" | "glass" | "painted"
-  | "fabric" | "wood" | "ceramic" | "skin" | "emissive";
+  | "fabric" | "wood" | "ceramic" | "skin" | "emissive"
+  | "silicon" | "pcb" | "solder" | "copper" | "anodized";
 export type Axis = "x" | "y" | "z";
 
 export interface Part {
@@ -157,6 +158,10 @@ export interface Part {
   profile: [number, number][] | null;
   teeth: number | null;
   turns: number | null;
+  /** Fine detail drawn on the part (scene/surface.ts): pins, traces, cells, fins, brushed,
+   * vents, grille, knurl, panel_lines. `density` makes it finer (2) or coarser (0.5). */
+  surface?: string | null;
+  density?: number | null;
   /** shape "limb": how thick it is at each point of `path`; `squash` flattens it side to side. */
   radii?: number[] | null;
   squash?: number | null;
@@ -410,7 +415,47 @@ export interface Hello {
   demo: boolean;
   gallery: Record<string, string>;
   beta?: { joined: boolean; can_join: boolean; own_key?: boolean };
+  /** The first-run tour: due at this start (never seen, or broke off), or playing right now. */
+  onboarding?: { due: boolean; active: boolean };
 }
+
+/**
+ * The first-run tour (pyxi/onboarding.py; played by overlay/onboarding). The overlay runs it
+ * and tells the brain where it is; the brain keeps the marker, voices the lines, hands over
+ * their first spoken words, and saves what they chose to tell it. Nothing here leaves the PC.
+ */
+export type OnboardingStep = "arrival" | "talk" | "screen" | "about" | "google" | "demos" | "landing";
+export type OnboardingEnding = "finished" | "skipped" | "underage" | "failed";
+/** What they told the tour. Every field is optional; the brain keeps only what looks right. */
+export interface OnboardingDetails {
+  name?: string;
+  email?: string;
+  /** YYYY-MM-DD. */
+  date_of_birth?: string;
+  likes?: string[];
+  use?: string;
+}
+export type OnboardingEvent =
+  /** Play it. `have`: what is already saved (someone updating), so the card can show it. */
+  | { type: "onboarding"; event: "start"; replay: boolean; have: Partial<Record<"first_name" | "email" | "date_of_birth", string>> }
+  /** Which step it is on, told to every screen (the notch and the firefly may be on another). */
+  | { type: "onboarding"; event: "step"; step: OnboardingStep }
+  /** One of the tour's lines in Pyxi's voice (`audio` null: quiet was asked for, or no voice yet). */
+  | { type: "onboarding"; event: "voice"; line: string; text: string; audio: string | null }
+  /** Their words in the "say hello" step ("" when they could not be made out). */
+  | { type: "onboarding"; event: "heard"; text: string }
+  /** What was kept. `underage`: nothing was, and the tour is over. */
+  | { type: "onboarding"; event: "saved"; ok: boolean; underage: boolean; errors: Record<string, string>; saved: string[] }
+  | { type: "onboarding"; event: "ended"; how: OnboardingEnding };
+export type OnboardingMessage =
+  /** The overlay is about to play it (ignored when it isn't due); `replay` from Settings. */
+  | { type: "onboarding"; action: "start" | "replay" }
+  | { type: "onboarding"; action: "step"; step: OnboardingStep }
+  | { type: "onboarding"; action: "say"; line: string; text: string }
+  | { type: "onboarding"; action: "save"; details: OnboardingDetails }
+  | { type: "onboarding"; action: "finish"; how: OnboardingEnding }
+  /** Settings: delete what the tour kept. */
+  | { type: "onboarding"; action: "forget" };
 
 /** A standing "Always allow" (pyxi/grants.py). Times are Unix seconds. */
 export interface Grant {
@@ -518,7 +563,8 @@ export type BrainEvent =
   | { type: "beta"; ok: boolean; message: string }
   | { type: "profile"; profile: Record<string, string>; saved?: boolean }
   | ({ type: "file_access" } & FileAccessState)
-  | ({ type: "libreoffice" } & ConverterState);
+  | ({ type: "libreoffice" } & ConverterState)
+  | OnboardingEvent;
 
 /** LibreOffice on demand, for exact Office layouts and old .doc/.xls/.ppt files. */
 export interface ConverterState {
@@ -607,4 +653,5 @@ export type ClientMessage =
   | { type: "disconnect"; id: string }
   | { type: "guide_cancel" }
   | { type: "object_closed"; by_them?: boolean }
-  | { type: "voice_preview"; engine: string; voice: string; speed?: number };
+  | { type: "voice_preview"; engine: string; voice: string; speed?: number }
+  | OnboardingMessage;

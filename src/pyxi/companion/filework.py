@@ -230,9 +230,103 @@ async def _open_when_done(brain: Brain, job_id: str) -> None:
         job = await brain.jobs.wait(job_id)
     except KeyError:
         return  # no such job (it was never started): nothing to open
-    links = (job.data or {}).get("links") or []
+    data = job.data if isinstance(job.data, dict) else {}
+    links = data.get("links") or []
     if job.status == "done" and links:
         await brain._quick_action("open_url", links[0])
+    elif job.status == "done" and job.params.get("new") and job.outputs:
+        # A workbook Ledger built from nothing: it opens in Excel (or whatever opens .xlsx).
+        try:
+            await asyncio.to_thread(open_path, Path(job.outputs[0]))
+        except OSError:  # no app for it: the notice still has the file and its Open button
+            pass
+
+
+def open_path(path: Path) -> None:
+    """Open a file in its usual app (Excel for a workbook). Replaced in tests."""
+    import os
+
+    os.startfile(str(path))  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------- one job, then another
+# Words that say a second teammate works on the first one's result.
+_AFTER = (
+    r"(?:and then|then|after that|afterwards?|next|"
+    r"once (?:that|it|she|he|they)(?:'s| is| has|'ve| are)? (?:done|finished|through)|"
+    r"when (?:that|it)(?:'s| is) (?:done|ready))"
+)
+
+
+def promised_next(spoken: str, starting: str, names: list[str]) -> str:
+    """The teammate a spoken line says will take the result next, or "".
+
+    Live, 13 November: "Pixel's turning your statement into Word first, then Quill gets the
+    grammar". Pixel finished in 3.7 seconds, no Quill job was ever started, and nothing said
+    so: the model had promised the second step and passed only the first."""
+    for name in names:
+        if not name or name.lower() == starting.lower():
+            continue
+        n = re.escape(name)
+        if (
+            re.search(rf"(?i)\b{_AFTER}\b[^.!?\n]{{0,60}}\b{n}\b", spoken)
+            or re.search(rf"(?i)\b{n}\b[^.!?\n]{{0,60}}\b(?:after(?:wards)?|next|then)\b", spoken)
+            or re.search(rf"(?i)\bfirst\b[^.!?\n]{{0,80}}\b{n}\b", spoken)
+            or re.search(
+                rf"(?i)\b(?:hand(?:s|ing)?|pass(?:es|ing)?|send(?:s|ing)?|giv(?:e|es|ing))\s+"
+                rf"(?:it|that|them|the \w+)\s+(?:on |over |off )?to\s+{n}\b",
+                spoken,
+            )
+        ):
+            return name
+    return ""
+
+
+def handoff(brain: Brain, tool: str, starting: str, args: dict[str, Any]) -> tuple[Any, str | None]:
+    """The ``then`` of a call that starts a teammate: (the hand-off or None, a note that sends
+    the call back to the model or None).
+
+    The call goes back, once a turn, when the line Pyxi is saying promises a second teammate
+    and the call names none. A teammate that doesn't exist is said too: it used to be dropped
+    without a word, which is the same broken promise."""
+    from pyxi.agents.jobs import Handoff
+
+    who = str(args.get("then_agent") or "").strip()
+    if getattr(brain, "registry", None) is None:
+        return None, None
+    if who:
+        agent = brain.registry.get(who)
+        if agent is None or agent.role == "companion":
+            names = ", ".join(a.name for a in brain.registry.all() if a.role != "companion")
+            return None, f"{tool}: there's no teammate called {who!r} for then_agent. The team: {names}."
+        what = str(args.get("then_task") or "").strip()
+        return Handoff(agent=who, task=what or "Use the result."), None
+    calls = getattr(brain, "_calls", None)
+    if calls is not None and getattr(brain, "_handoff_sent_back", None) is calls:
+        return None, None  # said once this turn already: the call goes ahead as it is
+    spoken = " ".join([*getattr(brain, "_said", []), getattr(brain, "_round_say", "") or ""])
+    names = [a.name for a in brain.registry.all() if a.role != "companion"]
+    promised = promised_next(spoken, starting, names)
+    if not promised:
+        return None, None
+    for call in calls or []:  # started in this same turn: the promise is kept another way
+        a = call.get("arguments") or {}
+        if promised.lower() in (str(a.get("agent", "")).lower(), str(a.get("then_agent", "")).lower()):
+            return None, None
+    brain._handoff_sent_back = calls
+    return None, (
+        f"{tool}: not started yet. You are telling them {promised} takes it next, but this call "
+        f"has no then_agent, so {promised} would never start and nobody would tell them. Call "
+        f'{tool} again now with then_agent "{promised}" and then_task (what {promised} does with '
+        "the result, in full: the new file is handed over by itself). Or, when one teammate can "
+        "do the whole thing (Quill fixes the grammar of a PDF and returns a Word file on its "
+        "own), start only that one. No new line of your own first."
+    )
+
+
+_NEW_FILE = re.compile(
+    r"(?i)^\s*new\s+(xlsx|excel(?: file| workbook)?|workbook|spreadsheet)\s*[:\-]\s*(.+?)\s*$"
+)
 
 
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
@@ -254,12 +348,22 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         if op == "compare_documents" and len(files) != 2:
             return "convert_files: compare_documents needs exactly two files, the old one first."
         names = ", ".join(Path(f).name for f in files[:3])
+        then, note = handoff(brain, "convert_files", "Pixel", args)
+        if note:
+            return note
         job = await brain.jobs.start(
             "pixel",
             f"{op.replace('_', ' ')}: {names}",
             files=files,
             params={"operation": op, "options": options},
+            then=then,
         )
+        if then is not None:
+            return (
+                f"Started {job.id}: {job.agent_name} is on it, and the new file goes straight to "
+                f"{then.agent} when it's done ({then.task[:120]}). Say one short line that names "
+                "both steps; they're told when the last one is finished."
+            )
         if op == "fill_form":
             return (
                 f"Started {job.id}: {job.agent_name} is reading the form and will put a card on "
@@ -278,7 +382,11 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         )
     if name == "edit_document":
         task = str(args.get("task") or "").strip()
-        files = _paths(args.get("files"))
+        given = args.get("files")
+        given = given if isinstance(given, list) else [given] if given else []
+        # "new xlsx: NEXORA": a workbook that doesn't exist yet, built from the brief.
+        new = [m.group(2).strip().strip('"')[:80] for f in given if (m := _NEW_FILE.match(str(f)))]
+        files = _paths([f for f in given if not _NEW_FILE.match(str(f))])
         raw = args.get("google")
         google = [
             str(g).strip()
@@ -293,6 +401,25 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
                 f"edit_document: I can't find {', '.join(Path(f).name for f in missing)}. Find the "
                 "exact path with search_files first, or ask them."
             )
+        then, note = handoff(brain, "edit_document", "Ledger", args)
+        if note:
+            return note
+        if new:
+            if files or google or len(new) > 1:
+                return (
+                    "edit_document: a new workbook is made on its own: one 'new xlsx: <title>' "
+                    "in files, and nothing else in files or google."
+                )
+            job = await brain.jobs.start(
+                "ledger", task, files=[], params={"new": [{"kind": "xlsx", "title": new[0]}]}, then=then
+            )
+            if then is None:
+                brain._spawn(_open_when_done(brain, job.id))
+            return (
+                f"Started {job.id}: {job.agent_name} is building {new[0]}.xlsx in the background, "
+                "sheet by sheet (a big workbook takes a minute or two), and it opens on their "
+                "screen when it's ready. Say one short line that names the job."
+            )
         if not files and not google:
             # The workbook, document or deck open in Excel, Word or PowerPoint: edited where it
             # is (agents/ledger_live.py), when the app can be reached right now.
@@ -300,7 +427,9 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             if note:
                 return note
             if ref:
-                job = await brain.jobs.start("ledger", task, files=[], params={"live": [ref]})
+                job = await brain.jobs.start(
+                    "ledger", task, files=[], params={"live": [ref]}, then=then
+                )
                 return (
                     f"Started {job.id}: {job.agent_name} is changing {ref['name']} right in "
                     f"{ref['label']}, where it's open; it takes a few seconds and nothing is saved. "
@@ -351,7 +480,9 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             title = "Sample data" if kind == "sheet" else "Sample document"
             google = [f"{_NEW[kind]}: {title}" if g in out_of_reach else g for g in google]
             made_instead = True
-        job = await brain.jobs.start("ledger", task, files=files, params={"google": google})
+        job = await brain.jobs.start(
+            "ledger", task, files=files, params={"google": google}, **({"then": then} if then else {})
+        )
         if not made_instead and any(g.lower().startswith("new ") for g in google):
             # "Open a new Google Doc and write...": a file made in their Drive goes on screen.
             brain._spawn(_open_when_done(brain, job.id))

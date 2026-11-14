@@ -72,7 +72,59 @@ Material = Literal[
     "ceramic",
     "skin",
     "emissive",
+    "silicon",
+    "pcb",
+    "solder",
+    "copper",
+    "anodized",
 ]
+# Fine detail the renderer draws on a part's surface (a generated texture: nothing to model).
+Surface = Literal[
+    "pins",
+    "traces",
+    "cells",
+    "fins",
+    "brushed",
+    "vents",
+    "grille",
+    "knurl",
+    "panel_lines",
+]
+SURFACES: tuple[str, ...] = Surface.__args__  # type: ignore[attr-defined]
+# What a builder writes when it reaches for a material that is not on the list: the nearest
+# real one, never a failed model (live: one "copper" cost a whole second build).
+MATERIAL_ALIASES = {
+    "aluminium": "brushed_metal",
+    "aluminum": "brushed_metal",
+    "brushed_aluminium": "brushed_metal",
+    "brushed_aluminum": "brushed_metal",
+    "steel": "metal",
+    "stainless_steel": "metal",
+    "chrome": "metal",
+    "silver": "metal",
+    "iron": "dark_metal",
+    "titanium": "brushed_metal",
+    "brass": "gold",
+    "bronze": "copper",
+    "black_plastic": "plastic",
+    "abs": "plastic",
+    "carbon": "rubber",
+    "graphite": "rubber",
+    "circuit_board": "pcb",
+    "fr4": "pcb",
+    "die": "silicon",
+    "wafer": "silicon",
+    "tin": "solder",
+    "anodised": "anodized",
+    "anodized_aluminium": "anodized",
+    "anodized_aluminum": "anodized",
+    "leather": "fabric",
+    "cloth": "fabric",
+    "paint": "painted",
+    "porcelain": "ceramic",
+    "light": "emissive",
+    "glow": "emissive",
+}
 CameraView = Literal["iso", "front", "back", "side", "left", "top", "below", "close", "wide"]
 Style = Literal["studio", "sticker", "blueprint", "xray"]
 Ease = Literal["linear", "in", "out", "in_out", "spring"]
@@ -108,6 +160,26 @@ def _clamp_fields(data: Any, limits: dict[str, tuple[float, float]]) -> Any:
     return out
 
 
+_MATERIALS: tuple[str, ...] = Material.__args__  # type: ignore[attr-defined]
+
+
+def _known_look(data: Any) -> Any:
+    """A material or surface that is not on the list becomes the nearest one that is (or none),
+    so one wrong word never fails a whole model."""
+    if not isinstance(data, dict):
+        return data
+    out = data
+    material = data.get("material")
+    if isinstance(material, str) and material not in _MATERIALS:
+        key = material.strip().lower().replace(" ", "_").replace("-", "_")
+        out = {**out, "material": key if key in _MATERIALS else MATERIAL_ALIASES.get(key, "plastic")}
+    surface = data.get("surface")
+    if surface is not None and surface not in SURFACES:
+        key = str(surface).strip().lower().replace(" ", "_").replace("-", "_")
+        out = {**out, "surface": key if key in SURFACES else None}
+    return out
+
+
 class Part(BaseModel):
     id: str = Field(description="Short unique id, e.g. 'seat'.")
     shape: PartShape = "box"
@@ -132,6 +204,20 @@ class Part(BaseModel):
     )
     material: Material = "plastic"
     color: str | None = Field(None, description="Hex like '#c0c4cc'.")
+    surface: Surface | None = Field(
+        None,
+        description="Fine detail drawn on the part for free (never model these from boxes): "
+        "pins (a pin or solder-ball grid, gold contacts), traces (circuit traces on a board), "
+        "cells (a chip die's grid of blocks), fins (heat-sink fins), brushed (brushed metal), "
+        "vents (cooling slots), grille (a mesh of holes: speaker, intake), knurl (a grip), "
+        "panel_lines (seams and access panels on a casing or hull).",
+    )
+    density: float | None = Field(
+        None,
+        ge=0.25,
+        le=4.0,
+        description="surface: how fine the detail is (1 normal, 2 twice as fine, 0.5 coarser).",
+    )
     opacity: float = Field(
         1.0, ge=0.0, le=1.0, description="0 = invisible until a motion fades it in."
     )
@@ -213,10 +299,12 @@ class Part(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _clamp(cls, data: Any) -> Any:
+        data = _known_look(data)
         return _clamp_fields(
             data,
             {
                 "opacity": (0, 1),
+                "density": (0.25, 4),
                 "taper": (0, 4),
                 "radius": (0.001, 10),
                 "teeth": (3, 80),
@@ -580,7 +668,7 @@ class PartPatch(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _clamp(cls, data: Any) -> Any:
-        return _clamp_fields(data, {"opacity": (0.05, 1)})
+        return _clamp_fields(_known_look(data), {"opacity": (0.05, 1), "density": (0.25, 4)})
 
     id: str
     position: list[float] | None = None
@@ -588,6 +676,8 @@ class PartPatch(BaseModel):
     size: list[float] | None = None
     material: Material | None = None
     color: str | None = None
+    surface: Surface | None = None
+    density: float | None = Field(None, ge=0.25, le=4.0)
     opacity: float | None = Field(None, ge=0.05, le=1.0)
     label: str | None = None
     note: str | None = None

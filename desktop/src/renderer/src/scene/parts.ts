@@ -8,6 +8,7 @@ import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeom
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Axis, Material, Part } from "../shared/protocol";
 import { blobGeometry, limbGeometry } from "./organic";
+import { applySurface, type Surface, SURFACES, surfaceUVs } from "./surface";
 
 export interface Built {
   geometry: THREE.BufferGeometry;
@@ -108,7 +109,23 @@ function beveledCylinder(top: number, bottom: number): THREE.BufferGeometry {
   return new THREE.LatheGeometry(pts, 48);
 }
 
+/** Does this part get surface detail? Light, flows and tags have no surface to draw on. */
+export function surfaceOf(p: Pick<Part, "surface" | "shape" | "material">): Surface | null {
+  if (!p.surface || !(SURFACES as readonly string[]).includes(p.surface)) return null;
+  if (p.shape === "arrow" || p.shape === "marker" || p.shape === "asset" || p.material === "emissive") return null;
+  return p.surface as Surface;
+}
+
 export function buildGeometry(p: Part): Built {
+  const built = shapeGeometry(p);
+  const kind = surfaceOf(p);
+  if (!kind || p.shape === "kit") return built;
+  const mapped = surfaceUVs(built.geometry, built.scale, p.size, kind, p.density ?? 1);
+  built.geometry.dispose();
+  return { ...built, geometry: mapped };
+}
+
+function shapeGeometry(p: Part): Built {
   const [sx, sy, sz] = p.size;
   const unit: [number, number, number] = [sx, sy, sz];
   switch (p.shape) {
@@ -219,6 +236,7 @@ export function buildGeometry(p: Part): Built {
     case "plane":
       return { geometry: new THREE.BoxGeometry(1, 1, 1), scale: [sx, Math.max(0.004, sy), sz] };
     case "rounded_box":
+      return { geometry: new RoundedBoxGeometry(sx, sy, sz, 3, Math.min(sx, sy, sz) * 0.2), scale: [1, 1, 1] };
     case "box":
     default: {
       // Real parts are never razor-edged: a hairline bevel (built at true size, so it stays
@@ -253,6 +271,18 @@ export const MATERIALS: Record<Material, Preset> = {
   ceramic: { color: "#f2f0ea", metalness: 0, roughness: 0.18, clearcoat: 0.7 },
   skin: { color: "#e2b08e", metalness: 0, roughness: 0.55, sheen: 0.5 },
   emissive: { color: "#ffb347", metalness: 0, roughness: 1, emissive: true },
+  // Electronics, as they are: a die is a dark mirror, a board is dull lacquer over glass
+  // fibre, solder is soft grey, copper is warm, anodized aluminium is satin and dark.
+  silicon: { color: "#2b303c", metalness: 0.8, roughness: 0.16, clearcoat: 0.5 },
+  pcb: { color: "#1f5a36", metalness: 0, roughness: 0.52, clearcoat: 0.4 },
+  solder: { color: "#b9bcc0", metalness: 1, roughness: 0.42 },
+  copper: { color: "#c47a4a", metalness: 1, roughness: 0.3 },
+  anodized: { color: "#3a3d44", metalness: 0.8, roughness: 0.52 },
+};
+
+const rgb = (c: THREE.Color): [number, number, number] => {
+  const hex = c.getHex(THREE.SRGBColorSpace);
+  return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
 };
 
 /**
@@ -346,6 +376,13 @@ export function makeMaterial(p: Part, style: string): THREE.MeshPhysicalMaterial
     m.roughness = 1;
     m.clearcoat = 0;
     m.sheen = 0;
+  } else {
+    // Fine detail the builder asked for: pins, traces, a die's cells, fins... (scene/surface.ts).
+    const kind = surfaceOf(p);
+    if (kind) {
+      applySurface(m, kind, { color: rgb(color), rough: preset.roughness, metal: preset.metalness });
+      m.clearcoat *= 0.5; // a coat of lacquer would smooth the detail away
+    }
   }
   // Flows and glowing parts are light already; everything else gets the edge light.
   if (!preset.emissive && p.shape !== "arrow") addRim(m, style === "blueprint" ? 0.9 : style === "xray" ? 0.7 : preset.metalness > 0.5 ? 0.28 : 0.2);

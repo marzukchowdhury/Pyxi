@@ -144,11 +144,12 @@ def test_newsletters_and_one_ride_are_not_subscriptions():
     """Live: The Startup Club at $485.00 a year, The GIST at $1.00 and one Lyft ride at $8.52
     "each time" were all listed, and the monthly total counted them."""
     subs = find_subscriptions(inbox(), now())
-    assert [s.service for s in subs] == ["Northline", "Netflix", "Spotify"]
-    assert [s.price() for s in subs] == ["$89.00 a month", "$15.49 a month", "$11.99 a month"]
+    assert [s.service for s in subs] == ["Netflix", "Spotify", "Northline"]
+    assert [s.price() for s in subs] == ["$15.49 a month", "$11.99 a month", "$89.00 a month"]  # the bill last
     title, body, lines = subscriptions_report(subs)
-    assert title == "$116.48 a month in subscriptions"
-    assert body.startswith("3 recurring charges") and "each time" not in " ".join(lines)
+    assert title == "$27.48 a month in subscriptions"  # the internet bill is listed, apart
+    assert body.startswith("2 recurring charges") and "1 regular bill" in body
+    assert "each time" not in " ".join(lines) and lines[-1].startswith("Northline: a bill of $89.00")
     # The three live ones alone find nothing at all.
     assert find_subscriptions([startup_club(), the_gist(), lyft()], now()) == []
 
@@ -228,7 +229,7 @@ def test_a_charge_every_three_months_is_a_third_a_month():
         for d in (10, 101, 192)
     ]
     [sub] = find_subscriptions(quarterly, now())
-    assert sub.cadence == "repeating" and 29 < sub.monthly < 31 and sub.every_days == 91.0
+    assert sub.cadence == "repeating" and 29 < sub.monthly < 31 and sub.every_days in (90.5, 91.0)  # the clock is read once a mail
 
 
 # ---------------------------------------------------------------- "that's not a subscription"
@@ -242,11 +243,12 @@ def test_what_they_said_is_not_a_subscription_stays_out(tmp_path):
     assert store.not_a_subscription("the netflix one") == "Netflix"
     assert store.not_a_subscription("hulu") is None  # nothing like it in the last list
     assert store.ignored() == {"Netflix"}
-    assert [s.service for s in store.subscriptions()] == ["Northline", "Spotify"]
+    assert [s.service for s in store.subscriptions()] == ["Spotify", "Northline"]
     again = MailWatchStore(tmp_path / "mailwatch.json")  # it is saved
     subs = find_subscriptions(inbox(), now(), ignore=again.ignored())
-    assert [s.service for s in subs] == ["Northline", "Spotify"]
-    assert subscriptions_report(subs)[0] == "$100.99 a month in subscriptions"
+    assert [s.service for s in subs] == ["Spotify", "Northline"]
+    assert subscriptions_report(subs)[0] == "$11.99 a month in subscriptions"  # the bill is not a subscription
+    assert "1 regular bill (listed below) is not in that total" in subscriptions_report(subs)[1]
 
 
 # ---------------------------------------------------------------- finding 9: currencies
@@ -355,7 +357,7 @@ async def test_a_scan_pages_through_gmail_and_says_when_it_was_cut():
     assert len(mails) == 257 and not mails.cut and len(fake.queries) == 3  # three pages
     assert read_back_to(mails) is None
     subs = find_subscriptions(mails, now())
-    assert [s.service for s in subs] == ["Northline", "Netflix", "Spotify"]
+    assert [s.service for s in subs] == ["Netflix", "Spotify", "Northline"]
     assert "read back to" not in subscriptions_report(subs)[1]
     # 400 newsletters in front: the scan stops at 300, knows it, and says how far it got.
     g, _ = connector(receipts + newsletters(400))
@@ -771,7 +773,9 @@ def test_twelve_real_senders_are_found_and_the_three_live_ones_stay_out():
     assert not {"The Startup Club", "The GIST", "Lyft Ride"} & {s.service for s in subs}
     assert {s.currency for s in subs} == {"CAD"}  # "$" beside CA$ and CDN$ is the same money
     title, body, _lines = subscriptions_report(subs)
-    assert title == "CA$554.86 a month in subscriptions" and body.startswith("12 recurring")
+    bills = [s.service for s in subs if s.kind == "bill"]
+    assert title == "CA$215.54 a month in subscriptions" and body.startswith(f"{12 - len(bills)} recurring")
+    assert bills and f"{len(bills)} regular bill" in body  # the utilities are listed, apart
     assert find_subscriptions(live, now()) == []
 
 
@@ -1216,7 +1220,7 @@ async def test_one_mail_that_cannot_be_fetched_does_not_lose_the_scan():
     assert len(mails) == 65 and mails.failed == 2 and not mails.cut
     assert not_read(mails) == "2 mails couldn't be read just now, so something may be missing."
     subs = find_subscriptions(mails, now())
-    assert [s.service for s in subs] == ["Northline", "Netflix", "Spotify"]
+    assert [s.service for s in subs] == ["Netflix", "Spotify", "Northline"]
     assert subscriptions_report(subs)[1].endswith("2 mails couldn't be read just now, so something may be missing.")
     # Not one mail could be read: that is a failure, said as one.
     g, _ = flaky(receipts, fail_ids={f"m{i}" for i in range(len(receipts))})
@@ -1307,6 +1311,16 @@ def test_the_five_that_nobody_was_paying_for():
     found = find_subscriptions(everything, now())
     assert found == []
     title, body, lines = subscriptions_report(found)
+    # None of them is a subscription being paid. Two are plans whose payment is not going
+    # through, and that is said, not left out (live, 13 November: "only Adobe" was the whole
+    # answer to someone whose streaming account was on hold and whose AI plan's payment had
+    # failed three times that month).
+    assert title == "Nothing is being charged right now"
+    assert sorted(line.split(":")[0] for line in lines) == ["Pixelworks", "Tagmill"]
+    assert all("did not go through" in line for line in lines)
+    assert "Tagmill" in body and "Coastline" not in body and "DashDine" not in body and "Strum" not in body
+    assert find_subscriptions([*gas, *orders, advert], now()).lapsed == []
+    title, body, lines = subscriptions_report(find_subscriptions([*gas, *orders, advert], now()))
     assert title == "No subscriptions found" and lines == []
     assert "only see what sends a receipt to this mailbox" in body
     # The real ones beside them are still found, and the total is theirs alone.
@@ -1343,3 +1357,49 @@ def test_a_payment_that_failed_or_an_advert_is_not_spending_either():
     # A receipt is a receipt, whatever the season.
     assert charge_in("Shop <billing@shop.example>", "Your receipt for the Black Friday sale", "Total: $99.00\n")
     assert charge_in("Tagmill <billing@tagmill.example>", "Your Tagmill receipt", "Amount paid: $29.00\n")
+
+
+def test_a_plan_that_is_on_hold_paused_or_ended_is_said_beside_the_ones_that_are_paid():
+    from pyxi.mailwatch import Lapsed
+
+    paid = [
+        mail(
+            "Inkwell <billing@inkwell.example>",
+            "Your Inkwell receipt",
+            "Thanks for your payment.\nInkwell Pro subscription, billed monthly.\nTotal: $12.00\n",
+            ago(d),
+        )
+        for d in (3, 33, 63)
+    ]
+    hold = [
+        mail("Reelbox <info@account.reelbox.example>", "We couldn't process your payment", "Please update your payment details to keep watching.\nYour membership is waiting.\n", ago(9)),
+        mail("Reelbox <info@account.reelbox.example>", "Update required: Reelbox account on hold", "Your account is on hold until you update your payment.\n", ago(5)),
+    ]
+    ended = [
+        mail("Parcelly <prime@parcelly.example>", "Your Parcelly Plus membership has been paused", "Your membership is paused.\n", ago(30)),
+        mail("Parcelly <prime@parcelly.example>", "Your Parcelly Plus membership has ended", "Your Parcelly Plus membership has ended. You can rejoin any time.\n", ago(20)),
+    ]
+    failing = [
+        mail("Quillbot Labs <billing@quillbotlabs.example>", "Your receipt from Quillbot Labs #2114-0001", "Receipt\nQuillbot Max subscription\nTotal: $28.00\nPaid\n", ago(60)),
+        *[mail("Quillbot Labs <billing@quillbotlabs.example>", "$28.00 payment to Quillbot Labs was unsuccessful", "We were unable to charge your card for your subscription.\n", ago(d)) for d in (2, 5, 8)],
+    ]
+    recovered = [
+        mail("Mapwise <billing@mapwise.example>", "Your Mapwise payment failed", "We could not process the payment for your Mapwise subscription.\n", ago(40)),
+        mail("Mapwise <billing@mapwise.example>", "Your Mapwise receipt", "Mapwise subscription, billed monthly.\nTotal: $5.00\nPaid\n", ago(38)),
+        mail("Mapwise <billing@mapwise.example>", "Your Mapwise receipt", "Mapwise subscription, billed monthly.\nTotal: $5.00\nPaid\n", ago(8)),
+    ]
+    old = [mail("Fernly <billing@fernly.example>", "Your Fernly subscription has been cancelled", "Your subscription was cancelled.\n", ago(200))]
+    order = [mail("DashDine <no-reply@dashdine.example>", "Order Confirmation: your card was declined", "We couldn't process the payment for your order.\n", ago(3))]
+    found = find_subscriptions([*paid, *hold, *ended, *failing, *recovered, *old, *order], now())
+    assert sorted(s.service for s in found) == ["Inkwell", "Mapwise"]  # paid, and paid again since it failed
+    got = {item.service: item for item in found.lapsed}
+    assert set(got) == {"Reelbox", "Parcelly", "Quillbot Labs"}  # not the old one, not the order
+    assert got["Reelbox"].state == "on hold" and got["Parcelly"].state == "ended"
+    assert got["Quillbot Labs"].state == "payment not going through" and got["Quillbot Labs"].last_paid
+    assert isinstance(got["Reelbox"], Lapsed)
+    title, body, lines = subscriptions_report(found)
+    assert "a month in subscriptions" in title  # the total is the paid ones' alone
+    assert "3 more are not being charged right now" in body
+    assert any(line.startswith("Reelbox: on hold since") for line in lines)
+    assert any(line.startswith("Parcelly: ended") for line in lines)
+    assert any(line.startswith("Quillbot Labs: the payment did not go through") and "last paid" in line for line in lines)

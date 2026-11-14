@@ -44,6 +44,7 @@ Everything is on your PC. Pyxi has no server of its own except the beta server, 
 | Memory Palace history (if you turned it on) | `%APPDATA%\Pyxi\.pyxi\pyxi.db` and `palace\` | Your Windows account. Deleted after 72 hours |
 | Things you asked Pyxi to remember, routines, flashcard decks, budgets, Ditto's recordings | `%APPDATA%\Pyxi\.pyxi\` | Your Windows account |
 | Booking details you saved (name, email, phone, date of birth, city) | `%APPDATA%\Pyxi\.pyxi\profile.json` | Your Windows account. ID numbers are never saved |
+| What you told the welcome tour: name, email and date of birth (in the booking details above); what to call you, what you like and what the PC is for (three memories); and that the tour was shown | `profile.json`, `pyxi.db`, and `%APPDATA%\Pyxi\.pyxi\onboarding.json` | Your Windows account. Nothing is kept for anyone under 13. "Delete what I told the tour" in Settings removes it |
 | Google and LinkedIn sign-in tokens | `%APPDATA%\Pyxi\.pyxi\connectors\` | **Encrypted** with Windows DPAPI: useless on another PC or Windows account |
 | Your beta token | `%APPDATA%\Pyxi\.pyxi\cloud.json` | **Encrypted** with Windows DPAPI |
 | Your own API keys, if you added any | `%APPDATA%\Pyxi\.env` | Your Windows account (you put them there) |
