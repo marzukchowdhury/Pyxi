@@ -1,0 +1,60 @@
+/* "Is this the address you meant?" (AddressCheck.tsx). A request card like the others, with the
+   address as the one large thing on it: drawn in a face that tells l, 1 and I apart, the name
+   in ink, the domain in ice, digits in the firefly's amber. The text box sits exactly over the
+   drawn characters (same face, same size), so a click puts the caret where it landed. */
+.request.address { width: 500px; max-width: calc(100vw - 40px); max-height: calc(100vh - 86px); overflow-y: auto; background: rgba(13,16,23,.985); border-color: rgba(255,200,97,.34); scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.28) transparent; }
+.addr { --mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, "SF Mono", Menlo, monospace; }
+.addr-head { display: flex; align-items: center; gap: 9px; }
+.addr-fly { width: 9px; height: 9px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, var(--fly-hi), var(--fly) 62%); box-shadow: 0 0 0 3px rgba(255,200,97,.12), 0 0 14px 3px rgba(255,200,97,.55); animation: glow 2.6s ease-in-out infinite; flex: none; }
+.addr-ask { font-size: 15px; margin-top: 8px; }
+.addr-rows { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.addr-row { display: flex; flex-direction: column; }
+
+.addr-field { position: relative; border-radius: 14px; border: 1px solid var(--hair-hi); background: rgba(255,255,255,.045); font: 600 26px/1.3 var(--mono); letter-spacing: 0; font-feature-settings: normal; transition: border-color .15s var(--ease), background .15s var(--ease); }
+.addr-field.mid { font-size: 20px; }
+.addr-field.small { font-size: 15px; }
+.addr-field:hover { border-color: rgba(158,203,255,.4); }
+.addr-field:focus-within { border-color: rgba(158,203,255,.75); background: rgba(158,203,255,.06); box-shadow: 0 0 0 3px rgba(158,203,255,.14); }
+.addr-field.bad, .addr-field.bad:focus-within { border-color: rgba(255,200,97,.8); box-shadow: 0 0 0 3px rgba(255,200,97,.13); }
+.addr-layer, .addr-input { display: block; width: 100%; margin: 0; padding: 12px 16px; font: inherit; letter-spacing: inherit; white-space: pre; }
+.addr-layer { overflow: hidden; color: var(--ink); pointer-events: none; }
+.addr-layer .dom { color: var(--ice); }
+.addr-layer .digit { color: var(--fly); }
+.addr-layer .mark { color: var(--ink-2); }
+.addr-layer .addr-at { color: var(--fly-hi); opacity: .9; }
+.addr-layer .alike { text-decoration: underline dotted rgba(255,200,97,.75); text-decoration-thickness: 2px; text-underline-offset: 6px; }
+.addr-empty { color: var(--ink-3); font-weight: 500; }
+.addr-input { position: absolute; inset: 0; height: 100%; border: 0; outline: none; background: transparent; color: transparent; caret-color: var(--ice-hi); cursor: text; user-select: text; border-radius: inherit; }
+.addr-input::selection { background: rgba(158,203,255,.32); color: transparent; }
+
+/* Under the address: which part is the name and which the domain, each as wide as its part. */
+.addr-labels { display: flex; height: 24px; padding: 5px 17px 0; font: 600 26px/1 var(--mono); letter-spacing: 0; font-feature-settings: normal; }
+.addr-labels.mid { font-size: 20px; }
+.addr-labels span { flex: none; display: block; border-top: 1px solid var(--ink-3); height: 5px; position: relative; }
+.addr-labels span:nth-child(2) { border-color: transparent; }
+.addr-labels span.dom { border-color: rgba(158,203,255,.5); }
+.addr-labels i { position: absolute; left: 0; top: 5px; font: 500 10.5px/1 "Inter", sans-serif; font-style: normal; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+.addr-labels .dom i { color: rgba(158,203,255,.7); }
+
+.addr-wrong { margin-top: 8px; font-size: 12.5px; font-weight: 600; color: #ffd59e; }
+.addr-heard, .addr-alike, .addr-note { margin-top: 8px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); user-select: text; }
+.addr-heard q { color: var(--ink); font-style: italic; }
+.addr-alike b { font: 600 13px/1 var(--mono); color: var(--ink); padding: 1px 4px; border-radius: 5px; background: rgba(255,255,255,.07); }
+.addr-alike b.digit { color: var(--fly); }
+.addr-note { color: #ffd59e; }
+.addr-was { font: 500 12.5px/1 var(--mono); color: var(--ink); margin-right: 6px; }
+.addr-undo { padding: 0; border: 0; background: none; color: var(--ice); font-size: 12.5px; text-decoration: underline; text-underline-offset: 2px; }
+.addr-chip { align-self: flex-start; margin-top: 10px; min-height: 32px; padding: 5px 13px; border-radius: 999px; border: 1px solid rgba(255,200,97,.5); background: rgba(255,200,97,.1); color: var(--fly-hi); font-size: 13px; animation: rise .35s var(--spring) .12s backwards; }
+.addr-chip b { font: 600 13px/1 var(--mono); color: #fff; }
+.addr-chip:hover { background: rgba(255,200,97,.18); }
+.addr-foot { margin-top: 14px; font-size: 12.5px; color: var(--ink-2); }
+.addr-buttons { margin-top: 10px; }
+.addr-buttons .yes[aria-disabled="true"] { opacity: .45; }
+.addr-buttons .addr-leave { margin-left: auto; border-color: transparent; background: none; color: var(--ink-2); }
+.addr-buttons .addr-leave:hover { color: var(--ink); }
+.addr button:focus-visible { outline: 2px solid rgba(158,203,255,.85); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .request.address, .addr-fly, .addr-chip { animation: none; }
+  .addr-field { transition: none; }
+}

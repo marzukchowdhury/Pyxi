@@ -6,6 +6,7 @@ import { bridge, currentDisplay, onThisDisplay, toLocal } from "../shared/bridge
 import type { Annotation, AnswerCard, BrainEvent, BrainState, FormField, Job, NoteCard, ObjectScene, Pin, SceneSpec, Sketchboard, TimelineMoment, Walkthrough } from "../shared/protocol";
 import { startChime } from "../shared/chime";
 import { brain } from "../shared/socket";
+import { type AddressItem, spoken } from "./addressParts";
 
 export const display = currentDisplay();
 export const isPrimary = display.primary;
@@ -68,7 +69,10 @@ export interface ChatLine {
 }
 
 interface Request {
-  kind: "confirm" | "ask";
+  kind: "confirm" | "ask" | "address";
+  /** "Is this the address you meant?": the addresses to check, and whether they were heard. */
+  addresses?: AddressItem[];
+  voice?: boolean;
   handover?: boolean; // their turn in the browser (paying): a Done button, no text box
   secret?: boolean; // a password: typed into a masked box, sent straight to the teammate
   request_id: string;
@@ -490,6 +494,12 @@ brain.on((e: BrainEvent) => {
       break;
     case "ask":
       if (isPrimary) useOverlay.setState((s) => ({ requests: [...s.requests, { kind: "ask", ...e }] }));
+      break;
+    case "check_address":
+      if (isPrimary) useOverlay.setState((s) => ({ requests: [...s.requests, { kind: "address", ...e }] }));
+      break;
+    case "address_voice":
+      if (isPrimary) spoken(e);
       break;
     case "notes": {
       const r = e.card.region;

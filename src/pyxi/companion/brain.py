@@ -44,6 +44,7 @@ from pyxi import alarms, booking, hands, media, safety, tidy, weather, web, wind
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.agents.jobs import Handoff
 from pyxi.companion import (
+    addresscheck,
     answers,
     filework,
     instant,
@@ -372,6 +373,7 @@ class Brain:
                 if getattr(self, "_talk_presses", 0) != presses:
                     self._half_said = (text, time.monotonic())
                     return
+        self._heard_text = text  # said, not typed: the address check shows "I heard: ..."
         await self.turn(text)
 
     async def _set_alarm(self, alarm: alarms.Alarm) -> None:
@@ -2607,6 +2609,7 @@ class Brain:
         self.activity.forget_all()
         if (learned := self._learned()) is not None:
             learned.forget()  # what the hands learned about apps and sites
+        addresscheck.Book(self.settings.data_dir).clear()  # addresses confirmed on the check card
         self.turns.prune(0)
         self.history = []
         self.audit.add(
@@ -2788,6 +2791,8 @@ class Brain:
             # press on its Done button: Pyxi looks and gives the next one.
             await self._step_said(user_text.strip())
             return
+        if not synthetic and await addresscheck.heard(self, user_text or ""):
+            return  # "yes", or a correction, for the address card that is waiting
         self.warm_voice()  # the voice loads while the model thinks, if it was let go
         behind = self._turn_id if self._lock.locked() else ""  # sent while that turn still ran
         async with self._lock:
@@ -3692,6 +3697,8 @@ class Brain:
             args = {**extra, **args}
         if name in tabwork.FETCHES and (no := await tabwork.before_fetch(self, name, args)):
             return no  # an address the model wrote after reading something: they're asked first
+        if name != "say" and (no := await addresscheck.before(self, name, args)):
+            return no  # an email address they gave was not confirmed: nothing is sent or searched
         if name == "say":
             text = strip_filler(str(args.get("text", "")))
             self._pending_say = ""
