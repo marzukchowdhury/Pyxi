@@ -420,11 +420,12 @@ async def before(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             finals = _answers(answer, len(items))
             if finals is None:
                 state.stopped = "cancelled" if answer is False else "unconfirmed"
-                brain._speak(
-                    "Okay, I've left it, and nothing was sent."
-                    if state.stopped == "cancelled"
-                    else "The address wasn't confirmed, so I've left it."
-                )
+                if getattr(brain, "_stopped_turn", None) != state.turn_id:  # not "stop everything"
+                    brain._speak(
+                        "Okay, I've left it, and nothing was sent."
+                        if state.stopped == "cancelled"
+                        else "The address wasn't confirmed, so I've left it."
+                    )
                 return _stop_note(name, state.stopped)
             for item, final in zip(items, finals, strict=True):
                 state.final[item["address"].lower()] = final
@@ -493,5 +494,6 @@ async def heard(brain: Brain, text: str) -> bool:
     # The talk key was an answer to the card, not a new request: the waiting turn goes on.
     brain._turn_gen = brain._speech_gen
     brain._prefetch = None
+    await brain.set_state("thinking")  # not left on "transcribing" while the card waits
     await brain.hub.emit("address_voice", **event)
     return True

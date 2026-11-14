@@ -111,6 +111,22 @@ def _no_real_windows_read(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(uia, "other_windows", lambda screen, main=0, limit=3: [])
 
 
+@pytest.fixture(autouse=True)
+def _addresses_are_right(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test waits on the "is this the address you meant?" card (companion/addresscheck.py):
+    it is shown, and answered at once with "Yes, that's it". Tests of the card itself give
+    their own answers (tests/test_address_check.py)."""
+    real = Hub.request
+
+    async def request(self: Hub, type: str, timeout: float = 300, **data: Any) -> Any:
+        if type != "check_address":
+            return await real(self, type, timeout=timeout, **data)
+        await self.emit(type, request_id="req_test", **data)
+        return {"addresses": [a["address"] for a in data["addresses"]]}
+
+    monkeypatch.setattr(Hub, "request", request)
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> PyxiSettings:
     return PyxiSettings(
