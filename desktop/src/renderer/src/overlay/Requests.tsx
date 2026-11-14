@@ -1,5 +1,6 @@
 // Approval and question toasts from teammates: "Can Scout click Submit?" right on screen.
 import { useState } from "react";
+import { AddressCheck } from "./AddressCheck";
 import { FormAsk } from "./FormAsk";
 import { Interactive } from "./Interactive";
 import { trusted } from "../shared/trusted";
@@ -12,8 +13,10 @@ export function Requests() {
   return (
     <div className="requests">
       {requests.map((r) => (
-        <Interactive key={r.request_id} className={r.fields ? "request form" : "request"}>
-          {r.fields ? (
+        <Interactive key={r.request_id} className={r.kind === "address" ? "request address" : r.fields ? "request form" : "request"}>
+          {r.kind === "address" ? (
+            <AddressCheck id={r.request_id} items={r.addresses ?? []} voice={!!r.voice} onAnswer={answer} />
+          ) : r.fields ? (
             <FormAsk id={r.request_id} agent={r.agent} question={r.question ?? ""} fields={r.fields} onAnswer={answer} />
           ) : r.kind === "confirm" ? (
             <>

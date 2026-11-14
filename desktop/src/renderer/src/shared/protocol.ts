@@ -538,6 +538,11 @@ export type BrainEvent =
   | { type: "confirm"; request_id: string; job_id: string; agent: string; action: string; reason: string; always?: string }
   | { type: "ask"; request_id: string; job_id: string; agent: string; question: string; handover?: boolean; secret?: boolean; fields?: FormField[] }
   | { type: "request_closed"; request_id: string }
+  // "Is this the address you meant?" (src/pyxi/companion/addresscheck.py): answered with
+  // { addresses: string[] } in the same order, or false for "Never mind".
+  | { type: "check_address"; request_id: string; job_id: string; agent: string; voice: boolean; addresses: { address: string; suggestion?: string | null; problem?: string | null; heard?: string | null }[] }
+  // Words said while that card is up: "yes", a spoken correction (fills the box), "no", "never mind".
+  | { type: "address_voice"; action: "confirm" | "fill" | "edit" | "cancel"; address?: string; heard?: string }
   | { type: "driving"; doing: string | null }
   | { type: "agents"; agents: Agent[] }
   | { type: "pins"; app: string; pins: Pin[] }
