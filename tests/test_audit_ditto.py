@@ -168,6 +168,11 @@ async def test_a_card_number_typed_while_watching_is_never_kept(tmp_path):
     recording = await r.stop()
     saved = (tmp_path / "watch" / f"{recording.id}.json").read_text(encoding="utf-8")
     everywhere = saved + recording.text() + " ".join(s.line() for s in logged)
+    # (Clock readings are numbers too: "1794555521.6737866" has 737 in it, and the test failed
+    # one run in a dozen. They are taken out before looking for what was typed.)
+    import re
+
+    everywhere = re.sub(r"\d{9,}\.\d+", "", everywhere)
     assert "4111" not in everywhere and "737" not in everywhere
     assert 'typed "Alex Morgan" into edit "Full name"' in recording.text()  # the rest is kept
     assert 'typed something private (not kept) into edit "Card number"' in recording.text()
