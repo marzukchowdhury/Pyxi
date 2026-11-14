@@ -11,18 +11,18 @@ describe("the address, a part at a time", () => {
   });
 
   it("knows digits from letters from marks", () => {
-    expect(parts("a_2@x.example").name.map((c) => c.kind)).toEqual(["letter", "mark", "digit"]);
+    expect(parts("a_2@x.test").name.map((c) => c.kind)).toEqual(["letter", "mark", "digit"]);
   });
 
   it("marks the characters that look like another", () => {
     const alike = (a: string) => [...parts(a).name, ...parts(a).domain].filter((c) => c.alike).map((c) => c.ch).join("");
     expect(alike("bill10@example.org")).toBe("ll10l");
-    expect(alike("Ian.O@abc.example")).toBe("IO");
-    expect(alike("sam@abc.example")).toBe("");
-    const rn = parts("barney@abc.example").name.filter((c) => c.alike);
+    expect(alike("Ian.O@abc.test")).toBe("IO");
+    expect(alike("sam@abc.test")).toBe("");
+    const rn = parts("barney@abc.test").name.filter((c) => c.alike);
     expect(rn.map((c) => c.ch).join("")).toBe("rn");
     expect(rn[0].alike).toBe("r then n, not m");
-    expect(parts("l1@abc.example").name.map((c) => c.alike)).toEqual(["small L", "the digit one"]);
+    expect(parts("l1@abc.test").name.map((c) => c.alike)).toEqual(["small L", "the digit one"]);
   });
 
   it("an address with no @ yet is all name", () => {
