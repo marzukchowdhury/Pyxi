@@ -338,6 +338,9 @@ _EVERYDAY_KEYS = re.compile(
     r"^(?:shift\+)?(?:enter|return|tab|up|down|left|right|backspace|delete|del|space|pageup|"
     r"pagedown|home|end)$|^ctrl\+[acvx]$"
 )
+_OPPOSITE = {"up": "down", "down": "up", "left": "right", "right": "left"}
+SCROLL_TURNS_TOLD = 2  # down, up, down: told once that the page has been seen
+SCROLL_TURNS_STOP = 4  # and at it again after that: an honest stop
 REPEAT_SPAN = 10  # steps: the same action three times within this many is a way that fails
 _RENAMES = re.compile(r"(?i)\brenam(?:e|ed|ing)\b|\b(?:change|set) (?:the |its |this |that )?(?:name|title)\b|\bcall it\b|\bname it\b")
 _NOTHING = "nothing happened"
@@ -441,6 +444,10 @@ class Operator:
             await asyncio.sleep(0.25)
         steps: list[Step] = []
         repeats: dict[str, int] = {}
+        # Scrolling one way and then back again. Live, 15 November: on a Maps list, down,
+        # up, down, up for two and a half minutes. Each scroll changed the screen, so
+        # none of it counted as the same thing again.
+        scrolled, turns, turned_told = "", 0, False
         last_look: Image.Image | None = None
         still = 0  # looks in a row where nothing on screen changed
         seen: list[Image.Image] = []  # every look so far, to notice going round in circles
@@ -582,6 +589,32 @@ class Operator:
             if not actions:
                 steps.append(
                     Step(n, "(nothing)", "No actions given: call act with actions, or done.")
+                )
+                continue
+            for a in actions:
+                if a.get("do") == "scroll":
+                    way = str(a.get("direction") or "down")
+                    if scrolled and _OPPOSITE.get(scrolled) == way:
+                        turns += 1
+                    scrolled = way
+            if turns >= SCROLL_TURNS_STOP:
+                log.info("hands: scrolling back and forth (%d turns); stopping", turns)
+                return Outcome(
+                    False,
+                    "I kept going up and down that page without finding it, so I stopped "
+                    "rather than keep you waiting. Tell me what to look for, or point me at it.",
+                    steps,
+                )
+            if turns >= SCROLL_TURNS_TOLD and not turned_told:
+                turned_told = True
+                steps.append(
+                    Step(
+                        n,
+                        "(back and forth)",
+                        "You have scrolled this page one way and back twice: you have seen it. "
+                        "Do not scroll back again. Act on what you saw, or call done and say "
+                        "what you found (with ok=false if it is not there).",
+                    )
                 )
                 continue
             key = repr(actions)
