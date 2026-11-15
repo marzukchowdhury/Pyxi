@@ -960,6 +960,27 @@ def for_later(job: Any) -> str:
 # (Not Ditto: its job ends with a plan waiting on a card, and "Ditto's done." was said while
 # nothing had been renamed yet. It says its own title, "Ready to do 3 more.")
 DOERS = {"documents", "files"}
+
+_MAPS_NOW = re.compile(r"(?i)(google\.[a-z.]+/maps/search/[^?#]*?)(?:\+|%20)open(?:\+|%20)now\b")
+_LATER = re.compile(
+    r"(?i)\b(tomorrow|tonight|this evening|later|next (?:week|month|weekend)|(?:this|the|on the) weekend|"
+    r"(?:on |this |next )?(?:mon|tues|wednes|thurs|fri|satur|sun)day|"
+    r"(?:at|around|by) \d{1,2}(?::\d\d)?\s*(?:am|pm|a\.m\.|p\.m\.)?|in (?:an?|\d+|a few) (?:hours?|days?))\b"
+)
+_NOW = re.compile(r"(?i)\b(open (?:right )?now|right now|still open|open at this (?:hour|time))\b")
+
+
+def place_for_later(url: str, asked: str) -> str:
+    """A Maps search without its 'open now' when they asked about a later time.
+
+    Live, 15 November, 2:53 in the morning: 'suggest me some Japanese place for tomorrow's
+    dinner' was searched as 'japanese restaurant open now', which found next to nothing,
+    and they had to stop it and say so. Their own 'open now' always wins."""
+    if not _MAPS_NOW.search(url) or _NOW.search(asked) or not _LATER.search(asked):
+        return url
+    return _MAPS_NOW.sub(r"\1", url)
+
+
 # A result that worked, with something they need to hear all the same.
 _CAVEAT = re.compile(
     r"(?i)\b(but|not|no|none|nothing|couldn'?t|can'?t|didn'?t|doesn'?t|won'?t|wasn'?t|isn'?t|instead|"

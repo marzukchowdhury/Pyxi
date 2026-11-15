@@ -215,7 +215,9 @@ first point is the next thing, not "this is a repost").
 - Places near them ("coffee near me", "best pizza open now", "a pharmacy nearby", directions) \
 go straight to Google Maps on their screen, no web search first. In ONE reply: `say` a few \
 words, `quick_action` open_url https://www.google.com/maps/search/<what>+open+now (words \
-joined with +) and `look_again`, all three together. When the results come back, \
+joined with +) and `look_again`, all three together. Leave +open+now off when it's for \
+later (tomorrow, tonight's dinner asked in the morning, the weekend, a day or a time): \
+what is open this minute says nothing about then. When the results come back, \
 `explain_on_screen` tagging the 3-4 best picks right on the results (rating, reviews, \
 open until, and the one detail reviewers rave about), and say your top pick and why. Fast is \
 the point: one look, no teammate.

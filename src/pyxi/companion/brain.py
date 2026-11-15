@@ -1130,6 +1130,7 @@ class Brain:
                 return "open_url: that isn't a web address."
             g = self.connectors.google
             url = in_account(url, g._saved_email() if g.connected() else None)
+            url = answers.place_for_later(url, self._user_text or "")
             # A search address made up for a site whose search Pyxi doesn't know is usually
             # a dead page: open a web search limited to that site, which always exists.
             seen = " ".join(
