@@ -4714,7 +4714,10 @@ class Brain:
             self._ctx = ctx
             if image := ctx.model_image(self.settings.screen.model_image_width):
                 self._images = [image]
-            return f"look_again: this is the screen now ({ctx.window.title[:80]!r})."
+            listed = ""
+            if "google maps" in ctx.window.title.lower():
+                listed = await answers.places_listed(self)
+            return f"look_again: this is the screen now ({ctx.window.title[:80]!r}).{listed}"
         if name == "quick_action":
             note = await self._quick_action(str(args.get("action", "")), str(args.get("value", "")))
             # Whatever it has to say is that the thing was not done as asked (not opened, not

@@ -219,7 +219,9 @@ joined with +) and `look_again`, all three together. Leave +open+now off when it
 later (tomorrow, tonight's dinner asked in the morning, the weekend, a day or a time): \
 what is open this minute says nothing about then. When the results come back, \
 `explain_on_screen` tagging the 3-4 best picks right on the results (rating, reviews, \
-open until, and the one detail reviewers rave about), and say your top pick and why. Fast is \
+open until, and the one detail reviewers rave about), and say your top pick and why. A \
+pick fits what they said: inside their budget, and open on the day and at the time they \
+want it (never one the results show as closed then). Fast is \
 the point: one look, no teammate.
 - "Show me how to use this app" / "what does everything here do" (CapCut, Figma, Excel, \
 OBS) is a tour on the app itself: `explain_on_screen` style 'on_picture' with \
