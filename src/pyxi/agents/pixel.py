@@ -64,7 +64,8 @@ OPERATIONS = {
     "images_to_pdf": "Put one or more images into a PDF, one page each, in the order given.",
     "to_pdf": "Turn Word, Excel, PowerPoint, Markdown, HTML or text files into PDF.",
     "word_to_pdf": "Turn a Word document into a PDF (same as to_pdf).",
-    "pdf_to_word": "Turn a PDF into an editable Word document (text, headings, pictures).",
+    "pdf_to_word": "Turn a PDF into an editable Word document (text, headings, tables as real tables, pictures).",
+    "pdf_to_excel": "Pull the tables out of a PDF into an Excel workbook (.xlsx), one table to a sheet, figures as numbers; a table that runs over pages is one sheet, and a scanned table is read with OCR.",
     "pdf_to_images": "Turn PDF pages into PNG or JPG images (options: pages, format, dpi).",
     "merge_pdfs": "Join PDFs into one, in the order given.",
     "split_pdf": "Split a PDF into several: every page on its own, or by pages like '1-2, 3'.",
@@ -749,6 +750,7 @@ ONE_FILE = {
     "fill_form",
     "extract_text",
     "pdf_to_word",
+    "pdf_to_excel",
     "pdf_to_images",
     "excel_to_csv",
 }
@@ -816,6 +818,8 @@ def _run_one(
         return to_pdf(paths, out, sheet=str(o.get("sheet") or ""))
     if op == "pdf_to_word":
         return pixel_pdf.pdf_to_word(paths, out)
+    if op == "pdf_to_excel":
+        return pixel_pdf.pdf_to_excel(paths, out)
     if op == "merge_pdfs":
         return merge_pdfs(paths, o.get("name"), out)
     if op == "split_pdf":
@@ -923,6 +927,13 @@ def guess_operation(task: str, files: list[str]) -> str | None:
             "rotate_pages",
         ),
         (pdf and bool(re.search(r"reorder|re-order|move page|order of", t)), "reorder_pages"),
+        (
+            # "Pull the table on page 3 into Excel" is the table, not page 3 as a PDF.
+            pdf
+            and bool(re.search(r"\bexcel\b|xlsx|spreadsheet|\btables?\b", t))
+            and not re.search(r"\bword\b|docx", t),
+            "pdf_to_excel",
+        ),
         (pdf and bool(re.search(r"delete|remove|drop", t)) and "page" in t, "delete_pages"),
         (
             pdf and bool(re.search(r"extract|pull out|just pages?|only pages?", t)) and "page" in t,
