@@ -311,17 +311,23 @@ def _pyxi_node(driver_path: Path) -> Path:
 
 def slim(version: str) -> None:
     started = time.monotonic()
-    for attempt in range(6):
-        if not BUNDLE.exists():
-            break
-        try:
-            shutil.rmtree(BUNDLE)
-        except PermissionError:
-            # A folder just emptied can stay "in use" for a moment on Windows (a virus scan,
-            # the search index): twice running, 25 November, that stopped the build cold.
-            if attempt == 5:
-                raise
-            time.sleep(2)
+    # The old bundle is moved aside and then removed, not removed in place: a folder just
+    # emptied can stay "in use" for a while on Windows (a virus scan, the search index), and
+    # on 25 November that stopped three builds running with "access is denied". What cannot
+    # be removed yet is left in its side folder and cleared by the next build.
+    for old in BUNDLE.parent.glob(f"{BUNDLE.name}.old-*"):
+        shutil.rmtree(old, ignore_errors=True)
+    if BUNDLE.exists():
+        aside = BUNDLE.with_name(f"{BUNDLE.name}.old-{int(time.time())}")
+        for attempt in range(6):
+            try:
+                BUNDLE.rename(aside)
+                break
+            except PermissionError:
+                if attempt == 5:
+                    raise
+                time.sleep(2)
+        shutil.rmtree(aside, ignore_errors=True)
     BUNDLE.mkdir(parents=True)
     for f in FULL.glob("*"):
         if f.is_file() and f.suffix.lower() in (".exe", ".dll"):
