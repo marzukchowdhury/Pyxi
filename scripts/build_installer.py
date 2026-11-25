@@ -311,8 +311,17 @@ def _pyxi_node(driver_path: Path) -> Path:
 
 def slim(version: str) -> None:
     started = time.monotonic()
-    if BUNDLE.exists():
-        shutil.rmtree(BUNDLE)
+    for attempt in range(6):
+        if not BUNDLE.exists():
+            break
+        try:
+            shutil.rmtree(BUNDLE)
+        except PermissionError:
+            # A folder just emptied can stay "in use" for a moment on Windows (a virus scan,
+            # the search index): twice running, 25 November, that stopped the build cold.
+            if attempt == 5:
+                raise
+            time.sleep(2)
     BUNDLE.mkdir(parents=True)
     for f in FULL.glob("*"):
         if f.is_file() and f.suffix.lower() in (".exe", ".dll"):
