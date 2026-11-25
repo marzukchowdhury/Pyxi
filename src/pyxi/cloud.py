@@ -28,7 +28,7 @@ BETA_MODEL = "anthropic/claude-haiku-5.5"
 BETA_MODELS = ("anthropic/claude-haiku-5.5", "anthropic/claude-sonnet-5.5")
 # Per-feature model overrides: in the beta, anything the server wouldn't allow falls back to the
 # chat model (empty), so nothing quietly bills a key of their own.
-MODEL_VARS = ("PYXI_JOB_MODEL", "PYXI_MODEL_3D", "PYXI_MODEL_HANDS", "PYXI_MODEL_HANDS_STRONG", "PYXI_MODEL_AIM", "PYXI_MODEL_DICTATION")
+MODEL_VARS = ("PYXI_JOB_MODEL", "PYXI_MODEL_3D", "PYXI_MODEL_HANDS", "PYXI_MODEL_HANDS_STRONG", "PYXI_MODEL_AIM", "PYXI_MODEL_DICTATION", "PYXI_MODEL_LISTEN")
 FILE = "cloud.json"
 
 

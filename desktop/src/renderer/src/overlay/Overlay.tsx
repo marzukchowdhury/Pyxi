@@ -9,6 +9,7 @@ import { AnswerCard } from "./AnswerCard";
 import { DictationSign } from "./DictationSign";
 import { DICTATION_MAX_MS, type DictationView, micProblem, OWN_NOTES, tooQuiet } from "./dictationText";
 import { guideClick } from "./guideMarks";
+import { Hearing } from "./Hearing";
 import { NotesCard } from "./NotesCard";
 import { Notch } from "./Notch";
 import { ObjectPanel } from "./ObjectPanel";
@@ -249,6 +250,7 @@ export function Overlay() {
       <PriceTag />
       <Team />
       <Requests />
+      <Hearing />
       <Onboarding />
       <Presence micLevel={micLevel} />
       {isPrimary && <Notch micLevel={micLevel} />}

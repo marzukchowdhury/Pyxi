@@ -240,6 +240,10 @@ def create_app(
         ambient.cancel()
         routines.cancel()
         idle.cancel()
+        try:  # the brain is closing: no capture outlives it
+            await brain.listening.ears.close()
+        except Exception:
+            log.exception("closing the listening failed")
         hub.cancel_all()
         if demo_site:
             demo_site.stop()
@@ -301,6 +305,15 @@ def create_app(
     async def stop_everything() -> dict[str, Any]:
         """The desktop app's "Stop everything" hotkey and tray item (needs the launch key)."""
         return {"ok": True, "message": await brain.stop_everything()}
+
+    @app.post("/api/listen/{what}")
+    async def listen(what: str) -> dict[str, Any]:
+        """The tray menu's "Take meeting notes" and "Live captions": each press turns it on,
+        or off when it is on (needs the launch key, like every request)."""
+        if what not in ("meeting", "captions"):
+            raise HTTPException(404)
+        await brain.listening.on_message({"type": "listen", "what": what, "action": "toggle"})
+        return {"ok": True, **brain.listening.public()}
 
     @app.get("/api/state")
     async def state() -> dict[str, Any]:
@@ -399,6 +412,10 @@ def create_app(
         await socket.accept()
         cid = hub.connect(socket.send_text)
         await socket.send_text(json.dumps({"type": "hello", **hello()}, default=str))
+        if brain.listening.active():  # a window that opens while Pyxi listens shows the sign
+            await socket.send_text(
+                json.dumps({"type": "listening", **brain.listening.public()}, default=str)
+            )
         try:
             while True:
                 msg = json.loads(await socket.receive_text())
@@ -560,6 +577,9 @@ def create_app(
             brain.object_closed(by_them=bool(msg.get("by_them", True)))
         elif kind == "stop_everything":
             await brain.stop_everything()
+        elif kind == "listen":
+            # The sign's Stop, the caption bar's own buttons, the tray menu: their own press.
+            brain._spawn(brain.listening.on_message(msg))
         elif kind == "answer":
             from pyxi import hands
 

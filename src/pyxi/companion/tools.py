@@ -1253,6 +1253,12 @@ from pyxi.companion.specialists import SPECS as SPECIALIST_TOOLS  # noqa: E402
 COMPANION_TOOLS += SPECIALIST_TOOLS
 INFO_TOOLS |= SPECIALIST_INFO
 
+# Listening to what the PC plays: live meeting notes (no bot) and live captions with
+# translation (companion/listening.py). Both start only when they ask, in that moment.
+from pyxi.companion.listening import SPECS as LISTENING_TOOLS  # noqa: E402
+
+COMPANION_TOOLS += LISTENING_TOOLS
+
 # Pyxi in your browser: read_tab and use_tab (companion/tabwork.py). They are not in
 # COMPANION_TOOLS: the brain adds them to a turn only while the extension is connected.
 from pyxi.companion.tabwork import INFO as TAB_INFO  # noqa: E402
