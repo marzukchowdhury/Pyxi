@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import difflib
 import io
+import logging
 import re
 from collections.abc import Callable
 from itertools import pairwise
@@ -27,6 +28,7 @@ from pyxi.agents.pixel_common import (
     unique_path,
 )
 
+log = logging.getLogger(__name__)
 
 # ============================================================================ helpers
 def _reader(src: Path, password: str | None = None):
@@ -522,8 +524,41 @@ def _render_page(pdf_path: Path, index: int, dpi: int = 200, password: str | Non
         doc.close()
 
 
+def read_layout(src: Path, *, ocr: bool = True, max_chars: int | None = None):
+    """A PDF read in reading order with its tables kept (agents/pdf_layout.py), or None when
+    that reader can't make anything of this file: the plain reader is used then. A locked or
+    broken PDF says so in a sentence."""
+    reader = _reader(src)
+    try:
+        from pyxi.agents import pdf_layout
+
+        return pdf_layout.read(
+            src,
+            ocr=ocr,
+            password="" if reader.is_encrypted else None,
+            max_chars=max_chars,
+            ocr_image=lambda img: _ocr_image(img),  # looked up when called: tests replace it
+        )
+    except Exception:
+        log.warning("pixel: the layout reader couldn't read %s; reading it plainly", src.name, exc_info=True)
+        return None
+
+
 def page_texts(src: Path, *, ocr: bool = True) -> tuple[list[str], list[int]]:
-    """Text of each page, and which pages were read with OCR (scans)."""
+    """Text of each page, and which pages were read with OCR (scans). Columns come in reading
+    order, a table as a table (rows of cells between | marks), and the running header and
+    footer are left out."""
+    layout = read_layout(src, ocr=ocr)
+    if layout is not None:
+        if not layout.words and layout.no_reader:
+            raise PixelError(layout.no_reader)
+        return layout.page_texts(), list(layout.scanned)
+    return _page_texts_plain(src, ocr=ocr)
+
+
+def _page_texts_plain(src: Path, *, ocr: bool = True) -> tuple[list[str], list[int]]:
+    """The text as the file holds it, in the file's own order: what is left when the layout
+    reader fails."""
     reader = _reader(src)
     texts, scanned = [], []
     no_reader: PixelError | None = None
@@ -658,6 +693,21 @@ def pdf_to_word(files: list[Path], out: Path | None = None) -> PixelResult:
     scanned = []
     made = 0  # paragraphs and pictures that went in
     no_reader: PixelError | None = None
+    layout = read_layout(src)
+    if layout is not None and layout.words:
+        # Read in reading order, with its tables as real Word tables.
+        tables = _word_from_layout(doc, layout, reader)
+        target = unique_path(out or out_dir_for(src), f"{src.stem}.docx")
+        doc.save(str(target))
+        n = len(reader.pages)
+        how = f" Read {_label(layout.scanned)} with OCR." if layout.scanned else ""
+        if tables:
+            how += f" {tables} table{'s' if tables != 1 else ''} came through as real tables."
+        return PixelResult(
+            [target],
+            f"Made {target.name} from {n} page{'s' if n != 1 else ''}.{how}",
+            {"tables": tables},
+        )
     for i, page in enumerate(reader.pages):
         if i:
             doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
@@ -699,6 +749,113 @@ def pdf_to_word(files: list[Path], out: Path | None = None) -> PixelResult:
     return PixelResult(
         [target],
         f"Made {target.name} from {len(reader.pages)} page{'s' if len(reader.pages) != 1 else ''}.{how}",
+    )
+
+
+def _word_from_layout(doc, layout, reader) -> int:
+    """The blocks of a PDF into a Word document: headings, paragraphs, lists, real tables, a
+    page break where the PDF had one, and each page's pictures. Returns how many tables."""
+    from docx.enum.text import WD_BREAK
+    from docx.shared import Inches
+
+    tables = 0
+    by_page: dict[int, list] = {}
+    for b in layout.blocks:
+        by_page.setdefault(b.page, []).append(b)
+    for number in range(1, layout.pages + 1):
+        if number > 1:
+            doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+        for b in by_page.get(number, []):
+            if hasattr(b, "rows"):
+                rows = [r for r in b.rows if r]
+                if not rows:
+                    continue
+                cols = max(len(r) for r in rows)
+                table = doc.add_table(rows=len(rows), cols=cols)
+                table.style = "Table Grid"
+                for r, row in enumerate(rows):
+                    for c, text in enumerate(row):
+                        cell = table.cell(r, c)
+                        cell.text = text
+                        if r == 0:
+                            for run in cell.paragraphs[0].runs:
+                                run.bold = True
+                doc.add_paragraph()
+                tables += 1
+            elif b.kind in ("h1", "h2"):
+                doc.add_heading(b.text, level=1 if b.kind == "h1" else 2)
+            elif b.kind == "bullet":
+                doc.add_paragraph(b.text, style="List Bullet")
+            elif b.kind == "number":
+                doc.add_paragraph(NUMBER_MARK.sub("", b.text, count=1), style="List Number")
+            else:
+                doc.add_paragraph().add_run(b.text).bold = b.bold or None
+        if number <= len(reader.pages):
+            for img in _page_images(reader.pages[number - 1]):
+                try:
+                    doc.add_picture(io.BytesIO(img), width=Inches(6.0))
+                except Exception:
+                    continue
+    return tables
+
+
+def pdf_to_excel(files: list[Path], out: Path | None = None) -> PixelResult:
+    """A PDF's tables as the sheets of a real workbook, one table to a sheet: rows and columns
+    kept, figures as numbers, the heading row bold and frozen. A table that runs over several
+    pages is one sheet."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    from pyxi.agents.pdf_layout import cell_value
+
+    (src,) = need(files, {".pdf"}, "PDF")
+    layout = read_layout(src)
+    if layout is None:
+        raise PixelError(f"I couldn't read the layout of {src.name}, so I can't pull its tables out.")
+    if not layout.words and layout.no_reader:
+        raise PixelError(layout.no_reader)
+    tables = [t for t in layout.tables if len(t.rows) >= 2 and t.cols >= 2]
+    if not tables:
+        raise PixelError(
+            f"I couldn't find a table in {src.name}. For its words, ask for the text or a Word copy."
+        )
+    wb = Workbook()
+    wb.remove(wb.active)
+    cells = 0
+    for n, t in enumerate(tables, 1):
+        pages = t.pages or [t.page]
+        where = f"p{pages[0]}" if len(pages) == 1 else f"p{pages[0]}-{pages[-1]}"
+        ws = wb.create_sheet(f"Table {n} ({where})"[:31])
+        widths = [8] * t.cols
+        for r, row in enumerate(t.rows, 1):
+            for c, text in enumerate(row, 1):
+                value = text if r == 1 else cell_value(text)
+                if value == "":
+                    continue
+                cell = ws.cell(r, c, value)
+                cells += 1
+                if r == 1:
+                    cell.font = Font(bold=True)
+                elif isinstance(value, float) and text.strip().endswith("%"):
+                    cell.number_format = "0.0%"
+                elif isinstance(value, float):
+                    cell.number_format = "#,##0.00"
+                elif isinstance(value, int) and "," in text:
+                    cell.number_format = "#,##0"
+                widths[c - 1] = max(widths[c - 1], min(60, len(text) + 2))
+        ws.freeze_panes = "A2"
+        for c, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(c)].width = w
+    target = unique_path(out or out_dir_for(src), f"{src.stem} (tables).xlsx")
+    wb.save(str(target))
+    how = f" Read {_short_label(layout.scanned)} with OCR, so check the figures." if layout.scanned else ""
+    n = len(tables)
+    return PixelResult(
+        [target],
+        f"Made {target.name}: {n} table{'s' if n != 1 else ''} from {src.name}, one to a sheet "
+        f"({cells:,} cells).{how}",
+        {"tables": n, "cells": cells, "sheets": wb.sheetnames},
     )
 
 
@@ -840,7 +997,18 @@ def document_lines(path: Path) -> list[str]:
     """A document as comparable lines: paragraphs, table rows, cells, slide text."""
     ext = path.suffix.lower()
     if ext == ".pdf":
-        texts, _ = page_texts(path, ocr=False)
+        layout = read_layout(path, ocr=False)
+        if layout is not None and layout.blocks:
+            # Paragraphs as paragraphs and a table a row to a line, the way a Word file's are
+            # read below: the PDF of a document compares cleanly with the document.
+            out = []
+            for b in layout.blocks:
+                if hasattr(b, "rows"):
+                    out += [" | ".join(c.strip() for c in row) for row in b.rows]
+                elif b.text.strip():
+                    out.append(re.sub(r"\s+", " ", b.text).strip())
+            return out
+        texts, _ = _page_texts_plain(path, ocr=False)
         raw = "\n".join(texts)
         # Re-join lines a PDF wrapped mid-sentence, so a reflow isn't a "change".
         paras = re.split(r"\n\s*\n|(?<=[.!?:])\n", raw)
