@@ -395,6 +395,28 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .toast-actions button:hover { color: var(--ink); border-color: rgba(158,203,255,.35); }
 .toast-actions button.primary { color: var(--ice-hi); background: rgba(158,203,255,.14); border-color: rgba(158,203,255,.4); }
 
+/* ============================================================ dictation sign */
+/* A pill at the bottom of the main screen: the microphone is open, then what was typed. */
+.dictation-wrap { position: fixed; left: 0; right: 0; bottom: 84px; z-index: 66; display: flex; justify-content: center; }
+.dictation { pointer-events: auto !important; min-width: 190px; max-width: min(560px, calc(100vw - 48px)); padding: 10px 14px 11px; border-radius: 18px; background: rgb(12, 13, 18); border: 1px solid rgba(158,203,255,.22); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 18px 50px rgba(0,0,0,.45), 0 0 0 .5px rgba(0,0,0,.5); animation: rise .28s var(--spring); }
+.dictation.tone-live { border-color: rgba(255,200,97,.5); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 18px 50px rgba(0,0,0,.45), 0 0 22px rgba(255,200,97,.16); }
+.dictation.tone-good { border-color: rgba(134,224,195,.4); }
+.dictation.tone-warn { border-color: rgba(255,179,138,.45); }
+.dictation-head { display: flex; align-items: center; gap: 10px; min-height: 22px; }
+.dictation-head b { flex: 1; font-size: 13.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dictation-bars { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 18px; }
+.dictation-bars i { width: 3px; height: 18px; border-radius: 2px; background: var(--fly); transform: scaleY(.22); box-shadow: 0 0 8px rgba(255,200,97,.5); }
+.dictation-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--ice); box-shadow: 0 0 10px rgba(158,203,255,.7); }
+.dictation.tone-good .dictation-dot { background: #86e0c3; box-shadow: 0 0 10px #86e0c3; }
+.dictation.tone-warn .dictation-dot { background: #ffb38a; box-shadow: 0 0 10px #ffb38a; }
+.dictation-dot.spin { animation: breathe .9s var(--ease) infinite; }
+.dictation-x { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin: -2px -4px -2px 0; border: 0; border-radius: 7px; background: none; color: var(--ink-3); cursor: pointer; }
+.dictation-x:hover { color: var(--ink); background: rgba(255,255,255,.08); }
+.dictation-x svg { width: 14px; height: 14px; }
+.dictation-body { margin-top: 6px; font-size: 13px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.dictation-note { margin-top: 4px; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+@media (prefers-reduced-motion: reduce) { .dictation, .dictation-dot.spin { animation: none; } }
+
 /* ============================================================ requests & notices */
 .requests { position: fixed; left: 50%; top: 66px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 10px; z-index: 60; }
 .request { pointer-events: auto !important; width: 440px; padding: 16px 18px; border-radius: 20px; background: var(--glass-strong); border: 1px solid rgba(255,213,158,.3); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 24px 70px rgba(0,0,0,.4); backdrop-filter: blur(22px); animation: rise .35s var(--spring); }

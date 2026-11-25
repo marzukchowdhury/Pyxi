@@ -12,7 +12,8 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
+import { dictationAccelerator, dictationPrefs, type DictationPrefs } from "./dictationPrefs";
+import { dictationState, pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
 import { tableClip } from "./tableClip";
 import { TRAY_PNG_16, TRAY_PNG_32, TRAY_PNG_64 } from "./trayImage";
 import { trayTemplate } from "./trayMenu";
@@ -108,6 +109,26 @@ function loadShareVisible(): boolean {
   }
 }
 let shareVisible = loadShareVisible();
+
+// Dictation's settings live in the same file (see dictationPrefs.ts).
+function loadDictation(): DictationPrefs {
+  try {
+    return dictationPrefs(JSON.parse(readFileSync(UI_PREFS, "utf-8")).dictation);
+  } catch {
+    return dictationPrefs(null);
+  }
+}
+let dictation = loadDictation();
+
+/** Both settings in ui.json, written together so neither wipes the other. */
+function saveUiPrefs(): void {
+  try {
+    mkdirSync(join(HOME, ".pyxi"), { recursive: true });
+    writeFileSync(UI_PREFS, JSON.stringify({ shareVisible, dictation }));
+  } catch (err) {
+    console.warn("[pyxi] couldn't save the interface settings:", err);
+  }
+}
 
 /** Is this one of Pyxi's own pages (the built files, or the dev server while developing)? */
 function ownPage(url: string): boolean {
@@ -586,8 +607,9 @@ app.whenReady().then(async () => {
     down: () => broadcast("ptt-down"),
     up: () => broadcast("ptt-up"),
     cancel: () => broadcast("ptt-cancel"),
-    // Hold Ctrl + left Windows: dictation, typed into whatever app has focus.
-    dictateDown: () => broadcast("dictate-down"),
+    // Hold Ctrl + left Windows: dictation, typed into whatever app has focus. The overlay is
+    // told how it was started (hold, or a press) and whether a long one may be tidied by a model.
+    dictateDown: () => broadcast("dictate-down", { mode: dictation.mode, polish: dictation.polish, here: !dictation.cloud, keys: dictationAccelerator(dictation.keys) }),
     dictateUp: () => broadcast("dictate-up"),
     dictateCancel: () => broadcast("dictate-cancel"),
     doubleTap: () => {
@@ -602,7 +624,7 @@ app.whenReady().then(async () => {
     // step drawn on a second screen never heard its click when only the main one was told.
     click: (x, y) => broadcast("global-click", { x, y }),
     move: () => wakeCursorFeed(),
-  });
+  }, () => dictation);
   registerHotkeys({
     talk: () => broadcast("ptt"),
     panel: toggleNotch,
@@ -661,12 +683,96 @@ ipcMain.on("release-focus", (e) => {
 ipcMain.on("ptt", () => broadcast("ptt"));
 ipcMain.on("open-external", (_e, url: unknown) => openExternalSafe(url));
 ipcMain.handle("displays", () => screen.getAllDisplays().map(displayInfo));
+/** Everything on the clipboard that can be read back (text, formatted text, a picture), copied
+ * out of it so it can be put back after a paste. Empty when the clipboard is empty. */
+async function keepClipboard(): Promise<ClipboardItem[]> {
+  const kept: ClipboardItem[] = [];
+  for (const item of await clipboard.read()) {
+    const parts: Record<string, Blob> = {};
+    for (const type of item.types) {
+      try {
+        const data: unknown = await item.getType(type);
+        if (data instanceof Blob && data.size <= 20_000_000) parts[type] = data;
+      } catch {
+        /* a format that can't be read: left out */
+      }
+    }
+    if (Object.keys(parts).length) kept.push(new ClipboardItem(parts));
+  }
+  return kept;
+}
+
+/** What the clipboard held before a dictation was pasted, until it has been put back. */
+interface Held {
+  text: string;
+  items: ClipboardItem[] | null; // null: it couldn't be read
+  timer: NodeJS.Timeout;
+}
+let held: Held | null = null;
+let dictationPastes: Promise<void> = Promise.resolve();
+
+/**
+ * Dictated words: pasted into the box that has the keyboard, wherever it is (Pyxi's own text box
+ * too, so no window is blurred first). Then what was on the clipboard comes back: text,
+ * formatted text or a picture. `keep` leaves the words on it instead, for an app that didn't say
+ * whether it takes text. (What can't be read back, such as copied files, is not put back: the
+ * clipboard is then left holding the words.) A second dictation that comes before the first
+ * one's clipboard is back puts back what was there before the first.
+ */
+async function pasteDictation(value: string, keep: boolean): Promise<void> {
+  let text = "";
+  let items: ClipboardItem[] | null = null;
+  if (held) {
+    clearTimeout(held.timer);
+    ({ text, items } = held);
+    held = null;
+  } else {
+    try {
+      text = await Promise.resolve(clipboard.readText());
+      items = await keepClipboard();
+    } catch (err) {
+      console.warn("[pyxi] dictation: the clipboard couldn't be read first:", err);
+    }
+  }
+  await clipboard.writeText(value);
+  await new Promise((r) => setTimeout(r, 60));
+  pasteText();
+  if (keep) return;
+  const mine: Held = {
+    text,
+    items,
+    timer: setTimeout(async () => {
+      if (held === mine) held = null;
+      try {
+        if ((await Promise.resolve(clipboard.readText())) !== value) return; // they copied something else meanwhile
+        if (items?.length) {
+          try {
+            return await clipboard.write(items);
+          } catch (err) {
+            console.warn("[pyxi] dictation: putting the clipboard back whole failed; its text goes back:", err);
+          }
+        }
+        if (text) await clipboard.writeText(text);
+        else if (items !== null && items.length === 0) clipboard.clear(); // it was empty before
+      } catch (err) {
+        console.warn("[pyxi] dictation: the clipboard couldn't be put back:", err);
+      }
+    }, 900),
+  };
+  held = mine;
+}
+
 // Quick actions. Inserting pastes into whatever field has focus, then puts your clipboard back.
 ipcMain.on("action", async (_e, kind: string, value: string) => {
   if (typeof value !== "string" || !value) return;
   if (kind === "open_url") openExternalSafe(value);
   else if (kind === "copy") clipboard.writeText(value);
-  else if (kind === "insert" || kind === "insert_table") {
+  else if (kind === "dictate" || kind === "dictate_keep") {
+    // One at a time, in the order they came: two dictations in a row never share the clipboard.
+    dictationPastes = dictationPastes
+      .then(() => pasteDictation(value, kind === "dictate_keep"))
+      .catch((err) => console.warn("[pyxi] dictation: couldn't paste:", err));
+  } else if (kind === "insert" || kind === "insert_table") {
     // A table goes on the clipboard twice (cells as text, and as an HTML table), so a
     // spreadsheet takes a grid and a document a real table.
     const clip = kind === "insert_table" ? tableClip(value) : { text: value, html: "" };
@@ -766,13 +872,27 @@ ipcMain.on("set-share-visible", (_e, value: boolean) => {
   shareVisible = !!value;
   for (const win of liveOverlays()) win.setContentProtection(!shareVisible);
   liveFirefly()?.setContentProtection(!shareVisible);
-  try {
-    mkdirSync(join(HOME, ".pyxi"), { recursive: true });
-    writeFileSync(UI_PREFS, JSON.stringify({ shareVisible }));
-  } catch (err) {
-    console.warn("[pyxi] couldn't save the screen-share setting:", err);
-  }
+  saveUiPrefs();
   broadcast("share-visible", shareVisible);
+});
+// Dictation: Settings reads and changes it; the keyboard hook reads it at every key press.
+ipcMain.handle("dictation-prefs", () => dictation);
+ipcMain.on("set-dictation-prefs", (e, change: unknown) => {
+  if (!ownPage(e.senderFrame?.url ?? "")) return;
+  const before = dictation;
+  dictation = dictationPrefs(change, dictation);
+  saveUiPrefs();
+  // Changed in the middle of one (the keys, the mode, or switched off): that one is dropped.
+  if (before.enabled !== dictation.enabled || before.keys !== dictation.keys || before.mode !== dictation.mode) {
+    dictationState("idle");
+    broadcast("dictate-cancel");
+  }
+  broadcast("dictation-prefs", dictation);
+});
+// The main screen's overlay says where a dictation is, so Esc can cancel it (holdToTalk.ts).
+ipcMain.on("dictation-state", (e, state: unknown) => {
+  if (!liveOverlays().some((w) => w.webContents === e.sender)) return;
+  if (state === "idle" || state === "recording" || state === "working") dictationState(state);
 });
 // The firefly moves its own window (it runs the spring); only the firefly page may.
 ipcMain.on("firefly-move", (e, x: unknown, y: unknown) => {
@@ -790,7 +910,7 @@ ipcMain.on("firefly-state", (e, s: unknown) => {
 ipcMain.handle("hotkeys", () => ({
   ...activeHotkeys,
   hold: holdToTalk ? "Control+Alt" : null,
-  dictate: holdToTalk ? "Control+Win" : null,
+  dictate: holdToTalk && dictation.enabled ? dictationAccelerator(dictation.keys) : null,
 }));
 // The notch's text box needs keyboard focus, which a non-focusable overlay can't take on its own.
 ipcMain.on("focus-overlay", (e) => {

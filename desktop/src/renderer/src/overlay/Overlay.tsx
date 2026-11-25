@@ -2,9 +2,12 @@ import { stopChime } from "../shared/chime";
 import { useCallback, useEffect, useRef } from "react";
 import { Recorder } from "../shared/audio";
 import { bridge } from "../shared/bridge";
+import type { DictationOutcome } from "../shared/protocol";
 import { brain } from "../shared/socket";
 import { Annotations } from "./Annotations";
 import { AnswerCard } from "./AnswerCard";
+import { DictationSign } from "./DictationSign";
+import { DICTATION_MAX_MS, type DictationView, micProblem, OWN_NOTES, tooQuiet } from "./dictationText";
 import { guideClick } from "./guideMarks";
 import { NotesCard } from "./NotesCard";
 import { Notch } from "./Notch";
@@ -23,6 +26,8 @@ const backdrop = new URLSearchParams(location.search).get("backdrop");
 
 export function Overlay() {
   const recorder = useRef(new Recorder());
+  const dictation = useRef(new Recorder()); // the same microphone path, kept apart from a question's
+  const cancelDictation = useRef<() => void>(() => {});
   const discard = useRef(false);
   const connected = useOverlay((s) => s.connected);
 
@@ -35,6 +40,7 @@ export function Overlay() {
         rec.stop();
         return;
       }
+      if (dictation.current.busy) return; // dictating: the microphone is taken, finish that first
       voice.stop();
       // No "interrupt" here: ptt_start quiets Pyxi's voice and has her hands wait for the
       // words. An interrupt sent first stopped the mouse for good, so every request spoken
@@ -66,7 +72,7 @@ export function Overlay() {
     if (!isPrimary) return;
     const rec = recorder.current;
     const offDown = bridge.onPttDown(async () => {
-      if (rec.active) return;
+      if (rec.active || dictation.current.busy) return; // (dictating: finish that first)
       stopChime(); // talking to Pyxi is "I'm up"
       voice.stop();
       brain.send({ type: "ptt_start" }); // (no "interrupt": see the toggle key above)
@@ -98,43 +104,87 @@ export function Overlay() {
     };
   }, []);
 
-  // Hold Ctrl + Windows: dictation. Record while held, then the brain types what was said
-  // where the cursor is (it never becomes a question for Pyxi). The brain is told while the
-  // keys are down, so a job that ends meanwhile is not announced over the dictation.
+  // Dictation (hold Ctrl + Windows, or a press to start and a press to stop): record, then the
+  // brain types what was said where the cursor is. It never becomes a question for Pyxi, and
+  // Pyxi's own state is left alone: the sign (DictationSign) is all that shows. The brain is
+  // told while it runs, so a job that ends meanwhile is not announced over the dictation.
   useEffect(() => {
     if (!isPrimary) return;
-    const rec = new Recorder();
-    let drop = false;
-    const offDown = bridge.onDictateDown(async () => {
-      if (rec.active || recorder.current.active) return;
-      voice.stop();
+    const rec = dictation.current;
+    let drop = false; // this recording is not to be written down
+    let late: number | undefined; // the brain never answered
+    const show = (view: DictationView) => useOverlay.setState({ dictation: view });
+    const ended = (how: DictationOutcome, note: string) => show({ phase: "done", how, text: "", note, at: performance.now() });
+    const offDown = bridge.onDictateDown(async (how) => {
+      if (rec.busy) return;
+      // One thing at a time with the microphone: a question being asked is not cut off.
+      if (recorder.current.busy) return ended("failed", OWN_NOTES.asking);
+      if (!useOverlay.getState().connected) return ended("failed", OWN_NOTES.offline);
+      voice.stop(); // Pyxi's own voice would be written down with theirs
       drop = false;
-      brain.send({ type: "dictating", on: true });
-      useOverlay.setState({ listening: true, state: "listening" });
+      brain.send({ type: "dictating", on: true, here: how.here });
+      show({ phase: "listening", mode: how.mode, keys: how.keys, at: performance.now() });
+      bridge.dictationState("recording");
       try {
         await rec.start((data, mime) => {
-          useOverlay.setState({ listening: false, state: "idle" });
           if (drop) {
+            // Cancelled, or refused (a password box): whoever dropped it has set the sign.
             drop = false;
             brain.send({ type: "dictating", on: false });
-          } else brain.send({ type: "dictate", data, mime }); // the brain takes it from here
-        }, false);
+          } else if (tooQuiet(rec.peak, rec.ms)) {
+            brain.send({ type: "dictating", on: false });
+            ended("nothing", OWN_NOTES.nothing);
+          } else {
+            brain.send({ type: "dictate", data, mime, polish: how.polish, here: how.here }); // the brain takes it from here
+            show({ phase: "working", at: performance.now() });
+            bridge.dictationState("working");
+            clearTimeout(late);
+            late = window.setTimeout(() => {
+              if (useOverlay.getState().dictation?.phase !== "working") return;
+              brain.send({ type: "dictate_cancel" });
+              ended("failed", OWN_NOTES.silent);
+            }, 95_000);
+          }
+        }, false, DICTATION_MAX_MS);
       } catch (err) {
-        useOverlay.setState({ listening: false, state: "idle" });
+        console.warn("dictation: microphone unavailable", err);
         brain.send({ type: "dictating", on: false });
-        const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-        brain.send({ type: "notice", message: `The microphone couldn't start. Check Settings > Privacy & security > Microphone. (${reason})` });
+        ended("failed", micProblem(err instanceof Error ? `${err.name}: ${err.message}` : String(err)));
       }
     });
     const offUp = bridge.onDictateUp(() => rec.stop());
-    const offCancel = bridge.onDictateCancel(() => {
-      drop = true;
-      rec.stop();
+    const cancel = () => {
+      const now = useOverlay.getState().dictation;
+      if (rec.busy || now?.phase === "listening") {
+        // (Listening but no longer recording: they let go a moment ago and the sound is
+        // still being packed up. It is dropped all the same.)
+        drop = true;
+        rec.stop();
+        ended("cancelled", OWN_NOTES.cancelled);
+      } else if (now?.phase === "working") {
+        brain.send({ type: "dictate_cancel" });
+        ended("cancelled", OWN_NOTES.cancelled);
+      }
+    };
+    cancelDictation.current = cancel;
+    const offCancel = bridge.onDictateCancel(cancel);
+    // Whatever ended it (the brain's answer, a refusal, Esc, the microphone): a recording still
+    // running is dropped, the keys are told it is over, and nothing waits for an answer.
+    const offStore = useOverlay.subscribe((s, before) => {
+      if (s.dictation === before.dictation || (s.dictation && s.dictation.phase !== "done")) return;
+      clearTimeout(late);
+      if (rec.busy || before.dictation?.phase === "listening") {
+        drop = true;
+        rec.stop();
+      }
+      bridge.dictationState("idle");
     });
     return () => {
       offDown();
       offUp();
       offCancel();
+      offStore();
+      clearTimeout(late);
     };
   }, []);
 
@@ -180,6 +230,11 @@ export function Overlay() {
   useEffect(() => bridge.onPrivacyToggle(() => brain.send({ type: "set", key: "privacy_paused", value: !useOverlay.getState().paused })), []);
 
   const micLevel = useCallback(() => (recorder.current.active ? recorder.current.level : 0), []);
+  const dictationLevel = useCallback(() => (dictation.current.active ? dictation.current.level : 0), []);
+  const stopDictation = useCallback(() => {
+    cancelDictation.current();
+    bridge.releaseFocus(); // the click took the keyboard: back to the app they were in
+  }, []);
 
   return (
     <div className={`overlay ${backdrop ? "with-backdrop" : ""}`}>
@@ -197,6 +252,7 @@ export function Overlay() {
       <Onboarding />
       <Presence micLevel={micLevel} />
       {isPrimary && <Notch micLevel={micLevel} />}
+      {isPrimary && <DictationSign level={dictationLevel} onCancel={stopDictation} />}
       {/* The main screen shows connection and privacy state in the notch. */}
       {!isPrimary && !connected && <div className="notice">Waiting for Pyxi's brain <code>pyxi serve</code></div>}
     </div>

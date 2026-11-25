@@ -24,6 +24,7 @@ import io
 import itertools
 import json
 import logging
+import os
 import random
 import re
 import secrets
@@ -247,6 +248,12 @@ class Brain:
         self._visual_turn = False  # a 3D model or scene was shown this turn
         self._talking_until = 0.0  # monotonic time the queued speech finishes playing
         self._dictating_until = 0.0  # they are holding the dictation keys (lapses by itself)
+        self._dictation_gen = 0  # goes up when a dictation is cancelled: its words are dropped
+        self._dictation_held = False  # the keys are down (or it was started by a press) right now
+        self._dictation_here = False  # this dictation is written down on the PC
+        self._dictation_last: asyncio.Future[None] | None = None  # the one before, still being typed
+        self._dictation_window = 0  # the window in front when they began to dictate
+        self._dictation_llm: Any = None  # tidies long dictations (False: it can't be reached)
         self._round_say = ""  # this round's spoken reply
         self._say_in_board = False
         self._visual_retry = False
@@ -496,37 +503,184 @@ class Brain:
         await self._notify("", ok=True, title=f"{what}, {alarms.spoken_time(now)}", body=line)
         self._speak(line, record=False)
 
-    def dictating(self, on: bool) -> None:
+    def dictating(self, on: bool, *, here: bool = False) -> None:
         """They are holding the dictation keys (or let go without saying anything): a background
         line waits, as it does for push-to-talk, but nothing is interrupted and no turn starts.
-        It lapses by itself, so a lost "let go" can't keep Pyxi quiet for good."""
+        It lapses by itself, so a lost "let go" can't keep Pyxi quiet for good. ``here``: this
+        dictation will be written down on the PC, so its ears are loaded while they speak."""
         self._dictating_until = time.monotonic() + _DICTATION_S if on else 0.0
+        self._dictation_held = on
+        self._dictation_here = here
+        if not on:
+            return
+        self._dictation_window = 0
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._spawn(self._dictation_begins(self._dictation_gen))
 
-    async def dictate(self, audio: bytes) -> str:
-        """Hold Ctrl + Windows and talk: the words are typed where the cursor is, in whatever app
-        has focus. Speech-to-text only (on this PC), no model, no screen: it works while Pyxi is
-        paused too. Returns what was typed ("" for nothing)."""
+    async def _dictation_begins(self, gen: int) -> None:
+        """The dictation keys went down. Which window is in front is remembered (the words are
+        not typed into another one that comes up meanwhile), a password box is refused before
+        a word is recorded, and the ears load while they speak."""
         from pyxi import dictation
 
-        await self.set_state("transcribing")
-        self._dictating_until = 0.0  # let go: "transcribing" holds the floor from here
+        try:
+            target = await asyncio.to_thread(dictation.where_to_type)
+        except Exception as exc:  # never in the way of the dictation itself
+            log.debug("dictation: couldn't see what has the keyboard: %s", exc)
+            target = dictation.Target()
+        if gen != self._dictation_gen or not self._dictation_held:
+            return  # cancelled, or already let go (the check before typing still runs)
+        self._dictation_window = target.window
+        if target.kind == "password":
+            self._dictation_held = False
+            self._dictating_until = 0.0
+            self._dictation_gen += 1  # whatever was recorded so far is dropped
+            await self._dictated("", "password", "password")
+            return
         try:
             studio = self.studio
-            heard, took, _ = await self.stt.transcribe(
-                audio, studio.prefs.language if studio else "en"
+            here = self._dictation_here or bool(studio and studio.prefs.listen_here)
+            self.stt.warm(studio.prefs.language if studio else "en", **({"here": True} if here else {}))
+        except Exception as exc:
+            log.debug("dictation warm-up failed: %s", exc)
+
+    def cancel_dictation(self) -> None:
+        """Esc, or Cancel on the sign: a dictation still being written down is dropped."""
+        self._dictation_gen += 1
+        self._dictation_held = False
+        self._dictating_until = 0.0
+
+    async def _dictated(self, text: str, how: str, why: str, seconds: float = 0.0, tidied: bool = False) -> None:
+        from pyxi import dictation
+
+        await self.hub.emit(
+            "dictated", text=text, how=how, note=dictation.NOTES.get(why, ""), seconds=round(seconds, 2), tidied=tidied
+        )
+
+    def _dictation_polisher(self) -> Any:
+        """The quick model that tidies a long dictation, or None when there is none to ask:
+        speech is kept on this PC, the brain is local or scripted, there is no key, or today's
+        budget is spent."""
+        from pyxi.demo import DemoLLM
+
+        studio = self.studio
+        if (
+            self._dictation_llm is False
+            or self.settings.local_mode
+            or (studio and studio.prefs.listen_here)
+            or self.turns.spent_today() >= self.settings.budget.daily_cost_usd
+        ):
+            return None
+        if self._dictation_llm is None:
+            if isinstance(self.llm, DemoLLM) or not os.environ.get("OPENROUTER_API_KEY"):
+                return None
+            self._dictation_llm = StreamingChat(
+                self.settings.model_dictation or self.settings.model, reasoning={"enabled": False}
             )
-        except Exception:
-            log.exception("dictation transcription failed")
-            await self.hub.emit("error", message="I couldn't make out that dictation. Try again?")
-            await self.set_state("idle")
-            return ""
-        text = dictation.clean(heard)
-        if text:
-            # The desktop pastes it into the focused field and puts the clipboard back.
-            await self.hub.emit("action", kind="insert", value=text)
-        await self.hub.emit("dictated", text=text, seconds=round(took, 2))
-        await self.set_state("idle")
-        return text
+        return self._dictation_llm
+
+    async def _polish_dictation(self, text: str) -> tuple[str, bool]:
+        """One quick model call on a long dictation: punctuation, capitals, fillers. The reply
+        is checked word for word (pyxi/dictation.py) and the rules' own text is typed when it
+        fails the check, is late, or can't be had. Returns (text, whether the model's was used)."""
+        from pyxi import dictation
+
+        llm = self._dictation_polisher()
+        if llm is None:
+            return text, False
+        try:
+            response = await asyncio.wait_for(
+                llm.complete(
+                    system=dictation.POLISH_SYSTEM,
+                    messages=[Message.user(dictation.polish_request(text))],
+                    max_tokens=max(400, len(text) // 2),
+                ),
+                timeout=dictation.POLISH_TIMEOUT_S,
+            )
+        except Exception as exc:
+            log.info("dictation: tidying by the model failed (%s); typing the rules' text", str(exc) or type(exc).__name__)
+            if getattr(exc, "status_code", None) in (400, 401, 403, 404, 422):
+                self._dictation_llm = False  # this model can't be asked: not tried again
+            return text, False
+        self.turns.add_spend("dictation", getattr(response.usage, "cost_usd", 0.0) or 0.0)
+        tidied = dictation.accept_polish(text, response.text or "")
+        return tidied, tidied != text
+
+    async def dictate(self, audio: bytes, *, polish: bool = False, here: bool = False) -> str:
+        """Hold Ctrl + Windows and talk: the words are typed where the cursor is, in whatever app
+        has the keyboard. It is never a question for Pyxi: no turn starts, nothing is said, and
+        Pyxi's own state is left alone, so it works while a turn is under way and while Pyxi is
+        paused. ``polish``: a long dictation may have one quick model call to tidy it (their
+        switch in Settings). ``here``: written down on this PC, which is the quickest (also a
+        switch there). Returns what was typed or copied ("" for nothing)."""
+        from pyxi import dictation
+
+        gen = self._dictation_gen
+        started_in = self._dictation_window
+        # Let go: the floor is held (no background line starts) until the words are down.
+        self._dictation_held = False
+        self._dictating_until = time.monotonic() + _DICTATION_WRITING_S
+        # Two in a row are typed in the order they were said, however long each takes to write.
+        before, mine = self._dictation_last, asyncio.get_running_loop().create_future()
+        self._dictation_last = mine
+        try:
+            try:
+                studio = self.studio
+                # On this PC when Settings say so (dictation's own switch, or the Voice
+                # panel's "on this PC only"); said per call, so a question being heard at the
+                # same moment still goes its own way.
+                here = here or bool(studio and studio.prefs.listen_here)
+                heard, took, _ = await self.stt.transcribe(
+                    audio, studio.prefs.language if studio else "en", **({"here": True} if here else {})
+                )
+            except Exception:
+                log.exception("dictation transcription failed")
+                if gen == self._dictation_gen:
+                    await self._dictated("", "failed", "failed")
+                return ""
+            text = dictation.clean(heard)
+            tidied = False
+            if polish and text and dictation.needs_polish(text) and gen == self._dictation_gen:
+                text, tidied = await self._polish_dictation(text)
+            if before is not None and not before.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(before), timeout=_DICTATION_WRITING_S)
+                except Exception:  # the one before is stuck: this one is not held up for good
+                    log.debug("dictation: stopped waiting for the one before")
+            if gen != self._dictation_gen:
+                await self._dictated("", "cancelled", "cancelled", took)
+                return ""
+            if not text:
+                await self._dictated("", "nothing", "nothing", took)
+                return ""
+            try:
+                target = await asyncio.to_thread(dictation.where_to_type)
+            except Exception as exc:
+                log.debug("dictation: couldn't see what has the keyboard: %s", exc)
+                target = dictation.Target()
+            how, why = dictation.decide(target, started_in, hands_busy=self._operator is not None)
+            if how == "password":
+                await self._dictated("", "password", "password", took)
+                return ""
+            if how == "copied":
+                await self.hub.emit("action", kind="copy", value=text.rstrip(" "))
+            else:
+                # The desktop pastes it into the box that has the keyboard, then puts the
+                # clipboard back ("dictate_keep" leaves the words on it: the app didn't say
+                # whether it takes text).
+                await self.hub.emit("action", kind="dictate_keep" if why == "kept" else "dictate", value=text)
+            await self._dictated(text, how, why, took, tidied)
+            return text
+        finally:
+            if not mine.done():
+                mine.set_result(None)
+            if self._dictation_last is mine:
+                self._dictation_last = None
+                if not self._dictation_held:  # (one that began meanwhile keeps the floor)
+                    self._dictating_until = 0.0
 
     async def _within_limits(self, kind: str, next_action: str) -> bool:
         """At an hourly limit (pyxi/limits.py), stop and ask before doing more."""
@@ -5678,8 +5832,10 @@ _MOUSE_JUST_S = 120.0  # how long after Pyxi's own mouse work a paste there star
 # The longest task the mouse and keyboard are given. A longer one is refused in words, never
 # cut: the hands do a job of some thirty steps, and a brief past this is not one.
 HANDS_TASK_CHARS = 2000
-# The longest a dictation is held (the app stops recording at a minute), with some room.
-_DICTATION_S = 90.0
+# The longest a dictation is held (the app stops recording at five minutes), with some room.
+_DICTATION_S = 330.0
+# The longest the words take to be written down and typed after they let go.
+_DICTATION_WRITING_S = 90.0
 _BACKGROUND_TOOLS = {
     "edit_document",
     "convert_files",

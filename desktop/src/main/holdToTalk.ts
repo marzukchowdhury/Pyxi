@@ -9,16 +9,22 @@
  * - Pressing any other key while holding cancels (Ctrl+Alt+Del, Ctrl+Alt+T, etc.).
  *
  * Double-tapping Ctrl (two quick taps, nothing else pressed) opens the notch's text box.
+ *
  * Holding Ctrl + (left) Windows the same way dictates: the words are typed where the cursor is.
+ * Settings can change the keys (Alt + Windows, Shift + Windows), turn dictation off, or make it
+ * "press once to start, press again to stop". In that mode the first press must still be held
+ * ~200 ms, any press of the keys stops it, and Esc cancels it. Esc also cancels a dictation
+ * that is being written down (the overlay says when one is, see dictationState).
  */
 import { UiohookKey, uIOhook } from "uiohook-napi";
+import { DEFAULT_DICTATION, type DictationPrefs } from "./dictationPrefs";
 
 export interface HoldToTalkEvents {
   down(): void;
   up(): void;
   cancel(): void;
   doubleTap(): void;
-  /** Hold Ctrl + (left) Windows: dictation. Same rules as talking: hold, release, any other key cancels. */
+  /** The dictation keys: start, stop (type what was said), cancel (type nothing). */
   dictateDown?(): void;
   dictateUp?(): void;
   dictateCancel?(): void;
@@ -34,6 +40,8 @@ const MOUSE_MOVES = new Set<number>([9, 10]);
 const CTRL = new Set<number>([UiohookKey.Ctrl, UiohookKey.CtrlRight]);
 const LEFT_ALT = UiohookKey.Alt;
 const LEFT_WIN = UiohookKey.Meta;
+const LEFT_SHIFT = UiohookKey.Shift;
+const ESCAPE = UiohookKey.Escape;
 // Tapped once when dictation starts: Windows opens Start when the Windows key goes up with
 // nothing pressed in between, and F24 is a key no app uses. The hook ignores it.
 const QUIET_KEY = UiohookKey.F24;
@@ -43,28 +51,61 @@ const TAP_GAP_MS = 360; // ...and the second tap must start within this of the f
 
 type Chord = "talk" | "dictate";
 
-export function startHoldToTalk(events: HoldToTalkEvents): boolean {
+// A dictation started by a press ("toggle") is running, or one is being written down: what the
+// overlay last reported, and what Esc acts on.
+let toggled = false;
+let working = false;
+
+/** The overlay says where a dictation is: recording, being written down, or over. Recording
+ * that ended by itself (five minutes, no microphone, a password box) ends the press-to-start
+ * state too, so the next press starts a new one. */
+export function dictationState(state: "idle" | "recording" | "working"): void {
+  if (state !== "recording") toggled = false;
+  working = state === "working";
+}
+
+export function startHoldToTalk(events: HoldToTalkEvents, dictation: () => DictationPrefs = () => DEFAULT_DICTATION): boolean {
   let ctrl = false;
   let alt = false;
   let win = false;
+  let shift = false;
   let tainted = false; // another key was pressed during this chord
   let holding: Chord | null = null;
   let timer: NodeJS.Timeout | null = null;
   let ctrlDownAt = 0;
   let ctrlClean = false; // nothing else was pressed while Ctrl was down
   let lastTapAt = 0;
+  toggled = false;
+  working = false;
 
   const clearTimer = () => {
     if (timer) clearTimeout(timer);
     timer = null;
   };
-  const chord = (): Chord | null =>
-    ctrl && alt && !win ? "talk" : ctrl && win && !alt && events.dictateDown ? "dictate" : null;
+  // Shift is one of the keys only when Settings made it so; otherwise it is "another key".
+  const shiftCounts = () => dictation().keys === "shift+win";
+  const chord = (): Chord | null => {
+    if (ctrl && alt && !win && !shift) return "talk";
+    const d = dictation();
+    if (!d.enabled || !events.dictateDown) return null;
+    const pressed =
+      d.keys === "ctrl+win" ? ctrl && win && !alt && !shift
+      : d.keys === "alt+win" ? alt && win && !ctrl && !shift
+      : shift && win && !ctrl && !alt;
+    return pressed ? "dictate" : null;
+  };
   const fire = (fn: (() => void) | undefined, what: string) => {
     try {
       fn?.();
     } catch (err) {
       console.warn(`[pyxi] ${what} failed:`, err);
+    }
+  };
+  const quietTap = () => {
+    try {
+      uIOhook.keyTap(QUIET_KEY);
+    } catch {
+      /* Start may open on release; dictation still works */
     }
   };
   const release = (how: "up" | "cancel") => {
@@ -86,7 +127,15 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
 
   uIOhook.on("keydown", safe((e) => {
     if (e.keycode === QUIET_KEY) return; // our own, see above
-    const modifier = CTRL.has(e.keycode) || e.keycode === LEFT_ALT || e.keycode === LEFT_WIN;
+    // Esc, alone: a dictation started by a press, or one being written down, is dropped.
+    if (e.keycode === ESCAPE && (toggled || working) && !ctrl && !alt && !win) {
+      toggled = false;
+      working = false;
+      fire(events.dictateCancel, "dictation cancel");
+      return;
+    }
+    const isShift = e.keycode === LEFT_SHIFT && shiftCounts();
+    const modifier = CTRL.has(e.keycode) || e.keycode === LEFT_ALT || e.keycode === LEFT_WIN || isShift;
     if (CTRL.has(e.keycode)) {
       if (!ctrl) {
         ctrlDownAt = Date.now();
@@ -96,10 +145,11 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
     } else {
       if (e.keycode === LEFT_ALT) alt = true;
       if (e.keycode === LEFT_WIN) win = true;
+      if (isShift) shift = true;
       ctrlClean = false;
       lastTapAt = 0;
     }
-    if (!modifier && (ctrl || alt || win)) {
+    if (!modifier && (ctrl || alt || win || shift)) {
       tainted = true;
       clearTimer();
       if (holding) release("cancel");
@@ -110,20 +160,31 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
       release("cancel");
       return;
     }
+    // Started by a press: the next press of the keys stops it at once and types the words.
+    if (toggled && chord() === "dictate" && !tainted && !holding) {
+      toggled = false;
+      tainted = true; // still held: this press must not start another
+      clearTimer();
+      quietTap();
+      fire(events.dictateUp, "dictation stop");
+      return;
+    }
     if (chord() && !tainted && !holding && !timer) {
       const wanted = chord();
       timer = setTimeout(() => {
         timer = null;
         if (chord() === wanted && !tainted) {
-          holding = wanted;
           if (wanted === "dictate") {
-            try {
-              uIOhook.keyTap(QUIET_KEY);
-            } catch {
-              /* Start may open on release; dictation still works */
-            }
+            quietTap();
+            if (dictation().mode === "toggle") {
+              toggled = true;
+              tainted = true; // letting go is not the end of it; the next press is
+            } else holding = wanted;
             fire(events.dictateDown, "dictation start");
-          } else fire(events.down, "push-to-talk start");
+          } else {
+            holding = wanted;
+            fire(events.down, "push-to-talk start");
+          }
         }
       }, HOLD_MS);
     }
@@ -142,10 +203,11 @@ export function startHoldToTalk(events: HoldToTalkEvents): boolean {
       } else lastTapAt = 0;
     } else if (e.keycode === LEFT_ALT) alt = false;
     else if (e.keycode === LEFT_WIN) win = false;
+    else if (e.keycode === LEFT_SHIFT && shift) shift = false;
     else return;
     clearTimer();
     if (holding) release("up");
-    if (!ctrl && !alt && !win) tainted = false;
+    if (!ctrl && !alt && !win && !shift) tainted = false;
   }));
 
   uIOhook.on("mousedown", safe((e) => {

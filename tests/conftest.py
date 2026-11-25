@@ -109,6 +109,15 @@ def _no_real_windows_read(monkeypatch: pytest.MonkeyPatch) -> None:
     from pyxi.screen import uia
 
     monkeypatch.setattr(uia, "other_windows", lambda screen, main=0, limit=3: [])
+    # Nor asks Windows which control has the keyboard: a dictation finds a text box in front
+    # (a test of the other cases gives its own answer).
+    from pyxi import dictation
+
+    def a_text_box() -> dictation.Target:
+        return dictation.Target("field", 0)
+
+    a_text_box.real = dictation.where_to_type  # type: ignore[attr-defined]
+    monkeypatch.setattr(dictation, "where_to_type", a_text_box)
 
 
 @pytest.fixture(autouse=True)

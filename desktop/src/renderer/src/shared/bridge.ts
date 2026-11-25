@@ -20,6 +20,28 @@ export interface FileInfo {
   icon: string | null;
 }
 
+/** Dictation's settings (desktop/src/main/dictationPrefs.ts keeps and checks them). */
+export interface DictationPrefs {
+  enabled: boolean;
+  keys: "ctrl+win" | "alt+win" | "shift+win";
+  /** "hold": speak while the keys are down. "toggle": press once to start, again to stop. */
+  mode: "hold" | "toggle";
+  /** One quick model call tidies dictations of 30 words or more. */
+  polish: boolean;
+  /** Written down by the cloud listener instead of on this PC. */
+  cloud: boolean;
+}
+
+/** How a dictation was started: sent with the key press. */
+export interface DictationStart {
+  mode: "hold" | "toggle";
+  polish: boolean;
+  /** Written down on this PC (not by the cloud listener). */
+  here: boolean;
+  /** The keys, as the hotkeys are written ("Control+Win"). */
+  keys: string;
+}
+
 /** What the firefly shows: its mood, the voice level (0-1), and hidden while Pyxi takes its own
  * screenshot. */
 export interface FireflyState {
@@ -38,9 +60,15 @@ export interface Bridge {
   onPttUp(fn: () => void): () => void;
   onPttCancel(fn: () => void): () => void;
   /** Hold Ctrl + Windows: dictation (the words are typed where the cursor is). */
-  onDictateDown(fn: () => void): () => void;
+  onDictateDown(fn: (how: DictationStart) => void): () => void;
   onDictateUp(fn: () => void): () => void;
   onDictateCancel(fn: () => void): () => void;
+  /** Dictation's settings (kept by the app, with its other interface settings). */
+  dictationPrefs(): Promise<DictationPrefs>;
+  setDictationPrefs(change: Partial<DictationPrefs>): void;
+  onDictationPrefs(fn: (prefs: DictationPrefs) => void): () => void;
+  /** The main screen's overlay says where a dictation is, so Esc can cancel it. */
+  dictationState(state: "idle" | "recording" | "working"): void;
   onQuickType(fn: () => void): () => void;
   /** A new version finished downloading in the background (installed app only). */
   onUpdateReady(fn: (info: { version: string }) => void): () => void;
@@ -48,7 +76,7 @@ export interface Bridge {
   /** Mouse clicks anywhere on the desktop, in physical screen px (only used for guides). */
   onGlobalClick(fn: (p: { x: number; y: number }) => void): () => void;
   /** Quick actions from the brain: open a URL, copy text, or paste a draft into the focused field. */
-  runAction(kind: "open_url" | "copy" | "insert" | "insert_table", value: string): void;
+  runAction(kind: "open_url" | "copy" | "insert" | "insert_table" | "dictate" | "dictate_keep", value: string): void;
   /** Open a file Pyxi made, or show it in Explorer (only files in Pyxi's own folders). */
   openFile(path: string): void;
   showInFolder(path: string): void;
@@ -102,6 +130,17 @@ declare global {
   }
 }
 
+// Browser preview only: dictation's settings and whether one is running.
+let mockDictation: DictationPrefs = {
+  enabled: true,
+  keys: "ctrl+win",
+  mode: new URLSearchParams(location.search).get("dictate") === "toggle" ? "toggle" : "hold",
+  polish: true,
+  cloud: false,
+};
+let mockDictating = false;
+const mockDictationListeners = new Set<(prefs: DictationPrefs) => void>();
+
 function mockBridge(): Bridge {
   const pttListeners = new Set<() => void>();
   const noop = () => () => {};
@@ -147,9 +186,60 @@ function mockBridge(): Bridge {
       return () => window.removeEventListener("keyup", h);
     },
     onPttCancel: noop,
-    onDictateDown: noop,
-    onDictateUp: noop,
-    onDictateCancel: noop,
+    // Browser preview: hold F9 to dictate while the page has focus (Esc cancels); add
+    // ?dictate=toggle to the address for "press once to start, again to stop".
+    onDictateDown(fn) {
+      const h = (e: KeyboardEvent) => {
+        if (e.key !== "F9" || e.repeat) return;
+        if (mockDictation.mode === "toggle" && mockDictating) return;
+        mockDictating = true;
+        fn({ mode: mockDictation.mode, polish: mockDictation.polish, here: !mockDictation.cloud, keys: "F9" });
+      };
+      window.addEventListener("keydown", h);
+      return () => window.removeEventListener("keydown", h);
+    },
+    onDictateUp(fn) {
+      // Hold: letting go ends it. Toggle: the second press does.
+      const up = (e: KeyboardEvent) => e.key === "F9" && mockDictation.mode === "hold" && ((mockDictating = false), fn());
+      let armed = false; // toggle: the press that started it must come up before one can stop it
+      const down = (e: KeyboardEvent) => {
+        if (e.key !== "F9" || e.repeat || mockDictation.mode !== "toggle") return;
+        if (mockDictating && armed) {
+          armed = false;
+          mockDictating = false;
+          e.stopImmediatePropagation(); // this press stops it: it must not start another
+          fn();
+        }
+      };
+      const arm = (e: KeyboardEvent) => e.key === "F9" && mockDictating && (armed = true);
+      window.addEventListener("keyup", up);
+      window.addEventListener("keyup", arm);
+      window.addEventListener("keydown", down, true);
+      return () => {
+        window.removeEventListener("keyup", up);
+        window.removeEventListener("keyup", arm);
+        window.removeEventListener("keydown", down, true);
+      };
+    },
+    onDictateCancel(fn) {
+      const h = (e: KeyboardEvent) => e.key === "Escape" && ((mockDictating = false), fn());
+      window.addEventListener("keydown", h);
+      return () => window.removeEventListener("keydown", h);
+    },
+    async dictationPrefs() {
+      return mockDictation;
+    },
+    setDictationPrefs(change) {
+      mockDictation = { ...mockDictation, ...change };
+      mockDictationListeners.forEach((fn) => fn(mockDictation));
+    },
+    onDictationPrefs(fn) {
+      mockDictationListeners.add(fn);
+      return () => mockDictationListeners.delete(fn);
+    },
+    dictationState(state) {
+      if (state !== "recording") mockDictating = false;
+    },
     onGlobalClick(fn) {
       const h = (e: MouseEvent) => fn({ x: e.clientX, y: e.clientY });
       window.addEventListener("mousedown", h);

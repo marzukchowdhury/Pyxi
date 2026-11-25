@@ -354,11 +354,12 @@ class Transcriber:
             log.info("downloading the speech model %s", name)
             download_model(name)
 
-    def warm(self, language: str = "en") -> None:
+    def warm(self, language: str = "en", *, here: bool = False) -> None:
         """The talk key went down: load the model now, while they speak. Never blocks.
         Not when the cloud listens: the model on the PC is only its fallback then, and loading
-        it at every press would cost the PC for nothing."""
-        if language not in ("bn", "auto") and self.listens_in_the_cloud():
+        it at every press would cost the PC for nothing. ``here``: this one will be heard on
+        the PC whatever the setting (dictation), so the model is loaded."""
+        if language not in ("bn", "auto") and self.listens_in_the_cloud() and not here:
             return
         if language == "bn" and (self.ears.available() or not self.bengali_offline()):
             return
@@ -515,8 +516,15 @@ class Transcriber:
             return text, "bn"
         return await self._local(name, samples, None)
 
-    async def transcribe(self, audio: bytes, language: str = "en") -> tuple[str, float, str]:
-        """Return (text, seconds taken, language spoken). ``language`` may be "auto"."""
+    async def transcribe(
+        self, audio: bytes, language: str = "en", *, here: bool = False
+    ) -> tuple[str, float, str]:
+        """Return (text, seconds taken, language spoken). ``language`` may be "auto".
+
+        ``here``: hear this one on the PC even when the cloud listens (dictation: measured on
+        the same clips, the PC had a five-second sentence written down in 0.1 s with a graphics
+        card and 0.6 s without, the cloud in 1.6 to 2.5 s). Bengali and Automatic go their
+        usual way: the PC has no good ears for Bengali."""
         started = time.monotonic()
         if language in ("bn", "auto"):
             samples = await asyncio.to_thread(decode_audio, audio)
@@ -528,7 +536,7 @@ class Transcriber:
         samples = await asyncio.to_thread(decode_audio, audio)
         # (Longer than the cloud takes in one piece, a long dictation say: the PC, which
         # has no limit, rather than a transcript that stops partway.)
-        if self.listens_in_the_cloud() and len(samples) <= MAX_CLOUD_SECONDS * 16000:
+        if not here and self.listens_in_the_cloud() and len(samples) <= MAX_CLOUD_SECONDS * 16000:
             # The small model on the PC mishears names and plain words alike (live, in one
             # afternoon: "earphones" as "Airphones", "GenOffice" as "Jen Office", "Gmail.com"
             # as "Chimeel.com", "SAFAR" as "Supper"). The model that listens gets it right,
@@ -539,7 +547,15 @@ class Transcriber:
             except Exception as exc:
                 log.warning("cloud listening failed (%s); listening on this PC", str(exc) or type(exc).__name__)
         name = self.model_for(language)
-        await self._get(name)
         lang = "en" if name.endswith(".en") else language
-        text, spoken = await self._local(name, samples, lang)
+        try:
+            await self._get(name)
+            text, spoken = await self._local(name, samples, lang)
+        except Exception as exc:
+            # Asked for on the PC, and the PC can't (its model is missing, say): the cloud,
+            # when their own switch allows it, rather than nothing.
+            if not (here and self.listens_in_the_cloud() and len(samples) <= MAX_CLOUD_SECONDS * 16000):
+                raise
+            log.warning("listening on this PC failed (%s); the cloud listens", str(exc) or type(exc).__name__)
+            text, spoken = await self.ears.transcribe(samples, language, self.hints), language
         return text, time.monotonic() - started, spoken

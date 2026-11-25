@@ -196,6 +196,13 @@ class PyxiSettings(BaseSettings):
         "accessibility layer, without the mouse, where the control allows it "
         "(PYXI_HANDS_DIRECT). False: every click is a mouse click.",
     )
+    model_dictation: str | None = Field(
+        "anthropic/claude-haiku-5.5",
+        description="Quick model that tidies a long dictation before it is typed "
+        "(PYXI_MODEL_DICTATION): punctuation, capitals and filler words only, one call, and "
+        "only for dictations of 30 words or more. Short ones are tidied by rules alone. "
+        "Empty: the chat model. The Dictation settings have a switch that turns it off.",
+    )
     model_aim: str | None = Field(
         "anthropic/claude-sonnet-5.5",
         description="Model that finds the parts of a picture Pyxi explains (PYXI_MODEL_AIM), on a "

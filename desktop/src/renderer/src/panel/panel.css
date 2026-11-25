@@ -261,6 +261,10 @@ html.web-preview { background: radial-gradient(120% 80% at 30% 0%, #1a1f2b, #070
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 15px; height: 15px; border-radius: 50%; background: #fff; transition: transform .25s var(--spring); }
 .switch:checked { background: rgba(158,203,255,.7); }
 .switch:checked::after { transform: translateX(15px); }
+/* The same rows inside Settings (Dictation), where plain labels are laid out differently. */
+.settings label.toggle-row, .settings label.select-row { align-items: center; }
+/* (The checkbox rule above would otherwise take the switch's height away.) */
+input[type="checkbox"].switch { height: 21px; margin-top: 0; }
 
 /* connected accounts */
 .connections { display: grid; gap: 8px; }

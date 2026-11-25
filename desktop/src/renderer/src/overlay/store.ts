@@ -7,6 +7,7 @@ import type { Annotation, AnswerCard, BrainEvent, BrainState, FormField, Job, No
 import { startChime } from "../shared/chime";
 import { brain } from "../shared/socket";
 import { type AddressItem, spoken } from "./addressParts";
+import { type DictationView, takesOver } from "./dictationText";
 
 export const display = currentDisplay();
 export const isPrimary = display.primary;
@@ -113,6 +114,8 @@ interface OverlayState {
   pins: Pin[];
   captureFlash: number;
   listening: boolean;
+  /** Dictation's sign (main screen): listening, being written down, or what became of it. */
+  dictation: DictationView | null;
   /** The notch's short conversation: the last few exchanges, sentences of one reply merged. */
   chat: ChatLine[];
   notice: { text: string; at: number } | null;
@@ -181,6 +184,7 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   pins: [],
   captureFlash: 0,
   listening: false,
+  dictation: null,
   chat: [],
   notice: null,
   seeing: "",
@@ -563,6 +567,11 @@ brain.on((e: BrainEvent) => {
       break;
     case "action":
       if (isPrimary) bridge.runAction(e.kind, e.value);
+      break;
+    case "dictated":
+      // The sign on the main screen says what became of the words (overlay/DictationSign.tsx).
+      if (isPrimary && takesOver(useOverlay.getState().dictation, e.how))
+        useOverlay.setState({ dictation: { phase: "done", how: e.how, text: e.text, note: e.note, at: performance.now() } });
       break;
     case "pins":
       useOverlay.setState({ pins: e.pins.filter((p) => onThisDisplay(p.rect[0], p.rect[1])) });

@@ -214,11 +214,26 @@ export class Recorder {
   /** ``autoStop``: end on ~1.2 s of silence after speech (toggle mode). Hold mode passes false. */
   private starting = false;
   private stopAsked = false;
+  /** Recording, or about to (the microphone is still opening). */
+  get busy(): boolean {
+    return this.active || this.starting;
+  }
 
-  async start(onDone: (b64: string, mime: string) => void, autoStop = true): Promise<void> {
+  /** The loudest moment of the last recording (0..1), how long it ran, and whether it ended
+   * because it reached ``maxMs``. Dictation reads them: silence and a slip of the keys are
+   * never sent to be written down. */
+  peak = 0;
+  ms = 0;
+  capped = false;
+  private startedAt = 0;
+
+  async start(onDone: (b64: string, mime: string) => void, autoStop = true, maxMs = 60000): Promise<void> {
     if (this.active || this.starting) return; // a second press while the mic opens is ignored
     this.starting = true;
     this.stopAsked = false;
+    this.peak = 0;
+    this.ms = 0;
+    this.capped = false;
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     } finally {
@@ -230,6 +245,8 @@ export class Recorder {
     this.rec.ondataavailable = (e) => e.data.size && this.chunks.push(e.data);
     this.rec.onstop = async () => {
       cancelAnimationFrame(this.raf);
+      this.ms = performance.now() - this.startedAt;
+      this.level = 0;
       this.stream?.getTracks().forEach((t) => t.stop());
       const blob = new Blob(this.chunks, { type: mime });
       const buf = new Uint8Array(await blob.arrayBuffer());
@@ -237,8 +254,9 @@ export class Recorder {
       for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
       onDone(btoa(bin), mime);
     };
+    this.startedAt = performance.now();
     this.rec.start(250);
-    this.watchSilence(autoStop);
+    this.watchSilence(autoStop, maxMs);
     // Released while the mic was still opening (a quick tap): stop now, don't record a minute.
     if (this.stopAsked) {
       this.stopAsked = false;
@@ -251,7 +269,7 @@ export class Recorder {
     else if (this.active) this.rec?.stop();
   }
 
-  private watchSilence(autoStop: boolean): void {
+  private watchSilence(autoStop: boolean, maxMs: number): void {
     const ac = audioCtx();
     const src = ac.createMediaStreamSource(this.stream!);
     const an = ac.createAnalyser();
@@ -267,12 +285,16 @@ export class Recorder {
       let sum = 0;
       for (const v of data) sum += ((v - 128) / 128) ** 2;
       this.level = Math.min(1, Math.sqrt(sum / data.length) * 6);
+      if (this.level > this.peak) this.peak = this.level;
       const now = performance.now();
       if (this.level > 0.12) {
         spoke = true;
         quietSince = now;
       }
-      if ((autoStop && spoke && now - quietSince > 1200) || now - started > 60000) this.stop();
+      if (now - started > maxMs) {
+        this.capped = true;
+        this.stop();
+      } else if (autoStop && spoke && now - quietSince > 1200) this.stop();
       else this.raf = requestAnimationFrame(tick);
     };
     this.raf = requestAnimationFrame(tick);

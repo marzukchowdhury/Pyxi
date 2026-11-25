@@ -507,6 +507,8 @@ export interface MemoryItem {
   at: number;
 }
 
+export type DictationOutcome = "typed" | "copied" | "password" | "nothing" | "cancelled" | "failed";
+
 export type BrainEvent =
   | ({ type: "hello" } & Hello)
   | ({ type: "settings" } & Hello)
@@ -516,7 +518,10 @@ export type BrainEvent =
   | { type: "say"; agent: string; index: number; total: number; text: string; audio: string | null; duration_s: number; annotations: Annotation[]; notes?: number[] }
   | { type: "notes"; card: NoteCard }
   | { type: "answer"; card: AnswerCard }
-  | { type: "action"; kind: "open_url" | "copy" | "insert" | "insert_table"; value: string }
+  | { type: "action"; kind: "open_url" | "copy" | "insert" | "insert_table" | "dictate" | "dictate_keep"; value: string }
+  /** How a dictation ended: typed where the cursor is, copied (no text box had the keyboard),
+   * or nothing at all (a password box, silence, Esc). `note` is the line for the sign. */
+  | { type: "dictated"; text: string; how: DictationOutcome; note: string; seconds: number; tidied?: boolean }
   | { type: "alarm"; title: string; label: string; at: string }
   | { type: "job_ready"; job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null }
   | { type: "guide"; active: boolean; step?: number; total?: number | null; goal?: string; label?: string; action?: string; finished?: boolean; at?: [number, number] | null }
@@ -629,8 +634,9 @@ export type ClientMessage =
   | { type: "file_access_save"; enabled: boolean; folders: string[] }
   | { type: "ptt_cancel" }
   | { type: "audio"; data: string; mime: string }
-  | { type: "dictate"; data: string; mime: string }
-  | { type: "dictating"; on: boolean }
+  | { type: "dictate"; data: string; mime: string; polish?: boolean; here?: boolean }
+  | { type: "dictating"; on: boolean; here?: boolean }
+  | { type: "dictate_cancel" }
   | { type: "interrupt" }
   | { type: "answer"; request_id: string; value: unknown }
   | { type: "job_control"; job_id: string; action: string; text?: string }

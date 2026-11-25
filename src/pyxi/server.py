@@ -537,9 +537,19 @@ def create_app(
             brain._spawn(brain.hear(base64.b64decode(msg["data"])))
         elif kind == "dictating" or (kind == "dictate" and not msg.get("data")):
             # The dictation keys went down, or came up with nothing to type.
-            brain.dictating(kind == "dictating" and bool(msg.get("on")))
+            brain.dictating(kind == "dictating" and bool(msg.get("on")), here=bool(msg.get("here")))
         elif kind == "dictate" and msg.get("data"):
-            brain._spawn(brain.dictate(base64.b64decode(msg["data"])))
+            # Their Settings switches. "polish": one quick model call on a long dictation.
+            # "here": written down on this PC (the quickest), not by the cloud listener.
+            brain._spawn(
+                brain.dictate(
+                    base64.b64decode(msg["data"]),
+                    polish=bool(msg.get("polish")),
+                    here=bool(msg.get("here")),
+                )
+            )
+        elif kind == "dictate_cancel":  # Esc, or Cancel on the sign, while it was written down
+            brain.cancel_dictation()
         elif kind == "ptt_cancel":
             brain._prefetch = None
             brain._release_hands()  # they let go without a word: the mouse work carries on

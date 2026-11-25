@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { bridge, keysOf } from "../shared/bridge";
+import { bridge, type DictationPrefs, keysOf } from "../shared/bridge";
 import { trusted } from "../shared/trusted";
 import { Activity } from "./Activity";
 import { Grants } from "./Grants";
@@ -500,11 +500,83 @@ function ShareToggle() {
   );
 }
 
+const DICTATION_KEYS: { id: DictationPrefs["keys"]; name: string }[] = [
+  { id: "ctrl+win", name: "Ctrl + Windows" },
+  { id: "alt+win", name: "Alt + Windows" },
+  { id: "shift+win", name: "Shift + Windows" },
+];
+
+/** Dictation: on or off, which keys, hold or press, and whether a model may tidy long ones. */
+function DictationSettings({ available }: { available: boolean }) {
+  const [prefs, setPrefs] = useState<DictationPrefs | null>(null);
+  useEffect(() => {
+    void bridge.dictationPrefs().then(setPrefs);
+    return bridge.onDictationPrefs(setPrefs);
+  }, []);
+  if (!prefs) return null;
+  const change = (part: Partial<DictationPrefs>) => {
+    setPrefs({ ...prefs, ...part });
+    bridge.setDictationPrefs(part);
+  };
+  const keys = DICTATION_KEYS.find((k) => k.id === prefs.keys)?.name ?? "the keys";
+  return (
+    <>
+      <label className="toggle-row">
+        <span>Dictate into any app</span>
+        <input type="checkbox" className="switch" checked={prefs.enabled} onChange={(e) => change({ enabled: e.target.checked })} />
+      </label>
+      <p className="muted">
+        {!available
+          ? "The keyboard hook could not start on this PC, so the dictation keys are not available."
+          : prefs.enabled
+            ? `${prefs.mode === "hold" ? `Hold ${keys}, speak, and let go` : `Press ${keys} for a moment, speak, and press it again`}: your words are typed where your cursor is, in any app. Pyxi does not answer. Esc cancels. Say "new line", "new paragraph", "comma", "full stop" or "question mark" for those. A password box is never typed into, and with no text box in front the words are copied instead.`
+            : "Off: the keys do nothing and the microphone is never opened for dictation."}
+      </p>
+      {prefs.enabled && (
+        <>
+          <label className="select-row">
+            <span>Keys</span>
+            <select value={prefs.keys} onChange={(e) => change({ keys: e.target.value as DictationPrefs["keys"] })}>
+              {DICTATION_KEYS.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+            </select>
+          </label>
+          <label className="select-row">
+            <span>How</span>
+            <select value={prefs.mode} onChange={(e) => change({ mode: e.target.value as DictationPrefs["mode"] })}>
+              <option value="hold">Hold while I speak</option>
+              <option value="toggle">Press to start, press again to stop</option>
+            </select>
+          </label>
+          <label className="toggle-row">
+            <span>Tidy long dictations with a quick model</span>
+            <input type="checkbox" className="switch" checked={prefs.polish} onChange={(e) => change({ polish: e.target.checked })} />
+          </label>
+          <p className="muted">
+            {prefs.polish
+              ? "Dictations of 30 words or more get one quick pass by a model for punctuation and filler words. It may not add or change words: if it does, its version is thrown away. The words (not your voice) are sent for that. Shorter ones are tidied on this PC and typed at once."
+              : "Every dictation is tidied by rules on this PC only, and typed at once."}
+          </p>
+          <label className="toggle-row">
+            <span>Write dictation down with the cloud listener</span>
+            <input type="checkbox" className="switch" checked={prefs.cloud} onChange={(e) => change({ cloud: e.target.checked })} />
+          </label>
+          <p className="muted">
+            {prefs.cloud
+              ? "Dictation is heard the way your questions are (see Voice, Listening): better with names and accents, about two seconds slower, and your voice is sent to be written down."
+              : "Dictation is written down on this PC: the quickest, free, and your voice stays here. Names and unusual words are misheard more often. Bengali and Automatic are heard the way your questions are."}
+          </p>
+        </>
+      )}
+    </>
+  );
+}
+
 export function Settings() {
   const { hello } = usePanel();
   const [keys, setKeys] = useState<Record<string, string | null>>({});
   useEffect(() => {
     void bridge.hotkeys().then(setKeys);
+    return bridge.onDictationPrefs(() => void bridge.hotkeys().then(setKeys)); // the dictation keys changed
   }, []);
   const k = (name: string) => keysOf(keys[name]).join("+") || "unavailable";
   if (!hello) return <p className="muted">Waiting for Pyxi's brain…</p>;
@@ -536,7 +608,7 @@ export function Settings() {
       <Connections />
       <h4>Hotkeys</h4>
       {keys.hold && <div className="kv"><span>Talk (hold, release to send)</span><kbd>{k("hold")}</kbd></div>}
-      {keys.dictate && <div className="kv"><span>Dictate (hold, types where your cursor is)</span><kbd>{k("dictate")}</kbd></div>}
+      {keys.dictate && <div className="kv"><span>Dictate (types where your cursor is)</span><kbd>{k("dictate")}</kbd></div>}
       <div className="kv"><span>Type to Pyxi</span><kbd>Ctrl, Ctrl</kbd></div>
       <div className="kv"><span>Talk (press to start or stop)</span><kbd>{k("talk")}</kbd></div>
       <div className="kv"><span>Show or hide this panel</span><kbd>{k("panel")}</kbd></div>
@@ -544,6 +616,8 @@ export function Settings() {
       <div className="kv"><span>Pause screen sharing</span><kbd>{k("privacy")}</kbd></div>
       <div className="kv"><span>Stop everything (every teammate, the mouse, Scout's browser, anything waiting)</span><kbd>{k("stop")}</kbd></div>
       <button className="danger" onClick={() => brain.send({ type: "stop_everything" })}>Stop everything now</button>
+      <h4>Dictation</h4>
+      <DictationSettings available={!!keys.hold} />
       <h4>Privacy</h4>
       <p className="muted">Pyxi only looks at your screen when you talk to it, plus lightweight UI metadata for the Memory Palace. Password managers, banking and password fields are never captured. Everything is stored locally in <code>.pyxi/</code>. Pyxi v{hello.version}.</p>
     </div>
