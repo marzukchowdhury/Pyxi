@@ -2564,6 +2564,7 @@ class LedgerResult:
     headline: str = ""
     built: dict[str, list[str]] = field(default_factory=dict)
     made: list[str] = field(default_factory=list)  # outputs that are new files, not copies
+    kind: str = ""  # "deck" for a new deck (deck_build.py): its problems are notes, not failed edits
 
 
 def parse_edits(text: str) -> dict[str, Any]:
@@ -2673,6 +2674,43 @@ async def run_ledger(task: str, *, live: list[Any] | None = None, **kw: Any) -> 
             await t.close()
 
 
+async def _new_deck(
+    task: str,
+    title: str,
+    files: list[str],
+    ask: Ask,
+    *,
+    name: str,
+    context: str,
+    progress: Callable[[str], Awaitable[None]] | None,
+    new_dir: Path | None,
+) -> LedgerResult:
+    """A new .pptx, built by deck_build.py: beside the file it is made from, or in
+    Documents\\Pyxi when it is made from a topic. Never over a file that is there."""
+    from pyxi.agents import deck_build
+    from pyxi.agents.pixel_common import out_dir_for, pyxi_folder
+
+    sources = [Path(f) for f in files]
+    folder = new_dir or (out_dir_for(sources[0]) if sources else pyxi_folder())
+    try:
+        deck = await deck_build.build(
+            task, title, ask=ask, sources=sources, folder=folder, name=name, context=context,
+            progress=progress,
+        )  # fmt: skip
+    except deck_build.DeckError as exc:
+        raise LedgerError(str(exc)) from None
+    return LedgerResult(
+        outputs=[str(deck.path)],
+        made=[str(deck.path)],
+        changes=deck.changes(),
+        problems=deck.problems,
+        headline=deck.headline(),
+        built={"done": [s.title for s in deck.kept], "not_done": []},
+        cost_usd=deck.cost_usd,
+        kind="deck",
+    )
+
+
 async def _run_ledger(
     task: str,
     *,
@@ -2690,6 +2728,14 @@ async def _run_ledger(
     ask_quick: Ask | None = None,
 ) -> LedgerResult:
     began = time.perf_counter()
+    deck = next((n for n in new or [] if str(n.get("kind") or "") == "pptx"), None)
+    if deck is not None:
+        # "new pptx: <title>": a deck that doesn't exist yet, planned and built from the brief
+        # (and from the files given, as what it is made from). See deck_build.py.
+        return await _new_deck(
+            task, str(deck.get("title") or "Presentation"), files, ask_quick or ask,
+            name=name, context=context, progress=progress, new_dir=new_dir,
+        )  # fmt: skip
     targets: list[Any] = []
     # Local files by their place in ``targets``: the path, or for a workbook that is being
     # built from nothing, how to make an empty one again.

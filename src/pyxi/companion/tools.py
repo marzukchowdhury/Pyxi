@@ -1143,7 +1143,17 @@ COMPANION_TOOLS += [
         "['new sheet: <title>'] when they named Google Sheets or no app at all and Google is "
         "connected. Put their whole brief in task, word for word: every sheet, column and "
         "formula they asked for. Say in your one line that it is being built as a file and "
-        "will open when ready. For fixing the grammar of a "
+        "will open when ready. "
+        "MAKING A DECK is Ledger's too ('make a presentation about X', 'turn this report into "
+        "slides', 'a 10-slide pitch deck from this PDF'): files ['new pptx: <title>'], and "
+        "when it is made from a file (Word, PDF, text, Markdown, Excel or CSV) that file's "
+        "path beside it in files. It is a real PowerPoint file with designed layouts, native "
+        "charts from the file's own figures and speaker notes; a deck made from a file holds "
+        "only what the file says. Put in task everything they said: the subject, who it is "
+        "for, how many slides, a theme if they named one (slate, paper, signal, forest, "
+        "dusk). Use google ['new slides: <title>'] only when they asked for Google Slides. "
+        "If they haven't said what the deck is about and gave no file, ask that first. "
+        "For fixing the grammar of a "
         "document, delegate to Quill instead. A second teammate on the result (Ledger builds "
         "it, then Pixel makes it a PDF) is then_agent and then_task in this same call. Say one "
         "short line that names the job; they get a notification.",
@@ -1159,7 +1169,9 @@ COMPANION_TOOLS += [
                 "items": {"type": "string"},
                 "description": "Full paths of .xlsx, .docx or .pptx files on this PC. Or, to "
                 "build a new Excel workbook that doesn't exist yet, the one entry 'new xlsx: "
-                "<title>' (it is saved in Documents\\Pyxi and opened for them).",
+                "<title>' (it is saved in Documents\\Pyxi and opened for them). Or, to make a "
+                "new deck, 'new pptx: <title>', alone for a deck on a subject or with the "
+                "paths of the files to make it from (saved beside them and opened).",
             },
             "google": {
                 "type": "array",

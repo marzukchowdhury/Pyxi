@@ -343,8 +343,43 @@ def _just_made(brain: Brain, drafts_only: bool = False) -> tuple[list[str], str]
 
 
 _NEW_FILE = re.compile(
-    r"(?i)^\s*new\s+(xlsx|excel(?: file| workbook)?|workbook|spreadsheet)\s*[:\-]\s*(.+?)\s*$"
+    r"(?i)^\s*new\s+(xlsx|excel(?: file| workbook)?|workbook|spreadsheet|pptx|ppt|"
+    r"powerpoint(?: file| deck| presentation)?|deck|presentation|slides?|slide deck)"
+    r"\s*[:\-]\s*(.+?)\s*$"
 )
+_DECK_WORD = re.compile(r"(?i)^(pptx?|powerpoint|deck|presentation|slide)")
+
+
+def _new_kind(ref: str) -> str:
+    """'new pptx: Tea' is a deck to build, 'new xlsx: Budget' a workbook."""
+    m = _NEW_FILE.match(ref)
+    return "pptx" if m and _DECK_WORD.match(m.group(1)) else "xlsx"
+
+
+def _deck_not_ready(task: str, new: list[str], files: list[str], google: Any) -> str:
+    """Why a new deck can't be started as asked ("" when it can): said to the model, which
+    asks them or calls again."""
+    from pyxi.agents import deck_build
+
+    if len(new) > 1 or google:
+        return (
+            "edit_document: a new deck is made on its own: one 'new pptx: <title>' in files, "
+            "with the files it is made from beside it if there are any, and nothing in google."
+        )
+    odd = [Path(f).name for f in files if Path(f).suffix.lower() not in deck_build.SOURCE_EXTS]
+    if odd:
+        return (
+            f"edit_document: a deck can be made from Word, PDF, text, Markdown, Excel and CSV "
+            f"files, not {', '.join(odd[:3])}. Tell them in one short line (Pixel can turn "
+            "most files into a PDF first)."
+        )
+    if not files and not deck_build.has_topic(task, new[0] if new else ""):
+        return (
+            "edit_document: not started. They haven't said what the deck is about, and a deck "
+            "about nothing would be made up. Ask them in one short line what it is about (or "
+            "which file to make it from), then call again with their answer in the task."
+        )
+    return ""
 
 
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
@@ -414,6 +449,7 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         given = given if isinstance(given, list) else [given] if given else []
         # "new xlsx: NEXORA": a workbook that doesn't exist yet, built from the brief.
         new = [m.group(2).strip().strip('"')[:80] for f in given if (m := _NEW_FILE.match(str(f)))]
+        deck = any(_new_kind(str(f)) == "pptx" for f in given if _NEW_FILE.match(str(f)))
         files = _paths([f for f in given if not _NEW_FILE.match(str(f))])
         raw = args.get("google")
         google = [
@@ -422,6 +458,8 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             if g and str(g).strip()
         ]
         missing = [f for f in files if not Path(f).is_file()]
+        if deck and not missing and (note := _deck_not_ready(task, new, files, google)):
+            return note
         if not task:
             return "edit_document: say what to change."
         if missing:
@@ -432,6 +470,21 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         then, note = handoff(brain, "edit_document", "Ledger", args)
         if note:
             return note
+        if new and deck:
+            # "new pptx: Tea": a deck that doesn't exist yet, planned and built from the brief
+            # and, when files are given, from them and nothing else (agents/deck_build.py).
+            job = await brain.jobs.start(
+                "ledger", task, files=files, params={"new": [{"kind": "pptx", "title": new[0]}]}, then=then
+            )
+            if then is None:
+                brain._spawn(_open_when_done(brain, job.id))
+            made_from = f" from {', '.join(Path(f).name for f in files[:2])}" if files else ""
+            return (
+                f"Started {job.id}: {job.agent_name} is building {new[0]}.pptx{made_from} in the "
+                "background: a plan of the slides, then the slides, then a check that nothing "
+                "runs off a slide and every figure is the source's (about a minute). It opens "
+                "on their screen when it's ready. Say one short line that names the job."
+            )
         if new:
             if files or google or len(new) > 1:
                 return (

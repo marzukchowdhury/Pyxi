@@ -1107,7 +1107,17 @@ class JobManager:
             n = len(result.problems)
             first += f", but {n} edit{'s' if n != 1 else ''} didn't work"
         parts = [first.rstrip(".") + "."]
-        if result.headline:
+        if result.headline and result.kind == "deck":
+            # A deck built from a plan: what it is, and anything that was left out of it.
+            parts = [result.headline]
+            job.data["slides"] = result.built.get("done", [])
+            if result.problems:
+                n = len(result.problems)
+                parts.append(
+                    f"{n} thing{'s' if n != 1 else ''} to know: {result.problems[0]}"
+                    + (" The rest are on the card." if n > 1 else "")
+                )
+        elif result.headline:
             # A workbook built sheet by sheet: which sheets are done and which are not, by
             # name, in place of a tally of edits.
             parts = [result.headline]

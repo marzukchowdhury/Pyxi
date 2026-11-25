@@ -5354,6 +5354,8 @@ class Brain:
             body = clip(" ".join(whole_sentences(shown)[:2]), 320) if shown.strip() else "Done."
             if job.role == "writer":
                 title, body = "Your draft is ready", clip(job.summary or "", 220)
+            elif job.role == "documents" and data.get("slides"):
+                title = "Your deck is ready"  # a deck Ledger built (agents/deck_build.py)
             actions = (["open"] if files else []) + (
                 ["walkthrough"] if job.role == "browser" else []
             )
