@@ -14,6 +14,21 @@ same step; if that shows nothing either, the step says so, the control is left a
 the screen changes, and a `done` straight after is sent back once. Every guard below is in
 front of both.
 
+A task is mostly the model answering (a look is under a second, an answer several), so the
+loop is built to need few answers. Besides click, type and keys, the model can do a thing to
+a control itself, in one action and with no mouse (screen/control.py): set a field's text
+and have it read back, choose a row or an option by its name however far down its list it
+is, set a switch, open or close a dropdown, walk a menu by its words, find controls by name,
+read one. It can aim at a control by its name instead of an id, for one that only appears
+after an earlier action of the same act (a dialog's field): Pyxi finds it in the window as
+it is then, waiting a moment for it, so a run through a dialog is one answer and not a look
+per step. The look it is given says what each control says about itself (a field's text, on
+or off, chosen, open, greyed out), and each of those actions reports what the control says
+afterwards, so nothing is looked at again only to check it. scripts/desktop_bench.py times
+all of this on real apps. Where a control can't be done to that way (an app that tells the
+accessibility layer nothing: a canvas, a game), the click or the typing it stands for is
+done instead, exactly as before.
+
 It does not go round for minutes: a single action (the same do + target + text) done in
 three separate steps is named to the model as a way that does not work here, and a second
 such warning ends the task with an honest "I could not".
@@ -31,6 +46,7 @@ Safety, in order of importance:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 from collections import Counter
@@ -47,6 +63,7 @@ from pyxi.companion.aim import confirm_target
 from pyxi.companion.annotations import resolve_point, resolve_rect
 from pyxi.companion.learned import BROWSERS, Learned, place_of
 from pyxi.screen import ScreenContext, uia
+from pyxi.screen import control as controls
 from pyxi.screen import press as presses
 
 log = logging.getLogger(__name__)
@@ -69,6 +86,12 @@ CLOSING_KEYS = {"ctrl+w", "ctrl+f4", "alt+f4", "ctrl+shift+w", "ctrl+q", "ctrl+s
 _TARGET = {
     "element_id": {"type": "integer", "description": "A UI element or OCR line id (best)."},
     "quote": {"type": "string", "description": "Exact words on it, from the OCR list."},
+    "name": {
+        "type": "string",
+        "description": "The control's own name, when it has no id on this screen: it appears "
+        "only after an earlier action of this same act (a dialog's field, a menu's item), or it "
+        "is out of view in a list. Pyxi finds it in the window, waiting a moment for it.",
+    },
     "box": {
         "type": "array",
         "items": {"type": "number"},
@@ -80,7 +103,7 @@ ACT = ToolSpec(
     "act",
     "Do the next 1-8 actions, in order, then look at the screen again. Batch every action whose "
     "target is already visible or needs none (click a field, type, press enter, a shortcut on the "
-    "selection); anything after a page change or a menu that has to open waits for the next look.",
+    "selection); anything after a page change or a menu that has to open waits for the next look, unless you can aim at it by `name`.",
     {
         "type": "object",
         "properties": {
@@ -94,8 +117,12 @@ ACT = ToolSpec(
                 "certain (a shortcut on a selection made in this same act, typing into a box clicked in "
                 "this act, a rename typed into the title and entered, a named button): the one short "
                 "sentence to tell them, as in `done`. The task "
-                "then ends after these actions with no further look. Leave it out when anything has to "
-                "load or open, when you must choose from what appears, or when a click is on a guessed spot.",
+                "then ends after these actions with no further look. Set it too when the act is made of "
+                "actions that check themselves (set_value, select, toggle, expand, menu) with at most a "
+                "named button or a shortcut after them: Pyxi checks each one and, if any did not take, "
+                "looks again instead of ending. Leave it out when anything has to "
+                "load or open, when you must choose from what appears, when you were asked to tell them "
+                "what something says, or when a click is on a guessed spot.",
             },
             "actions": {
                 "type": "array",
@@ -114,19 +141,36 @@ ACT = ToolSpec(
                                 "drag",
                                 "open",
                                 "wait",
+                                "set_value",
+                                "select",
+                                "toggle",
+                                "expand",
+                                "collapse",
+                                "menu",
+                                "scroll_to",
+                                "find",
+                                "read",
                             ],
                         },
                         **_TARGET,
                         "text": {
                             "type": "string",
-                            "description": "type: the text; press: keys like 'ctrl+s' or 'enter'; "
-                            "open: a web address or an app name.",
+                            "description": "type, set_value: the text; press: keys like 'ctrl+s' or "
+                            "'enter'; open: a web address or an app name; select: the name of the row "
+                            "or option to choose; menu: the path, 'File > Save as'; find: words to "
+                            "look for in the names of this window's controls.",
                         },
+                        "on": {"type": "boolean", "description": "toggle: true to turn it on, false off."},
                         "direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
                         "amount": {"type": "integer", "description": "scroll notches (default 5)"},
                         "to_element_id": {"type": "integer"},
                         "to_quote": {"type": "string"},
-                        "to_box": {"type": "array", "items": {"type": "number"}},
+                        "to_box": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "drag: where to let go, [x, y] in screenshot px. A drag "
+                            "always needs one of the three to_ fields.",
+                        },
                         "seconds": {"type": "number"},
                         "label": {
                             "type": "string",
@@ -196,7 +240,39 @@ it: a click on any cell, even one inside the range, drops the selection you just
 - Prefer the quickest sure way: keyboard shortcuts (ctrl+l to the address bar, ctrl+t new tab, \
 ctrl+s, win to search apps), `open` for a web address or an app, typing into search boxes.
 - To type into a field, click it first in the same `act`, then type. Select-all (ctrl+a) first \
-if it already has text you're replacing.
+if it already has text you're replacing. But first choice, wherever a control has an id or a \
+name, is to do the thing itself, below: typing goes wherever the keyboard happens to be, an \
+app's autocorrect or autocomplete can change it, and it cannot tell you what the field holds.
+- Do the thing itself, not the clicks and keys that stand for it. \
+These use no mouse, wait for the control, and each one tells you in "Done so far" what the \
+control says afterwards, so you need no look to check it:
+  `set_value` puts `text` in a field in place of what it held (a form field, a file name, a \
+search box, the Name box): one action, not click, ctrl+a, type. Press enter after it if the \
+field needs it. Exact text you were given (a name, a path, a sentence to enter "exactly") \
+goes in with set_value, also into an empty document or note: typed, it can come out \
+changed. Only in a document that already has text you must keep, click and `type` \
+instead, because set_value replaces all of it.
+  `select` chooses the row or option called `text`, in a list, a tree, a dropdown or a tab \
+row, however far out of view it is: NEVER scroll a list to hunt for a row whose name you know. \
+Aim it at the list or dropdown (id or name), or leave the target out to search the window.
+  `toggle` with `on` true or false sets a tick or a switch; it does nothing if it is so already.
+  `expand` / `collapse` open and close a dropdown, a tree row or a section.
+  `menu` walks a menu bar by its words in ONE action: `text` "File > Export > As CSV".
+  `scroll_to` brings the control called `name` into view. `find` lists the controls whose \
+names have the words in `text`, in view or not (a list's line says how many of its rows are \
+out of view). `read` tells you what a control says now.
+- A control that is not on this screen yet, because an earlier action of this same `act` \
+brings it up (a dialog's field after ctrl+shift+s, a button in a panel after ctrl+h), is \
+aimed at by `name`, the words you know it has: Pyxi waits for it to appear. So a whole run \
+through a dialog you know is ONE `act`: press ctrl+h, set_value name "Find" , set_value name \
+"Replace", click name "Replace all". Use `name` only for words you are sure of; when you \
+would have to guess, look first.
+- After a shortcut or a button that brings up a panel or a dialog, do not `type` on the \
+guess that the keyboard is in its first box: aim each box by its `name` with set_value. \
+A note that a dialog's window has closed after your Save, OK or Enter means the dialog \
+took it: that is the result, not a failure, so do not open it again to check.
+- The list shows what each control says: a field's text after `=`, (on) or (off), (chosen), \
+(open) or (closed), (greyed out). Trust it over the picture.
 - After an action that loads something, `wait` 1-2 s or just let the next look show it.
 - If something didn't work (the screen didn't change), try a different way; never repeat the \
 same failing action more than twice. Pyxi counts: an action done in three separate steps with \
@@ -377,7 +453,15 @@ class Operator:
         direct: bool = True,
         learned: Learned | None = None,
         glance: Callable[[tuple[int, int, int, int]], Image.Image | None] | None = None,
+        control: Any = None,
     ) -> None:
+        # Doing a thing to a control itself (screen/control.py): a field's value set and
+        # read back, a row chosen by name, a switch set, a menu walked. With pretend hands
+        # (tests) only a pretend one that comes with them; without one, each of these
+        # falls back to the click or the typing it stands for.
+        self.control = control or (controls.Controls() if direct and make_hands is None else None)
+        self.wait_named = 2.5  # seconds a control aimed at by name is waited for
+        self._found: controls.Done | None = None  # the last control found by name
         # Pressing a control itself, with no mouse (screen/press.py). With pretend hands
         # (tests) nothing real is pressed unless a pretend ``press`` comes with them.
         self.press = press or (presses.press if direct and make_hands is None else None)
@@ -449,6 +533,7 @@ class Operator:
         # none of it counted as the same thing again.
         scrolled, turns, turned_told = "", 0, False
         last_look: Image.Image | None = None
+        last_hwnd = 0  # the window the look before this one was of
         still = 0  # looks in a row where nothing on screen changed
         seen: list[Image.Image] = []  # every look so far, to notice going round in circles
         laps = 0  # times the screen came back to how it was a few steps earlier
@@ -469,6 +554,9 @@ class Operator:
                 return Outcome(False, "That's a private app, so I won't touch it.", steps)
             look = _glance(ctx)
             self._look = look
+            if self.control is not None and ctx.window.hwnd:
+                with contextlib.suppress(Exception):
+                    self.control.watch(ctx.window.hwnd)
             unchanged = bool(steps) and last_look is not None and look is not None and _same(last_look, look)
             pressed, self._pressed = self._pressed, []
             if pressed and steps and last_look is not None and look is not None and _same(last_look, look):
@@ -490,7 +578,10 @@ class Operator:
                     ).strip()
             else:
                 still = 0
-                if look is not None and steps and any(_alike(look, o) for o in seen[-8:-1]):
+                # Back in the window a dialog was opened from, after the dialog was answered,
+                # is where a task is meant to end up: only the same window counts.
+                moved = bool(last_hwnd and ctx.window.hwnd and ctx.window.hwnd != last_hwnd)
+                if look is not None and steps and not moved and any(_alike(look, o) for o in seen[-8:-1]):
                     laps += 1
                     steps[-1].note = (
                         f"{steps[-1].note} The screen is back to how it was a few steps ago: what "
@@ -514,7 +605,7 @@ class Operator:
                     "times in a row and it isn't getting anywhere. If the task is already done, call "
                     "done now. Otherwise use a completely different way, or call done with ok=false."
                 ).strip()
-            last_look = look
+            last_look, last_hwnd = look, ctx.window.hwnd
             if look is not None:
                 seen.append(look)
             if laps >= 3:
@@ -715,8 +806,16 @@ class Operator:
             steps.append(Step(n, "; ".join(done_here), " ".join(notes), shows))
             if any(note.startswith("declined") for note in notes):
                 return Outcome(False, "Okay, I left that for you.", steps)
-            await asyncio.sleep(0.35)  # let the app react before looking again
+            await self._settle(ctx)  # let the app react before looking again
+            if front := await asyncio.to_thread(self._in_front, ctx):
+                # Said, so that a dialog these actions brought up is not a surprise at the
+                # next look, and one that they closed is known to have been taken.
+                steps[-1].note = f"{steps[-1].note} {front}".strip()
             finish = str(call.arguments.get("finish") or "").strip()
+            if finish and clean and "is in front now" in front:
+                # A window came up that the model has not seen (a "replace it?" question, an
+                # error): the task is not ended on its say-so. It looks first.
+                finish = ""
             if finish and clean:
                 # The model said this act completes the task. A look by Pyxi itself (under a
                 # second, no model) checks that the screen answered: then it is done, and the
@@ -729,6 +828,38 @@ class Operator:
         return Outcome(
             False, "That took more steps than I expected, so I stopped where it is.", steps
         )
+
+    async def _settle(self, ctx: ScreenContext) -> None:
+        """Wait until the window has stopped changing (a menu sliding shut, a list filling
+        in), not a fixed time: two looks at its pixels a tenth of a second apart that are
+        the same, or a second and a bit at most. Without a quick way to see the pixels
+        (tests), the old fixed wait."""
+        if self.glance is None:
+            await asyncio.sleep(0.35)
+            return
+        await asyncio.sleep(0.12)
+        last = await self._peek(ctx)
+        for _ in range(10):
+            await asyncio.sleep(0.1)
+            now = await self._peek(ctx)
+            if last is None or now is None or _same(last, now):
+                return
+            last = now
+
+    def _in_front(self, ctx: ScreenContext) -> str:
+        """The title of the window now in front, when it is another window of the same app
+        than the one the look was of (a dialog that has just opened). Empty otherwise, and
+        always for a window that is not this app's: its title is not ours to pass on."""
+        if self.control is None or not ctx.window.hwnd:
+            return ""
+        try:
+            front = self.control.in_front(ctx.window.hwnd)[:60]
+            if self.control.closed(ctx.window.hwnd):
+                was = ctx.window.title[:50] or "that"
+                return f"The “{was}” window has closed" + (f", and “{front}” is in front again." if front else ".")
+            return f"A window called “{front}” is in front now." if front else ""
+        except Exception:
+            return ""
 
     async def _while_held(self) -> None:
         """They pressed talk: nothing is clicked or typed until their words are in. "Stop" (or
@@ -814,12 +945,20 @@ class Operator:
                     "\n\nWhat you found out here on earlier tasks (the app may have changed: where the "
                     "screen says otherwise, trust the screen):\n" + "\n".join(f"- {n}" for n in notes)
                 )
+        if self.control is None and self.make_hands is hands.Hands:
+            # Pressing controls directly is switched off (hands_direct): said, so that no
+            # answer is spent finding out.
+            known += (
+                "\n\n(On this PC only the mouse and keyboard are used: set_value, select, toggle and "
+                "expand are done as the click and typing they stand for, on a control with an id; "
+                "menu, find, read, scroll_to and aiming by `name` are not available.)"
+            )
         history = "\n".join(
             f"{s.n}. {s.actions}" + (f"  -> {s.note}" if s.note else "") for s in steps[-12:]
         )
         text = (
             f"Task: {task}{known}\n\nDone so far:\n{history or '(nothing yet)'}\n\n"
-            f"Screen now:\n{ctx.render(120)}"
+            f"Screen now:\n{_render(ctx)}"
         )
         parts: list[Any] = [TextPart(text)]
         if image:
@@ -862,6 +1001,18 @@ class Operator:
         model's guess from the screenshot, so the spot is zoomed into and checked first."""
         eid = a.get("element_id")
         quote = str(a.get("quote") or "").strip()
+        if (aim := self._aim(ctx, a, by_name=True)) is not None:
+            # A control named, not seen: found in the window as it is now, waited for a
+            # moment (the dialog it is in may still be opening), brought into view.
+            found = await asyncio.to_thread(self.control.where, aim, self.wait_named)
+            if found.ok and found.rect and (found.offscreen or found.rect[2] < 3 or found.rect[3] < 3):
+                moved = await asyncio.to_thread(self.control.scroll_to, aim)
+                found = moved if moved.ok and moved.rect else controls.Done(why="out of view")
+            self._found = found
+            if not found.ok or not found.rect:
+                return None, _not_there(aim.name, found.why)
+            x, y, w, h = found.rect
+            return (x + w // 2, y + h // 2), ""
         within = resolve_rect(ctx, eid, None)
         hit = ctx.find_text(quote, within) if quote else None
         exact = hit or within
@@ -919,9 +1070,32 @@ class Operator:
                 return True
         return False
 
+    def _aim(self, ctx: ScreenContext, a: dict[str, Any], by_name: bool = False) -> controls.Aim | None:
+        """The control an action is on, for doing the thing itself: the one its id names
+        (as the look saw it), else the one its `name` names. ``by_name``: only the second.
+        None when there is nothing to do it with, or the action aims by words or a box."""
+        if self.control is None or not ctx.window.hwnd:
+            return None
+        if a.get("element_id") is not None:
+            if by_name:
+                return None
+            try:
+                el = ctx.element(int(a["element_id"]))
+            except (TypeError, ValueError):
+                el = None
+            if el is None or el.role in ("ScreenText", "TaskbarButton"):
+                return None
+            return controls.Aim(el.hwnd or ctx.window.hwnd, el.name, el.role, el.rect, el.automation_id)
+        name = str(a.get("name") or "").strip()
+        if not name or a.get("quote") or a.get("box"):
+            return None
+        return controls.Aim(ctx.window.hwnd, name)
+
     def _control(self, ctx: ScreenContext, a: dict[str, Any]) -> tuple[tuple[str, str, str], Any] | None:
         """The named control a click is on, when it is the kind a press works on."""
         if a.get("element_id") is None:
+            if (aim := self._aim(ctx, a, by_name=True)) is not None:
+                return (ctx.window.process.lower(), "", aim.name), aim
             return None
         try:
             el = ctx.element(int(a["element_id"]))
@@ -953,9 +1127,14 @@ class Operator:
         if h.interrupted():
             raise hands.Interrupted
         before = await self._peek(ctx) if check else None
-        target = presses.Target(ctx.window.hwnd, el.role, el.name, el.rect)
         hands.acted()  # before and after: what the app does in answer is Pyxi's doing
-        res = await asyncio.to_thread(self.press, target)
+        if isinstance(el, controls.Aim):  # aimed at by name: found and pressed in one go
+            res = await asyncio.to_thread(self.control.click, el, self.wait_named)
+        elif self.press is None:
+            return False, "", None, None
+        else:
+            target = presses.Target(ctx.window.hwnd, el.role, el.name, el.rect)
+            res = await asyncio.to_thread(self.press, target)
         if res is None:
             return False, "", None, None
         now = (res.rect[0] + res.rect[2] // 2, res.rect[1] + res.rect[3] // 2) if res.rect else None
@@ -991,6 +1170,17 @@ class Operator:
     ) -> tuple[str, str]:
         do = str(a.get("do"))
         label = str(a.get("label") or a.get("quote") or "")[:50]
+        # The field the action before this one clicked, in this same act: where a `type`
+        # with no target of its own goes.
+        clicked, self._clicked = getattr(self, "_clicked", None), None
+        if do in _DIRECT:
+            return await self._verb(h, ctx, a, n, do)
+        if do == "wait" and (aim := self._aim(ctx, a, by_name=True)) is not None:
+            secs = max(0.5, min(float(a.get("seconds") or 5.0), 10.0))
+            there = await asyncio.to_thread(self.control.wait_for, aim, secs)
+            if there.ok:
+                return f"waited for “{aim.name}”", ""
+            return f"waited for “{aim.name}”", f"failed: nothing called “{aim.name}” came up in {secs:g} s"
         if do == "wait":
             secs = max(0.2, min(float(a.get("seconds") or 1.0), 8.0))
             await asyncio.sleep(secs)
@@ -1033,10 +1223,13 @@ class Operator:
             return f"pressed {keys}", ""
         if do == "type":
             text = str(a.get("text") or "")
-            if a.get("element_id") is not None or a.get("quote") or a.get("box"):
+            if a.get("element_id") is not None or a.get("quote") or a.get("box") or a.get("name"):
+                self._found = None
                 spot, why = await self._where(ctx, a, label or "the text field")
                 if spot is None:
                     return "type", why
+                if self._found is not None and self._found.password:
+                    return "type", "skipped: that's a password field; ask_user to type it themselves"
                 await asyncio.to_thread(h.click, *spot)
                 await asyncio.sleep(0.15)
             focus = await asyncio.to_thread(uia.read_focus)
@@ -1046,6 +1239,33 @@ class Operator:
             if el is not None and el.is_password:
                 return "type", "skipped: that's a password field; ask_user to type it themselves"
             await self.report(f"Typing {text[:30]!r}", n)
+            into = el or clicked  # the field this types into: named here, or clicked just before
+            if (
+                self.control is not None
+                and into is not None
+                and into.role in ("Edit", "Document", "ComboBox")
+                and not into.is_password
+                and not into.value  # the look saw it empty: its text is then all there will be
+                and len(text) >= 2
+                and "\n" not in text
+                and "\t" not in text
+            ):
+                # Put in whole, exactly as given. Typed key by key, the app's autocorrect
+                # changed it (live: "harbour" was saved as "harbor") and a file name box
+                # completed it to another file's name. Anything it can't be done to that
+                # way is typed as before.
+                aim = controls.Aim(into.hwnd or ctx.window.hwnd, into.name, into.role, into.rect, into.automation_id)
+                hands.acted()
+                got = await asyncio.to_thread(self.control.set_value, aim, text, 0.0, True)
+                hands.acted()
+                if got.why == "password" or got.password:
+                    return "type", "skipped: that's a password field; ask_user to type it themselves"
+                if got.ok:
+                    if why := await self._wake(h, aim, got):
+                        return "type", why
+                    if got.role == "Document":
+                        await asyncio.to_thread(h.press, "ctrl+end")  # what is typed next goes after it
+                    return f"typed {text[:60]!r}" + (f" into {label}" if label else "") + " (it now reads exactly that)", ""
             await asyncio.to_thread(h.type, text)
             return f"typed {text[:60]!r}" + (f" into {label}" if label else ""), ""
         if do == "scroll":
@@ -1060,8 +1280,10 @@ class Operator:
         name = label or (
             ctx.element(int(a["element_id"])).name
             if a.get("element_id") is not None and ctx.element(int(a["element_id"]))
-            else ""
+            else str(a.get("name") or "")
         )
+        if a.get("name") and a.get("element_id") is None and RISKY.search(str(a["name"])):
+            name = str(a["name"])  # its own words decide whether to ask, not a label given to it
         spot, why = await self._where(ctx, a, name)
         if spot is None:
             return f"{do} {name}", why
@@ -1087,7 +1309,7 @@ class Operator:
             self._answered(h)
         await self.report(f"Clicking {name[:40] or 'there'}", n)
         before, found = None, None
-        if do == "click" and self.press is not None:
+        if do == "click" and (self.press is not None or self._aim(ctx, a, by_name=True) is not None):
             found = self._control(ctx, a)
             was = self._dead.get(found[0]) if found else None
             if was is not None:
@@ -1111,6 +1333,9 @@ class Operator:
         button = "right" if do == "right_click" else "left"
         count = 2 if do == "double_click" else 1
         await asyncio.to_thread(h.click, cx, cy, button, count)
+        if do == "click" and a.get("element_id") is not None and not a.get("quote"):
+            with contextlib.suppress(TypeError, ValueError):
+                self._clicked = next((e for e in ctx.elements if e.id == int(a["element_id"])), None)
         if before is not None and found is not None:
             # The press showed nothing, so that was the mouse, at once and in the same step.
             if await self._showed(ctx, before, self.settle_click):
@@ -1126,12 +1351,237 @@ class Operator:
             )
         return f"{do} {name or (cx, cy)}", ""
 
+    async def _verb(self, h: Any, ctx: ScreenContext, a: dict[str, Any], n: int, do: str) -> tuple[str, str]:
+        """One of the things done to a control itself (screen/control.py), with every guard a
+        click has in front of it: their hand on the mouse stops it, anything that sends or
+        deletes is asked about first, a password field is never written or read. Where the
+        control can't be done to that way, the click or the typing it stands for is done
+        instead, so an app that tells the accessibility layer little still works."""
+        text = str(a.get("text") or "").strip()
+        aim = self._aim(ctx, a)
+        label = str(a.get("label") or "")[:50]
+        said = (aim.name if aim and aim.name else label) or "that"
+        if h.interrupted():
+            raise hands.Interrupted
+        if do in ("find", "read", "scroll_to"):
+            if self.control is None:
+                return do, "skipped: that can't be done here; go by the screen"
+            if do == "find":
+                if not text:
+                    return "find", "skipped: no words to look for"
+                got = await asyncio.to_thread(self.control.find, ctx.window.hwnd, text)
+                if not got.ok:
+                    return f"looked for “{text[:40]}”", (
+                        "" if got.why == "not found" else _not_there(text, got.why)
+                    ) or (
+                        f"Nothing in this window has “{text[:40]}” in its name. (A very long list only "
+                        "holds the rows it shows: `select` a row there by its full name.)"
+                    )
+                more = f" and {got.others} more" if got.others else ""
+                return f"looked for “{text[:40]}”, found: " + "; ".join(got.found) + more, ""
+            if aim is None and do == "scroll_to" and text:
+                aim = controls.Aim(ctx.window.hwnd, text)
+            if aim is None:
+                return do, "skipped: say which control, by its id or its name"
+            if do == "read":
+                got = await asyncio.to_thread(self.control.read, aim, self.wait_named)
+                if got.why == "password":
+                    return "read", "skipped: that's a password field, which is never read"
+                if not got.ok:
+                    return f"read “{said}”", _not_there(said, got.why)
+                return f"read “{got.name or said}”: {got.now or 'it says nothing about itself'}", ""
+            got = await asyncio.to_thread(self.control.scroll_to, aim, self.wait_named)
+            if got.ok:
+                return f"brought “{got.name or said}” into view", ""
+            if got.why == "no way":
+                return f"scroll_to “{said}”", f"skipped: “{said}” can't be brought into view that way; scroll its list instead"
+            return f"scroll_to “{said}”", _not_there(said, got.why)
+        what = {"set_value": "", "select": text, "menu": text}.get(do, "")
+        risky = bool(a.get("risky") or RISKY.search(label) or (do != "set_value" and RISKY.search(f"{said} {what}")))
+        if risky:
+            ask = {"select": f"Choose “{text}”", "menu": f"Use the menu {text}"}.get(do, f"Press “{said}”")
+            if not await self.confirm(ask, "This may send, buy, post or delete something."):
+                return f"{do} {said}", "declined by the user"
+            self._answered(h)
+        if do == "menu":
+            path = [p for p in (part.strip() for part in re.split(r"\s*(?:>|→|\|)\s*", text)) if p]
+            if not path:
+                return "menu", "skipped: no menu path given (text: 'File > Save as')"
+            if self.control is None:
+                return f"menu {text}", "skipped: a menu can't be walked here; click it open and look"
+            await self.report(f"Menu {' > '.join(path)[:40]}", n)
+            hands.acted()
+            got = await asyncio.to_thread(self.control.menu, ctx.window.hwnd, path)
+            hands.acted()
+            if got.ok:
+                self._sure = not got.late
+                return f"menu {' > '.join(path)}", ""
+            for _ in range(got.steps):  # close what was opened on the way: nothing is left hanging
+                await asyncio.to_thread(h.press, "esc")
+            if got.why == "disabled":
+                return f"menu {' > '.join(path)}", f"skipped: “{got.name}” is greyed out in that menu right now"
+            if got.found:
+                return f"menu {' > '.join(path)}", (
+                    f"failed: there is no “{got.name}” in that menu. It holds: " + ", ".join(got.found[:20])
+                )
+            return f"menu {' > '.join(path)}", (
+                f"failed: no menu item called “{got.name or path[0]}” was found. Click the menu open and look"
+            )
+        if do == "set_value":
+            if aim is not None:
+                await self.report(f"Filling in {said[:30]}", n)
+                hands.acted()
+                got = await asyncio.to_thread(self.control.set_value, aim, str(a.get("text") or ""), self.wait_named)
+                hands.acted()
+                if got.ok:
+                    self._sure = True
+                    if why := await self._wake(h, aim, got):
+                        return f"set “{got.name or said}”", why
+                    return f"set “{got.name or said}” to {got.now[:200]!r} (it now reads that)", ""
+                if got.why == "password" or got.password:
+                    return "set_value", "skipped: that's a password field; ask_user to type it themselves"
+                if got.why == "disabled":
+                    return f"set_value “{said}”", f"skipped: “{said}” is greyed out right now, so nothing can be put in it"
+                if got.why in ("not found", "not in front", "slow", "behind a dialog") or (
+                    got.why == "failed" and a.get("element_id") is None
+                ):
+                    # The field is not there any more (or a dialog is over it): never typed
+                    # on a guess at where it was.
+                    return f"set_value “{said}”", _not_there(said, got.why)
+            # A field that can't be set that way (or nothing to set it with): the typing it
+            # stands for, on the field itself.
+            if a.get("element_id") is None and not a.get("quote") and not a.get("box") and not a.get("name"):
+                return "set_value", "skipped: say which field, by its id or its name"
+            _, note = await self._do(h, ctx, {**a, "do": "click"}, n)
+            if note:
+                return f"set_value “{said}”", note
+            await asyncio.sleep(0.15)
+            focus = await asyncio.to_thread(uia.read_focus)
+            el = ctx.element(int(a["element_id"])) if a.get("element_id") is not None else None
+            if (focus and focus.name == "(password field)") or (el is not None and el.is_password):
+                return "set_value", "skipped: that's a password field; ask_user to type it themselves"
+            await asyncio.to_thread(h.press, "ctrl+a")
+            await asyncio.to_thread(h.type, str(a.get("text") or ""))
+            return f"typed {str(a.get('text') or '')[:60]!r} into {said} in place of what was there", ""
+        if do == "select":
+            if not text:
+                return "select", "skipped: say which row or option, in `text`"
+            if self.control is None:
+                return f"select {text}", "skipped: that can't be done here; click the row instead"
+            await self.report(f"Choosing {text[:30]}", n)
+            hands.acted()
+            got = await asyncio.to_thread(
+                self.control.select, aim or controls.Aim(ctx.window.hwnd), text, self.wait_named if aim and a.get("name") else 0.0
+            )
+            hands.acted()
+            if got.ok:
+                self._sure = got.sure
+                return f"chose “{got.name or text}”" + (f" in {said}" if aim else "") + " (it is the chosen one now)", ""
+            if got.why == "no way" and got.rect and not got.offscreen and got.rect[2] >= 3:
+                x, y, w, hh = got.rect  # in view now, but it takes a click to choose it
+                await asyncio.to_thread(h.click, x + w // 2, y + hh // 2)
+                return f"click “{got.name or text}” (brought into view first)", ""
+            if got.why == "disabled":
+                return f"select {text}", f"skipped: “{got.name or text}” is greyed out right now"
+            if got.why == "no such row":
+                return f"select {text}", (
+                    f"skipped: no row or option called “{text}” was found" + (f" in {said}" if aim else " in this window")
+                    + ". `find` a word of it to see what there is, or look"
+                )
+            if got.why in ("no way", "did not take"):
+                return f"select {text}", (
+                    f"skipped: “{got.name or text}” is there but could not be chosen that way. Open its "
+                    "list and click it"
+                )
+            return f"select {text}", _not_there(said if aim else text, got.why)
+        # toggle, expand, collapse
+        if aim is None:
+            if a.get("element_id") is None and not a.get("quote") and not a.get("box"):
+                return do, "skipped: say which control, by its id or its name"
+            return await self._do(h, ctx, {**a, "do": "click"}, n)  # nothing to do it with: a click
+        await self.report(f"{'Setting' if do == 'toggle' else 'Opening' if do == 'expand' else 'Closing'} {said[:30]}", n)
+        hands.acted()
+        if do == "toggle":
+            want = a.get("on") if isinstance(a.get("on"), bool) else None
+            got = await asyncio.to_thread(self.control.toggle, aim, want, self.wait_named if a.get("name") else 0.0)
+        else:
+            got = await asyncio.to_thread(self.control.expand, aim, do == "expand", self.wait_named if a.get("name") else 0.0)
+        hands.acted()
+        if got.ok:
+            self._sure = True
+            state = got.now or ("open" if do == "expand" else "closed")
+            if got.how == "already":
+                return f"“{got.name or said}” was already {state}: left as it is", ""
+            verb = "turned" if do == "toggle" else "opened" if do == "expand" else "closed"
+            return f"{verb} “{got.name or said}” (it is {state} now)", ""
+        if got.why == "disabled":
+            return f"{do} “{said}”", f"skipped: “{said}” is greyed out right now"
+        if got.why in ("no way", "did not take") and (a.get("element_id") is not None or got.rect):
+            # It does not offer that: the click it stands for (a switch drawn by the app itself).
+            return await self._do(h, ctx, {**a, "do": "click"}, n)
+        return f"{do} “{said}”", _not_there(said, got.why)
+
+    async def _wake(self, h: Any, aim: controls.Aim, got: controls.Done) -> str:
+        """Some boxes show text put in directly but go on using what was typed before (live:
+        Save as kept the old file name, and Enter saved over the open file). A key
+        pressed in the box makes the app read it: a space at the end, taken straight out
+        again. Only in a one-line box the keyboard is in. Says why, if the app then
+        changed the text."""
+        if not got.focused or got.role not in ("Edit", "ComboBox") or "\n" in got.now:
+            return ""
+        await asyncio.to_thread(h.press, "end")
+        await asyncio.to_thread(h.type, " ")
+        await asyncio.to_thread(h.press, "backspace")
+        after = await asyncio.to_thread(self.control.read, controls.Aim(aim.hwnd, got.name, got.role, got.rect), 0.0)
+        if after.ok and after.now and repr(got.now[:40])[1:-1] not in after.now:
+            return (
+                f"failed: the app changed what was put in “{got.name or 'that field'}”: it now {after.now[:120]}. "
+                "Click the field, select all and type it instead"
+            )
+        return ""
+
     def _answered(self, h: Any) -> None:
         """They just answered one of Pyxi's own cards, most likely with the mouse: the pointer
         is where that left it, and that is not them taking the mouse back."""
         rest = getattr(h, "rest", None)
         if callable(rest):
             rest()
+
+
+# Things done to a control itself, with no mouse (screen/control.py).
+_DIRECT = {"set_value", "select", "toggle", "expand", "collapse", "menu", "scroll_to", "find", "read"}
+
+
+def _not_there(name: str, why: str) -> str:
+    """Why a control aimed at by its name was not acted on, said so the model does the next
+    right thing instead of the same thing again."""
+    if why == "not in front":
+        return (
+            "skipped: another window is in front now, not the one this look was of, so nothing "
+            "was done there. Look again"
+        )
+    if why == "behind a dialog":
+        return (
+            f"skipped: another window of this app has come up in front of “{name[:50]}”, so it was left "
+            "alone. Look again and deal with what is in front first"
+        )
+    if why == "out of view":
+        return f"skipped: “{name[:50]}” is out of view and could not be brought into view; scroll its list"
+    if why == "slow":
+        return f"skipped: the app did not answer in time about “{name[:50]}”. Look again"
+    return (
+        f"skipped: nothing called “{name[:50]}” is in this window right now. Look again and aim "
+        "at what is there (an id, or its exact name)"
+    )
+
+
+def _render(ctx: Any) -> str:
+    """The screen as the hands are shown it: what each control says about itself, and no
+    line of text twice. A pretend screen (tests) is shown as it always was."""
+    try:
+        return ctx.render(120, hands=True)
+    except TypeError:
+        return ctx.render(120)
 
 
 def _glance(ctx: ScreenContext) -> Image.Image | None:
@@ -1227,7 +1677,9 @@ def _action_key(a: dict[str, Any], ctx: Any) -> tuple[str, str, str] | None:
         if el is not None and el.name.strip():
             on = f"{el.name.strip()} ({el.role})"
     if not on:
-        on = str(a.get("quote") or a.get("label") or "").strip().lower()
+        on = str(a.get("quote") or a.get("name") or a.get("label") or "").strip().lower()
+    if do in _DIRECT:
+        return (do, on, text.lower()) if on or text else None
     box = a.get("box")
     if not on and isinstance(box, list) and len(box) >= 2:
         try:
@@ -1245,8 +1697,11 @@ def _say_action(key: tuple[str, str, str]) -> str:
         return f"opening {text[:40]}"
     if do == "type":
         return f"typing {text[:40]!r}"
-    verb = {"click": "clicking", "double_click": "double-clicking", "right_click": "right-clicking", "drag": "dragging"}
-    return f"{verb.get(do, do)} {on[:50]}"
+    verb = {"click": "clicking", "double_click": "double-clicking", "right_click": "right-clicking", "drag": "dragging",
+            "set_value": "filling in", "select": "choosing", "toggle": "switching", "expand": "opening",
+            "collapse": "closing", "menu": "using the menu", "scroll_to": "bringing into view",
+            "find": "looking for", "read": "reading"}  # fmt: skip
+    return f"{verb.get(do, do)} {on[:50]}" + (f" ({text[:40]})" if text and do in _DIRECT else "")
 
 
 def _alike(a: Image.Image, b: Image.Image) -> bool:

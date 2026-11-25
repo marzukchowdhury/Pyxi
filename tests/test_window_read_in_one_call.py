@@ -112,7 +112,9 @@ def test_the_whole_window_comes_from_one_call_in_the_walks_order():
     assert [e.is_password for e in found] == [False, False, False, False, False, True, False]
     assert auto.calls == 1  # one question to the program, however many controls
     assert auto.request.TreeScope == 7 and auto.request.TreeFilter == "raw"  # the whole tree, the view the walk uses
-    assert set(auto.request.props) == {30001, 30003, 30005, 30011, 30019, 30022}
+    # What each control is and where, and (for the hands) what it says about itself: its
+    # value, on or off, chosen, open, greyed out. All in that same one question.
+    assert set(auto.request.props) == {30001, 30003, 30005, 30011, 30019, 30022, *uia._STATES}
 
 
 def test_it_stops_at_the_same_limits_as_the_walk():

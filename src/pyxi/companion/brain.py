@@ -729,7 +729,11 @@ class Brain:
             )
         self._operator = Operator(
             self._hands_llm,
-            lambda: self.screen.capture(pixels=True, follow_mouse=False),
+            (
+                (lambda: self.screen.capture(pixels=True, follow_mouse=False, hands=True))
+                if getattr(self.screen, "reads_for_hands", False)
+                else (lambda: self.screen.capture(pixels=True, follow_mouse=False))
+            ),
             confirm,
             report,
             image_width=self.settings.screen.model_image_width,
@@ -741,6 +745,7 @@ class Brain:
             direct=getattr(self.settings, "hands_direct", True),
             learned=self._learned(),
             glance=getattr(self.screen, "glance", None),
+            control=self._controls(),
         )
         try:
             out = await self._operator.run(task, window, come_back)
@@ -1738,6 +1743,18 @@ class Brain:
             tools = [t for t in tools if t.name not in _SCREEN_MARKS]
         tools += tabwork.tools(self)  # read_tab and use_tab, only while a browser is connected
         return tools
+
+    def _controls(self):
+        """What lets the hands do a thing to a control itself (set a field, choose a row by
+        name, walk a menu: screen/control.py). It never looks inside a private app. None when
+        pressing controls directly is switched off (hands_direct): then every one of those
+        is the click or the typing it stands for."""
+        if not getattr(self.settings, "hands_direct", True) or not hasattr(self.screen, "is_excluded"):
+            return None
+        from pyxi.screen.context import WindowInfo
+        from pyxi.screen.control import Controls
+
+        return Controls(private=lambda title, process: bool(self.screen.is_excluded(WindowInfo(title, process))))
 
     def _learned(self):
         """What the hands found out about apps and sites on earlier tasks (one small file)."""

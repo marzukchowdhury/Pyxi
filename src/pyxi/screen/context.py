@@ -66,11 +66,37 @@ class UIElement:
     # The window it is in, when that is another window of the screen than the one the look
     # was for (0: that one, or the taskbar).
     hwnd: int = 0
+    # What it says about itself (screen/uia.py): shown to the hands only.
+    automation_id: str = ""
+    value: str = ""
+    on: bool | None = None
+    chosen: bool = False
+    open: bool | None = None
+    enabled: bool = True
+    more: int = 0
 
     @property
     def center(self) -> tuple[int, int]:
         x, y, w, h = self.rect
         return x + w // 2, y + h // 2
+
+    def says(self) -> str:
+        """What it says about itself, for the hands: a field's text, on or off, chosen,
+        open or closed, greyed out, and how many of a list's rows are out of view."""
+        bits: list[str] = []
+        if self.value and not self.is_password and self.value != self.name:
+            bits.append(f'= "{self.value}"')
+        if self.on is not None:
+            bits.append("(on)" if self.on else "(off)")
+        if self.chosen:
+            bits.append("(chosen)")
+        if self.open is not None:
+            bits.append("(open)" if self.open else "(closed)")
+        if not self.enabled:
+            bits.append("(greyed out)")
+        if self.more:
+            bits.append("(has more rows out of view: `select` one by its name, never scroll to hunt for it)")
+        return " ".join(bits)
 
     def describe(self, to_image=None, cut: str = "") -> str:
         """``cut``: the edge that hides part of it ("bottom"), when one does."""
@@ -228,7 +254,11 @@ class ScreenContext:
         ]
 
     # ------------------------------------------------------------------ rendering
-    def render(self, max_elements: int = 120) -> str:
+    def render(self, max_elements: int = 120, hands: bool = False) -> str:
+        """``hands``: for Pyxi's hands (companion/operator.py). Each control's line also
+        says what the control says about itself, so a field need not be looked at again
+        to know what is in it; and a line of text read from the pixels is left out when
+        it only repeats the name of a control listed above it."""
         if self.excluded:
             return f"The user is in a private app ({self.excluded}). You cannot see it, and you must not ask what is in it."
         w = self.window
@@ -265,7 +295,10 @@ class ScreenContext:
                 f"UI elements ({min(len(group), most)} of {len(group)}, from the accessibility tree):"
             )
             lines.extend(
-                "  " * min(e.depth, 6) + e.describe(img, cut.get(e.id, "")) for e in group[:most]
+                "  " * min(e.depth, 6)
+                + e.describe(img, cut.get(e.id, ""))
+                + (f" {said}" if hands and (said := e.says()) else "")
+                for e in group[:most]
             )
 
         def place(r: tuple[int, int, int, int]) -> str:
@@ -317,11 +350,34 @@ class ScreenContext:
                 "Text read from the pixels (OCR, top to bottom; includes text inside images, "
                 "so frame or underline these, or quote their exact words):"
             )
+            said_twice = self._named_already() if hands else set()
             lines.extend(
                 f'[{t.id}] "{t.text[:90]}" @({img(t.rect)[0]},{img(t.rect)[1]},{img(t.rect)[2]}x{img(t.rect)[3]})'
                 for t in self.text
+                if t.id not in said_twice
             )
         return "\n".join(lines)
+
+    def _named_already(self) -> set[int]:
+        """Lines of text read from the pixels that only repeat the name of a control they
+        lie on (a button's label, a row's file name): the control's own line has the
+        words and an id that can be pressed, so the hands are not shown them twice."""
+
+        def words(s: str) -> str:
+            return " ".join(re.sub(r"[^\w]+", " ", s.casefold()).split())
+
+        named = [(e.rect, words(e.name)) for e in self.elements if e.name and e.role != "Document"]
+        out: set[int] = set()
+        for t in self.text:
+            said = words(t.text)
+            if not said:
+                continue
+            cx, cy = t.rect[0] + t.rect[2] / 2, t.rect[1] + t.rect[3] / 2
+            for (x, y, w, h), name in named:
+                if said == name and x - 4 <= cx <= x + w + 4 and y - 4 <= cy <= y + h + 4:
+                    out.add(t.id)
+                    break
+        return out
 
     def model_image(self, width: int, *, marks: bool = True) -> bytes | None:
         """Downscaled JPEG with element ids drawn on (set-of-marks) and passwords masked."""
@@ -451,16 +507,18 @@ class ScreenReader:
                     rects.append(r)
         return rects
 
+    reads_for_hands = True  # capture(hands=True): a look for Pyxi's hands
+
     async def capture(
-        self, *, pixels: bool = True, follow_mouse: bool = True, hwnd: int | None = None
+        self, *, pixels: bool = True, follow_mouse: bool = True, hwnd: int | None = None, hands: bool = False
     ) -> ScreenContext:
         """``follow_mouse``: read the window under the mouse (what they're looking at); off while
         Pyxi drives, when the window in front is the one being worked in. ``hwnd``: read this
         window and its screen instead (the request named it, "...in Notepad")."""
-        return await asyncio.to_thread(self._capture_sync, pixels, follow_mouse, hwnd)
+        return await asyncio.to_thread(self._capture_sync, pixels, follow_mouse, hwnd, hands)
 
     def _capture_sync(
-        self, pixels: bool, follow_mouse: bool = True, hwnd: int | None = None
+        self, pixels: bool, follow_mouse: bool = True, hwnd: int | None = None, hands: bool = False
     ) -> ScreenContext:
         now, started = time.time(), time.monotonic()
         if self.paused:
@@ -505,7 +563,7 @@ class ScreenReader:
                 def on_screen(r: uia.RawElement) -> bool:
                     return _contains(screen, r.rect)
 
-        elements = self._number(raw, on_screen)
+        elements = self._number(raw, on_screen, hands=hands)
         others: list[WindowInfo] = []
         if shot is not None and follow_mouse:
             # The picture is of the whole screen, so every window it shows is read, not only
@@ -690,13 +748,14 @@ class ScreenReader:
         return lines
 
     def _number(
-        self, raw: list[uia.RawElement], keep: Any = None, most: int | None = None
+        self, raw: list[uia.RawElement], keep: Any = None, most: int | None = None, hands: bool = False
     ) -> list[UIElement]:
         """``keep``: which of them are in the picture (a window can lie across two screens,
         and the desktop lies across all of them). ``most``: how many, when fewer than usual."""
         # Prefer interactive and named elements when trimming to the budget.
+        echo = _echoes(raw) if hands else set()
         ranked = sorted(
-            (i for i in range(len(raw)) if keep is None or keep(raw[i])),
+            (i for i in range(len(raw)) if i not in echo and (keep is None or keep(raw[i]))),
             key=lambda i: (raw[i].role + "Control" not in uia.INTERACTIVE, not raw[i].name, i),
         )
         keep = sorted(ranked[: most or self.config.max_elements])
@@ -719,6 +778,13 @@ class ScreenReader:
                     r.depth,
                     index_to_id.get(parent) if parent is not None else None,
                     r.is_password,
+                    automation_id=r.automation_id,
+                    value="" if r.is_password or secrets.looks_secret(r.value) else r.value,
+                    on=r.on,
+                    chosen=r.chosen,
+                    open=r.open,
+                    enabled=r.enabled,
+                    more=r.more,
                 )
             )
         return out
@@ -747,6 +813,24 @@ class ScreenReader:
                 mon["left"],
                 mon["top"],
             )
+
+
+_CARRIES_WORDS = {"Button", "CheckBox", "RadioButton", "MenuItem", "TabItem", "ListItem", "TreeItem", "DataItem", "Hyperlink", "SplitButton"}
+
+
+def _echoes(raw: list[uia.RawElement]) -> set[int]:
+    """Labels and pictures that only say again what the control they are inside is called
+    (the word "Apply" inside the Apply button, a row's own text and icon): the hands are
+    shown the control, which can be pressed, and not its echo. That leaves room, in a
+    look that keeps only so many controls, for ones that would otherwise be cut."""
+    out: set[int] = set()
+    for i, r in enumerate(raw):
+        if r.role not in ("Text", "Image") or r.parent is None:
+            continue
+        above = raw[r.parent]
+        if above.role in _CARRIES_WORDS and above.name and (not r.name or r.name in above.name):
+            out.add(i)
+    return out
 
 
 def _contains(outer: tuple[int, int, int, int], r: tuple[int, int, int, int]) -> bool:
