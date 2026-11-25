@@ -193,8 +193,10 @@ class PyxiSettings(BaseSettings):
     hands_direct: bool = Field(
         True,
         description="Press buttons, switches, tabs, menu items and list rows through the "
-        "accessibility layer, without the mouse, where the control allows it "
-        "(PYXI_HANDS_DIRECT). False: every click is a mouse click.",
+        "accessibility layer, without the mouse, where the control allows it, and do things "
+        "to a control itself in one step: set a field's text, choose a row or an option by "
+        "its name, set a switch, walk a menu by its words (PYXI_HANDS_DIRECT). False: every "
+        "click is a mouse click and every one of those is the clicking and typing it stands for.",
     )
     model_dictation: str | None = Field(
         "anthropic/claude-haiku-5.5",

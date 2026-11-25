@@ -125,6 +125,14 @@ class RawElement:
     parent: int | None  # index into the returned list
     is_password: bool
     automation_id: str
+    # What the control says about itself, when the whole window came in one call (the
+    # hands show these to the model, so it need not look again to check a field).
+    value: str = ""  # a field's text, a dropdown's choice (never a password's)
+    on: bool | None = None  # a tick or a switch: on or off
+    chosen: bool = False  # the row, tab or option that is the selected one
+    open: bool | None = None  # a dropdown, a tree row: open or closed
+    enabled: bool = True
+    more: int = 0  # rows of it that are out of view (a list's, a tree's)
 
 
 @dataclass
@@ -488,6 +496,12 @@ def read_foreground(
 # UI Automation property ids (UIAutomationClient.h), and "this control and everything under it".
 _P_RECT, _P_TYPE, _P_NAME, _P_AUTOMATION_ID, _P_PASSWORD, _P_OFFSCREEN = 30001, 30003, 30005, 30011, 30019, 30022
 _WHOLE_TREE = 1 | 2 | 4  # TreeScope_Element | Children | Descendants
+# What a control says about itself: enabled, its value, open or closed, chosen, ticked.
+_P_ENABLED, _P_VALUE, _P_EXPANDED, _P_SELECTED, _P_TOGGLE = 30010, 30045, 30070, 30079, 30086
+_P_HAS_EXPAND, _P_HAS_SELECTION, _P_HAS_TOGGLE, _P_HAS_VALUE = 30028, 30036, 30041, 30043
+_STATES = (_P_ENABLED, _P_VALUE, _P_EXPANDED, _P_SELECTED, _P_TOGGLE, _P_HAS_EXPAND, _P_HAS_SELECTION, _P_HAS_TOGGLE, _P_HAS_VALUE)
+_ROWS = {"ListItem", "TreeItem", "DataItem"}
+VALUE_CHARS = 80  # how much of a field's text a look keeps
 # A window whose one-call read did not come back in time is walked the old way for a while.
 _ONE_CALL_OFF_S = 60.0
 _one_call_off: dict[int, float] = {}
@@ -516,7 +530,7 @@ def _cached_elements(auto, hwnd: int, max_elements: int, max_depth: int) -> list
     """
     ui = auto.uiautomation._AutomationClient.instance().IUIAutomation
     request = ui.CreateCacheRequest()
-    for prop in (_P_RECT, _P_TYPE, _P_NAME, _P_AUTOMATION_ID, _P_PASSWORD, _P_OFFSCREEN):
+    for prop in (_P_RECT, _P_TYPE, _P_NAME, _P_AUTOMATION_ID, _P_PASSWORD, _P_OFFSCREEN, *_STATES):
         request.AddProperty(prop)
     request.TreeScope = _WHOLE_TREE
     # The raw view, as the walk below uses: a browser page marks many of its groups and texts
@@ -545,6 +559,12 @@ def _cached_elements(auto, hwnd: int, max_elements: int, max_depth: int) -> list
             w, h = rect.right - rect.left, rect.bottom - rect.top
             name = (node.CachedName or "").strip()
             if not _keep(role, bool(node.CachedIsOffscreen), w, h, name):
+                if role.removesuffix("Control") in _ROWS and name:
+                    # A row out of view: not listed, but its list is told it has it.
+                    while kept_above and kept_above[-1][0] >= depth:
+                        kept_above.pop()
+                    if kept_above and kept_above[-1][1] is not None:
+                        out[kept_above[-1][1]].more += 1
                 continue
         except Exception:
             continue
@@ -568,10 +588,37 @@ def _cached_elements(auto, hwnd: int, max_elements: int, max_depth: int) -> list
                 parent=kept_above[-1][1] if kept_above else None,
                 is_password=is_password,
                 automation_id=automation_id,
+                **_states(node, is_password),
             )
         )
         kept_above.append((depth, len(out) - 1))
     return out
+
+
+def _states(node: Any, is_password: bool) -> dict[str, Any]:
+    """What a control says about itself, from what the one call brought back: nothing
+    more is asked of the program. Whatever can't be read is left unsaid."""
+
+    def get(prop: int) -> Any:
+        try:
+            return node.GetCachedPropertyValue(prop)
+        except Exception:
+            return None
+
+    said: dict[str, Any] = {}
+    if get(_P_ENABLED) is False:
+        said["enabled"] = False
+    if get(_P_HAS_VALUE) and not is_password:
+        value = get(_P_VALUE)
+        if isinstance(value, str) and value.strip():
+            said["value"] = " ".join(value.split())[:VALUE_CHARS]
+    if get(_P_HAS_TOGGLE) and (state := get(_P_TOGGLE)) is not None:
+        said["on"] = state == 1
+    if get(_P_HAS_SELECTION) and get(_P_SELECTED):
+        said["chosen"] = True
+    if get(_P_HAS_EXPAND) and (state := get(_P_EXPANDED)) in (0, 1, 2):
+        said["open"] = state != 0
+    return said
 
 
 def read_in_one_call(auto, hwnd: int, budget_s: float, max_elements: int, max_depth: int) -> list[RawElement] | None:
