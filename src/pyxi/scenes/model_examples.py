@@ -532,7 +532,98 @@ CHIP = {
     ],
 }
 
+# --------------------------------------------------------------------------- from a photo
+# Everyday things built the way a photo of them needs (scenes/photo.py): a body from its
+# cross-sections, a hollow vessel, a bent tube, legs that reach what they hold up. Each stands
+# upright with its front to +z, and every part touches the next: nothing hangs in the air.
+_UPPER = {"material": "fabric", "color": "#23262d"}
+
+SNEAKER = {
+    "title": "Black running shoe",
+    "parts": [
+        {"id": "sole", "shape": "loft", "axis": "z", "material": "rubber", "color": "#f1f0ea", "label": "Sole",
+         "sections": [[-5.15, 1.2, 0.8, 0.45, 0.8], [-4.9, 2.5, 0.9, 0.45, 0.5], [-3.4, 3.0, 0.95, 0.47, 0.45], [0, 3.1, 0.8, 0.4, 0.45], [3.4, 3.6, 0.7, 0.35, 0.5], [4.9, 2.5, 0.55, 0.4, 0.6], [5.2, 1.1, 0.4, 0.42, 0.9]]},
+        {"id": "outsole", "shape": "loft", "axis": "z", "material": "rubber", "color": "#b98a4e",
+         "sections": [[-4.9, 2.4, 0.16, 0.06, 0.4], [-3.4, 2.9, 0.16, 0.06, 0.4], [3.4, 3.5, 0.16, 0.06, 0.4], [4.9, 2.2, 0.16, 0.14, 0.4]]},
+        {"id": "upper", "shape": "loft", "axis": "z", **_UPPER, "label": "Upper",
+         "sections": [[-5.0, 1.0, 1.2, 1.9, 1], [-4.8, 2.1, 2.5, 1.95, 0.8], [-3.6, 2.8, 3.3, 2.35, 0.7], [-1.5, 3.0, 2.9, 2.15, 0.75], [0.8, 3.1, 2.0, 1.7, 0.8], [3.2, 3.3, 1.3, 1.35, 0.85], [4.7, 2.3, 0.85, 1.05, 0.9], [5.0, 1.0, 0.35, 0.9, 1]]},
+        {"id": "toe_cap", "shape": "loft", "axis": "z", "material": "rubber", "color": "#2f333b",
+         "sections": [[3.0, 3.36, 1.2, 1.3, 0.85], [4.0, 3.1, 1.1, 1.2, 0.9], [4.75, 2.36, 0.9, 1.06, 0.9], [5.04, 1.05, 0.4, 0.9, 1]]},
+        {"id": "collar", "shape": "torus", "axis": "y", "size": [2.7, 0.5, 2.7], "position": [0, 3.85, -2.9], "rotation": [-8, 0, 0], "material": "fabric", "color": "#3a3f49", "label": "Collar"},
+        {"id": "lace_1", "shape": "tube", "position": [0, 3.38, -0.6], "path": [[-0.85, -0.15, 0], [0, 0.1, 0.25], [0.85, -0.15, 0]], "radius": 0.09, "material": "fabric", "color": "#c8372d", "label": "Laces"},
+        {"id": "lace_2", "shape": "tube", "position": [0, 3.02, 0.2], "path": [[-0.85, -0.15, 0], [0, 0.1, 0.25], [0.85, -0.15, 0]], "radius": 0.09, "material": "fabric", "color": "#c8372d"},
+        {"id": "lace_3", "shape": "tube", "position": [0, 2.68, 1.0], "path": [[-0.85, -0.15, 0], [0, 0.1, 0.25], [0.85, -0.15, 0]], "radius": 0.09, "material": "fabric", "color": "#c8372d"},
+        {"id": "lace_4", "shape": "tube", "position": [0, 2.38, 1.8], "path": [[-0.85, -0.15, 0], [0, 0.1, 0.25], [0.85, -0.15, 0]], "radius": 0.09, "material": "fabric", "color": "#c8372d"},
+        {"id": "stripe", "shape": "extrude", "axis": "x", "size": [0.08, 0.9, 2.8], "position": [1.5, 2.05, -0.5], "mirror": True, "material": "plastic", "color": "#e9e9e6",
+         "profile": [[-1.3, -0.3], [0.4, -0.1], [1.5, 0.5], [0.4, 0.22], [-0.9, 0.05]]},
+        {"id": "heel_tab", "shape": "rounded_box", "size": [0.7, 1.0, 0.2], "position": [0, 3.3, -4.75], "material": "fabric", "color": "#c8372d"},
+    ],
+    "beats": [
+        {"title": "A running shoe", "narration": "...", "at": 0, "camera": "iso"},
+        {"title": "Foam under the heel", "narration": "...", "at": 2.5, "camera": "side", "focus": ["sole", "outsole"]},
+        {"title": "Take it apart?", "narration": "...", "at": 5, "camera": "iso"},
+    ],
+}
+
+_PAINT = {"material": "painted", "color": "#b3202a"}
+
+HATCHBACK = {
+    "title": "Red hatchback",
+    "parts": [
+        {"id": "body", "shape": "loft", "axis": "z", **_PAINT, "surface": "panel_lines", "label": "Body",
+         "sections": [[-4.5, 3.1, 1.0, 1.4, 0.5], [-3.9, 3.5, 1.45, 1.25, 0.45], [-1.5, 3.6, 1.5, 1.2, 0.4], [1.5, 3.6, 1.5, 1.2, 0.4], [3.5, 3.5, 1.3, 1.15, 0.45], [4.5, 3.0, 0.8, 1.0, 0.55]]},
+        {"id": "cabin", "shape": "loft", "axis": "z", "material": "plastic", "color": "#10151b", "label": "Windows",
+         "sections": [[-4.1, 2.9, 0.3, 2.0, 0.5], [-3.2, 3.1, 1.1, 2.45, 0.45], [0.2, 3.1, 1.15, 2.5, 0.45], [1.9, 2.9, 0.2, 2.0, 0.5]]},
+        {"id": "wheel_fl", "shape": "kit", "kit": "wheel", "axis": "x", "size": [0.6, 1.5, 1.5], "position": [1.62, 0.75, 2.8], "label": "Wheel"},
+        {"id": "wheel_fr", "shape": "kit", "kit": "wheel", "axis": "x", "size": [0.6, 1.5, 1.5], "position": [-1.62, 0.75, 2.8]},
+        {"id": "wheel_rl", "shape": "kit", "kit": "wheel", "axis": "x", "size": [0.6, 1.5, 1.5], "position": [1.62, 0.75, -2.7]},
+        {"id": "wheel_rr", "shape": "kit", "kit": "wheel", "axis": "x", "size": [0.6, 1.5, 1.5], "position": [-1.62, 0.75, -2.7]},
+        {"id": "headlight", "shape": "sphere", "size": [0.8, 0.4, 0.5], "position": [1.1, 1.3, 4.3], "mirror": True, "material": "glass", "color": "#f4f6f8", "label": "Headlight"},
+        {"id": "grille", "shape": "rounded_box", "size": [1.5, 0.3, 0.12], "position": [0, 1.0, 4.46], "material": "rubber", "color": "#15171a", "surface": "grille"},
+        {"id": "bumper", "shape": "rounded_box", "size": [3.0, 0.4, 0.3], "position": [0, 0.72, 4.3], "material": "plastic", "color": "#22252a"},
+        {"id": "tail_light", "shape": "rounded_box", "size": [0.7, 0.4, 0.12], "position": [1.2, 1.55, -4.42], "mirror": True, "material": "emissive", "color": "#d21a1a"},
+        {"id": "mirror", "shape": "rounded_box", "size": [0.4, 0.26, 0.2], "position": [1.85, 2.05, 1.5], "mirror": True, **_PAINT},
+        {"id": "handle", "shape": "rounded_box", "size": [0.06, 0.1, 0.5], "position": [1.8, 1.7, -0.2], "mirror": True, "material": "metal"},
+    ],
+    "motions": [
+        {"part": "wheel_fl", "kind": "spin", "axis": "x", "speed": 0.4},
+        {"part": "wheel_fr", "kind": "spin", "axis": "x", "speed": 0.4},
+        {"part": "wheel_rl", "kind": "spin", "axis": "x", "speed": 0.4},
+        {"part": "wheel_rr", "kind": "spin", "axis": "x", "speed": 0.4},
+    ],
+    "beats": [
+        {"title": "A small hatchback", "narration": "...", "at": 0, "camera": "iso"},
+        {"title": "Short nose, tall cabin", "narration": "...", "at": 2.5, "camera": "side", "focus": ["body", "cabin"]},
+        {"title": "Look inside?", "narration": "...", "at": 5, "camera": "iso"},
+    ],
+}
+
+_OAK = {"material": "wood", "color": "#9a6a3c"}
+
+CHAIR = {
+    "title": "Oak dining chair",
+    "parts": [
+        {"id": "seat", "shape": "rounded_box", "size": [4.4, 0.5, 4.2], "position": [0, 4.4, 0], "material": "fabric", "color": "#c9c2b2", "label": "Seat"},
+        {"id": "seat_frame", "shape": "box", "size": [4.2, 0.5, 4.0], "position": [0, 4.0, 0], **_OAK},
+        {"id": "front_leg", "shape": "box", "size": [0.38, 4.0, 0.38], "position": [1.9, 2.0, 1.8], "mirror": True, **_OAK, "label": "Leg"},
+        {"id": "back_post", "shape": "box", "size": [0.38, 9.4, 0.38], "position": [1.9, 4.7, -1.85], "mirror": True, **_OAK, "label": "Back post"},
+        {"id": "top_rail", "shape": "rounded_box", "size": [4.2, 0.8, 0.3], "position": [0, 9.0, -1.85], **_OAK, "label": "Top rail"},
+        {"id": "low_rail", "shape": "box", "size": [3.5, 0.3, 0.22], "position": [0, 5.6, -1.85], **_OAK},
+        {"id": "slat_mid", "shape": "box", "size": [0.6, 3.1, 0.14], "position": [0, 7.15, -1.85], **_OAK, "label": "Slat"},
+        {"id": "slat_side", "shape": "box", "size": [0.5, 3.1, 0.14], "position": [1.0, 7.15, -1.85], "mirror": True, **_OAK},
+        {"id": "side_stretcher", "shape": "box", "size": [0.22, 0.22, 3.4], "position": [1.9, 1.5, -0.02], "mirror": True, **_OAK},
+        {"id": "front_stretcher", "shape": "box", "size": [3.5, 0.22, 0.22], "position": [0, 2.2, 1.8], **_OAK},
+    ],
+    "beats": [
+        {"title": "A dining chair", "narration": "...", "at": 0, "camera": "iso"},
+        {"title": "Legs tied together", "narration": "...", "at": 2.5, "camera": "side", "focus": ["side_stretcher", "front_stretcher"]},
+        {"title": "Take it apart?", "narration": "...", "at": 5, "camera": "iso"},
+    ],
+}
+
 EXAMPLES = (JET, HEART)
+# For a made thing in a photo: a shoe, a car and a chair.
+PHOTO_EXAMPLES = (SNEAKER, HATCHBACK, CHAIR)
 # For anything alive: the organ and the animal.
 LIVING_EXAMPLES = (HEART, CAT)
 # For electronics: the machine and the chip.

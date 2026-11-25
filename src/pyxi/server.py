@@ -443,7 +443,13 @@ def create_app(
         elif kind == "text" and msg.get("text", "").strip() and await _tour_heard(msg["text"]):
             pass  # typed instead of spoken, in the tour's "say hello" step
         elif kind == "text" and msg.get("text", "").strip():
-            brain._spawn(brain.turn(msg["text"].strip()))
+            # A picture dropped or pasted into the chat box comes with the words.
+            from pyxi.companion import photomodel
+
+            picture, problem = await photomodel.from_chat(msg.get("picture"))
+            brain._spawn(
+                brain.turn(msg["text"].strip(), picture=picture, picture_problem=problem)
+            )
         elif kind == "ptt_start":
             brain.begin_listening()
         elif kind == "look_ahead":

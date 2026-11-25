@@ -10,7 +10,7 @@
  */
 import * as THREE from "three";
 
-export const SURFACES = ["pins", "traces", "cells", "fins", "brushed", "vents", "grille", "knurl", "panel_lines"] as const;
+export const SURFACES = ["pins", "traces", "cells", "fins", "brushed", "vents", "grille", "knurl", "panel_lines", "windows"] as const;
 export type Surface = (typeof SURFACES)[number];
 
 type RGB = [number, number, number];
@@ -210,6 +210,28 @@ const SPECS: Record<Surface, Spec> = {
         color: shade(base.color, (1 - 0.55 * seam) * (1 - 0.12 * rivet)),
         rough: clamp(base.rough + 0.2 * seam),
         metal: base.metal,
+      };
+    },
+  },
+  windows: {
+    px: 128, across: 6, aspect: 1, bump: 2.2,
+    texel(u, v, base) {
+      // One window to a tile, set back into the wall: dark glass that catches the sky, a thin
+      // frame, a cross of glazing bars. The same turned on its side, so a tower and a long
+      // low block both get upright rows.
+      const dx = Math.abs(u - 0.5), dy = Math.abs(v - 0.5);
+      const edge = Math.max(dx - 0.3, dy - 0.33); // below 0 inside the opening
+      const glass = 1 - smooth(-0.012, 0.012, edge);
+      const frame = glass * (1 - smooth(0.03, 0.05, -edge));
+      const bars = glass * (1 - smooth(0.012, 0.022, Math.min(dx, dy)));
+      const pane = clamp(glass - Math.max(frame, bars));
+      const sky = mix([0.07, 0.1, 0.15], [0.3, 0.42, 0.56], smooth(0.2, 0.8, v) * 0.6 + 0.4 * hash(Math.floor(u * 2) + 7 * Math.floor(v * 2)));
+      const trim = shade(base.color, 0.72);
+      return {
+        h: 1 - 0.8 * pane - 0.3 * Math.max(frame, bars),
+        color: mix(mix(base.color, trim, Math.max(frame, bars)), sky, pane),
+        rough: lerp(base.rough, 0.08, pane),
+        metal: lerp(base.metal, 0.6, pane),
       };
     },
   },

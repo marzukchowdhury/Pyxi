@@ -48,6 +48,7 @@ from pyxi.companion import (
     filework,
     instant,
     paperwork,
+    photomodel,  # a photo made into a 3D model
     pricecheck,
     prompts,
     specialists,
@@ -1727,9 +1728,20 @@ class Brain:
         they want and much faster (3D takes seconds to build, and its schemas are big)."""
         tools = list(COMPANION_TOOLS)
         if not wants_3d(self._user_text, has_model=self._object is not None):
-            tools = [t for t in tools if t.name not in THREE_D_TOOLS]
+            # A picture in the chat box, or one Pyxi has just asked about ("which thing in it:
+            # the chair or the lamp?" ... "the chair"), keeps the photo tool on the table: the
+            # answer to that question has no "3D" in it.
+            keep = (
+                {"model_from_photo"}
+                if getattr(self, "_attached", None) is not None
+                or photomodel.state(self).recent() is not None
+                else set()
+            )
+            tools = [t for t in tools if t.name not in THREE_D_TOOLS or t.name in keep]
         if self._builder_on():
             tools = [BUILD_BRIEF if t.name == "build_3d_model" else t for t in tools]
+        else:  # a photo is read, measured and built by the 3D builder: without one, no such tool
+            tools = [t for t in tools if t.name != "model_from_photo"]
         if self._object is not None and _PART_CLICKED.match(self._user_text or ""):
             # They clicked a part of the model that is showing. Live: "tell me more about the
             # Motherboard" was answered with a note card and a frame drawn on the Facebook
@@ -1748,6 +1760,22 @@ class Brain:
 
             self._learned_store = Learned(self.settings.data_dir / "learned.json")
         return self._learned_store
+
+    def _attached_note(self) -> str:
+        """What the model is told about a picture put in the chat box with this message."""
+        if getattr(self, "_attached", None) is not None:
+            return (
+                "They put a picture in the chat box with this message: it is the LAST image "
+                "below, after the screenshot. \"This\" and \"it\" mean that picture, not the "
+                "screen. Answer about it; for a 3D model of it use model_from_photo with "
+                "source attached."
+            )
+        if problem := getattr(self, "_attached_problem", ""):
+            return (
+                "They put a picture in the chat box with this message, but it could not be "
+                f"used. Tell them, in your own short words: {problem}"
+            )
+        return ""
 
     def _builder_llm(self) -> LLMProvider:
         """Streamed, so the model can be on screen assembling itself while the rest arrives (a
@@ -2943,10 +2971,18 @@ class Brain:
             self.interrupt()
 
     async def turn(
-        self, user_text: str, *, shown: str | None = None, synthetic: bool = False
+        self,
+        user_text: str,
+        *,
+        shown: str | None = None,
+        synthetic: bool = False,
+        picture: Any = None,
+        picture_problem: str = "",
     ) -> None:
         """``synthetic``: a routine or a guide step, not words the user actually said (so an
-        address in it never counts as the user naming that person)."""
+        address in it never counts as the user naming that person). ``picture``: a picture they
+        put in the chat box with these words (a scenes.photo.Picture); ``picture_problem``: why
+        the one they put there could not be used, in words."""
         if getattr(self, "_object_shut", False) and _PART_CLICKED.match(user_text or ""):
             return  # a click on a model they have since closed
         if not synthetic and self._guide is not None and step_said_done(user_text):
@@ -2975,6 +3011,7 @@ class Brain:
             self._visual_retry = False
             self._user_text = user_text
             self._synthetic = synthetic
+            self._attached, self._attached_problem = picture, picture_problem
             if not synthetic:
                 self._guide_fresh = True  # a new request: a guide in it counts from step 1
             self._pending_say = ""  # an answer held back during a lookup round
@@ -3337,6 +3374,7 @@ class Brain:
                             else ""
                         ),
                         answers.on_screen(self),
+                        self._attached_note(),
                     )
                     if x
                 ),
@@ -3347,6 +3385,9 @@ class Brain:
             parts: list[TextPart | ImagePart] = [TextPart(text)] + [
                 ImagePart(img, "image/jpeg") for img in self._images
             ]
+            if getattr(self, "_attached", None) is not None:
+                # The picture they put in the chat box, after the screen: "the last image".
+                parts.append(ImagePart(self._attached.jpeg(768), "image/jpeg"))
             connector_tools = self.connectors.tools()
             early: set[str] = set()
 
@@ -3548,6 +3589,7 @@ class Brain:
             # the explaining, so the spoken reply is kept to one sentence.
             visual = {
                 "build_3d_model",
+                "model_from_photo",
                 "edit_3d_model",
                 "explain_in_3d",
                 "explode_view",
@@ -4401,6 +4443,8 @@ class Brain:
                 f"{len(diagram.steps)} steps)."
             )
             return f"{note} Repairs: {'; '.join(diagram.notes[:4])}" if diagram.notes else None
+        if name == "model_from_photo":  # a photo made into a 3D model: companion/photomodel.py
+            return await photomodel.handle(self, args)
         if name == "build_3d_model" and self._builder_on() and not args.get("parts"):
             # A brief: the 3D builder makes the model in the background while Pyxi talks.
             self._visual_turn = True
@@ -5690,6 +5734,7 @@ _BACKGROUND_TOOLS = {
     "use_tab",
     "tidy_folder",
     "build_3d_model",
+    "model_from_photo",
     "explain_in_3d",
     "subscriptions",
     "returns",
@@ -5846,7 +5891,7 @@ TOOL_ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
 QUIET_NOTES = {"say", "explain_on_screen", "point", "circle", "highlight", "arrow", "remember"}
 # A visual the model drew wrong: the note says what to fix, and it gets one more try.
 VISUAL_INVALID = ("SCENE_INVALID", "MODEL_INVALID", "SKETCH_INVALID", "DIAGRAM_INVALID")
-THREE_D_TOOLS = {"build_3d_model", "edit_3d_model", "explain_in_3d", "explode_view"}
+THREE_D_TOOLS = {"build_3d_model", "model_from_photo", "edit_3d_model", "explain_in_3d", "explode_view"}
 _ASKS_3D = re.compile(
     r"\b(3d|3-d|three[- ]?d|in three dimensions|(build|make|show) (me )?(a |the )?model|render|build (it|this|me|one|a|an|the)|"
     r"cut (it |this )?open|cutaway|cross[- ]section|inside of|show me (the )?inside|what'?s inside|"

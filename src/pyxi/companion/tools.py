@@ -103,6 +103,66 @@ BUILD_BRIEF = _tool(
     ["subject", "show"],
 )
 
+# A photo made into a 3D model (scenes/photo.py). Offered only when a 3D builder is configured.
+MODEL_FROM_PHOTO = _tool(
+    "model_from_photo",
+    "Make a 3D model of the thing in a PICTURE: a photo on their screen (in a browser, an image "
+    "viewer, a shop page), a picture they put in the chat box, or an image file they name. Use "
+    "it whenever they ask for a 3D model OF a picture or of the thing in one ('make a 3D model "
+    "of this', 'turn this photo into 3D', 'model the chair in this picture', 'make a 3D model of "
+    "the photo on my desktop called chair'). The model is measured against the photo (shape, "
+    "proportions, colours) and shown with the photo beside it; it takes about half a minute. "
+    "Use build_3d_model instead when there is no picture and they just name a thing. In the "
+    "same reply `say` ONE short line (that you are on it), and never describe the picture's "
+    "parts or promise what the model will have: its own narration does that. It models things, "
+    "not people: never use it to model a person or a face (say you can do an object in the "
+    "picture, not the person).",
+    {
+        "source": {
+            "type": "string",
+            "enum": ["screen", "attached", "file"],
+            "description": "Where the picture is. attached: the picture they put in the chat box "
+            "with this message (the last image you were sent), or the same picture as a moment "
+            "ago when they are answering which thing in it they meant. screen: a picture "
+            "showing on their screen. file: an image file they named.",
+        },
+        "element_id": {
+            "type": "integer",
+            "description": "source screen: the picture's element on screen, when it has one.",
+        },
+        "box": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "source screen, when the picture has no element: [x, y, width, height] "
+            "of the picture in screenshot px, with a little room round it.",
+        },
+        "path": {
+            "type": "string",
+            "description": "source file: the full path, when they gave one or search_files found it.",
+        },
+        "name": {
+            "type": "string",
+            "description": "source file, when they gave only a name: the file's name without "
+            "its folder ('chair'). Pyxi looks for a picture called that.",
+        },
+        "folder": {
+            "type": "string",
+            "description": "source file with `name`: where they said it is ('desktop', "
+            "'downloads', 'pictures', 'documents'), if they said.",
+        },
+        "object": {
+            "type": "string",
+            "description": "Which thing in the picture, ONLY if they said ('the chair', 'the red "
+            "car'). Leave out otherwise: Pyxi takes the main thing and says so.",
+        },
+        "show": {
+            "type": "string",
+            "description": "Anything they asked to have explained or shown about it, if they did.",
+        },
+    },
+    ["source"],
+)
+
 COMPANION_TOOLS: list[ToolSpec] = [
     SAY,
     _tool("point", "Fly over and point at something on screen.", {**_TARGET, **_LABEL}),
@@ -416,6 +476,7 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "for vehicles and profiles, iso to show depth, close for a detail.",
         build_tool_schema(),
     ),
+    MODEL_FROM_PHOTO,
     ToolSpec(
         "edit_3d_model",
         "Change the 3D model already on screen: 'show the inside' (cutaway), 'remove the casing' (hide), "

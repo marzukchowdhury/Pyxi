@@ -130,7 +130,7 @@ export interface SceneSpec {
 export type Vec3 = [number, number, number];
 export type PartShape =
   | "box" | "rounded_box" | "sphere" | "cylinder" | "cone" | "capsule" | "torus" | "ring" | "wedge"
-  | "tube" | "limb" | "blob" | "extrude" | "lathe" | "gear" | "spring" | "plane" | "arrow" | "marker" | "kit" | "asset";
+  | "tube" | "limb" | "blob" | "extrude" | "lathe" | "loft" | "gear" | "spring" | "plane" | "arrow" | "marker" | "kit" | "asset";
 export type Material =
   | "metal" | "brushed_metal" | "dark_metal" | "gold" | "plastic" | "rubber" | "glass" | "painted"
   | "fabric" | "wood" | "ceramic" | "skin" | "emissive"
@@ -168,6 +168,12 @@ export interface Part {
   /** shape "blob": [x, y, z, rx, ry, rz] lumps melted into one skin; `blend` is how softly. */
   lumps?: number[][] | null;
   blend?: number | null;
+  /** shape "lathe": hollow and open at its +axis end, with walls this thick (a mug, a pot). */
+  wall?: number | null;
+  /** shape "extrude": edges rounded over, as a share of the thickness (0 sharp, 0.5 right over). */
+  bevel?: number | null;
+  /** shape "loft": [along, width, height, lift, round] cross-sections joined into one skin. */
+  sections?: number[][] | null;
   /** Part of a living thing (never drawn hard-edged; set by the builder, repaired by Pyxi). */
   organic?: boolean;
   /** shape "asset": a piece of a real model from Pyxi's library (its id, and the part's name in it). */
@@ -277,6 +283,11 @@ export interface ObjectScene {
   auto_play: boolean;
   /** Who made the real model it uses, when it uses one (shown small under the stage). */
   credit?: string | null;
+  /** Built from a photo: the photo, small (a data URL), kept beside the model to compare. */
+  photo?: string | null;
+  /** The angle the photo was taken from, [degrees round from the front, degrees above level]:
+   * the model first opens seen from there. */
+  photo_view?: [number, number] | null;
 }
 
 export interface TimelineMoment {
@@ -599,7 +610,8 @@ export interface FileAccessState {
 }
 
 export type ClientMessage =
-  | { type: "text"; text: string }
+  /** `picture`: one pasted or dropped into the chat box with the words (a data URL, made small). */
+  | { type: "text"; text: string; picture?: { data: string } }
   | { type: "ptt_start" }
   | { type: "look_ahead" }
   | { type: "beta_join"; code: string }

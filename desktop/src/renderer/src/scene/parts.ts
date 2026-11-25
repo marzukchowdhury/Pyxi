@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Axis, Material, Part } from "../shared/protocol";
+import { hollowProfile, loftGeometry } from "./loft";
 import { blobGeometry, limbGeometry } from "./organic";
 import { applySurface, type Surface, SURFACES, surfaceUVs } from "./surface";
 
@@ -212,14 +213,29 @@ function shapeGeometry(p: Part): Built {
       const prof = p.profile ?? [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
       const depth = p.size[idx[p.axis === "y" ? "y" : p.axis]];
       const shape = new THREE.Shape(prof.map(([x, y]) => new THREE.Vector2(x, y)));
-      const bevel = Math.min(0.04, depth * 0.25);
-      const g = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.001, depth - bevel * 2), bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 2 });
+      // `bevel` rounds the edges over (a car body, a phone): a share of the thickness, and
+      // never more of the outline than a third of its smaller side, so a thin fin keeps its shape.
+      const xs = prof.map((q) => q[0]), ys = prof.map((q) => q[1]);
+      const small = Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+      const soft = p.bevel != null && p.bevel > 0;
+      const bevel = soft ? Math.min(depth * p.bevel!, depth * 0.49, small * 0.33) : Math.min(0.04, depth * 0.25);
+      // A soft edge is cut into the outline (the part keeps its written size); the hairline one sits on it, as before.
+      const g = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.001, depth - bevel * 2), bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelOffset: soft ? -bevel : 0, bevelSegments: soft ? 6 : 2 });
       g.translate(0, 0, -depth / 2 + bevel);
       return { geometry: fromZ(g, p.axis), scale: [1, 1, 1] };
     }
     case "lathe": {
       // [[along, radius], ...] turned round the axis, closed at both ends, at true size.
       const prof = (p.profile ?? [[-0.5, 0.5], [0.5, 0.5]]).map(([a, r]) => new THREE.Vector2(Math.max(0, r), a));
+      if (p.wall != null && p.wall > 0) {
+        // A hollow vessel, open at its +axis end: the outside as written (smoothed), then over
+        // the rim and down the inside to a floor as thick as the wall.
+        if (prof[0].y > prof[prof.length - 1].y) prof.reverse();
+        const outer = prof.length >= 4 ? new THREE.SplineCurve(prof).getSpacedPoints(Math.min(72, prof.length * 8)) : prof;
+        const walls = hollowProfile(outer.map((q) => [q.x, q.y]), p.wall).map(([r, a]) => new THREE.Vector2(r, a));
+        if (walls[0].x > 0) walls.unshift(new THREE.Vector2(0, walls[0].y));
+        return { geometry: alongAxis(new THREE.LatheGeometry(walls, 64), p.axis), scale: [1, 1, 1] };
+      }
       if (prof[0].x > 0) prof.unshift(new THREE.Vector2(0, prof[0].y));
       if (prof[prof.length - 1].x > 0) prof.push(new THREE.Vector2(0, prof[prof.length - 1].y));
       // A turned profile needs a smooth outline: resample it as a curve unless it's very short.
@@ -228,6 +244,10 @@ function shapeGeometry(p: Part): Built {
       pts[pts.length - 1].x = 0;
       const g = new THREE.LatheGeometry(pts, 64);
       return { geometry: alongAxis(g, p.axis), scale: [1, 1, 1] };
+    }
+    case "loft": {
+      const sections = p.sections?.length ? p.sections : [[-sx / 2, sz, sy, 0, 1], [sx / 2, sz, sy, 0, 1]];
+      return { geometry: loftGeometry(sections, p.axis), scale: [1, 1, 1] };
     }
     case "arrow":
       return { geometry: arrowGeometry(p), scale: [1, 1, 1] };

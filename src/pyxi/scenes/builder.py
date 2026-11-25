@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from otto.llm.base import LLMProvider, Message, ToolSpec
+from otto.llm.base import ImagePart, LLMProvider, Message, ToolSpec
 from pydantic import ValidationError
 
 from pyxi.partial_json import complete_items, partial_string
@@ -45,7 +45,16 @@ piston, nose cone, lens barrel, vase, bullet) is ONE lathe: `profile` is [[along
 from one end to the other along `axis` (6-12 points, a smooth outline). Any flat outline (wing \
 or fin from above, hull side, blade, circuit board, phone body, key, gun frame) is ONE extrude \
 with its true outline as `profile` (8-16 points, traced like a technical drawing). Never \
-capsules or boxes for bodies or wings.
+capsules or boxes for bodies or wings. A vessel that is open (mug, cup, bowl, glass, pot, \
+bucket, lampshade) is a lathe with `wall` set: the profile is its outside, from the closed end \
+to the rim, and it comes out hollow. A body that is neither round nor a flat outline (a car \
+body, a shoe, a computer mouse, a hull, a controller's grip, a helmet) is ONE `loft`: \
+`sections` [[along, width, height, lift, round], ...] from one end to the other along `axis`, \
+5-9 of them, wide and low where the real thing is, tall where it is tall; never a box with \
+smaller boxes on it. An outline with soft edges gets `bevel` (0.2-0.5). A handle, pipe, cable \
+or bent rod is a `tube` along its real curve. Several of the same thing in a ring (stool \
+legs, petals, a plant's leaves, spokes, columns) are modelled once with `around` set to how \
+many. A building's walls get surface `windows`.
 - Living things (animals, people, organs, plants, anything grown, not made): decide this \
 first and set organic=true on every such part. They have no flat faces and no hard edges, so \
 never box, rounded_box or cylinder. A mass (torso, head, heart, fruit, a tree's crown) is ONE \
@@ -118,7 +127,7 @@ Narration: one vivid spoken sentence each, a concrete fact or analogy, never a \
 description of the picture; the last one lands the "so that's why", adds one related fun \
 fact, and offers one specific thing to show next (inside a part, how it's assembled, a diagram).
 
-Two complete examples of the quality expected (different subjects; follow the rules, not the \
+Complete examples of the quality expected (different subjects; follow the rules, not the \
 shapes):
 {examples}
 """
@@ -332,16 +341,29 @@ class PartialModel:
 
 
 async def build_model(
-    llm: LLMProvider, brief: str, context: str = "", on_parts: OnParts | None = None
+    llm: LLMProvider,
+    brief: str,
+    context: str = "",
+    on_parts: OnParts | None = None,
+    *,
+    images: list[bytes] | None = None,
+    examples: tuple[dict[str, Any], ...] | None = None,
+    check: bool = True,
 ) -> BuildResult:
     """Build a model from a brief; one repair attempt if the first try doesn't validate.
 
     ``on_parts``: called with the model so far as its parts stream in (only for a streaming
-    model). The finished model keeps the same id, so the view carries straight on from it."""
+    model). The finished model keeps the same id, so the view carries straight on from it.
+
+    A model built from a photo (scenes/photo.py) passes the photo in ``images`` (JPEGs the
+    builder looks at while it models), names its own worked ``examples`` (a long brief full
+    of measurements must not be searched for the word "leg" to choose them), and does its
+    own look before showing (``check`` False)."""
     # The ask decides; what happens to be on screen only when the ask says nothing either way.
-    examples = examples_for(brief)
-    if examples is EXAMPLES:
-        examples = examples_for(f"{brief} {context[:300]}")
+    if examples is None:
+        examples = examples_for(brief)
+        if examples is EXAMPLES:
+            examples = examples_for(f"{brief} {context[:300]}")
     system = SYSTEM.format(
         examples="\n".join(json.dumps(e, separators=(",", ":")) for e in examples)
     )
@@ -350,7 +372,8 @@ async def build_model(
         ask += f"\n\nWhat the user is looking at (use it so the model is about their exact thing):\n{context[:1500]}"
     result = BuildResult(model=None)
     started = time.monotonic()
-    messages = [Message.user(ask)]
+    pictures = [ImagePart(data, "image/jpeg") for data in images or []]
+    messages = [Message.user(ask, *pictures)]
     scene_id = ObjectScene(title="x", parts=[Part(id="x")]).id
     params = inspect.signature(llm.complete).parameters
     streams = on_parts is not None and "on_partial" in params
@@ -372,7 +395,7 @@ async def build_model(
         call = next((c for c in response.tool_calls if c.name == "build_3d_model"), None)
         if call is None:
             result.errors.append("no tool call")
-            messages = [Message.user(ask + "\n\nCall build_3d_model now.")]
+            messages = [Message.user(ask + "\n\nCall build_3d_model now.", *pictures)]
             continue
         try:
             result.model = ObjectScene.model_validate({**dict(call.arguments), "id": scene_id})
@@ -383,10 +406,11 @@ async def build_model(
             messages = [
                 Message.user(
                     f"{ask}\n\nYour last attempt was rejected: {errors}. Fix those and call "
-                    "build_3d_model again with the complete model."
+                    "build_3d_model again with the complete model.",
+                    *pictures,
                 )
             ]
-    if result.model is not None:
+    if result.model is not None and check:
         result.model = await look_over(llm, result.model, result, brief)
     result.seconds = time.monotonic() - started
     return result
