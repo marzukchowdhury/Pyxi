@@ -112,6 +112,27 @@ def _no_real_windows_read(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_real_listening(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test listens to this PC's speakers or microphone, starts Windows Live Captions or
+    asks Windows what is playing: the real capture refuses to open (tests of the listening
+    give LiveEars a pretend one)."""
+    from pyxi.companion import listening
+    from pyxi.listen import capture, wincaptions
+
+    def refuse(self: Any, wait_s: float = 3.0) -> bool:
+        self.problem = "Tests never listen to the real PC."
+        return False
+
+    refuse.real = capture.Capture.start  # for the test of the capture's own thread (fake device)
+    monkeypatch.setattr(capture.Capture, "start", refuse)
+    monkeypatch.setattr(capture, "muted", lambda: False)
+    monkeypatch.setattr(wincaptions, "installed", lambda: False)
+    monkeypatch.setattr(wincaptions, "window", lambda: 0)
+    monkeypatch.setattr(listening, "sound_playing", lambda: False)
+    monkeypatch.setattr(listening, "sound_screen", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _addresses_are_right(monkeypatch: pytest.MonkeyPatch) -> None:
     """No test waits on the "is this the address you meant?" card (companion/addresscheck.py):
     it is shown, and answered at once with "Yes, that's it". Tests of the card itself give

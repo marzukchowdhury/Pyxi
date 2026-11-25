@@ -12,6 +12,7 @@ const actions = (over: Partial<TrayActions> = {}): TrayActions => ({
   togglePause: noop,
   setMuted: noop,
   stopEverything: noop,
+  listen: noop,
   openUrl: noop,
   checkForUpdates: noop,
   quit: noop,
@@ -28,6 +29,9 @@ describe("the tray menu", () => {
       "Mute Pyxi's voice",
       "Stop everything  (Ctrl+Alt+S)",
       "---",
+      "Meeting notes: start or stop",
+      "Live captions: on or off",
+      "---",
       "Report a Bug…",
       "Request a Feature…",
       "What's New",
@@ -35,6 +39,15 @@ describe("the tray menu", () => {
       "---",
       "Quit Pyxi",
     ]);
+  });
+
+  it("starts and stops the listening from their own press", () => {
+    const asked: string[] = [];
+    const menu = trayTemplate(actions({ listen: (what) => asked.push(what) }));
+    for (const label of ["Meeting notes: start or stop", "Live captions: on or off"]) {
+      (menu.find((i) => i.label === label)!.click as () => void)();
+    }
+    expect(asked).toEqual(["meeting", "captions"]);
   });
 
   it("says Resume while paused", () => {

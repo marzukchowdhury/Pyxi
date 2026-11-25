@@ -507,8 +507,41 @@ export interface MemoryItem {
   at: number;
 }
 
+/**
+ * What Pyxi is hearing right now (src/pyxi/companion/listening.py). While either is set, a sign
+ * with a Stop button is on screen: the meeting's pill, or the caption bar itself.
+ */
+export interface MeetingSign {
+  /** Unix seconds the listening began (for the elapsed time). */
+  since: number;
+  /** "listening": the call is being heard. "writing": it has stopped and the notes are being written. */
+  state: "listening" | "writing";
+  lines: number;
+  /** One plain line under the sign, e.g. the microphone couldn't be heard. */
+  note: string;
+}
+export interface CaptionState {
+  /** The language captions are translated into ("" for captions as spoken). */
+  translate: string;
+  /** Show the original above the translation. */
+  both: boolean;
+  /** Text size, 0 (small) to 4. */
+  size: number;
+  edge: "bottom" | "top";
+  /** The screen the bar belongs on, in physical px (null: the main one). */
+  screen: Rect | null;
+  /** Whose words they are: Pyxi's own model, or Windows Live Captions. */
+  source: "pyxi" | "windows";
+  note: string;
+  languages: string[];
+}
+
 export type BrainEvent =
   | ({ type: "hello" } & Hello)
+  | { type: "listening"; meeting: MeetingSign | null; captions: CaptionState | null }
+  // One caption line: updated under the same id while it is being said, then final. With
+  // translation on, the final comes again with `translation` when it is ready (`pending` until then).
+  | { type: "caption"; id: number; text: string; final: boolean; translation: string | null; pending: boolean }
   | ({ type: "settings" } & Hello)
   | { type: "state"; state: BrainState }
   | { type: "user"; text: string; turn_id: string }
@@ -616,6 +649,8 @@ export type ClientMessage =
   | { type: "browser_site_revoke"; host: string }
   | { type: "audit_get" }
   | { type: "stop_everything" }
+  // The meeting sign's Stop and the caption bar's own buttons (their own press, never Pyxi's).
+  | { type: "listen"; what: "meeting" | "captions"; action: "start" | "stop" | "toggle" | "set" | "size" | "move"; translate?: string; both?: boolean; delta?: number }
   | { type: "memories_get" }
   | { type: "memory_forget"; store: string; scope: string; key: string }
   | { type: "memories_wipe" }

@@ -47,6 +47,7 @@ from pyxi.companion import (
     answers,
     filework,
     instant,
+    listening,  # meeting notes with no bot, and live captions
     paperwork,
     pricecheck,
     prompts,
@@ -277,6 +278,7 @@ class Brain:
         self.routines = RoutineStore(settings.data_dir / "routines.json")
         self.mailwatch = MailWatchStore(settings.data_dir / "mailwatch.json")
         tabwork.setup(self)  # Pyxi in your browser: self.browser, the extension's bridge
+        listening.setup(self)  # meeting notes and live captions: self.listening (nothing starts)
         # Set by the server for the first-run tour (pyxi/onboarding.py): given what was just
         # heard, it answers True when the tour takes those words for itself.
         self.heard_hook: Any = None
@@ -2732,6 +2734,11 @@ class Brain:
         """The "Stop everything" hotkey and tray item: every teammate job, the hands, Scout's
         browser, open cards (answered "no") and anything queued to go out, all at once."""
         in_tab = await tabwork.stop(self)  # before its job is cancelled: the tab is told too
+        try:  # nothing is heard from this moment: captions, a meeting being noted
+            heard = await self.listening.stop_all()
+        except Exception:
+            log.exception("stopping the listening failed")
+            heard = []
         jobs = await self.jobs.stop_all()
         hands_on = self._operator is not None
         if hands_on:
@@ -2752,6 +2759,7 @@ class Brain:
             parts.append("the mouse and keyboard")
         if in_tab:
             parts.append("the work in your browser tab")
+        parts += heard
         if queued:
             parts.append(f"{queued} waiting action{'s' if queued != 1 else ''}")
         message = "Stopped everything" + (
@@ -2928,6 +2936,21 @@ class Brain:
         """Have they asked her not to talk (and not yet said she can again)?"""
         return time.monotonic() < getattr(self, "_quiet_until", 0.0)
 
+    def _hushed(self) -> bool:
+        """Is the PC's own sound being listened to (meeting notes, captions)? Then her words
+        are shown, not spoken: her voice would be captioned, or written into the notes."""
+        ls = getattr(self, "listening", None)
+        return ls is not None and ls.hears_speakers()
+
+    async def _narration(self, text: str) -> Any:
+        """A narration line's voice (a model's steps, a walk-through). While the PC's sound is
+        being listened to it is words only, like everything else she says then."""
+        if self._hushed():
+            from pyxi.voice.tts import Speech
+
+            return Speech(text=text, wav=None, duration_s=max(1.5, len(text) / 16))
+        return await self.tts.synthesize(text)
+
     def object_closed(self, by_them: bool = True) -> None:
         """The 3D model has left the screen. Closed by them: nothing more is said about it,
         the answer under way about one of its parts stops, and the ones waiting behind it are
@@ -3066,6 +3089,10 @@ class Brain:
                     # "Okay, got it." asks for nothing, so nothing is said (unless it answers a
                     # question of hers: then it is a yes, and the model takes it).
                     self._calls.append({"round": 1, "tool": "say", "arguments": {"text": ""}, "instant": True})
+                elif not synthetic and (heard_cmd := listening.command(self, user_text)) is not None:
+                    # "Take notes on this meeting", "caption this", "stop the captions": at
+                    # once and with no model call (and no voice into the call).
+                    await listening.run_command(self, heard_cmd)
                 elif not synthetic and instant.is_stop(user_text):
                     # A spoken "stop" stops for real: jobs, the hands, cards and anything queued,
                     # like the hotkey. Before, it only made the model say "Stopping."
@@ -3302,6 +3329,8 @@ class Brain:
                 for j in self.jobs.recent(6)
                 if j.role != "model" and (j.ended_at is None or now_t - j.ended_at < 120)
             )
+            if hearing := self.listening.prompt_note():  # notes being taken, captions on
+                jobs = f"{jobs}\n{hearing}".strip()
             from pyxi import onboarding
 
             # What they told Pyxi in the tour (their name, what they like) is always there.
@@ -4776,6 +4805,8 @@ class Brain:
             return f"Created {agent.name} ({agent.role})."
         if name in specialists.TOOLS:  # Atlas and the other specialists: companion/specialists.py
             return await specialists.handle(self, name, args)
+        if name in listening.TOOLS:  # live meeting notes and captions: companion/listening.py
+            return await listening.handle(self, name, args)
         if name in FILE_TOOLS:  # Pixel, Ledger and file search: companion/filework.py
             return await filework.handle(self, name, args)
         if name in PAPER_TOOLS:  # forms, flight check-in, showing a bill: companion/paperwork.py
@@ -4959,8 +4990,9 @@ class Brain:
             notes = [eid for kind, eid in markers if kind.lower() == "note"]
             if not clean and not anns and not notes:
                 continue
-            if self._quiet():
-                # Shown in the notch, not spoken: they asked her not to talk.
+            if self._quiet() or self._hushed():
+                # Shown in the notch, not spoken: they asked her not to talk (or the PC's
+                # sound is being listened to, and her voice must not end up in the notes).
                 await self.hub.emit(
                     "say",
                     agent=agent,
@@ -5127,7 +5159,7 @@ class Brain:
         for i, line in enumerate(lines):
             if not line:
                 continue
-            speech = await self.tts.synthesize(line)
+            speech = await self._narration(line)
             await self.hub.emit(
                 "scene_audio",
                 scene_id=key,
@@ -5141,7 +5173,7 @@ class Brain:
         for i, step in enumerate(scene.steps):
             if not step.narration:
                 continue
-            speech = await self.tts.synthesize(step.narration)
+            speech = await self._narration(step.narration)
             await self.hub.emit(
                 "scene_audio",
                 scene_id=scene.id,
@@ -5225,7 +5257,7 @@ class Brain:
         walk = build_walkthrough(self.otto_store, job.run_id)
         await self.hub.emit("walkthrough", walkthrough=walk.model_dump(mode="json"))
         for step in walk.steps:
-            speech = await self.tts.synthesize(step.narration)
+            speech = await self._narration(step.narration)
             await self.hub.emit(
                 "walkthrough_audio",
                 walkthrough_id=walk.id,
@@ -6361,7 +6393,7 @@ def says_on_it(text: str) -> bool:
 ACTS = CAN_REFUSE | {
     "subscriptions", "returns", "fill_form", "check_in_flight", "play_music", "tidy_folder",
     "arrange_windows", "schedule_routine", "travel", "money", "meeting_notes", "make_flashcards",
-    "fix_code", "watch_me", "check_prices", "create_agent",
+    "fix_code", "watch_me", "check_prices", "create_agent", "live_notes", "captions",
 }  # fmt: skip
 _HAS_PRICE = re.compile(r"[$£€]\s?\d|\d\s?(?:dollars|bucks)", re.I)
 OPENER_WORDS = 10  # a line said before a lookup: this short, or it is "On it."

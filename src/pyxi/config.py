@@ -201,6 +201,12 @@ class PyxiSettings(BaseSettings):
         description="Model that finds the parts of a picture Pyxi explains (PYXI_MODEL_AIM), on a "
         "zoomed crop: about $0.004 a picture, run while Pyxi speaks. Empty: the chat model's guess.",
     )
+    model_listen: str | None = Field(
+        None,
+        description="Small fast model that writes a live meeting's notes part by part and "
+        "translates captions (PYXI_MODEL_LISTEN). Empty: Haiku where it can be reached "
+        "(OpenRouter, the beta, an Anthropic key), else the chat model.",
+    )
 
     host: str = "127.0.0.1"
     port: int = 8766

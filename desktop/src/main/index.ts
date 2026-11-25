@@ -333,6 +333,16 @@ async function stopEverything(): Promise<void> {
   }
 }
 
+/** The tray's "Meeting notes" and "Live captions": on, or off when it is on. The brain shows
+ * the sign with its Stop button; a problem (no speakers to listen to) comes back as a notice. */
+async function toggleListening(what: "meeting" | "captions"): Promise<void> {
+  try {
+    await fetch(`${BACKEND}/api/listen/${what}`, keyed({ method: "POST" }));
+  } catch (err) {
+    console.warn("[pyxi] listening: the brain didn't answer", err);
+  }
+}
+
 /** Everything lives in the notch now; Ctrl+Alt+W and the tray icon unfold it. */
 function toggleNotch(): void {
   const win = overlays.get(primaryId);
@@ -370,6 +380,7 @@ function buildTrayMenu(): void {
           broadcast("mute", muted);
         },
         stopEverything: () => void stopEverything(),
+        listen: (what) => void toggleListening(what),
         openUrl: (url) => void shell.openExternal(url),
         checkForUpdates: async () => {
           const said = await checkNow();

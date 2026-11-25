@@ -69,6 +69,7 @@ class Notes:
     actions: list[dict[str, str]] = field(default_factory=list)
     subject: str = ""
     body: str = ""
+    questions: list[str] = field(default_factory=list)  # left open (a live meeting's notes)
 
     def action_line(self, a: dict[str, str]) -> str:
         who = a.get("who") or "No owner yet"
@@ -87,6 +88,8 @@ class Notes:
         )
         out += ["", "## Action items", ""]
         out += [f"- [ ] {self.action_line(a)}" for a in self.actions] or ["- None recorded"]
+        if self.questions:
+            out += ["", "## Open questions", ""] + [f"- {q}" for q in self.questions]
         if self.body:
             out += [
                 "",
@@ -120,7 +123,11 @@ def parse_notes(raw: str) -> Notes | None:
         return [clean(x) for x in v if str(x).strip()] if isinstance(v, list) else []
 
     actions = [
-        {k: clean(a.get(k) or "") for k in ("who", "what", "when")}
+        {
+            k: clean(a.get(k) or "")
+            for k in ("who", "what", "when", "due")
+            if k != "due" or a.get(k)  # an ISO date, only when the notes were asked for one
+        }
         for a in data.get("actions") or []
         if isinstance(a, dict) and str(a.get("what") or "").strip()
     ]
@@ -131,6 +138,7 @@ def parse_notes(raw: str) -> Notes | None:
         actions=actions,
         subject=clean(fu.get("subject") or ""),
         body=clean(fu.get("body") or "").replace(", ,", ","),
+        questions=strings(data.get("questions")),
     )
 
 

@@ -1,0 +1,49 @@
+/* The meeting sign and the caption bar (Hearing.tsx). */
+
+/* ------------------------------------------------------------ taking notes */
+.hear-pill { position: fixed; left: 26px; bottom: 96px; z-index: 66; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 13px; border-radius: 999px; background: var(--glass-strong); border: 1px solid rgba(255, 122, 122, .32); box-shadow: 0 10px 30px rgba(0, 0, 0, .38), 0 0 0 .5px rgba(0, 0, 0, .5); pointer-events: auto !important; animation: rise .3s var(--spring); }
+/* With the caption bar along the bottom of the same screen, the sign moves up out of its way. */
+.hear-pill.above-captions { bottom: 46%; }
+.hear-pill.writing { border-color: rgba(158, 203, 255, .3); }
+.hear-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #ff6b6b; box-shadow: 0 0 9px rgba(255, 107, 107, .9); animation: breathe 1.6s ease-in-out infinite; }
+.hear-pill.writing .hear-dot { background: var(--ice); box-shadow: 0 0 9px rgba(158, 203, 255, .9); }
+.hear-pill-text { display: grid; grid-template-columns: auto auto; column-gap: 8px; align-items: baseline; }
+.hear-pill-text b { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.hear-time { font: 500 12.5px/1 "Inter", ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.hear-pill-text small { grid-column: 1 / -1; max-width: 300px; margin-top: 2px; font-size: 11px; line-height: 1.35; color: var(--ink-2); }
+.hear-stop { flex: none; height: 28px; padding: 0 13px; border-radius: 999px; border: 1px solid rgba(255, 122, 122, .45); background: rgba(255, 107, 107, .14); color: #ffd9d9; font-size: 12.5px; font-weight: 600; cursor: pointer; pointer-events: auto !important; }
+.hear-stop:hover { background: rgba(255, 107, 107, .26); color: #fff; }
+.hear-pill.writing .hear-stop { border-color: var(--hair-hi); background: rgba(255, 255, 255, .05); color: var(--ink-2); }
+
+/* ------------------------------------------------------------ captions */
+.cap-bar { --cap-size: 26px; position: fixed; left: 50%; transform: translateX(-50%); z-index: 64; display: flex; flex-direction: column; align-items: center; gap: 6px; width: min(1100px, 76vw); pointer-events: none; }
+.cap-bar.bottom { bottom: 78px; }
+.cap-bar.top { top: 70px; flex-direction: column-reverse; }
+/* Readable over anything: a dark plate, white words, and a dark edge on every letter. */
+.cap-plate { max-width: 100%; padding: calc(var(--cap-size) * .28) calc(var(--cap-size) * .62) calc(var(--cap-size) * .34); border-radius: calc(var(--cap-size) * .5); background: rgba(6, 7, 10, .82); box-shadow: 0 8px 30px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .06); text-align: center; pointer-events: none; }
+.cap-plate.empty { opacity: .62; }
+.cap-text, .cap-original { display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
+/* Two lines at most: the box is two lines tall and the words sit on its floor, so when
+   there are more it is the newest two that show. */
+.cap-text { max-height: calc(var(--cap-size) * 1.32 * 2); }
+.cap-text span { flex: none; font-size: var(--cap-size); line-height: 1.32; font-weight: 600; letter-spacing: -.005em; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .9), 0 0 8px rgba(0, 0, 0, .6); overflow-wrap: anywhere; }
+.cap-plate.empty .cap-text span { font-size: calc(var(--cap-size) * .62); font-weight: 500; color: var(--ink-2); }
+.cap-text.waiting span { color: rgba(255, 255, 255, .72); }
+.cap-original { max-height: calc(var(--cap-size) * .62 * 1.35 * 2); margin-bottom: calc(var(--cap-size) * .12); }
+.cap-original span { flex: none; font-size: calc(var(--cap-size) * .62); line-height: 1.35; font-weight: 500; color: rgba(232, 238, 248, .78); text-shadow: 0 1px 2px rgba(0, 0, 0, .9); overflow-wrap: anywhere; }
+
+.cap-tools { position: relative; display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 12px; background: rgba(6, 7, 10, .78); border: 1px solid rgba(255, 255, 255, .08); opacity: .5; transition: opacity .2s; pointer-events: auto !important; }
+.cap-tools:hover { opacity: 1; }
+.cap-tools > button { height: 24px; min-width: 30px; padding: 0 8px; border-radius: 8px; border: 0; background: transparent; color: var(--ink-2); font-size: 11.5px; font-weight: 600; cursor: pointer; pointer-events: auto !important; }
+.cap-tools > button:hover { background: rgba(255, 255, 255, .1); color: var(--ink); }
+.cap-tools > button.on { color: var(--ice-hi); background: rgba(158, 203, 255, .14); }
+.cap-tools > button.cap-stop { color: #ffd0d0; background: rgba(255, 107, 107, .16); }
+.cap-tools > button.cap-stop:hover { background: rgba(255, 107, 107, .32); color: #fff; }
+.cap-menu { position: absolute; left: 0; bottom: calc(100% + 6px); display: grid; grid-template-columns: 1fr 1fr; gap: 3px; width: 250px; padding: 7px; border-radius: 12px; background: var(--glass-strong); border: 1px solid var(--hair-hi); box-shadow: 0 14px 40px rgba(0, 0, 0, .5); pointer-events: auto !important; }
+.cap-bar.top .cap-menu { bottom: auto; top: calc(100% + 6px); }
+.cap-menu button { height: 26px; padding: 0 9px; border-radius: 8px; border: 0; background: transparent; color: var(--ink-2); font-size: 12px; text-align: left; cursor: pointer; pointer-events: auto !important; }
+.cap-menu button:hover { background: rgba(255, 255, 255, .08); color: var(--ink); }
+.cap-menu button.on { color: var(--ice-hi); background: rgba(158, 203, 255, .14); }
+.cap-menu label { grid-column: 1 / -1; display: flex; align-items: center; gap: 7px; margin-top: 4px; padding: 6px 9px 2px; border-top: 1px solid var(--hair); font-size: 12px; color: var(--ink-2); cursor: pointer; pointer-events: auto !important; }
+.cap-menu input { pointer-events: auto !important; }
+@media (prefers-reduced-motion: reduce) { .hear-dot { animation: none; } .hear-pill { animation: none; } }

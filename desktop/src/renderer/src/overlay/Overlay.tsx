@@ -6,6 +6,7 @@ import { brain } from "../shared/socket";
 import { Annotations } from "./Annotations";
 import { AnswerCard } from "./AnswerCard";
 import { guideClick } from "./guideMarks";
+import { Hearing } from "./Hearing";
 import { NotesCard } from "./NotesCard";
 import { Notch } from "./Notch";
 import { ObjectPanel } from "./ObjectPanel";
@@ -194,6 +195,7 @@ export function Overlay() {
       <PriceTag />
       <Team />
       <Requests />
+      <Hearing />
       <Onboarding />
       <Presence micLevel={micLevel} />
       {isPrimary && <Notch micLevel={micLevel} />}
