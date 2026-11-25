@@ -309,25 +309,31 @@ def _pyxi_node(driver_path: Path) -> Path:
     (site / "playwright" / "driver" / "node.exe").unlink(missing_ok=True)
 
 
+def clear(folder: Path) -> None:
+    """Make way for a fresh ``folder``: the old one is moved aside and then removed, not
+    removed in place. A folder just emptied can stay "in use" for a while on Windows (a virus
+    scan, the search index), and on 25 November that stopped four builds running with
+    "access is denied" or a folder that was still there. What cannot be removed yet stays in
+    its side folder and is cleared by the next build."""
+    for old in folder.parent.glob(f"{folder.name}.old-*"):
+        shutil.rmtree(old, ignore_errors=True)
+    if not folder.exists():
+        return
+    aside = folder.with_name(f"{folder.name}.old-{int(time.time())}")
+    for attempt in range(6):
+        try:
+            folder.rename(aside)
+            break
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(2)
+    shutil.rmtree(aside, ignore_errors=True)
+
+
 def slim(version: str) -> None:
     started = time.monotonic()
-    # The old bundle is moved aside and then removed, not removed in place: a folder just
-    # emptied can stay "in use" for a while on Windows (a virus scan, the search index), and
-    # on 25 November that stopped three builds running with "access is denied". What cannot
-    # be removed yet is left in its side folder and cleared by the next build.
-    for old in BUNDLE.parent.glob(f"{BUNDLE.name}.old-*"):
-        shutil.rmtree(old, ignore_errors=True)
-    if BUNDLE.exists():
-        aside = BUNDLE.with_name(f"{BUNDLE.name}.old-{int(time.time())}")
-        for attempt in range(6):
-            try:
-                BUNDLE.rename(aside)
-                break
-            except PermissionError:
-                if attempt == 5:
-                    raise
-                time.sleep(2)
-        shutil.rmtree(aside, ignore_errors=True)
+    clear(BUNDLE)
     BUNDLE.mkdir(parents=True)
     for f in FULL.glob("*"):
         if f.is_file() and f.suffix.lower() in (".exe", ".dll"):
@@ -349,7 +355,7 @@ def slim(version: str) -> None:
     site.mkdir(parents=True)
     packages = Zip(BUNDLE / "python-packages.zip")
     pack_dir = DESKTOP / "build" / "packs" / "voice"
-    shutil.rmtree(pack_dir.parent, ignore_errors=True)
+    clear(pack_dir.parent)
     pack_dir.mkdir(parents=True)
 
     all_dists = dists(full_site)
