@@ -172,9 +172,11 @@ def floating(scene: ObjectScene) -> list[Floater]:
     return out
 
 
-def tidy(scene: ObjectScene) -> tuple[ObjectScene, list[str]]:
+def tidy(scene: ObjectScene, *, open_up: bool = True) -> tuple[ObjectScene, list[str]]:
     """Mend what has one right answer. Returns the model (the same one if nothing was wrong)
-    and what was done, in words."""
+    and what was done, in words. ``open_up`` False: a solid part that hides a labelled one is
+    left solid (a model built from a photo is the outside of the thing, and a button set into
+    a controller's top is not "sealed inside" it)."""
     found = boxes(scene)
     extent = _extent(found)
     done: list[str] = []
@@ -195,7 +197,7 @@ def tidy(scene: ObjectScene) -> tuple[ObjectScene, list[str]]:
 
     # A labelled part sealed inside a solid one is a tag pointing at nothing you can see.
     shells: set[str] = set()
-    for inner in judged:
+    for inner in judged if open_up else []:
         if not inner.part.label or inner.part.id in drop:
             continue
         for outer in judged:
@@ -204,6 +206,8 @@ def tidy(scene: ObjectScene) -> tuple[ObjectScene, list[str]]:
                 continue
             if o.opacity < 0.9 or o.material == "glass" or outer.volume < 3 * inner.volume:
                 continue
+            if o.shape == "lathe" and o.wall:
+                continue  # a hollow vessel, open at the top: what is in it shows (soil in a pot)
             # A round shape does not fill its box: only its middle surely hides things.
             inset = 0.15 if o.shape in _ROUND else 0.0
             lo = [outer.lo[i] + inset * (outer.hi[i] - outer.lo[i]) for i in range(3)]

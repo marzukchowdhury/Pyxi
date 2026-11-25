@@ -15,6 +15,7 @@ import { storyDuration } from "../scene/motion";
 import { Interactive } from "./Interactive";
 import "./objectPanel.css";
 import { useLinger } from "./linger";
+import { photoAngle, safePhoto } from "./objectPhoto";
 import { useOverlay, voice } from "./store";
 
 const STAGE = { w: 780, h: 560 };
@@ -31,6 +32,7 @@ export function ObjectPanel() {
   const [cutaway, setCutaway] = useState(false);
   const [finished, setFinished] = useState(false); // last beat told and its animation run out
   const [stalled, setStalled] = useState(false); // interrupted mid-beat: paused, then tidied away
+  const [comparing, setComparing] = useState(false); // the photo it was built from, big, beside it
   const clipGen = useRef(0); // bumps when this panel stops its own lines, so that isn't "interrupted"
   const stopMine = () => {
     clipGen.current++;
@@ -54,6 +56,7 @@ export function ObjectPanel() {
       setFinished(false);
       setPlaying(object.spec.auto_play);
     }
+    if (object.version === 1) setComparing(false);
     setCutaway(object.spec.cutaway);
   }, [object]);
 
@@ -121,9 +124,11 @@ export function ObjectPanel() {
   // Gone by itself once its story is told: the brain is told that too, so Pyxi never says a
   // model "is still up" when it isn't.
   const tidyAway = () => { brain.send({ type: "object_closed", by_them: false }); closeObject(); };
-  const linger = useLinger((finished && playing) || stalled, tidyAway, finished && playing ? 2500 : 15000);
+  // While they are comparing it with the photo it stays: that is them looking at it.
+  const linger = useLinger(((finished && playing) || stalled) && !comparing, tidyAway, finished && playing ? 2500 : 15000);
 
   if (!object || !spec) return null;
+  const photo = safePhoto(spec.photo);
   const current = spec.beats[Math.min(beat, spec.beats.length - 1)];
   const hasCasing = spec.parts.some((p) => p.casing);
 
@@ -171,7 +176,21 @@ export function ObjectPanel() {
             brain is told, so nothing more is said about a model they have shut. */}
         <button className="icon" onClick={() => { brain.send({ type: "object_closed", by_them: true }); closeObject(); }} title="Close"><Close /></button>
       </div>
-      <ObjectView scene={spec} clock={clock} beat={current} beatIndex={beat} cutaway={cutaway} width={width} height={height} onPick={ask} />
+      <ObjectView scene={spec} clock={clock} beat={current} beatIndex={beat} cutaway={cutaway} width={width} height={height} onPick={ask} photoAngle={comparing ? photoAngle(spec.photo_view) : null} />
+      {/* Built from a photo: the photo stays beside the model. A click makes it big and turns
+          the model to the angle the photo was taken from, to compare the two; again puts it back. */}
+      {photo && (
+        <button
+          className={`object-photo ${comparing ? "comparing" : ""}`}
+          onClick={() => setComparing(!comparing)}
+          title={comparing ? "Make the photo small again" : "Compare with the photo"}
+          aria-label={comparing ? "Make the photo small again" : "Compare with the photo"}
+          aria-pressed={comparing}
+        >
+          <img src={photo} alt="The photo this model was built from" draggable={false} />
+          <span>{comparing ? "The photo" : "Photo"}</span>
+        </button>
+      )}
       {/* No card: the model floats on its own. A slim bar says where we are; the voice tells it. */}
       <div className="object-bar" title={current.narration}>
         <div className="object-dots">

@@ -14,6 +14,7 @@ not an engineering drawing.
 
 from __future__ import annotations
 
+import math
 import re
 import uuid
 from typing import Any, Literal
@@ -35,6 +36,7 @@ PartShape = Literal[
     "blob",
     "extrude",
     "lathe",
+    "loft",
     "gear",
     "spring",
     "plane",
@@ -89,6 +91,7 @@ Surface = Literal[
     "grille",
     "knurl",
     "panel_lines",
+    "windows",
 ]
 SURFACES: tuple[str, ...] = Surface.__args__  # type: ignore[attr-defined]
 # What a builder writes when it reaches for a material that is not on the list: the nearest
@@ -131,7 +134,9 @@ Ease = Literal["linear", "in", "out", "in_out", "spring"]
 
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 _ID = re.compile(r"[^a-zA-Z0-9_\-]")
+_PHOTO = re.compile(r"^data:image/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$")
 MAX_PARTS, MAX_MOTIONS, MAX_BEATS, MAX_POINTS, MAX_LUMPS = 90, 60, 10, 64, 24
+MAX_SECTIONS, MAX_AROUND = 24, 24
 # Shapes with hard edges, and what a living thing gets instead of each.
 SOFTER = {"box": "sphere", "rounded_box": "sphere", "cylinder": "capsule"}
 
@@ -154,9 +159,10 @@ def _clamp_fields(data: Any, limits: dict[str, tuple[float, float]]) -> Any:
     for key, (lo, hi) in limits.items():
         v = out.get(key)
         if isinstance(v, int | float) and not isinstance(v, bool):
-            out[key] = (
-                type(v)(max(lo, min(hi, v))) if isinstance(v, float) else int(max(lo, min(hi, v)))
-            )
+            c = max(lo, min(hi, v))
+            # A whole number stays whole (a tooth count), unless the limit it met is not one:
+            # a bevel of 1 is the most there is, 0.5, not none at all.
+            out[key] = float(c) if isinstance(v, float) or c != int(c) else int(c)
     return out
 
 
@@ -210,7 +216,8 @@ class Part(BaseModel):
         "pins (a pin or solder-ball grid, gold contacts), traces (circuit traces on a board), "
         "cells (a chip die's grid of blocks), fins (heat-sink fins), brushed (brushed metal), "
         "vents (cooling slots), grille (a mesh of holes: speaker, intake), knurl (a grip), "
-        "panel_lines (seams and access panels on a casing or hull).",
+        "panel_lines (seams and access panels on a casing or hull), windows (rows of window "
+        "panes on a building's wall or a tower: density 1 is about six floors).",
     )
     density: float | None = Field(
         None,
@@ -279,6 +286,40 @@ class Part(BaseModel):
         "lathe: [[along, radius], ...] from one end to the other, spun round `axis` (a fuselage, "
         "rocket, bottle, piston, nose cone, vase: anything round in cross-section).",
     )
+    wall: float | None = Field(
+        None,
+        ge=0.005,
+        le=5.0,
+        description="lathe: makes it a hollow vessel, open at its +axis end, with walls this "
+        "thick: a mug, cup, bowl, glass, plant pot, bucket, lampshade, bin. `profile` is then "
+        "the OUTSIDE only, from the closed end to the open rim.",
+    )
+    bevel: float | None = Field(
+        None,
+        ge=0.0,
+        le=0.5,
+        description="extrude: how far its edges are rounded over, as a share of its thickness "
+        "(0 sharp, 0.5 rounded right over): a car body or a phone seen from the side is an "
+        "outline with soft edges, not a slab.",
+    )
+    sections: list[list[float]] | None = Field(
+        None,
+        description="loft: [[along, width, height, lift, round], ...] cross-sections from one "
+        "end to the other along `axis`, joined into one smooth skin (3-10 of them). width is "
+        "across the body, height is up (y), lift raises that section's middle, round is 1 for "
+        "an oval section down to 0.2 for a nearly square one. A car body (low bonnet, tall "
+        "cabin, boot), a shoe, a computer mouse, a hull, a controller's grip, a shampoo "
+        "bottle: any body that is not round and not a flat outline. With axis y, width is x "
+        "and height is z.",
+    )
+    around: int | None = Field(
+        None,
+        ge=2,
+        le=MAX_AROUND,
+        description="Make this many of the part in all, spaced evenly round the upright (y) "
+        "line through the model's middle (or its parent's): the legs of a stool, a plant's "
+        "leaves, petals, spokes, columns. Model one, off the middle line.",
+    )
     teeth: int | None = Field(
         None, ge=3, le=80, description="gear: number of teeth (or fan blades)."
     )
@@ -311,6 +352,9 @@ class Part(BaseModel):
                 "turns": (1, 40),
                 "squash": (0.15, 1),
                 "blend": (0, 1),
+                "wall": (0.005, 5),
+                "bevel": (0, 0.5),
+                "around": (2, MAX_AROUND),
             },
         )
 
@@ -377,6 +421,27 @@ class Part(BaseModel):
             return None
         pts = [p for p in (_vec(x, 2, -200.0, 200.0) for x in v[:MAX_POINTS]) if p]
         return pts if len(pts) >= 3 else None
+
+    @field_validator("sections", mode="before")
+    @classmethod
+    def _sections(cls, v: Any) -> list[list[float]] | None:
+        if not isinstance(v, list):
+            return None
+        out: list[list[float]] = []
+        for item in v[:MAX_SECTIONS]:
+            if not isinstance(item, list | tuple) or len(item) < 3:
+                continue
+            try:
+                nums = [float(x) for x in item[:5]]
+            except (TypeError, ValueError):
+                continue
+            along = max(-200.0, min(200.0, nums[0]))
+            width, height = (max(0.005, min(60.0, abs(n))) for n in nums[1:3])
+            lift = max(-200.0, min(200.0, nums[3])) if len(nums) > 3 else 0.0
+            rnd = max(0.15, min(1.0, nums[4])) if len(nums) > 4 else 1.0
+            out.append([along, width, height, lift, rnd])
+        out.sort(key=lambda s: s[0])
+        return out if len(out) >= 2 else None
 
     @field_validator("label", "note")
     @classmethod
@@ -481,6 +546,24 @@ class ObjectScene(BaseModel):
     cutaway: bool = False
     auto_play: bool = True
     credit: str | None = Field(None, description="Set by Pyxi: who made the real model it uses.")
+    # A model built from a photo (scenes/photo.py; set by Pyxi, never by the model): the photo,
+    # small, as a data URL, kept beside the model to compare; and the angle it was taken from,
+    # [degrees round from the front, degrees above level], which the model first opens at.
+    photo: str | None = None
+    photo_view: list[float] | None = None
+
+    @field_validator("photo", mode="before")
+    @classmethod
+    def _photo(cls, v: Any) -> str | None:
+        # Only a small picture held in the model itself: never an address to fetch.
+        ok = isinstance(v, str) and len(v) <= 400_000 and _PHOTO.match(v)
+        return v if ok else None
+
+    @field_validator("photo_view", mode="before")
+    @classmethod
+    def _photo_view(cls, v: Any) -> list[float] | None:
+        angle = _vec(v, 2, -360.0, 360.0)
+        return [angle[0], max(-89.0, min(89.0, angle[1]))] if angle else None
     notes: list[str] = Field(
         default_factory=list, description="Repairs made during validation (set by Pyxi)."
     )
@@ -515,8 +598,13 @@ class ObjectScene(BaseModel):
             if p.organic and p.shape in SOFTER:
                 notes.append(f"{pid}: a living part is never a {p.shape}; drawn as a {SOFTER[p.shape]}")
                 p = p.model_copy(update={"shape": SOFTER[p.shape]})
+            if p.shape == "loft" and not p.sections:
+                notes.append(f"{pid}: loft without sections became a rounded box")
+                p = p.model_copy(update={"shape": "rounded_box"})
             if p.shape in ("limb", "blob"):
                 p = _fit_box(p)
+            if p.shape == "loft":
+                p = _fit_loft(p)
             if p.organic and p.shape == "extrude" and p.profile:
                 # A fin, an ear, a leaf, a wing: an outline with almost no thickness. Written
                 # as thick as it is wide, it is a block of wood stuck on a fish.
@@ -542,7 +630,11 @@ class ObjectScene(BaseModel):
                 notes.append(f"{pid}: extrude without profile became a box")
                 p = p.model_copy(update={"shape": "box"})
             parts.append(p.model_copy(update={"id": pid}))
-            if p.mirror:
+            if p.around:
+                parts[-1].around = None
+                parts[-1].mirror = False
+                parts += _ring(parts[-1], p.around, {q.id for q in parts})
+            elif p.mirror:
                 parts[-1].mirror = False
                 twin = _twin(parts[-1], {q.id for q in parts})
                 if twin is not None:
@@ -621,6 +713,103 @@ def _fit_box(p: Part) -> Part:
             "lumps": [[*shift(lump), *lump[3:6]] for lump in p.lumps] if p.lumps else None,
         }
     )
+
+
+def loft_rings(sections: list[list[float]], steps: int = 8) -> list[list[float]]:
+    """The cross-sections a loft is really drawn from: the written ones with `steps` eased in
+    between each pair (Catmull-Rom through every number, the same sum the renderer does)."""
+    n = len(sections)
+    if n < 2:
+        return [list(s) for s in sections]
+    out: list[list[float]] = []
+    for i in range(n - 1):
+        p0, p1, p2, p3 = sections[max(0, i - 1)], sections[i], sections[i + 1], sections[min(n - 1, i + 2)]
+        for k in range(steps + (1 if i == n - 2 else 0)):
+            f = k / steps
+            row = [
+                0.5 * (2 * b + (c - a) * f + (2 * a - 5 * b + 4 * c - d) * f * f + (3 * b - a - 3 * c + d) * f**3)
+                for a, b, c, d in zip(p0, p1, p2, p3)
+            ]
+            # Never past its neighbours along the body, never thinner than a hair, never rounder than round.
+            row[0] = min(max(row[0], p1[0]), p2[0])
+            row[1], row[2] = max(0.004, row[1]), max(0.004, row[2])
+            row[4] = max(0.15, min(1.0, row[4]))
+            out.append(row)
+    return out
+
+
+def _fit_loft(p: Part) -> Part:
+    """A loft is drawn from its sections, so its `size` is worked out from them, and an unturned
+    one is re-centred on its box (see ``_fit_box``)."""
+    rings = loft_rings(p.sections or [])
+    if not rings:
+        return p
+    a = "xyz".index(p.axis)
+    across, up = (2, 1) if p.axis == "x" else (0, 1) if p.axis == "z" else (0, 2)
+    lo, hi = [0.0] * 3, [0.0] * 3
+    lo[a], hi[a] = min(r[0] for r in rings), max(r[0] for r in rings)
+    lo[across], hi[across] = -max(r[1] for r in rings) / 2, max(r[1] for r in rings) / 2
+    lo[up], hi[up] = min(r[3] - r[2] / 2 for r in rings), max(r[3] + r[2] / 2 for r in rings)
+    size = [max(0.005, hi[i] - lo[i]) for i in range(3)]
+    mid = [(lo[i] + hi[i]) / 2 for i in range(3)]
+    if any(p.rotation) or all(abs(m) < 1e-6 for m in mid):
+        return p.model_copy(update={"size": size})
+    return p.model_copy(
+        update={
+            "size": size,
+            "position": [p.position[i] + mid[i] for i in range(3)],
+            "sections": [[s[0] - mid[a], s[1], s[2], s[3] - mid[up], s[4]] for s in p.sections or []],
+        }
+    )
+
+
+def _euler_matrix(deg: list[float]) -> list[list[float]]:
+    """Degrees [x, y, z] to a turn, the way the renderer reads them (z first, then y, then x)."""
+    (cx, sx), (cy, sy), (cz, sz) = ((math.cos(math.radians(d)), math.sin(math.radians(d))) for d in deg)
+    return [
+        [cy * cz, -cy * sz, sy],
+        [cx * sz + sx * sy * cz, cx * cz - sx * sy * sz, -sx * cy],
+        [sx * sz - cx * sy * cz, sx * cz + cx * sy * sz, cx * cy],
+    ]
+
+
+def _matrix_euler(m: list[list[float]]) -> list[float]:
+    sy = max(-1.0, min(1.0, m[0][2]))
+    if abs(sy) < 0.9999999:
+        x, z = math.atan2(-m[1][2], m[2][2]), math.atan2(-m[0][1], m[0][0])
+    else:
+        x, z = math.atan2(m[2][1], m[1][1]), 0.0
+    return [round(math.degrees(v), 4) + 0.0 for v in (x, math.asin(sy), z)]
+
+
+def _ring(p: Part, count: int, taken: set[str]) -> list[Part]:
+    """The rest of a ring of ``count`` of this part, evenly round the upright line through the
+    middle of the model (or of its parent)."""
+    if p.shape in ("asset", "marker", "arrow") or math.hypot(p.position[0], p.position[2]) < 1e-6:
+        return []  # on the middle line every copy would be the same part again
+    base = _euler_matrix(p.rotation)
+    out: list[Part] = []
+    for k in range(1, count):
+        cid = f"{p.id}_{k + 1}"
+        if cid in taken:
+            continue
+        angle = 360.0 * k / count
+        c, s = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+        turn = [[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]]
+        both = [[sum(turn[i][j] * base[j][n] for j in range(3)) for n in range(3)] for i in range(3)]
+        x, y, z = p.position
+        out.append(
+            p.model_copy(
+                update={
+                    "id": cid,
+                    "position": [round(c * x + s * z, 5), y, round(-s * x + c * z, 5)],
+                    "rotation": _matrix_euler(both),
+                    "label": None,
+                    "note": None,
+                }
+            )
+        )
+    return out
 
 
 def _twin(p: Part, taken: set[str]) -> Part | None:
@@ -781,7 +970,7 @@ def _pyxi_only(node: Any) -> Any:
     if isinstance(node, dict):
         props = node.get("properties")
         if isinstance(props, dict):
-            for key in ("asset", "node", "credit"):
+            for key in ("asset", "node", "credit", "photo", "photo_view"):
                 props.pop(key, None)
         if isinstance(node.get("enum"), list) and "arrow" in node["enum"]:
             node["enum"] = [v for v in node["enum"] if v != "asset"]

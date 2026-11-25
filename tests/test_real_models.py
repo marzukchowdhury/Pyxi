@@ -54,7 +54,7 @@ def test_a_part_can_ask_for_surface_detail_and_real_electronics_materials():
     )
     assert [p.surface for p in m.parts] == ["traces", "cells", "pins", None, "fins"]
     assert m.parts[1].density == 2 and m.parts[0].density is None and not m.notes
-    assert set(SURFACES) == {"pins", "traces", "cells", "fins", "brushed", "vents", "grille", "knurl", "panel_lines"}
+    assert set(SURFACES) == {"pins", "traces", "cells", "fins", "brushed", "vents", "grille", "knurl", "panel_lines", "windows"}
     # It survives the trip to the renderer, and an edit can set it.
     sent = m.model_dump(mode="json")["parts"][1]
     assert sent["surface"] == "cells" and sent["density"] == 2 and sent["material"] == "silicon"

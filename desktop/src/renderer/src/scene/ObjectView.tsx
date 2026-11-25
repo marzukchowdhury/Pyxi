@@ -14,7 +14,7 @@ import { type MutableRefObject, Suspense, useEffect, useMemo, useRef, useState }
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { Beat, ObjectScene, Part } from "../shared/protocol";
-import { flatView, fromOrbit, orbitSpring, type OrbitSpring, smoothDamp, stepOrbit, toOrbit } from "./camera";
+import { flatView, fromOrbit, orbitSpring, type OrbitSpring, photoAngle as cleanAngle, photoDirection, smoothDamp, stepOrbit, toOrbit } from "./camera";
 import { children, evaluate } from "./motion";
 import { usePace } from "./pace";
 import { useAsset } from "./assets";
@@ -38,6 +38,8 @@ interface Props {
   width: number;
   height: number;
   onPick?: (part: Part) => void;
+  /** Held at this angle (the photo's own), whatever the beat says: for comparing with the photo. */
+  photoAngle?: [number, number] | null;
 }
 
 interface Layer {
@@ -77,7 +79,7 @@ const VIEWS: Record<Beat["camera"], [number, number, number]> = {
   wide: [0.82, 0.58, 1.3],
 };
 
-export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, height, onPick }: Props) {
+export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, height, onPick, photoAngle }: Props) {
   const registry = useRef(new Map<string, Registered>());
   const callouts = useRef(new Map<string, { el: HTMLDivElement | null; line: SVGPathElement | null; dot: SVGCircleElement | null }>());
   const labelled = scene.parts.filter((p) => p.label);
@@ -114,7 +116,7 @@ export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, heig
         <Measure registry={registry} sceneId={fit} out={bounds} />
         <Studio style={scene.style} bounds={bounds} sceneId={fit} shadows={high} />
         <Model scene={scene} clock={clock} beat={beat} cutaway={cutaway} registry={registry} onPick={onPick} />
-        <Rig registry={registry} beat={beat} beatIndex={beatIndex} sceneId={scene.id} />
+        <Rig registry={registry} beat={beat} beatIndex={beatIndex} sceneId={scene.id} photoView={photoAngle ?? cleanAngle(scene.photo_view)} photoHeld={photoAngle != null} />
         <CalloutDriver registry={registry} callouts={callouts} beat={beat} width={width} height={height} />
         <Shadow bounds={bounds} sceneId={fit} style={scene.style} />
       </Canvas>
@@ -602,7 +604,7 @@ function Pace({ clock, deps }: { clock: MutableRefObject<Clock>; deps: unknown[]
 }
 
 /** Frames the beat's subject from the beat's angle and follows it; hands over when you drag. */
-function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObject<Map<string, Registered>>; beat: Beat; beatIndex: number; sceneId: string }) {
+function Rig({ registry, beat, beatIndex, sceneId, photoView, photoHeld }: { registry: MutableRefObject<Map<string, Registered>>; beat: Beat; beatIndex: number; sceneId: string; photoView?: [number, number] | null; photoHeld?: boolean }) {
   const controls = useRef<OrbitControlsImpl>(null);
   const { camera, size, invalidate } = useThree();
   const manual = useRef(false);
@@ -626,6 +628,11 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
   useEffect(() => {
     first.current = true;
   }, [sceneId]);
+  // "Compare with the photo": swing back to the photo's angle even after they turned it.
+  useEffect(() => {
+    if (photoHeld) manual.current = false;
+    invalidate();
+  }, [photoHeld, invalidate]);
   useEffect(() => {
     const c = controls.current;
     if (!c) return;
@@ -667,6 +674,9 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
       const sign = beat.camera === "side" ? 1 : -1;
       view = span.x >= span.z ? [0, 0.16, sign] : [sign, 0.16, 0.02];
     }
+    // A model built from a photo opens from the photo's own angle (and is held there while
+    // the two are being compared), so the first thing seen is the thing in the picture.
+    if (photoView && (photoHeld || beatIndex === 0)) view = photoDirection(photoView[0], photoView[1]);
     const dir = new THREE.Vector3(...view).normalize();
     // Tight fit: the closest distance at which all 8 corners of the box are inside the view.
     const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir);

@@ -7,6 +7,7 @@ import { BrowserConnect } from "./BrowserConnect";
 import { Memories } from "./Memories";
 import { PrivateApps } from "./PrivateApps";
 import { Close, Compass, Cube, Feather, FileStack, Grid, Mark, Mic, Minus, Plus, Replay, Send, Spark, Thread } from "../shared/icons";
+import { PICTURE_ALONE, useChatPicture } from "../shared/pictureInput";
 import type { Agent, Job } from "../shared/protocol";
 import { brain } from "../shared/socket";
 import { answer, getJson, usePanel } from "./store";
@@ -99,9 +100,13 @@ export function Chat() {
     end.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat.length]);
   const color = (name?: string) => agents.find((a) => a.name === name)?.color ?? "#a78bfa";
+  const chatPicture = useChatPicture(); // a picture pasted or dropped into the chat box
   const send = (t: string) => {
-    if (!t.trim()) return;
-    brain.send({ type: "text", text: t.trim() });
+    if (!t.trim() && !chatPicture.picture) return;
+    // A picture in the box goes with the words; with no words it is a picture to model.
+    if (chatPicture.picture) brain.send({ type: "text", text: t.trim() || PICTURE_ALONE, picture: { data: chatPicture.picture.data } });
+    else brain.send({ type: "text", text: t.trim() });
+    chatPicture.clear();
     setText("");
   };
   return (
@@ -129,10 +134,17 @@ export function Chat() {
         {(state === "thinking" || state === "looking") && <div className="line agent pending"><span className="avatar" /><div className="text shimmer-text">{state === "looking" ? "Looking at your screen" : "Thinking"}</div></div>}
         <div ref={end} />
       </div>
-      <form className="composer" onSubmit={(e) => { e.preventDefault(); send(text); }}>
+      {(chatPicture.picture || chatPicture.problem) && (
+        <div className="chat-picture">
+          {chatPicture.picture && <img src={chatPicture.picture.data} alt="" draggable={false} />}
+          <span>{chatPicture.picture ? "Picture added. Say what to do with it, or press Enter for a 3D model." : chatPicture.problem}</span>
+          <button type="button" aria-label="Remove the picture" title="Remove the picture" onClick={chatPicture.clear}><Close /></button>
+        </div>
+      )}
+      <form className={`composer ${chatPicture.over ? "dropping" : ""}`} onSubmit={(e) => { e.preventDefault(); send(text); }} {...chatPicture.handlers}>
         <button type="button" className={`mic ${state === "listening" ? "live" : ""}`} onClick={() => bridge.ptt()} title={`Talk (${talk.keys.join("+") || "click"})`}><Mic /></button>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask Pyxi anything" />
-        <button type="submit" className="send" disabled={!text.trim()} aria-label="Send"><Send /></button>
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder={chatPicture.picture ? "What should I do with it?" : "Ask Pyxi anything, or paste a picture"} />
+        <button type="submit" className="send" disabled={!text.trim() && !chatPicture.picture} aria-label="Send"><Send /></button>
       </form>
     </div>
   );

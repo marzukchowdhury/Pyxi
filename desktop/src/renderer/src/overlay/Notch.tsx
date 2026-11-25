@@ -22,6 +22,7 @@ import { Chat, Gallery, Palace, Settings, type Tab, TABS, Team } from "../panel/
 import { Activity } from "../panel/Activity";
 import { VoiceStudio } from "../panel/VoiceStudio";
 import { Close, Expand, Mic, Send } from "../shared/icons";
+import { PICTURE_ALONE, useChatPicture } from "../shared/pictureInput";
 import { brain } from "../shared/socket";
 import { FileReady } from "./FileReady";
 import { Interactive } from "./Interactive";
@@ -96,6 +97,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const [pinned, setPinned] = useState(false);
   const [focused, setFocused] = useState(false);
   const [text, setText] = useState("");
+  const chatPicture = useChatPicture(); // a picture pasted or dropped into the chat box
   const [now, setNow] = useState(() => performance.now());
   const [hintUntil, setHintUntil] = useState(0);
   const bornAt = useRef(performance.now());
@@ -235,10 +237,13 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const send = (e: FormEvent) => {
     e.preventDefault();
     const t = text.trim();
-    if (!t) return;
+    if (!t && !chatPicture.picture) return;
     voice.stop();
     brain.send({ type: "interrupt" });
-    brain.send({ type: "text", text: t });
+    // A picture in the box goes with the words; with no words it is a picture to model.
+    if (chatPicture.picture) brain.send({ type: "text", text: t || PICTURE_ALONE, picture: { data: chatPicture.picture.data } });
+    else brain.send({ type: "text", text: t });
+    chatPicture.clear();
     setText("");
     setPinned(false);
     input.current?.blur(); // fold away and let the answer play in the notch
@@ -464,11 +469,18 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                   </div>
                 ))}
               </div>
-              <form className="notch-input" onSubmit={send}>
+              {(chatPicture.picture || chatPicture.problem) && (
+                <div className="chat-picture">
+                  {chatPicture.picture && <img src={chatPicture.picture.data} alt="" draggable={false} />}
+                  <span>{chatPicture.picture ? "Picture added. Say what to do with it, or press Enter for a 3D model." : chatPicture.problem}</span>
+                  <button type="button" className="notch-btn" aria-label="Remove the picture" title="Remove the picture" onClick={chatPicture.clear}><Close /></button>
+                </div>
+              )}
+              <form className={`notch-input ${chatPicture.over ? "dropping" : ""}`} onSubmit={send} {...chatPicture.handlers}>
                 <input
                   ref={input}
                   value={text}
-                  placeholder="Ask Pyxi anything"
+                  placeholder={chatPicture.picture ? "What should I do with it?" : "Ask Pyxi anything, or paste a picture"}
                   onChange={(e) => {
                     // The first key of a new message: Pyxi starts looking at the screen now, not after Enter.
                     if (!text && e.target.value) brain.send({ type: "look_ahead" });
@@ -482,7 +494,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                   }}
                   onKeyDown={(e) => e.key === "Escape" && close()}
                 />
-                {text.trim() ? (
+                {text.trim() || chatPicture.picture ? (
                   <button type="submit" className="notch-btn primary" aria-label="Send"><Send /></button>
                 ) : (
                   <button type="button" className={`notch-btn ${state === "listening" ? "live" : ""}`} title="Talk" onClick={() => bridge.ptt()}><Mic /></button>

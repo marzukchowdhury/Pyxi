@@ -345,6 +345,12 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .nl.system { align-self: center; max-width: 96%; font-size: 11.5px; color: #ffcfae; background: rgba(255,179,138,.07); border: 1px solid rgba(255,179,138,.18); }
 .nl b { display: block; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ice); }
 .notch-input { display: flex; gap: 7px; margin-top: 12px; }
+.notch-input.dropping input { border-color: rgba(158,203,255,.7); box-shadow: 0 0 0 3px rgba(158,203,255,.14); }
+/* A picture pasted or dropped into the chat box, waiting to be sent with the words. */
+.notch-zone .chat-picture { display: flex; align-items: center; gap: 9px; margin: 10px 0 -4px; padding: 6px 8px; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid var(--hair-hi); font-size: 12px; line-height: 1.35; color: var(--ink-2); }
+.notch-zone .chat-picture img { flex: none; width: 44px; height: 44px; object-fit: cover; border-radius: 7px; background: #fff; }
+.notch-zone .chat-picture span { flex: 1; min-width: 0; }
+.notch-zone .chat-picture .notch-btn { flex: none; width: 26px; height: 26px; }
 .notch-input input { flex: 1; min-width: 0; height: 36px; padding: 0 13px; border-radius: 12px; border: 1px solid var(--hair-hi); background: rgba(255,255,255,.05); color: var(--ink); font: inherit; font-size: 13px; outline: none; transition: border-color .2s, box-shadow .2s; user-select: text; }
 .notch-input input:focus { border-color: rgba(158,203,255,.45); box-shadow: 0 0 0 3px rgba(158,203,255,.1); }
 .notch-input .notch-btn { width: 36px; height: 36px; border-radius: 12px; }

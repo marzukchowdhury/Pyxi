@@ -52,6 +52,25 @@ export function flatView(camera: string, span: [number, number, number], firstBe
   return camera === "top" && firstBeat ? THREE_QUARTER : null;
 }
 
+/**
+ * Where to look from to see a model the way its photo was taken: `azimuth` degrees round from
+ * straight in front (+z; 90 is from the model's +x side), `elevation` degrees above level. The
+ * same sum as view_axes in scenes/raster.py, which is what the model was checked from.
+ */
+export function photoDirection(azimuth: number, elevation: number): [number, number, number] {
+  const az = (azimuth * Math.PI) / 180;
+  const el = (Math.max(-89, Math.min(89, elevation)) * Math.PI) / 180;
+  return [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+}
+
+/** The angle a photo was taken from, if it is one the camera can go to (null for anything else). */
+export function photoAngle(view: unknown): [number, number] | null {
+  if (!Array.isArray(view) || view.length < 2) return null;
+  const [az, el] = view;
+  if (typeof az !== "number" || typeof el !== "number" || !Number.isFinite(az) || !Number.isFinite(el)) return null;
+  return [az, Math.max(-89, Math.min(89, el))];
+}
+
 export interface Orbit {
   radius: number;
   /** Around the vertical axis, radians (0 = looking down -z from +z). */
