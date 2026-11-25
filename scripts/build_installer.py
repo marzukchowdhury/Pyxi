@@ -597,6 +597,8 @@ def ship_browser_extension(out: Path | None = None) -> Path:
     finally:
         sys.path.remove(str(ROOT / "extension"))
     out = out or DESKTOP / "build" / "browser-extension"
+    if out.parent == DESKTOP / "build":
+        clear(out)  # our own staging folder: moved aside, as the bundle is
     for target in ("chrome", "firefox"):
         build(target, out / target)
     return out
