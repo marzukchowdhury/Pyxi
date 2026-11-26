@@ -170,13 +170,20 @@ def undo_log(log_path: Path) -> str:
         try:
             shutil.move(dst, _free(Path(src)))
             back += 1
-        except OSError as exc:
-            failed.append(f"{Path(dst).name}: {exc.strerror or exc}")
+        except OSError:
+            failed.append(Path(dst).name)
     for d in record["made"]:
         try:
             Path(d).rmdir()  # only if it's empty again: anything they added stays
         except OSError:
             pass
+    if failed:
+        # The record is kept, so the same Undo finishes the job once those are closed. It
+        # used to be marked undone here, and the files left behind could never go back.
+        return (
+            f"Put {back} files back where they were. {len(failed)} couldn't move back "
+            f"({', '.join(failed[:3])}{' and more' if len(failed) > 3 else ''}): they may be "
+            "open in another app. Close them, then undo again."
+        )
     log_path.rename(log_path.with_suffix(".undone"))
-    tail = f" {len(failed)} couldn't move back: {'; '.join(failed[:3])}." if failed else ""
-    return f"Put {back} files back where they were.{tail}"
+    return f"Put {back} files back where they were."

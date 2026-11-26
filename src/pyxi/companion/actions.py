@@ -334,8 +334,12 @@ async def open_app(name: str) -> str:
         name, target = found
     try:
         await asyncio.to_thread(os.startfile, target)  # type: ignore[attr-defined]
-    except (OSError, AttributeError) as exc:
-        return f"open_app: Windows couldn't open {name} ({exc})."
+    except (OSError, AttributeError):
+        return (
+            f"open_app: Windows couldn't open {name}. It may not be installed, or its "
+            "shortcut is broken. Tell them so in one short line, and to open it from the "
+            "Start menu if they can."
+        )
     return f"Opened {name}."
 
 

@@ -59,7 +59,7 @@ async def test_a_failing_cloud_voice_falls_back_and_says_why(studio, monkeypatch
     speech = await studio.synthesize("{excited} It works!")
     assert speech.wav == b"RIFF" and studio.calls[-1]["voice"] == "af_heart"
     assert studio.calls[-1]["speed"] == pytest.approx(1.06)  # excited reads a touch quicker
-    assert "elevenlabs voice failed" in (studio.last_error or "")
+    assert "ElevenLabs voice failed" in (studio.last_error or "")
 
 
 async def test_spanish_gets_a_spanish_voice(studio):

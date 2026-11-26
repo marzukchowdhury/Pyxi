@@ -2605,6 +2605,18 @@ _WRITES_FIRST = {
 }
 
 
+def _didnt_work(what: str, exc: Exception) -> str:
+    """One edit that broke, for the card: what it was and, when the cause is one a person
+    can mend (a picture that won't open, a full disk, no internet), that. Never Python's own
+    words: "The insert picture didn't work (cannot identify image file 'C:\\Users\\...')"."""
+    from pyxi.plainwords import explain
+
+    known = explain(exc)
+    if known is not None:
+        return f"The {what} didn't work. {known.line}"
+    return f"The {what} didn't work, so that part is unchanged. Ask me for it again, worded another way."
+
+
 def _may_have_written(target: Any, op: dict[str, Any], exc: Exception) -> bool:
     kind = getattr(target, "kind", "")
     if not isinstance(exc, LedgerError) or kind == "pptx":
@@ -2810,7 +2822,8 @@ async def _run_ledger(
             why, wrote = str(exc), _may_have_written(targets[0], e, exc)
         except Exception as exc:
             what = str(e.get("op") or "edit").replace("_", " ")
-            why, wrote = f"The {what} didn't work ({str(exc)[:120]}).", True
+            log.warning("ledger: the %s failed: %s", what, type(exc).__name__, exc_info=True)
+            why, wrote = _didnt_work(what, exc), True
         else:
             changed.add(0)
             done.append((0, e, said))
@@ -2942,7 +2955,7 @@ async def _run_ledger(
             except Exception as exc:  # a bad cell address, a style the file lacks...
                 failed.append(f"{json.dumps(e)[:200]}: {type(exc).__name__}: {str(exc)[:160]}")
                 what = str(e.get("op") or "edit").replace("_", " ")
-                why, wrote = f"The {what} didn't work ({str(exc)[:120]}).", True
+                why, wrote = _didnt_work(what, exc), True
             if why:
                 reasons.append(why)
                 fails.append((index, e, why))

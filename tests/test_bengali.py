@@ -89,7 +89,7 @@ async def test_a_failing_cloud_voice_falls_back_to_mitali_not_to_english(studio,
 
     monkeypatch.setattr(studio, "_gemini", boom)
     speech = await studio.synthesize("আজ বিকেল চারটায় মিটিং আছে।")
-    assert speech.wav == b"RIFF-bn" and "gemini voice failed" in (studio.last_error or "")
+    assert speech.wav == b"RIFF-bn" and "Gemini voice failed" in (studio.last_error or "")
 
 
 async def test_no_bengali_voice_yet_shows_the_words_instead_of_an_english_voice(

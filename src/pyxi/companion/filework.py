@@ -24,6 +24,33 @@ FILE_TOOLS = {"convert_files", "edit_document", "search_files", "read_file"}
 CONSENT_ACTION = "Let Pyxi search your files?"
 
 
+OLD_OFFICE = {".doc", ".xls", ".ppt", ".rtf", ".odt", ".ods", ".odp"}
+
+
+def _unreadable(tool: str, path: Path, exc: BaseException) -> str:
+    """A file that could not be read, as a note the model can pass on: why in plain words
+    and what they can do, never the error itself ("[Errno 13] Permission denied: 'C:\\...'")."""
+    from pyxi import plainwords
+
+    ext = path.suffix.lower()
+    if ext in OLD_OFFICE and "can't read" in str(exc):
+        # Not the end: saved in today's format, or as a PDF copy, it can be read.
+        newer = ".xlsx" if ext in (".xls", ".ods") else ".pptx" if ext in (".ppt", ".odp") else ".docx"
+        return (
+            f"{tool}: {path.name} is an older kind of file ({ext}) that Pyxi can't read as it "
+            f"is. Tell them in one short line: save it as {newer} from the app it opens in "
+            "(File, Save As), or ask you for a PDF copy of it, and then ask again."
+        )
+    known = plainwords.explain(exc)
+    why = known.line if known else plainwords.safe_line(
+        str(exc), "It may be damaged, or open in another app.", 200
+    )
+    return (
+        f"{tool}: couldn't read {path.name}. {why} Tell them that in one short line; don't "
+        "guess at what the file says."
+    )
+
+
 def _paths(raw: Any) -> list[str]:
     items = raw if isinstance(raw, list) else [raw] if raw else []
     return [str(Path(str(f).strip().strip('"')).expanduser()) for f in items if str(f).strip()]
@@ -617,6 +644,6 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         try:
             text = await asyncio.to_thread(files_access.read_text, path)
         except Exception as exc:
-            return f"read_file: couldn't read {path.name}: {str(exc)[:160]}"
+            return _unreadable("read_file", path, exc)
         return f"read_file {path.name}:\n{text}"
     return None

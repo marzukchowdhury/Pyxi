@@ -205,7 +205,13 @@ def _plain(exc: BaseException, label: str) -> BaseException:
         return Unreachable(f"{label} is busy (a box is open in it, or a cell is being typed in).")
     if _is_com(exc):
         said = _said(exc)
-        return LedgerError(f"{label} said no: {said}" if said else f"{label} refused that edit.")
+        if said and not re.fullmatch(r"(?i)exception occurred\.?|unspecified error\.?", said):
+            return LedgerError(f"{label} said no: {said}")
+        # Nothing of the app's own to pass on ("Exception occurred." is no reason at all).
+        return LedgerError(
+            f"{label} refused that edit. If a box is open in {label}, or the file is "
+            "protected or read-only, sort that out there, then ask again."
+        )
     return exc
 
 

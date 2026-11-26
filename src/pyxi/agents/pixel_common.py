@@ -169,11 +169,21 @@ def heif_ready() -> bool:
 
 
 def open_image(path: Path):
-    from PIL import Image, ImageOps
+    from PIL import Image, ImageOps, UnidentifiedImageError
 
     if path.suffix.lower() in (".heic", ".heif") and not heif_ready():
-        raise PixelError("HEIC photos need the pillow-heif package, which isn't installed.")
-    img = Image.open(path)
+        raise PixelError(
+            "I can't open HEIC photos on this PC right now. Open the photo in the Photos app, "
+            "save a copy as JPG, then ask me again. Reinstalling Pyxi usually brings HEIC back."
+        )
+    try:
+        img = Image.open(path)
+    except UnidentifiedImageError:
+        # Named, so one bad picture among several can be left out and the rest asked again.
+        raise PixelError(
+            f"{path.name} won't open as a picture. It may be damaged, or not really a "
+            "picture. Try another copy of it."
+        ) from None
     return ImageOps.exif_transpose(img)  # phone photos come out the right way up
 
 

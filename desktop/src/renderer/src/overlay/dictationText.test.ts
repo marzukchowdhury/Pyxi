@@ -59,6 +59,23 @@ describe("the microphone not starting", () => {
     expect(micProblem("NotAllowedError: Permission denied")).toMatch(/Windows blocked the microphone/);
     expect(micProblem("TypeError: boom")).toMatch(/couldn't start/);
   });
+
+  it("never repeats the browser's own error, and always says what to do", () => {
+    // The talk keys used to add it in brackets: "... (NotAllowedError: Permission denied)".
+    for (const reason of ["NotAllowedError: Permission denied", "NotFoundError: Requested device not found", "NotReadableError: Could not start audio source", "TypeError: boom"]) {
+      const said = micProblem(reason);
+      expect(said).not.toMatch(/Error|denied|Requested device|boom|\(/);
+      expect(said).toMatch(/Turn on|Plug one in|Close what is using it|Check Settings/);
+    }
+  });
+
+  it("the talk keys use the same words as dictation", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const source = readFileSync(fileURLToPath(new URL("./Overlay.tsx", import.meta.url)), "utf8");
+    expect(source).not.toMatch(/\(\$\{reason\}\)/); // no raw reason shown after the hint
+    expect(source.match(/message: micProblem\(reason\)/g)?.length).toBe(2); // toggle key and hold key
+  });
 });
 
 describe("a result that arrives while a new dictation is recorded", () => {

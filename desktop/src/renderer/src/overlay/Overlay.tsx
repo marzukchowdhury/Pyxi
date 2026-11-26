@@ -58,12 +58,9 @@ export function Overlay() {
         useOverlay.setState({ listening: false });
         brain.send({ type: "ptt_cancel" });
         const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-        const hint = /NotAllowed|Permission/i.test(reason)
-          ? "Windows blocked the microphone. Turn on Settings > Privacy & security > Microphone > Let desktop apps access your microphone."
-          : /NotFound|Overconstrained/i.test(reason)
-            ? "No microphone was found. Plug one in or pick a default input in Windows Sound settings."
-            : "The microphone couldn't start.";
-        brain.send({ type: "notice", message: `${hint} (${reason})` });
+        // What to do about it, in the same words dictation uses: never the browser's own
+        // error after it ("... (NotAllowedError: Permission denied)").
+        brain.send({ type: "notice", message: micProblem(reason) });
       }
     });
   }, []);
@@ -90,7 +87,8 @@ export function Overlay() {
         useOverlay.setState({ listening: false });
         brain.send({ type: "ptt_cancel" });
         const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-        brain.send({ type: "notice", message: `The microphone couldn't start. Check Settings > Privacy & security > Microphone. (${reason})` });
+        console.warn("microphone unavailable", err);
+        brain.send({ type: "notice", message: micProblem(reason) }); // blocked, none, or in use: each says what to do
       }
     });
     const offUp = bridge.onPttUp(() => rec.stop());

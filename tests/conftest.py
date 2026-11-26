@@ -67,6 +67,9 @@ def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # No test sends sound to the cloud to be written down: the key that makes the cloud
     # reachable is taken out (a test that means to listen there sets one of its own).
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    # Nor believes it is in the beta because an earlier test joined it (cloud.apply sets this
+    # for the whole process): what a refused key is called depends on it (plainwords.py).
+    monkeypatch.delenv("PYXI_BETA", raising=False)
     # No test opens an address in a real browser: links go out as the app's own "action".
     from pyxi import windows
 
