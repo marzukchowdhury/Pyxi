@@ -1,7 +1,7 @@
 /**
  * The pricing page: three plans as jars of fireflies (more light in the bigger plans), a
- * monthly / yearly switch, and a "what you get" strip that fills for the plan under the pointer.
- * Every number is in the page's own markup (pricing.html); this file only moves them about.
+ * monthly / yearly switch, and a strip that shows how big the monthly allowance is for the plan
+ * under the pointer. Every price is in the page's own markup (pricing.html).
  * Reduced motion: the jars are drawn once, still, and nothing counts or flies.
  */
 import "./pricing.css";
@@ -12,8 +12,13 @@ function init() {
   const force = new URLSearchParams(location.search).has("motion") || document.documentElement.classList.contains("force-motion");
   const reduced = !force && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const plans = [...document.querySelectorAll(".plan")];
-  const LIMITS = { starter: { q: 40, m: 10, t: 30, b: 1 }, pro: { q: 100, m: 50, t: 250, b: 3 }, max: { q: 150, m: 150, t: 800, b: 6 } };
-  const TOP = LIMITS.max;
+  // How big each plan's monthly allowance is beside the biggest (the bar), and in words. The
+  // plans differ in nothing else: there are no per-day limits and no counts of questions.
+  const SIZE = {
+    starter: { share: 0.2, words: "The smallest" },
+    pro: { share: 0.45, words: "A little over twice Starter" },
+    max: { share: 1, words: "About five times Starter" },
+  };
   const NAMES = { starter: "Starter", pro: "Pro", max: "Max" };
 
   // ---- monthly / yearly
@@ -37,10 +42,8 @@ function init() {
     shown = id;
     plans.forEach((p) => p.classList.toggle("lit", p.dataset.plan === id));
     document.getElementById("gets-name").textContent = NAMES[id];
-    for (const k of ["q", "m", "t", "b"]) {
-      gets.querySelector(`u[data-k="${k}"]`).style.transform = `scaleX(${(LIMITS[id][k] / TOP[k]).toFixed(4)})`;
-      gets.querySelector(`b[data-k="${k}"]`).textContent = LIMITS[id][k];
-    }
+    gets.querySelector('u[data-k="a"]').style.transform = `scaleX(${SIZE[id].share.toFixed(4)})`;
+    gets.querySelector('b[data-k="a"]').textContent = SIZE[id].words;
     const card = plans.find((p) => p.dataset.plan === id);
     if (!reduced) window.pyxi?.fly?.point?.(card.querySelector("h2"), NAMES[id], { hold: 1400 });
   };

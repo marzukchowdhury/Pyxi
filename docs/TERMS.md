@@ -1,19 +1,21 @@
 # Pyxi terms of use
 
-*Draft for the Pyxi beta, last updated 7 November 2026. It isn't legal advice: have a lawyer review it before the public launch.*
+*Draft, last updated 26 November 2026. It isn't legal advice: have a lawyer review it before the public launch.*
 
-These terms are an agreement between you and Marzuk Haider Chowdhury, British Columbia, Canada ("we"), the maker of Pyxi. By installing or using Pyxi, or using an invite code, you agree to them. If you don't agree, please don't use Pyxi. How Pyxi handles your information is in the [privacy policy](/privacy).
+These terms are an agreement between you and Marzuk Haider Chowdhury, British Columbia, Canada ("we"), the maker of Pyxi. By installing or using Pyxi, signing in to it, or using an invite code, you agree to them. If you don't agree, please don't use Pyxi. How Pyxi handles your information is in the [privacy policy](/privacy).
 
 ## 1. What Pyxi is
 
 Pyxi is a desktop assistant for Windows. It looks at your screen when you ask, explains things, works on files you point it at, works in accounts you connect, and can use your mouse and keyboard and a browser on your behalf when you allow it. Its teammates (Scout, Quill, Sketch, Pixel, Ledger, Atlas, Penny, Scribe, Sage, Patch, Ditto, Trace and others) do parts of that work.
 
-## 2. The beta
+## 2. The trial and the plans
 
-- Pyxi is in an early, invite-only beta. It's free during the beta.
-- Your invite code is for you. Don't sell it or post it publicly. Each code works on a limited number of devices.
-- The beta includes a daily allowance of AI use, and the whole beta has a monthly limit. When a limit is reached, Pyxi stops answering until it resets.
-- Features can change, break or be removed, and the beta can end. We can change the allowances, or turn off a code or token that's being misused.
+- When you sign in to Pyxi with Google, a 3-day trial of the Pro plan starts. No card is asked for. The trial starts once for each Google account, and it comes with a small allowance of AI use.
+- After the trial, Pyxi needs a paid plan: Starter, Pro or Max. The prices, in US dollars, are on the [pricing page](/pricing). There is no free plan. You choose a plan in Pyxi's Settings and pay on Stripe's checkout page in your browser.
+- Each plan includes a monthly allowance of AI use. When it's used up, Pyxi's AI stops answering until the allowance resets at the start of the next month, or until you move to a bigger plan.
+- You can change or cancel your plan at any time from Pyxi's Settings.
+- If you joined the earlier beta with an invite code, the code keeps working, with its daily allowance, while that beta lasts. Your invite code is for you. Don't sell it or post it publicly. Each code works on a limited number of devices.
+- Features can change, break or be removed. We can change the allowances, or turn off an account, a code or a sign-in that's being misused.
 - Things will go wrong sometimes. Please tell us when they do.
 
 ## 3. Pyxi acts only when you allow it
@@ -51,7 +53,7 @@ Don't use Pyxi to:
 - get into accounts, files, devices or data you aren't allowed to access, or get around security, paywalls or limits on other sites;
 - scrape or overload websites, or use them in ways their terms forbid;
 - make anything that harms children, or anything illegal or abusive;
-- use the beta server or your beta token for anything other than Pyxi, share your token, try to get past the allowances, or try to break into or reverse-engineer the beta server.
+- use Pyxi's server or your Pyxi sign-in for anything other than Pyxi, share your sign-in, try to get past the allowances, or try to break into or reverse-engineer Pyxi's server.
 
 We can suspend or end your access if you break these rules.
 
@@ -61,15 +63,15 @@ Your files, emails, recordings and screen stay yours. You let Pyxi process them 
 
 ## 9. The software
 
-Pyxi's source code is published under the MIT License (see `LICENSE` in the repository), and it includes other open-source parts under their own licenses. These terms cover the installer, the beta server and the beta itself.
+Pyxi's source code is published under the MIT License (see `LICENSE` in the repository), and it includes other open-source parts under their own licenses. These terms cover the installer and Pyxi's server.
 
 Pyxi updates itself: it checks for new versions when it starts and every four hours, downloads them in the background, and installs them when you restart or quit.
 
 ## 10. "As is", and limits on our responsibility
 
-Pyxi is a free beta, provided **"as is" and "as available"**, without warranties of any kind, including that it will work without errors, be available, or be fit for a particular purpose.
+Pyxi is provided **"as is" and "as available"**, without warranties of any kind, including that it will work without errors, be available, or be fit for a particular purpose.
 
-As far as the law allows, we aren't responsible for indirect or consequential losses, lost data, lost profits, missed bookings or flights, or anything done on a third-party site, including actions you approved. Our total responsibility for any claim about Pyxi is limited to what you paid us for it in the past 12 months, which during the free beta is nothing.
+As far as the law allows, we aren't responsible for indirect or consequential losses, lost data, lost profits, missed bookings or flights, or anything done on a third-party site, including actions you approved. Our total responsibility for any claim about Pyxi is limited to what you paid us for it in the past 12 months.
 
 Some places don't allow some of these limits. Where that's the case, they apply only as far as your local law permits, and nothing here takes away rights you have under consumer law.
 

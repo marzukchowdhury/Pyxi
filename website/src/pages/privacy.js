@@ -322,7 +322,7 @@ function drawScene(ctx, t, par) {
   );
   text(
     ctx,
-    "through the Pyxi beta server and OpenRouter",
+    "through Pyxi's server and OpenRouter",
     MODEL.x,
     MODEL.y + MODEL.r + 34,
     `400 14px ${FONT}`,

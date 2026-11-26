@@ -1,6 +1,6 @@
 # Pyxi privacy policy
 
-*Draft for the Pyxi beta, last updated 25 November 2026. It describes how the software works today. It isn't legal advice: have a lawyer review it before the public launch.*
+*Draft, last updated 26 November 2026. It describes how the software works today. It isn't legal advice: have a lawyer review it before the public launch.*
 
 Pyxi is a desktop assistant that can see your screen, read the files you point it at and work in the accounts you connect, so privacy is the core of the product, not a footnote. This page says plainly what Pyxi looks at, what leaves your computer, what is kept, and how to delete it.
 
@@ -14,7 +14,7 @@ Pyxi is a desktop assistant that can see your screen, read the files you point i
 - What Pyxi reads is **data, not instructions**. Text in an email, page or document can't make Pyxi act: every send, booking and file change still needs your Allow, and the card says when a recipient came from something Pyxi read.
 - What you ask, plus the screenshot, on-screen text and the parts of files or emails it needs to answer, goes to an AI model to work out the reply. **We don't sell it, and we don't use it to train models.**
 - Your history stays **on your computer**. Conversations are deleted after 30 days; Memory Palace history after 72 hours.
-- What you say to Pyxi is sent to a cloud model to be turned into text, because it mishears far less than a model that fits on a PC. **Neither Pyxi nor the Pyxi beta server keeps the sound**; the model provider processes it under its own terms (see below). You can keep your voice on your computer instead: Voice panel, "Turn my speech into text on this PC only". Then nothing you say is sent. Offline, your computer listens by itself. Meeting recordings are always turned into text on your computer.
+- What you say to Pyxi is sent to a cloud model to be turned into text, because it mishears far less than a model that fits on a PC. **Neither Pyxi nor Pyxi's server keeps the sound**; the model provider processes it under its own terms (see below). You can keep your voice on your computer instead: Voice panel, "Turn my speech into text on this PC only". Then nothing you say is sent. Offline, your computer listens by itself. Meeting recordings are always turned into text on your computer.
 - Pyxi listens to what your computer plays (meeting notes, live captions) **only while you have asked it to**, with a sign and a Stop button on screen the whole time. **The sound is never saved and never leaves your computer**; it is turned into text on your computer.
 - Pyxi uses your mouse and keyboard **only after you press Allow**. Anything that sends, books, buys, deletes or posts asks again. Pyxi never types passwords, card numbers or government ID numbers, and **never pays for anything**.
 
@@ -97,14 +97,14 @@ Pyxi never sends an email, posts, messages, invites someone or cancels anything 
 
 **Google user data.** Pyxi's use of information received from Google APIs follows the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), including the Limited Use requirements. We use Google data only to do what you ask Pyxi to do. We don't sell it, use it for advertising or use it to train models, and it isn't stored on our servers.
 
-**Sign-in tokens** for connected accounts, and your beta token, are stored on your computer, encrypted with Windows' own data protection (DPAPI), so they can't be used if the files are copied to another PC or Windows account.
+**Sign-in tokens** for connected accounts, and your Pyxi sign-in, are stored on your computer, encrypted with Windows' own data protection (DPAPI), so they can't be used if the files are copied to another PC or Windows account.
 
 ## What leaves your computer
 
 | What | Where it goes | Why |
 |---|---|---|
-| Your request, the masked screenshot and on-screen text, recent conversation, what Pyxi remembers about you (what to call you and what you like, and other memories that fit the request), and the parts of files or emails a job needs | The AI model, through OpenRouter (during the beta, through the Pyxi beta server), or the provider of your own key if you added one | To understand your screen and answer |
-| What you say to Pyxi (the sound of each request) | Google's Gemini model, through OpenRouter (during the beta, through the Pyxi beta server) | To turn your speech into text. With "Turn my speech into text on this PC only" switched on in the Voice panel, nothing you say is sent: your computer listens (Bengali then needs the offline Bengali model, which Pyxi offers to download) |
+| Your request, the masked screenshot and on-screen text, recent conversation, what Pyxi remembers about you (what to call you and what you like, and other memories that fit the request), and the parts of files or emails a job needs | The AI model, through Pyxi's server and OpenRouter, or the provider of your own key if you added one | To understand your screen and answer |
+| What you say to Pyxi (the sound of each request) | Google's Gemini model, through Pyxi's server and OpenRouter | To turn your speech into text. With "Turn my speech into text on this PC only" switched on in the Voice panel, nothing you say is sent: your computer listens (Bengali then needs the offline Bengali model, which Pyxi offers to download) |
 | Dictation (your words typed where your cursor is) | Nowhere, as it comes: your voice is written down on this PC. Two switches in Settings, Dictation change that. "Tidy long dictations with a quick model" (on at first) sends the words of a dictation of 30 words or more, never the sound, to the AI model. "Write dictation down with the cloud listener" (off at first) sends the sound where your requests go. Bengali and Automatic are heard the way your requests are | To type what you said, with its punctuation. With "Turn my speech into text on this PC only" switched on, neither the sound nor the words of a dictation are sent. A password box is never typed into |
 | The text of a meeting you asked Pyxi to take notes on (never its sound), and, with captions translated into a language other than English, the text of each sentence | The AI model, as above | To write the notes, and to translate the captions |
 | Web searches you ask for, and price checks | DuckDuckGo or Bing, then the store websites that come up | To look things up and compare prices |
@@ -117,7 +117,7 @@ Pyxi never sends an email, posts, messages, invites someone or cancels anything 
 
 **AI providers.** OpenRouter passes your request to the model provider: Anthropic's Claude for answers and teammates, and Google's Gemini for turning speech into text. They process it to produce the answer, under their own terms and privacy policies ([OpenRouter](https://openrouter.ai/privacy), [Anthropic](https://www.anthropic.com/legal/privacy), [Google](https://policies.google.com/privacy)). **[Before launch: confirm and state the data-retention and training settings on your OpenRouter account.]** In local mode (Ollama), nothing goes to any AI provider.
 
-**The Pyxi beta server** forwards your requests to OpenRouter with our key, so you don't need one. It **doesn't store what you ask, what's on your screen, or your voice**. It keeps only:
+**Pyxi's server** forwards your requests to OpenRouter with our key, so you don't need one. It **doesn't store what you ask, what's on your screen, or your voice**. It keeps only:
 
 - a scrambled (hashed) form of each device's Pyxi token, with the date it was made and either the invite code you used or which account it belongs to;
 - how many devices have used each invite code;
@@ -143,7 +143,7 @@ Everything lives in `%APPDATA%\Pyxi\.pyxi`:
   - what to call you, a few things you like and what you mostly use the PC for are kept as three memories ("Call them Sam."), with the other things Pyxi remembers. Like every memory, they go along with your requests to the AI model, so its answers fit you;
   - a small marker, `onboarding.json`, records that the tour was shown, how it ended, and which booking details it filled in (their names, never their values);
 - your settings, including which folders Pyxi may search, and how you like captions shown (text size, top or bottom, original shown too), in `listen.json`. No words from captions and no sound are kept;
-- encrypted sign-in tokens for accounts you connected, and your beta token.
+- encrypted sign-in tokens for accounts you connected, and your Pyxi sign-in.
 
 Files Pyxi makes for you go to `Documents\Pyxi`, or beside the file they came from. The notes and transcripts of meetings you asked it to note are in `Documents\Pyxi\Meetings`; delete them there like any file. LibreOffice, if you allow it, goes to `%LOCALAPPDATA%\Pyxi\LibreOffice`.
 
