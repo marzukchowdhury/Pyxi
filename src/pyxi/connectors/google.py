@@ -19,6 +19,7 @@ import mimetypes
 import os
 import re
 import sys
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
@@ -47,6 +48,9 @@ GOOGLE_EXPIRED = (
     "Your Google sign-in has run out. Press Sign in to Google, pick your account, then ask "
     "me once more. The same button is in Settings under Connected accounts."
 )
+
+
+_SIGN_IN = threading.Lock()  # one sign-in at a time (the closing page is swapped in meanwhile)
 
 
 class GoogleExpired(RuntimeError):
@@ -509,12 +513,27 @@ class GoogleConnector(Connector):
         if config is None:
             raise RuntimeError("No Google OAuth client yet: save it as .pyxi/google_client.json.")
         flow = InstalledAppFlow.from_client_config(config, SCOPES)
-        creds = flow.run_local_server(
-            port=0,
-            open_browser=True,
-            prompt="consent",
-            success_message="Pyxi is connected to Google. You can close this tab.",
-        )
+        # The library ends the sign-in on a line of plain text; Pyxi's own page goes there
+        # instead (connectors/signin_page.py). If a later version of the library has no such
+        # part to swap, its plain line is what shows: the sign-in itself is untouched.
+        import google_auth_oauthlib.flow as oauth_flow
+
+        from pyxi.connectors.signin_page import ClosingPage
+
+        theirs = getattr(oauth_flow, "_RedirectWSGIApp", None)
+        with _SIGN_IN:
+            if theirs is not None:
+                oauth_flow._RedirectWSGIApp = ClosingPage
+            try:
+                creds = flow.run_local_server(
+                    port=0,
+                    open_browser=True,
+                    prompt="consent",
+                    success_message="Pyxi is connected to Google. You can close this tab.",
+                )
+            finally:
+                if theirs is not None:
+                    oauth_flow._RedirectWSGIApp = theirs
         email = None
         try:
             r = httpx.get(
