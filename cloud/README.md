@@ -102,7 +102,7 @@ The same chat route also accepts the listening model (`EARS_MODELS`, default `go
    npx vercel --prod
    ```
 
-6. **Point Pyxi at it:** if the URL isn't `https://pyxi-beta.vercel.app`, change `DEFAULT_URL` in `src/pyxi/cloud.py` (or set `PYXI_CLOUD_URL`) and rebuild the installer.
+6. **Point Pyxi at it:** if the URL isn't `https://api.heypyxi.com`, change `DEFAULT_URL` in `src/pyxi/cloud.py` (or set `PYXI_CLOUD_URL`) and rebuild the installer.
 
 ## The OpenRouter key
 
@@ -137,7 +137,7 @@ Do this every few months, straight away if the key may have leaked (it showed up
 Every device has a short id: Pyxi's `GET /api/me` shows it as `user`, and OpenRouter's activity page shows the same value as `X-User`. To stop a device at once:
 
 ```bash
-curl -X POST https://pyxi-beta.vercel.app/api/admin/revoke -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"user": "0123456789abcdef"}'
+curl -X POST https://api.heypyxi.com/api/admin/revoke -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"user": "0123456789abcdef"}'
 ```
 
 Send `{"code": "FIREFLY-ANNA"}` instead to stop an invite code and every device that joined with it (a code that was shared publicly, for example). Add `"restore": true` to undo either one. Without an admin token, put the code in `REVOKED_CODES` and redeploy. To stop everyone at once, set `MONTHLY_CAP_USD=0`, or delete the OpenRouter key.
@@ -211,7 +211,7 @@ Save. This is the page Pyxi opens when someone wants to change or cancel their p
 
 In Stripe, open **Developers**, then **Webhooks**, then **Add endpoint**:
 
-- Endpoint URL: your server's address followed by `/api/billing/webhook`, for example `https://pyxi-beta.vercel.app/api/billing/webhook`.
+- Endpoint URL: your server's address followed by `/api/billing/webhook`, for example `https://api.heypyxi.com/api/billing/webhook`.
 - Events to send. Tick exactly these six:
   - `checkout.session.completed`
   - `customer.subscription.created`

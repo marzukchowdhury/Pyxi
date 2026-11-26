@@ -22,7 +22,7 @@ from pyxi import secretstore
 log = logging.getLogger(__name__)
 
 # Where the beta server lives (cloud/ in this repo, deployed on Vercel). Overridable for testing.
-DEFAULT_URL = "https://pyxi-beta.vercel.app"
+DEFAULT_URL = "https://api.heypyxi.com"
 BETA_MODEL = "anthropic/claude-haiku-5.5"
 # What the beta server lets through (cloud/lib/beta.ts DEFAULT_MODELS).
 BETA_MODELS = ("anthropic/claude-haiku-5.5", "anthropic/claude-sonnet-5.5")

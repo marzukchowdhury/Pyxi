@@ -13,7 +13,7 @@
 //   ADMIN_TOKEN=... node admin.ts restore-account anna@example.com  back on
 //   ADMIN_TOKEN=... node admin.ts erase-account anna@example.com    remove their details
 //
-// PYXI_BETA_URL picks the server (default https://pyxi-beta.vercel.app). The secret is sent only
+// PYXI_BETA_URL picks the server (default https://api.heypyxi.com). The secret is sent only
 // in the Authorization header, never printed.
 import { pathToFileURL } from "node:url";
 
@@ -71,7 +71,7 @@ export async function run(
     out("Set ADMIN_TOKEN first (the same secret as in Vercel).");
     return 2;
   }
-  const url = (env.PYXI_BETA_URL ?? "https://pyxi-beta.vercel.app").replace(/\/$/, "");
+  const url = (env.PYXI_BETA_URL ?? "https://api.heypyxi.com").replace(/\/$/, "");
   const res = await fetchImpl(`${url}/api/admin/${account ? "account" : "revoke"}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
