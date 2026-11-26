@@ -154,7 +154,7 @@ export const STORY = [
     shows: "One beat of silence. The camera flies into the firefly. Its light becomes the mark beside the name.",
     payoff: {
       type: ["Pyxi.", "Just [ask]."],
-      small: ["Free beta for Windows 10 and 11", "pyxi-site.vercel.app", "Screens simulated. Everything shown is something Pyxi does today."],
+      small: ["For Windows 10 and 11. Free for 3 days, no card.", "www.heypyxi.com", "Screens simulated. Everything shown is something Pyxi does today."],
     },
   },
 ];
