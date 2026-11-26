@@ -106,6 +106,7 @@ from pyxi.companion.tools import BUILD_BRIEF, COMPANION_TOOLS, INFO_TOOLS
 from pyxi.companion.turns import TurnStore
 from pyxi.config import PyxiSettings
 from pyxi.connectors import Connectors, Outgoing
+from pyxi.connectors.google import GOOGLE_EXPIRED
 from pyxi.hub import Hub
 from pyxi.llm import make_llm
 from pyxi.logscrub import hide_secrets
@@ -5606,6 +5607,11 @@ class Brain:
             actions = (["open"] if files else []) + (
                 ["walkthrough"] if job.role == "browser" else []
             )
+        elif job.status == "failed" and job.summary == GOOGLE_EXPIRED:
+            # Not a dead end: the card carries the button that mends it.
+            title, body, actions = "Sign in to Google again", GOOGLE_EXPIRED, ["google"]
+            self.connectors.google.expired = True
+            await self.hub.emit("connectors", connectors=self.connectors.statuses())
         else:
             title = f"{job.agent_name} couldn't finish"
             body = clip(job.summary or job.status, 220)
@@ -5651,6 +5657,26 @@ class Brain:
         )
         if job.role in specialists.ROLES:  # reminders, check-ins, the next monthly summary
             await specialists.after_job(self, job)
+
+    async def google_expired_card(self) -> None:
+        """The card that mends an expired Google sign-in: one button, which opens Google's own
+        sign-in page. Settings shows the same button from now on."""
+        self.connectors.google.expired = True
+        await self.hub.emit("connectors", connectors=self.connectors.statuses())
+        await self.hub.emit(
+            "job_ready",
+            job_id="google-sign-in",
+            agent="Pyxi",
+            ok=False,
+            title="Sign in to Google again",
+            body=GOOGLE_EXPIRED,
+            files=[],
+            changes=[],
+            notes=[],
+            actions=["google"],
+            link=None,
+            calendar=None,
+        )
 
     def _gets_card(self, job: Job, body: str, whole: str | None, own_card: bool) -> bool:
         """Does a finished job's result go up on a card as well as on the notice? Only when
@@ -6125,9 +6151,7 @@ def friendly_error(exc: BaseException) -> str:
     )
     if beta:
         return beta.group(1).strip()
-    if "invalid_grant" in text or type(exc).__name__ == "RefreshError":
-        from pyxi.agents.jobs import GOOGLE_EXPIRED
-
+    if "invalid_grant" in text or type(exc).__name__ in ("RefreshError", "GoogleExpired"):
         return GOOGLE_EXPIRED
     if "is switched off in Pyxi's Google Cloud project" in text:
         return text[:260]  # already says what to do, with the link

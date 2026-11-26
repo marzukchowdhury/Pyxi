@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 from pyxi.agents.registry import AgentProfile, AgentRegistry
 from pyxi.booking import CHECKIN_PATTERNS, CHECKIN_SAFE, CONFIRM_PATTERNS, HANDOVER
 from pyxi.config import PyxiSettings
+from pyxi.connectors.google import GOOGLE_EXPIRED
 from pyxi.docs import SUMMARY_EXTS, SUPPORTED, document_mode, fix_document, summarize_document
 from pyxi.hub import Hub
 from pyxi.llm import otto_settings
@@ -153,9 +154,6 @@ def named_draft(job: Any) -> Path | None:
     return path
 
 
-GOOGLE_EXPIRED = "Your Google sign-in has run out. Connect Google again in Settings and ask me once more."
-
-
 def describe_failure(exc: BaseException) -> str:
     """What went wrong, the way you'd tell a person (the notch shows this, never a stack)."""
     text = str(exc)
@@ -164,7 +162,7 @@ def describe_failure(exc: BaseException) -> str:
         # Already said plainly, and it may name a file ("Budget 2026.xlsx is locked"), which
         # mustn't be mistaken for the spending limit below.
         return text.strip()[:300] or "That didn't work."
-    if "invalid_grant" in low or type(exc).__name__ == "RefreshError":
+    if "invalid_grant" in low or type(exc).__name__ in ("RefreshError", "GoogleExpired"):
         # Google ends a sign-in after a while (a week, for an app still in testing). On 26
         # November a sheet job showed the raw "('invalid_grant: Token has been expired..." line.
         return GOOGLE_EXPIRED

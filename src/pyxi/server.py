@@ -382,6 +382,9 @@ def create_app(
         except Exception as exc:
             message = f"Couldn't connect {connector.name}: {exc}"
         await hub.emit("connectors", connectors=brain.connectors.statuses(), message=message)
+        # Also by the notch: the sign-in may have been started from a card, with Settings shut.
+        again = " Ask me again now." if message.startswith("Connected") else ""
+        await hub.emit("notice", message=message + again)
 
     async def _preview(msg: dict[str, Any]) -> None:
         """Speak a sample line in a voice without changing the setting (the voice picker)."""

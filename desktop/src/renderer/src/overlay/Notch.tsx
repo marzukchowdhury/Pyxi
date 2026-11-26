@@ -400,6 +400,9 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                 {result.actions.includes("update") && (
                   <button className="primary" onClick={() => bridge.installUpdate()}>Restart to update</button>
                 )}
+                {result.actions.includes("google") && (
+                  <button className="primary" onClick={() => { brain.send({ type: "connect", id: "google" }); dismissToast(result.job_id); }}>Sign in to Google</button>
+                )}
                 {result.actions.includes("calendar") && result.calendar && (
                   <button className="primary" onClick={() => { brain.send({ type: "text", text: result.calendar! }); dismissToast(result.job_id); }}>Add to calendar</button>
                 )}

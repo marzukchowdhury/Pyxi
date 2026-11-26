@@ -41,6 +41,17 @@ def _clock(t: datetime) -> str:
 
 log = logging.getLogger(__name__)
 
+# Google ends a sign-in after a while (a week, for an app still in testing). Said the same
+# way everywhere; the card beside it carries the button (brain.google_expired_card).
+GOOGLE_EXPIRED = (
+    "Your Google sign-in has run out. Press Sign in to Google, pick your account, then ask "
+    "me once more. The same button is in Settings under Connected accounts."
+)
+
+
+class GoogleExpired(RuntimeError):
+    """Google turned the saved sign-in down: only signing in again mends it."""
+
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/calendar.events",
@@ -393,6 +404,7 @@ class GoogleConnector(Connector):
         self.downloads = downloads
         self._creds = None
         self.email: str | None = None
+        self.expired = False  # Google refused the saved sign-in this session
         self._tz: str | None = None
         self._names: dict[str, str] = {}  # address -> display name, from mail seen this session
 
@@ -430,6 +442,10 @@ class GoogleConnector(Connector):
     def status(self) -> Status:
         if self.connected():
             detail = self._saved_email() or "Connected"
+            if self.expired:
+                return Status(
+                    self.id, self.name, True, detail + ". The sign-in has run out", needs="Sign in again"
+                )
             if label := self.needs_ok():
                 apps = label.removeprefix("Allow ")
                 detail += f". Press {label} so Pyxi can work in your Google {apps} too"
@@ -518,6 +534,7 @@ class GoogleConnector(Connector):
             data["scopes"] = sorted(granted.split() if isinstance(granted, str) else granted)
         secretstore.write_json(self.token_path, data)
         self._creds = None
+        self.expired = False
         if SHEETS_SCOPE in self.missing_scopes():
             raise RuntimeError(
                 "Google didn't give the Sheets permission. Press Allow Sheets and tick the "
@@ -528,6 +545,7 @@ class GoogleConnector(Connector):
     def disconnect(self) -> None:
         self.token_path.unlink(missing_ok=True)
         self._creds = None
+        self.expired = False
 
     async def _token(self) -> str:
         from google.auth.transport.requests import Request
@@ -543,7 +561,14 @@ class GoogleConnector(Connector):
                 saved, sorted(self.granted_scopes()) or SCOPES
             )
         if not self._creds.valid:
-            await asyncio.to_thread(self._creds.refresh, Request())
+            try:
+                await asyncio.to_thread(self._creds.refresh, Request())
+            except Exception as exc:
+                if "invalid_grant" in str(exc):
+                    self.expired = True
+                    raise GoogleExpired(GOOGLE_EXPIRED) from exc
+                raise
+            self.expired = False
             data = json.loads(self._creds.to_json())
             data["pyxi_email"] = self._saved_email()
             secretstore.write_json(self.token_path, data)
@@ -1011,6 +1036,11 @@ class GoogleConnector(Connector):
             except Exception as exc:
                 from pyxi.localzone import local_zone
 
+                if isinstance(exc, GoogleExpired):
+                    # Said to the user when they ask for something of Google's; not a
+                    # warning on every turn until they sign in again.
+                    log.info("calendar time zone: the Google sign-in has run out")
+                    return local_zone() or None
                 if re.search(r"\b403\b|insufficient", str(exc)):
                     # The calendar settings scope isn't granted: that won't change this session,
                     # so use this PC's own zone from now on (and stop asking every turn).

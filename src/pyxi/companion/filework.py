@@ -524,6 +524,16 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             return (
                 "edit_document: Google isn't connected. Tell them to connect it in Settings first."
             )
+        if google and getattr(brain.connectors.google, "expired", False):
+            # Known since Google refused the sign-in earlier: say so now, with the button,
+            # not "Ledger's on it" and a failure half a second later (26 November, three times).
+            await brain.google_expired_card()
+            return (
+                "edit_document: their Google sign-in has run out, so Pyxi can't work in Google "
+                "files until they sign in again. A card with a Sign in to Google button is on "
+                "screen now. Tell them in one short line to press it and then ask again. Don't "
+                "say a teammate is working on it, and don't call edit_document again in this reply."
+            )
         google = [await _open_google_file(brain, g) for g in google]
         if "" in google:
             return (
