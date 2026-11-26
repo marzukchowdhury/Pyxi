@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { bridge, type DictationPrefs, keysOf } from "../shared/bridge";
 import { trusted } from "../shared/trusted";
+import { useAccount } from "../shared/account";
+import { AccountCard } from "./Account";
 import { Activity } from "./Activity";
 import { Grants } from "./Grants";
 import { BrowserConnect } from "./BrowserConnect";
@@ -46,7 +48,9 @@ export function Panel() {
       {hello?.demo && (
         <div className="demo-banner">
           {hello.beta?.can_join
-            ? <>Demo mode: Pyxi is using a scripted brain. Have an invite code? Join the beta in <b>Settings</b>.</>
+            ? hello.account?.offered
+              ? <>Demo mode: Pyxi is using a scripted brain. Sign in from <b>Settings</b> to start your 3-day trial.</>
+              : <>Demo mode: Pyxi is using a scripted brain. Have an invite code? Join the beta in <b>Settings</b>.</>
             : <>Demo mode: no API key found, so Pyxi uses a scripted brain. Add OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) to <code>.env</code>, or run <code>pyxi serve --local</code>.</>}
         </div>
       )}
@@ -430,6 +434,7 @@ function BetaCard() {
   const [left, setLeft] = useState<number | null>(null);
   const joined = !!hello?.beta?.joined;
   const ownKey = !!hello?.beta?.own_key;
+  const account = useAccount((s) => s.account);
   useEffect(() => brain.on((e) => {
     if (e.type === "beta") setMessage({ ok: e.ok, text: e.message });
   }), []);
@@ -440,6 +445,10 @@ function BetaCard() {
       .catch(() => setLeft(null));
   }, [joined]);
   if (!hello?.beta || (!joined && !hello.beta.can_join)) return null;
+  // Signed in to a Pyxi account: the Account card above says it all (panel/Account.tsx).
+  if (account?.signed_in || account?.gate === "signed_out") return null;
+  // The server has stopped taking invite codes: nothing to type one into.
+  if (!joined && account?.offered && !account.invite_codes) return null;
   // The developer version (Pyxi Dev, run from the code) uses the developer's own key: no invite.
   if (import.meta.env.DEV && !joined) return null;
   if (joined)
@@ -595,6 +604,7 @@ export function Settings() {
   const set = (key: string, value: unknown) => brain.send({ type: "set", key, value });
   return (
     <div className="settings">
+      <AccountCard />
       <BetaCard />
       <div className="kv"><span>Brain</span><b>{hello.model}{hello.local_mode ? " (local)" : ""}{hello.demo ? " · demo" : ""}</b></div>
       <div className="kv"><span>Voice</span><b>{hello.tts}</b></div>

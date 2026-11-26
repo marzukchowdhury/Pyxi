@@ -21,6 +21,7 @@ import { Routines } from "../panel/Connections";
 import { Chat, Gallery, Palace, Settings, type Tab, TABS, Team } from "../panel/Panel";
 import { Activity } from "../panel/Activity";
 import { VoiceStudio } from "../panel/VoiceStudio";
+import { cardButton, showPlans } from "../shared/account";
 import { Close, Expand, Mic, Send } from "../shared/icons";
 import { PICTURE_ALONE, useChatPicture } from "../shared/pictureInput";
 import { brain } from "../shared/socket";
@@ -88,6 +89,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const result = toasts[0];
   // A new file gets its own card: the file itself, Open file, Open file location, drag it out.
   const fileResult = !!result && result.ok && result.files.length > 0 && !result.link && !result.actions.includes("update");
+  const accountButton = result ? cardButton(result.actions) : null;
   const [left, setLeft] = useState(1); // share of the result's 10 seconds still to go
   const hold = useHoldKeys();
 
@@ -402,6 +404,22 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                 )}
                 {result.actions.includes("google") && (
                   <button className="primary" onClick={() => { brain.send({ type: "connect", id: "google" }); dismissToast(result.job_id); }}>Sign in to Google</button>
+                )}
+                {accountButton && (
+                  // The trial, the plan, the allowance, the sign-in: the one button that fixes it.
+                  <button
+                    className="primary"
+                    onClick={(e) => {
+                      e.stopPropagation(); // the notch opens only for the plans, on Settings
+                      if (accountButton.does === "plans") {
+                        showPlans();
+                        openFull("settings");
+                      } else brain.send({ type: "account", action: accountButton.does });
+                      dismissToast(result.job_id);
+                    }}
+                  >
+                    {accountButton.label}
+                  </button>
                 )}
                 {result.actions.includes("calendar") && result.calendar && (
                   <button className="primary" onClick={() => { brain.send({ type: "text", text: result.calendar! }); dismissToast(result.job_id); }}>Add to calendar</button>

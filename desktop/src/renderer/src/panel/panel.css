@@ -299,6 +299,29 @@ button.ghost:hover { color: var(--ink); border-color: var(--hair-hi); }
 .beta-card b { font-size: 13.5px; } .beta-card p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
 .beta-row { display: flex; gap: 8px; } .beta-row input { flex: 1; height: 32px; letter-spacing: .06em; text-transform: uppercase; }
 .beta-card .beta-ok { color: #ffc861; } .beta-card .beta-error { color: #ff9ea0; }
+/* the account: who is signed in, the plan, this month's allowance, and the plans */
+.account-card { gap: 8px; }
+.account-card .kv { font-size: 12.5px; }
+.account-card .kv b { font-size: 12.5px; text-align: right; }
+.account-allowance { display: grid; gap: 5px; }
+.account-bar { height: 6px; border-radius: 3px; background: var(--hair-hi); overflow: hidden; }
+.account-bar i { display: block; height: 100%; border-radius: 3px; background: #ffc861; transition: width .4s var(--ease); }
+.account-bar.near i { background: #ffab5e; } .account-bar.full i { background: #ff9ea0; }
+.account-actions { flex-wrap: wrap; align-items: center; margin-top: 2px; }
+.account-actions button { white-space: nowrap; }
+.account-gap { flex: 1; }
+.account-link { padding: 0; border: 0; background: none; color: var(--ice-hi); font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; }
+.plan-picker { display: grid; gap: 8px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--hair); }
+.plan-bill { display: inline-flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--surface); border: 1px solid var(--hair); justify-self: start; }
+.plan-bill button { height: 26px; padding: 0 11px; border-radius: 7px; border: 0; background: none; color: var(--ink-2); font-size: 12px; }
+.plan-bill button.on { background: var(--surface-hi); color: var(--ink); box-shadow: 0 0 0 1px var(--hair-hi) inset; }
+.plan-bill button i { font-style: normal; color: #ffc861; margin-left: 4px; }
+.plan-list { display: grid; gap: 6px; }
+.plan-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; background: var(--surface); border: 1px solid var(--hair); }
+.plan-row.pro { border-color: rgba(255,200,97,.35); }
+.plan-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.plan-text span { font-size: 11.5px; color: var(--ink-2); }
+.plan-price { font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* booking details: what Scout may fill in, kept on this PC */
 .booking-details { display: grid; gap: 10px; margin-bottom: 14px; }
 .booking-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
