@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld("pyxiBridge", {
   togglePanel: () => ipcRenderer.send("toggle-panel"),
   ptt: () => ipcRenderer.send("ptt"),
   openExternal: (url: string) => ipcRenderer.send("open-external", url),
+  openWindowsPage: (page: "microphone") => ipcRenderer.send("open-windows-page", page),
   displays: () => ipcRenderer.invoke("displays"),
   hotkeys: () => ipcRenderer.invoke("hotkeys"),
   voicePlay: (clip: unknown) => ipcRenderer.send("voice-play", clip),

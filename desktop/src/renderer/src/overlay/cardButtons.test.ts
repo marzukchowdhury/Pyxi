@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type CardFacts, cardButtons, MAX_BUTTONS, retryLine, settingsTarget } from "./cardButtons";
+import { micBlocked, micBlockedCard, micProblem } from "./dictationText";
 
 const card = (part: Partial<CardFacts>): CardFacts => ({ ok: false, actions: [], files: [], link: null, calendar: null, retry: null, ...part });
 const labels = (part: Partial<CardFacts>) => cardButtons(card(part)).map((b) => b.label);
@@ -32,6 +33,19 @@ describe("a result card's buttons", () => {
     // The voice has a tab of its own.
     expect(settingsTarget(["settings:voice"])).toEqual({ tab: "voice", section: null });
     expect(labels({ actions: ["settings:voice"] })).toEqual(["Open Voice settings"]);
+  });
+
+  it("puts Open microphone settings on a blocked microphone's card, and only there", () => {
+    const blocked = micBlockedCard("NotAllowedError: Permission denied");
+    expect(blocked).not.toBeNull();
+    expect(blocked!.body).toBe(micProblem("NotAllowedError: Permission denied"));
+    expect(blocked!.title).toBe("The microphone is blocked");
+    expect(cardButtons(blocked!)).toEqual([{ kind: "mic", label: "Open microphone settings", primary: true }]);
+    // No microphone, or one in use: the Windows privacy page would not help, so no card.
+    expect(micBlockedCard("NotFoundError: Requested device not found")).toBeNull();
+    expect(micBlockedCard("NotReadableError: Could not start audio source")).toBeNull();
+    expect(micBlockedCard("TypeError: boom")).toBeNull();
+    expect(micBlocked("SecurityError: x")).toBe(true);
   });
 
   it("keeps the buttons that were there before", () => {

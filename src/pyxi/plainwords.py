@@ -126,6 +126,16 @@ _SETTINGS_PART = (
 )
 
 
+# "Open microphone settings": a microphone that Windows keeps from desktop apps is let
+# through on Windows' own privacy page, not in Pyxi's Settings. The app opens that one page
+# by name (desktop/src/main/windowsSettings.ts) and changes nothing there.
+MIC_SETTINGS = "mic_settings"
+_MIC_BLOCKED = re.compile(
+    r"(?i)Windows blocked the microphone|Windows\s+lets desktop apps use it|"
+    r"Privacy & security(?:,| >) Microphone"
+)
+
+
 def settings_part(line: str) -> str:
     """The part of Settings that mends this line ("files", "accounts", "budget", "voice"), or ""."""
     return next((part for part, said in _SETTINGS_PART if said.search(line or "")), "")
@@ -140,6 +150,8 @@ def action_for(line: str) -> str:
     line = (line or "").strip()
     if mend := ACTIONS.get(line, "") or account.action_for(line):
         return mend
+    if _MIC_BLOCKED.search(line):
+        return MIC_SETTINGS
     if part := settings_part(line):
         return f"{SETTINGS}:{part}"
     if line in RETRY_LINES or _RETRY_SAID.match(line):

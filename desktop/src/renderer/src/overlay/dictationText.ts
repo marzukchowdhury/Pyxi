@@ -25,9 +25,21 @@ export function tooQuiet(peak: number, ms: number): boolean {
   return ms < 350 || peak < 0.03;
 }
 
+/** Did Windows (its microphone privacy switch) keep the microphone from starting? */
+export function micBlocked(reason: string): boolean {
+  return /NotAllowed|Permission|SecurityError/i.test(reason);
+}
+
+/** The card for a blocked microphone: the same words as the notice, and the one button that
+ * opens the Windows page where it is let through ("mic_settings", overlay/cardButtons.ts). */
+export function micBlockedCard(reason: string): { job_id: string; agent: string; ok: boolean; title: string; body: string; files: string[]; changes: string[]; notes: string[]; actions: string[] } | null {
+  if (!micBlocked(reason)) return null;
+  return { job_id: "mic-blocked", agent: "Pyxi", ok: false, title: "The microphone is blocked", body: micProblem(reason), files: [], changes: [], notes: [], actions: ["mic_settings"] };
+}
+
 /** Why the microphone didn't start, in words that say what to do. */
 export function micProblem(reason: string): string {
-  if (/NotAllowed|Permission|SecurityError/i.test(reason))
+  if (micBlocked(reason))
     return "Windows blocked the microphone. Turn on Settings > Privacy & security > Microphone > Let desktop apps access your microphone.";
   if (/NotFound|Overconstrained|DevicesNotFound/i.test(reason)) return "No microphone was found. Plug one in, or pick an input in Windows Sound settings.";
   if (/NotReadable|TrackStart|Abort/i.test(reason)) return "The microphone is in use by another app, or it didn't start. Close what is using it and try again.";

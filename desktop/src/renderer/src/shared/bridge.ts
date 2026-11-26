@@ -102,6 +102,9 @@ export interface Bridge {
   togglePanel(): void;
   ptt(): void;
   openExternal(url: string): void;
+  /** Open a Windows settings page from the app's short list, by name (main/windowsSettings.ts).
+   * It shows the page and changes nothing; links still go through openExternal (http, https). */
+  openWindowsPage(page: "microphone"): void;
   displays(): Promise<DisplayInfo[]>;
   /** One voice across monitors: other overlays send clips to the main screen's player. */
   voicePlay(clip: { id: string; b64: string | null; text: string }): void;
@@ -305,6 +308,7 @@ function mockBridge(): Bridge {
     openExternal(url) {
       window.open(url, "_blank");
     },
+    openWindowsPage() {}, // only the desktop app can open a Windows settings page
     async displays() {
       return [currentDisplay()];
     },

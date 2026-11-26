@@ -7,6 +7,7 @@ second time. Open Settings opens Pyxi's own Settings at the part that mends the 
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import httpx
 import pytest
@@ -52,6 +53,25 @@ def test_failures_that_pass_get_try_again(line):
 )  # fmt: skip
 def test_failures_settings_mends_get_open_settings(line, part):
     assert pw.action_for(line) == f"settings:{part}"
+
+
+def test_a_microphone_windows_blocks_gets_the_windows_page_not_pyxis_settings():
+    from pyxi.listen import capture
+
+    blocked = (
+        "I couldn't open the microphone. Check that one is plugged in and that Windows "
+        "lets desktop apps use it (Settings, Privacy & security, Microphone)."
+    )
+    source = Path(capture.__file__).read_text(encoding="utf-8")
+    assert blocked in source.replace('"\n            "', "")  # the line as the listener raises it
+    assert pw.action_for(blocked) == "mic_settings"
+    assert pw.action_for(
+        "Windows blocked the microphone. Turn on Settings > Privacy & security > Microphone > "
+        "Let desktop apps access your microphone."
+    ) == "mic_settings"
+    # A microphone line Windows' page does not mend has no button.
+    assert pw.action_for("I can't hear your microphone, so only the others' side is in the notes.") == ""
+    assert pw.action_for("No microphone was found. Plug one in, or pick an input in Windows Sound settings.") == ""
 
 
 def test_the_buttons_that_were_there_keep_their_lines():

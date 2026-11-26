@@ -18,6 +18,7 @@ import { tableClip } from "./tableClip";
 import { TRAY_PNG_16, TRAY_PNG_32, TRAY_PNG_64 } from "./trayImage";
 import { trayTemplate } from "./trayMenu";
 import { checkNow, startUpdates } from "./updates";
+import { windowsPageUrl } from "./windowsSettings";
 import {
   app,
   BrowserWindow,
@@ -152,6 +153,15 @@ function openExternalSafe(url: unknown): void {
   } catch {
     /* not a URL */
   }
+}
+
+/** Opens one of the few Windows settings pages on Pyxi's list (windowsSettings.ts), asked for
+ * by name from one of Pyxi's own pages. It shows the page and changes nothing. A name that
+ * is not on the list, or a request from any other page, does nothing. */
+function openWindowsPage(sender: string, page: unknown): void {
+  if (!ownPage(sender)) return;
+  const url = windowsPageUrl(page);
+  if (url) void shell.openExternal(url);
 }
 
 // Every window runs Pyxi's own pages with no Node in the page, isolated from the preload, in
@@ -693,6 +703,7 @@ ipcMain.on("release-focus", (e) => {
 });
 ipcMain.on("ptt", () => broadcast("ptt"));
 ipcMain.on("open-external", (_e, url: unknown) => openExternalSafe(url));
+ipcMain.on("open-windows-page", (e, page: unknown) => openWindowsPage(e.senderFrame?.url ?? "", page));
 ipcMain.handle("displays", () => screen.getAllDisplays().map(displayInfo));
 /** Everything on the clipboard that can be read back (text, formatted text, a picture), copied
  * out of it so it can be put back after a paste. Empty when the clipboard is empty. */

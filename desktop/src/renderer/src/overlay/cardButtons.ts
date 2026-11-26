@@ -17,7 +17,7 @@ export interface CardFacts {
   retry?: string | null;
 }
 
-export type CardButtonKind = "update" | "google" | "account" | "settings" | "retry" | "link" | "file" | "calendar" | "folder" | "send_back";
+export type CardButtonKind = "update" | "google" | "account" | "settings" | "mic" | "retry" | "link" | "file" | "calendar" | "folder" | "send_back";
 
 export interface CardButtonSpec {
   kind: CardButtonKind;
@@ -61,6 +61,8 @@ export function cardButtons(r: CardFacts): CardButtonSpec[] {
   if (r.account) out.push({ kind: "account", label: r.account, primary: true });
   const settings = settingsTarget(r.actions);
   if (settings) out.push({ kind: "settings", label: settings.tab === "voice" ? "Open Voice settings" : "Open Settings", primary: true });
+  // A microphone Windows has blocked: its privacy page (it is shown, nothing is changed).
+  if (has("mic_settings")) out.push({ kind: "mic", label: "Open microphone settings", primary: true });
   // Try again: only on a failure, and only when the brain said what it would run again.
   if (has("retry") && !r.ok && r.retry) out.push({ kind: "retry", label: "Try again", primary: true, hint: retryLine(r.retry) });
   // What opens the result.

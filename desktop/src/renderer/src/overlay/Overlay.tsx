@@ -7,7 +7,7 @@ import { brain } from "../shared/socket";
 import { Annotations } from "./Annotations";
 import { AnswerCard } from "./AnswerCard";
 import { DictationSign } from "./DictationSign";
-import { DICTATION_MAX_MS, type DictationView, micProblem, OWN_NOTES, tooQuiet } from "./dictationText";
+import { DICTATION_MAX_MS, type DictationView, micBlockedCard, micProblem, OWN_NOTES, tooQuiet } from "./dictationText";
 import { guideClick } from "./guideMarks";
 import { Hearing } from "./Hearing";
 import { NotesCard } from "./NotesCard";
@@ -24,6 +24,13 @@ import { Team } from "./Team";
 import { Walkthrough } from "./Walkthrough";
 
 const backdrop = new URLSearchParams(location.search).get("backdrop");
+
+/** A microphone that Windows blocked: the notice's words on a card, with the button that opens
+ * the Windows microphone page. Any other microphone problem keeps its notice and no card. */
+function showMicCard(reason: string): void {
+  const card = micBlockedCard(reason);
+  if (card) useOverlay.setState((s) => ({ toasts: [card, ...s.toasts.filter((t) => t.job_id !== card.job_id)].slice(0, 3) }));
+}
 
 export function Overlay() {
   const recorder = useRef(new Recorder());
@@ -61,6 +68,7 @@ export function Overlay() {
         // What to do about it, in the same words dictation uses: never the browser's own
         // error after it ("... (NotAllowedError: Permission denied)").
         brain.send({ type: "notice", message: micProblem(reason) });
+        showMicCard(reason); // blocked by Windows: the card has Open microphone settings
       }
     });
   }, []);
@@ -89,6 +97,7 @@ export function Overlay() {
         const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
         console.warn("microphone unavailable", err);
         brain.send({ type: "notice", message: micProblem(reason) }); // blocked, none, or in use: each says what to do
+        showMicCard(reason);
       }
     });
     const offUp = bridge.onPttUp(() => rec.stop());
@@ -148,7 +157,9 @@ export function Overlay() {
       } catch (err) {
         console.warn("dictation: microphone unavailable", err);
         brain.send({ type: "dictating", on: false });
-        ended("failed", micProblem(err instanceof Error ? `${err.name}: ${err.message}` : String(err)));
+        const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+        ended("failed", micProblem(reason));
+        showMicCard(reason);
       }
     });
     const offUp = bridge.onDictateUp(() => rec.stop());
