@@ -37,7 +37,11 @@ def _reader(src: Path, password: str | None = None):
     try:
         reader = PdfReader(str(src))
     except Exception as exc:
-        raise PixelError(f"{src.name} doesn't open as a PDF ({type(exc).__name__}).") from None
+        log.info("pdf: %s would not open (%s)", src.suffix, type(exc).__name__)
+        raise PixelError(
+            f"{src.name} doesn't open as a PDF. It may be damaged, or not really a PDF. Open "
+            "it yourself to check, save a fresh copy, then ask again."
+        ) from None
     if reader.is_encrypted:
         if password is None:
             # Many "protected" PDFs only restrict printing and open with an empty password.

@@ -196,7 +196,11 @@ def unpack(msi: Path, target: Path) -> Path:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if result.returncode not in (0, 3010):
-        raise RuntimeError(f"Unpacking LibreOffice failed (msiexec {result.returncode}).")
+        log.warning("unpacking LibreOffice failed: msiexec %s", result.returncode)
+        raise RuntimeError(
+            "Windows couldn't unpack LibreOffice. If another installer or a Windows update "
+            "is running, let it finish, then try again from Settings, under Your files."
+        )
     found = find_soffice(target)
     if found is None:
         raise RuntimeError("LibreOffice unpacked, but soffice.exe wasn't in it.")
@@ -371,4 +375,8 @@ def _plain(exc: BaseException) -> str:
         return "I couldn't download LibreOffice. Is the internet connection up?"
     if "space" in low or "errno 28" in low:
         return "There isn't enough free disk space for LibreOffice (it needs about 1.5 GB)."
-    return text.splitlines()[0][:200] if text else type(exc).__name__
+    from pyxi.plainwords import plain_failure
+
+    return plain_failure(
+        exc, "LibreOffice didn't install. Try again from Settings, under Your files.", 240
+    )

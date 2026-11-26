@@ -108,7 +108,19 @@ class AuditLog:
             message = _undo(how)
         except Exception as exc:  # a file in use, moved by hand since: say so, change nothing
             log.warning("undo failed: %s", exc)
-            return f"I couldn't undo that: {exc}"
+            from pyxi.plainwords import plain_failure
+
+            own = str(exc)
+            if type(exc) is RuntimeError and own:  # _undo's own words, below
+                return f"I couldn't undo that. {own[:1].upper()}{own[1:]}."
+            why = plain_failure(
+                exc, "A file it needs may be open, or was moved since. Close it, then press Undo again."
+            )
+            return f"I couldn't undo that. {why}"
+        if "couldn't move back" in message:
+            # Some files were open: the entry stays undoable, so the same button finishes it
+            # once they are closed (tidy.undo_log keeps its record for that).
+            return message
         entry["undone"] = True
         self._rewrite(entries)
         self.add("undid", f"Undid: {entry['what']}", agent="Pyxi", detail=message)

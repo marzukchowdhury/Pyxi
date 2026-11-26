@@ -65,8 +65,12 @@ async def _show_file(brain: Brain, args: dict[str, Any]) -> str:
         return "show_file: that file is outside the folders they allowed (Settings > Let Pyxi search my files)."
     try:
         await asyncio.to_thread(open_path, path)
-    except (OSError, AttributeError) as exc:
-        return f"show_file: Windows couldn't open {path.name} ({exc})."
+    except (OSError, AttributeError):
+        return (
+            f"show_file: Windows couldn't open {path.name}: no app on this PC opens that "
+            "kind of file, or the file is in use. Tell them so in one short line, and that "
+            "they can pick an app for it with Open with in File Explorer."
+        )
     # The viewer takes a moment to draw the first page; then look at it, like look_again.
     seen = await brain._act("look_again", {"seconds": 2.5})
     return (
@@ -126,7 +130,9 @@ async def _read_documents(brain: Brain, paths: list[str]) -> dict[str, str] | st
         try:
             out[str(path)] = await asyncio.to_thread(files_access.read_text, path, 8000)
         except Exception as exc:
-            return f"fill_form: couldn't read {path.name}: {str(exc)[:160]}"
+            from pyxi.companion.filework import _unreadable
+
+            return _unreadable("fill_form", path, exc)
     return out
 
 

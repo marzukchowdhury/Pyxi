@@ -1090,7 +1090,13 @@ class Builder:
         except Exception as exc:  # one sheet's trouble is that sheet's, never the workbook's
             log.exception("ledger build: the sheet %s failed", sheet.name)
             sheet.state = "partly" if sheet.edits else "missing"
-            sheet.why = sheet.why or f"{sheet.name} hit a problem ({str(exc)[:120]})."
+            from pyxi.plainwords import plain_failure
+
+            # Why in plain words (the model busy, no internet), never the raw error.
+            sheet.why = sheet.why or (
+                f"{sheet.name} isn't finished. "
+                + plain_failure(exc, "Ask me to finish that sheet and I'll pick it up.", 140)
+            )
         finally:
             self.count += 1
             if sheet.state == "built":

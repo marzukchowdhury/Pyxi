@@ -14,12 +14,15 @@ measuring is what the builder's last check uses.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 W, H = 13.333, 7.5  # inches: a 16:9 slide
 MX = 0.75  # left and right margin
@@ -437,7 +440,8 @@ class DeckWriter:
         except Exception as exc:  # one slide's trouble is that slide's: it is drawn plainly
             if len(self.prs.slides) > before:
                 self._drop_last()
-            self.problems.append(f"Slide {self.n + 1}: the {layout.replace('_', ' ')} layout failed ({str(exc)[:80]}), so it is a plain slide.")
+            log.warning("deck: the %s layout failed on slide %d: %s", layout, self.n + 1, exc)
+            self.problems.append(f"Slide {self.n + 1}: the {layout.replace('_', ' ')} layout didn't fit what was on it, so it is a plain slide. Ask me to redo that slide if you want the layout.")
             slide = self._draw_bullets({**s, "layout": "bullets", "bullets": s.get("bullets") or [s.get("point") or ""]})
         self._notes(slide, str(s.get("notes") or s.get("point") or s.get("title") or ""))
 

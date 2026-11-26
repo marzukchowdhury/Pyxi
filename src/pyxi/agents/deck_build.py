@@ -234,7 +234,13 @@ def read_source(paths: list[Path]) -> Source:
         except DeckError:
             raise
         except Exception as exc:
-            raise DeckError(f"I couldn't read {path.name}: {str(exc)[:160]}") from None
+            from pyxi.plainwords import plain_failure
+
+            log.warning("deck: %s could not be read: %s", path.suffix, type(exc).__name__)
+            why = plain_failure(
+                exc, "It may be damaged, or open in another app. Close it and ask again.", 200
+            )
+            raise DeckError(f"I couldn't read {path.name}. {why}") from None
         if not text.strip() and len(src.tables) == before:
             raise DeckError(
                 f"{path.name} has nothing in it to make slides from. If it's a scan, ask Pixel "

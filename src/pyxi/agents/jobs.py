@@ -434,7 +434,12 @@ class JobManager:
             from pyxi import made
 
             fixed = job.data.get("fixed", []) if isinstance(job.data, dict) else []
-            made.record(self.settings.data_dir, [*job.outputs, *fixed])
+            try:
+                made.record(self.settings.data_dir, [*job.outputs, *fixed])
+            except OSError:
+                # A full disk or a locked data folder: the job is still told as done. Raised
+                # from here, it stayed "running" in the tray for good and was never announced.
+                log.warning("job %s: its files could not be noted for the app", job.id, exc_info=True)
         await self._update(job)
         if job.status == "done" and job.then:
             context = f"Result from {job.agent_name}: {job.summary}\n\nData: {json.dumps(job.data, default=str)[:4000]}"
