@@ -3,13 +3,13 @@
   <head>
     <!--include:head-->
     <title>Pyxi pricing: Starter, Pro and Max</title>
-    <meta name="description" content="Pyxi's plans: Starter at $9 a month, Pro at $19 and Max at $39, with two months free on a yearly plan and a 14-day free trial of Pro. Paid plans start at launch." />
+    <meta name="description" content="Pyxi's plans: Starter at $9 a month, Pro at $19 and Max at $39, with two months free on a yearly plan and a 3-day free trial of Pro with no card needed." />
     <link rel="canonical" href="{{siteUrl}}/pricing" />
     <meta property="og:url" content="{{siteUrl}}/pricing" />
     <meta property="og:title" content="Pyxi pricing" />
-    <meta property="og:description" content="Starter, Pro and Max. A 14-day free trial of Pro. Paid plans start at launch." />
+    <meta property="og:description" content="Starter, Pro and Max. A 3-day free trial of Pro, no card needed." />
     <meta name="twitter:title" content="Pyxi pricing" />
-    <meta name="twitter:description" content="Starter, Pro and Max. A 14-day free trial of Pro. Paid plans start at launch." />
+    <meta name="twitter:description" content="Starter, Pro and Max. A 3-day free trial of Pro, no card needed." />
     <script type="module" src="/src/main.js"></script>
     <script type="module" src="/src/pages/pricing.js"></script>
   </head>
@@ -22,7 +22,7 @@
         <div class="wrap">
           <p class="kicker reveal">Pricing</p>
           <h1 class="display-sm reveal">Pick your light. <span class="dim">Start free.</span></h1>
-          <p class="lead reveal">Every plan starts with 14 days of Pro, free. Paid plans start at launch: today Pyxi is a free beta, and nothing here can be bought yet.</p>
+          <p class="lead reveal">Every plan starts with 3 days of Pro, free. No card needed. The trial starts when you sign in to Pyxi, and you choose a plan inside the app.</p>
           <div class="bill reveal" role="group" aria-label="Billing">
             <button type="button" data-bill="month" aria-pressed="true">Monthly</button>
             <button type="button" data-bill="year" aria-pressed="false">Yearly <i>two months free</i></button>
@@ -46,7 +46,8 @@
                 <li>Docs, sheets, PDFs and email help included</li>
                 <li><b>1</b> background teammate at a time</li>
               </ul>
-              <a class="btn btn-ghost btn-lg" href="/download" data-track="pricing-starter">Start the free trial</a>
+              <a class="btn btn-ghost btn-lg" href="/download#trial" data-track="pricing-starter">Start the free trial</a>
+              <p class="plan-start">Your trial starts when you sign in to Pyxi. You choose a plan inside the app.</p>
             </article>
 
             <article class="plan pro reveal" data-plan="pro" data-month="19" data-year="180" data-permonth="15" data-flies="18">
@@ -63,7 +64,8 @@
                 <li>Docs, sheets, PDFs and email help included</li>
                 <li><b>3</b> background teammates at a time</li>
               </ul>
-              <a class="btn btn-fly btn-lg" href="/download" data-track="pricing-pro">Start the free trial</a>
+              <a class="btn btn-fly btn-lg" href="/download#trial" data-track="pricing-pro">Start the free trial</a>
+              <p class="plan-start">Your trial starts when you sign in to Pyxi. You choose a plan inside the app.</p>
             </article>
 
             <article class="plan reveal" data-plan="max" data-month="39" data-year="372" data-permonth="31" data-flies="40">
@@ -80,9 +82,11 @@
                 <li><b>6</b> background teammates at a time</li>
                 <li>Priority support and early features</li>
               </ul>
-              <a class="btn btn-ghost btn-lg" href="/download" data-track="pricing-max">Start the free trial</a>
+              <a class="btn btn-ghost btn-lg" href="/download#trial" data-track="pricing-max">Start the free trial</a>
+              <p class="plan-start">Your trial starts when you sign in to Pyxi. You choose a plan inside the app.</p>
             </article>
           </div>
+          <p class="plans-usd reveal">Prices in US dollars.</p>
 
           <div class="gets reveal" id="gets" aria-live="polite">
             <p class="gets-head">What you get on <b id="gets-name">Pro</b></p>
@@ -93,7 +97,7 @@
           </div>
 
           <p class="counts reveal"><b>What counts.</b> A question is one thing you ask: an answer, an explanation of what is on your screen, a pointer or a diagram. A 3D model is one model Pyxi builds for you. An agent task is one job Pyxi does for you, such as a task on your desktop or an errand on the web.</p>
-          <p class="counts reveal"><b>Need more?</b> A top-up is $5 for 25 more 3D models or 100 more agent tasks. There is no free plan: every plan starts with the 14-day trial of Pro.</p>
+          <p class="counts reveal"><b>Need more?</b> A top-up is $5 for 25 more 3D models or 100 more agent tasks. There is no free plan: every plan starts with the 3-day trial of Pro, and the trial asks for no card.</p>
         </div>
       </section>
 
@@ -112,8 +116,8 @@
             <details class="pq reveal" open><summary><i>1</i>What happens when I run out?</summary><p>Pyxi tells you. You can top up, or wait for the next month, when your plan fills up again.</p></details>
             <details class="pq reveal"><summary><i>2</i>Can I change my plan?</summary><p>Yes, at any time.</p></details>
             <details class="pq reveal"><summary><i>3</i>Does my data leave my PC?</summary><p>Some of it has to, so Pyxi can answer. The <a href="/privacy">privacy page</a> says exactly what is sent, what is kept and how to delete it.</p></details>
-            <details class="pq reveal"><summary><i>4</i>Is there a free version?</summary><p>There is a 14-day free trial of Pro. There is no free plan after it.</p></details>
-            <details class="pq reveal"><summary><i>5</i>Can I pay today?</summary><p>No. Pyxi is in a free beta, and paid plans start at launch. The buttons above take you to the download.</p></details>
+            <details class="pq reveal"><summary><i>4</i>Is there a free version?</summary><p>There is a 3-day free trial of Pro, with no card needed. There is no free plan after it.</p></details>
+            <details class="pq reveal"><summary><i>5</i>How do I start, and how do I pay?</summary><p>Download Pyxi and sign in with Google. Your 3-day trial starts then. To keep going, open Settings in Pyxi and choose a plan: you pay on a secure checkout page in your browser, and Pyxi unlocks a few seconds later. There is no sign-in on this website.</p></details>
           </div>
         </div>
       </section>
