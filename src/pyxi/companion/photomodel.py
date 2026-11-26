@@ -222,7 +222,7 @@ async def handle(brain: Brain, args: dict[str, Any]) -> str | None:
     """``model_from_photo``: find the picture, then build in the background. A string is a
     note back to the model (nothing was started); None means the build is on its way."""
     if brain.turns.spent_today() >= brain.settings.budget.daily_cost_usd:
-        return "model_from_photo: today's budget is used up. Tell them."
+        return "model_from_photo: today's budget is used up. Tell them, and that they can raise the daily limit in Settings."
     asked = state(brain)
     source = str(args.get("source") or "screen")
     want = " ".join(str(args.get("object") or "").split())[:120]
@@ -290,10 +290,18 @@ async def _run(brain: Brain, picture: photo.Picture, want: str, show: str, key: 
         result = await photo.model_from_picture(
             brain._builder_llm(), picture, want=want, show=show, seen=earlier, on_seen=read, on_parts=assembling, build_llm=build_llm(brain)
         )
-    except Exception:
+    except Exception as exc:
         log.exception("photo to 3D failed")
-        await brain.jobs.settle(job, ok=False, summary="The model wouldn't come together.")
-        await brain.say_line("Hmm, that model wouldn't come together. Want me to try again?", record=False)
+        from pyxi import plainwords
+
+        # A cause Pyxi knows (the AI model busy or out of reach, the allowance used up) is
+        # said as that: "want me to try again?" was offered for failures a retry can't mend.
+        known = plainwords.explain(exc)
+        why = f"I couldn't build that model. {known.line}" if known else ""
+        await brain.jobs.settle(job, ok=False, summary=why or "The model wouldn't come together.")
+        await brain.say_line(
+            why or "Hmm, that model wouldn't come together. Want me to try again?", record=False
+        )
         return
     finally:
         if asked.building == key:
@@ -311,7 +319,13 @@ async def _run(brain: Brain, picture: photo.Picture, want: str, show: str, key: 
     if seen.kind != "object":
         await brain.jobs.settle(job, ok=False, summary="No object to model in that picture.", cost=result.cost_usd)
         return
-    await brain.jobs.settle(job, ok=result.model is not None, summary=seen.subject, cost=result.cost_usd)
+    await brain.jobs.settle(
+        job,
+        ok=result.model is not None,
+        # (A failed one used to read just "chair" in the tray.)
+        summary=seen.subject if result.model is not None else f"The model of {seen.subject or 'that'} wouldn't come together.",
+        cost=result.cost_usd,
+    )
     if result.model is None:
         await brain.say_line("Hmm, that model wouldn't come together. Want me to try again?", record=False)
         return
