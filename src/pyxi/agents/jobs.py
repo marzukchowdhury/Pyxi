@@ -164,7 +164,7 @@ def describe_failure(exc: BaseException) -> str:
     # Every failure Pyxi knows is said one way everywhere, with its next step; anything else
     # is shown only if it reads as a sentence, never as Python's own words (pyxi/plainwords.py).
     # On 26 November a sheet job showed the raw "('invalid_grant: Token has been expired..." line.
-    return plain_failure(exc)
+    return plain_failure(exc, job=True)
 
 
 # How Pyxi's browser teammates work. The user is waiting for a notification, so quick and

@@ -268,7 +268,14 @@ def _read_one(path: Path, src: Source) -> str:
 
         layout = read_layout(path)
         if layout is None:
-            raise DeckError(f"I couldn't read {path.name}.")
+            raise DeckError(
+                f"I couldn't read {path.name}. It may be damaged, or locked with a password. "
+                "Open it yourself to check, save a fresh copy, then ask again."
+            )
+        if not layout.words and layout.no_reader:
+            # A scan, and the reader for scans isn't there: said as that. "Ask Pixel to make
+            # it searchable first" sent them to the same missing reader.
+            raise DeckError(layout.no_reader)
         out = []
         for b in layout.blocks:
             if hasattr(b, "rows"):

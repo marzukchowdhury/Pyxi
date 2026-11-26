@@ -816,7 +816,10 @@ def pdf_to_excel(files: list[Path], out: Path | None = None) -> PixelResult:
     (src,) = need(files, {".pdf"}, "PDF")
     layout = read_layout(src)
     if layout is None:
-        raise PixelError(f"I couldn't read the layout of {src.name}, so I can't pull its tables out.")
+        raise PixelError(
+            f"I couldn't read the layout of {src.name}, so I can't pull its tables out. Open it "
+            "yourself and save a fresh copy, then ask again, or ask me for its text instead."
+        )
     if not layout.words and layout.no_reader:
         raise PixelError(layout.no_reader)
     tables = [t for t in layout.tables if len(t.rows) >= 2 and t.cols >= 2]

@@ -70,6 +70,25 @@ def test_a_source_the_deck_builder_cannot_read(tmp_path):
     assert clean(str(err.value)) == f"I couldn't read Report.docx. {pw.FILE_DAMAGED}"
 
 
+def test_a_pdf_the_deck_builder_cannot_read_says_what_to_do(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    pdf = tmp_path / "Plan.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    monkeypatch.setattr(pixel_pdf, "read_layout", lambda path, *a, **kw: None)
+    with pytest.raises(deck_build.DeckError) as err:
+        deck_build.read_source([pdf])
+    assert str(err.value).startswith("I couldn't read Plan.pdf. It may be damaged") and "save a fresh copy" in str(err.value)
+    # A scan with no reader for scans on this PC: said as that, not "ask Pixel to make it
+    # searchable first", which needs the same reader.
+    missing = "I can't read scanned pages on this PC right now. Reinstalling Pyxi usually fixes it."
+    scan = SimpleNamespace(words=[], blocks=[], tables=[], no_reader=missing)
+    monkeypatch.setattr(pixel_pdf, "read_layout", lambda path, *a, **kw: scan)
+    with pytest.raises(deck_build.DeckError) as err:
+        deck_build.read_source([pdf])
+    assert str(err.value) == missing
+
+
 # ---------------------------------------------------------------- Pixel
 def test_a_pdf_that_is_not_one_says_what_to_do(tmp_path):
     bad = tmp_path / "Scan.pdf"

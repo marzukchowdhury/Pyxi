@@ -357,7 +357,7 @@ def _file(exc: BaseException, text: str, low: str, names: set[str]) -> str:
     return ""
 
 
-def explain(exc: BaseException, *, beta: bool | None = None) -> Plain | None:
+def explain(exc: BaseException, *, beta: bool | None = None, job: bool = False) -> Plain | None:
     """A failure Pyxi knows, as a line that says what happened and what to do next. None for
     one it doesn't know (then :func:`safe_line` decides what may be shown)."""
     text = str(exc)
@@ -379,7 +379,9 @@ def explain(exc: BaseException, *, beta: bool | None = None) -> Plain | None:
     ) or bool(_BETA_SAID.search(text))
     if is_model and (line := _model(text, low, names, beta)):
         return Plain(line, "model")
-    if not re.search(r"\b\w+ said \d{3}", text):  # a job's model error, however it was worded
+    # A teammate's model error, however it was worded. (Only for jobs: in a turn a bare
+    # "401" may be some other service's, and is said as that service's refusal.)
+    if job and not re.search(r"\b\w+ said \d{3}", text):
         if re.search(r"\b401\b|authentication|invalid (x-)?api.?key", low):
             return Plain(MODEL_KEY_BETA if beta else MODEL_KEY, "model")
         if re.search(r"\b429\b|rate.?limit|overloaded", low):
@@ -469,7 +471,9 @@ def safe_line(text: str, fallback: str = UNKNOWN, limit: int = 160) -> str:
     return line
 
 
-def plain_failure(exc: BaseException, fallback: str = UNKNOWN, limit: int = 160) -> str:
+def plain_failure(
+    exc: BaseException, fallback: str = UNKNOWN, limit: int = 160, *, job: bool = False
+) -> str:
     """One line for any failure: a known one's own words, else what is safe to show."""
-    known = explain(exc)
+    known = explain(exc, job=job)
     return known.line if known else safe_line(str(exc), fallback, limit)
