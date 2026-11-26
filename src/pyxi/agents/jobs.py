@@ -39,7 +39,7 @@ from pyxi.config import PyxiSettings
 from pyxi.docs import SUMMARY_EXTS, SUPPORTED, document_mode, fix_document, summarize_document
 from pyxi.hub import Hub
 from pyxi.llm import otto_settings
-from pyxi.plainwords import plain_failure
+from pyxi.plainwords import own_tab_hint, plain_failure
 from pyxi.safety import RULE as UNTRUSTED_RULE
 
 log = logging.getLogger(__name__)
@@ -593,6 +593,10 @@ class JobManager:
             if booking or checkin
             else honest_result(result.summary, result.success)
         )
+        if not found and not (booking or checkin) and result.status.value != "stopped":
+            # A site that shut this browser out (its bot check, a sign-in only they can do)
+            # is not the end: the same work can be done in a tab of their own browser.
+            summary = (summary or "").rstrip() + own_tab_hint(summary)
         job.run_id, job.summary, job.data = result.run_id, summary, result.data
         job.outputs, job.cost_usd, job.steps = result.outputs, result.usage.cost_usd, result.steps
         job.status = "done" if found else ("stopped" if result.status.value == "stopped" else "failed")

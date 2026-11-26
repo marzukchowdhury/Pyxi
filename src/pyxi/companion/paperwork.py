@@ -270,12 +270,17 @@ def notice(job: Job, data: dict[str, Any]) -> dict[str, Any] | None:
                 "link": link,
                 "actions": ["link"] if link else [],
             }
-        link = str(data.get("link") or "") or None
+        # A check-in that broke before it reached the airline (no browser, no internet) left
+        # a card that said "needs you" with nothing to press: the airline's own page is the
+        # way on, so the card opens it.
+        start = str(job.start_url or "")
+        link = str(data.get("link") or "") or (start if start.startswith("http") else None)
         need = str(data.get("needs_you") or "").strip()
+        own = "" if need or data.get("link") or not link else " Press Open to check in yourself."
         return {
             "ok": False,
             "title": f"Check-in needs you: {flight}"[:70],
-            "body": (f"It needs {need}. " if need else "") + (job.summary or job.status)[:200],
+            "body": (f"It needs {need}. " if need else "") + (job.summary or job.status)[:200] + own,
             "link": link,
             "actions": ["link"] if link else [],
         }

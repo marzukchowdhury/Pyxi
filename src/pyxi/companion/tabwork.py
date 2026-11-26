@@ -361,6 +361,45 @@ def _plain(text: str) -> str:
     return " ".join(re.sub(r"[#\u27e6\u27e7\[\]]", " ", str(text)).split())[:200]
 
 
+NOT_CONNECTED = (
+    "Your browser isn't connected any more. Open the browser again, or connect it in "
+    "Settings under Connect your browser, then ask me again."
+)
+
+
+def _for_them(exc: BaseException) -> str:
+    """What the extension said went wrong, if it is a sentence a person can be read (its own
+    plain lines are; a page's script error passed through it is not)."""
+    from pyxi import plainwords
+
+    return plainwords.safe_line(_plain(str(exc)), "", 200)
+
+
+def _not_opened(note: str) -> str:
+    """Why a page could not be opened, said to the user. ``note`` is the step's note, which
+    is written for the model ("failed: the browser didn't answer, so it isn't known whether
+    that happened. Read the page before doing anything else."): live, that was read out."""
+    from pyxi import plainwords
+
+    if "isn't connected" in note:
+        return NOT_CONNECTED
+    if "didn't answer" in note:
+        return (
+            "Your browser didn't answer, so I can't tell if that page opened. Check the "
+            "browser is still open, then ask me again."
+        )
+    if m := re.search(r"hasn't let Pyxi into (.+?) yet", note):
+        return (
+            f"Your browser hasn't let me into {m.group(1)} yet. Click the Pyxi icon in the "
+            "browser's toolbar and press Allow on this site, then ask me again."
+        )
+    if "isn't a plain web address" in note:
+        return "That doesn't look like a web address I can open. Give me the site's name or its full address."
+    rest = note.split(":", 1)[-1].strip()
+    why = plainwords.safe_line(rest[:1].upper() + rest[1:], "", 200)
+    return f"I couldn't open that page. {why}".strip() + ("" if why else " Open it yourself, then ask me again.")
+
+
 def _quoted(text: str, limit: int = 80) -> str:
     """The same, for use between double quotes: the page can't close the quote."""
     return _plain(text).replace('"', "'")[:limit]
@@ -645,8 +684,13 @@ class TabOperator:
                         False, "That's one of the browser's own pages, which I can't work in."
                     )
                 if exc.code == "not_connected":
-                    return Outcome(False, "The browser extension isn't connected any more.")
-                return Outcome(False, f"I couldn't read that tab. {_plain(str(exc))}")
+                    return Outcome(False, NOT_CONNECTED)
+                why = _for_them(exc)
+                return Outcome(
+                    False,
+                    f"I couldn't read that tab. {why}".strip()
+                    + ("" if exc.code == "gone" else " Reload the page, then ask me again."),
+                )
 
     # ------------------------------------------------------------------ the loop
     async def run(self, task: str, tab: str = "", url: str = "") -> Outcome:
@@ -663,12 +707,14 @@ class TabOperator:
             line, note = await self._do({"do": "open_tab", "url": url}, {}, 0)
             steps.append(Step(0, line, note))
             if note.startswith(("declined", "skipped", "failed")):
-                return Outcome(False, "Okay, I left that for you." if note.startswith("declined") else note, steps)
+                return Outcome(False, "Okay, I left that for you." if note.startswith("declined") else _not_opened(note), steps)
         elif tab:
             try:
                 found = await self._call("peek", {"tab": tab})
             except BrowserError as exc:
-                return Outcome(False, f"I couldn't find a tab like that. {_plain(str(exc))}")
+                if exc.code == "not_connected":
+                    return Outcome(False, NOT_CONNECTED)
+                return Outcome(False, f"I couldn't find a tab like that. {_for_them(exc)}".strip())
             self.tab = int(found["id"])
         repeats: dict[str, int] = {}
         last, still = "", 0
@@ -1314,7 +1360,7 @@ async def _read_tab(brain: Brain, link: BrowserLink, which: str) -> str:
                 )
             if exc.code == "browser_page":
                 return "read_tab: that's one of the browser's own pages, which can't be read."
-            return f"read_tab: couldn't read the tab. {exc}"
+            return f"read_tab: couldn't read the tab. {_for_them(exc)} Tell them so in one short line, and to reload the page and ask again."
     others: list[str] = []
     try:
         listing = await link.call("tabs", {}, browser=browser)

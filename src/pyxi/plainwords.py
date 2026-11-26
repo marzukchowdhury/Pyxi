@@ -266,6 +266,29 @@ def connect_failure(name: str, exc: BaseException) -> str:
     return safe_line(str(exc), again, 220)
 
 
+OWN_TAB = (
+    " Open that site in your own browser, sign in if it asks, then ask me again and I'll "
+    "work in that tab."
+)
+_SHUT_OUT = re.compile(
+    r"(?i)bot check|captcha|verify(?:ing)? (?:that )?you(?:'re| are) (?:a )?human|not a robot|"
+    r"security verification|automated browsers?|blocked (?:me|the browser|automated)|access denied|"
+    r"\bsign(?:ed|ing)?[ -]?in\b|\blog(?:ged|ging)?[ -]?in\b|needs? an account"
+)
+
+
+def own_tab_hint(summary: str) -> str:
+    """The next step when a site kept the browser teammate out (its bot check, a sign-in
+    only they can do): the same thing in a tab of their own browser. "" when the failure was
+    something else, or the result already says what to do."""
+    text = summary or ""
+    if not _SHUT_OUT.search(text) or re.search(
+        r"(?i)ask me (again|once more)|your own browser|Pyxi beta|in Settings", text
+    ):
+        return ""
+    return OWN_TAB
+
+
 HEARING_OFFLINE = (
     "I couldn't write down what you said: the listening pack for that language isn't on "
     "this PC yet and I can't get online to fetch it. Check the internet connection, then "
