@@ -69,6 +69,11 @@
 .ob-none { margin: 8px 0 0 6px; padding: 0; background: none; border: 0; font: 500 14px/1.4 "Inter", sans-serif; color: rgba(255, 244, 222, .62); text-decoration: underline; text-underline-offset: 3px; }
 .ob-none:hover { color: #fffaf0; }
 .ob-none:disabled { opacity: .5; }
+/* Continue with Google: one button where the code box would be, and the same quiet ways on. */
+.ob-signin-row { display: flex; align-items: center; gap: 10px; padding-left: 6px; }
+.ob-signin .ob-btn { height: 46px; padding: 0 24px; font-size: 16px; border-radius: 14px; }
+.ob-none.ob-other { margin-left: 18px; }
+.ob-signin .ob-none:first-of-type { margin-left: 6px; }
 .step-screen.phase-demo .ob-go { margin-left: 0; }
 .ob-enter { background: none; border: 0; padding: 0; opacity: .75; }
 .ob-enter:hover { opacity: 1; }

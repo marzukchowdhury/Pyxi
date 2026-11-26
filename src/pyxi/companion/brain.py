@@ -227,6 +227,10 @@ class Brain:
             settings.data_dir / "audit.jsonl", settings.screen.turn_retention_days
         )
         self.jobs.audit = self.audit
+        # The signed-in account, its plan and the server's gates (pyxi/account.py).
+        from pyxi.account import Account
+
+        self.account = Account(settings.data_dir, hub)
         self.history: list[tuple[str, str]] = []
         self.state: State = "idle"
         self._lock = asyncio.Lock()
@@ -2175,7 +2179,7 @@ class Brain:
             await self._notify(
                 job.id,
                 ok=False,
-                title=plainwords.TITLES.get(why, "Couldn't finish that"),
+                title=plainwords.title_for(why) or "Couldn't finish that",
                 body=why,
                 actions=[mend] if mend else None,
             )
@@ -2410,6 +2414,8 @@ class Brain:
             self._spawn(self._say_when_free(hide_secrets(line)))
         # A failure that a button mends carries that button, whoever reports it.
         mend = [] if ok else [a for a in [plainwords.action_for(body)] if a]
+        if not ok:
+            await self.account.noticed(body)  # the trial, the plan, the allowance: Settings too
         await self.hub.emit(
             "job_ready",
             job_id=job_id,
@@ -5654,7 +5660,8 @@ class Brain:
             )
         elif job.status == "failed" and (mend := plainwords.action_for(job.summary)):
             # Not a dead end: the card carries the button that mends it.
-            title, body, actions = plainwords.TITLES[job.summary.strip()], job.summary, [mend]
+            title, body, actions = plainwords.title_for(job.summary), job.summary, [mend]
+            await self.account.noticed(body)  # the trial, the plan, the allowance: Settings too
             if job.summary == GOOGLE_EXPIRED:
                 self.connectors.google.expired = True
                 await self.hub.emit("connectors", connectors=self.connectors.statuses())
@@ -5747,8 +5754,12 @@ class Brain:
                 await self.google_expired_card()
             else:
                 await self._notify(
-                    job_id, ok=False, title=plainwords.TITLES[line], body=line, actions=["google"]
+                    job_id, ok=False, title=plainwords.title_for(line), body=line, actions=["google"]
                 )
+        elif (gate := self.account.gate_card(line)) is not None:
+            # The trial, the plan, the allowance or the sign-in (pyxi/account.py): the
+            # server's own sentence, and the one button that fixes it.
+            await self._notify(gate, ok=False, title=plainwords.title_for(line), body=line)
         return line
 
     async def _tool_failed(self, name: str, exc: BaseException) -> str:
@@ -5757,9 +5768,12 @@ class Brain:
         for the model only: live, a raw Google error was read out word for word."""
         if plainwords.explain(exc) is not None:
             line = await self.failure_card(exc)
+            mend = plainwords.action_for(line)
             button = (
                 " A card with a Sign in to Google button is on screen now: tell them to press it."
-                if plainwords.action_for(line)
+                if mend == "google"
+                else " A card with the button that fixes it is on screen now: tell them to press it."
+                if mend
                 else ""
             )
             return (

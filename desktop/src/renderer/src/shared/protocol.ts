@@ -426,9 +426,66 @@ export interface Hello {
   demo: boolean;
   gallery: Record<string, string>;
   beta?: { joined: boolean; can_join: boolean; own_key?: boolean };
+  /** The Pyxi account (pyxi/account.py). */
+  account?: AccountState;
   /** The first-run tour: due at this start (never seen, or broke off), or playing right now. */
   onboarding?: { due: boolean; active: boolean };
 }
+
+/**
+ * The Pyxi account: sign in with Google, a 3-day trial, then a plan (pyxi/account.py; the
+ * server's side is the contract in .pyxi/ACCOUNTS-CONTRACT.md). The brain keeps it and sends
+ * the whole of it in one event, `account`. It never holds a token of any kind.
+ */
+export type AccountPlan = "trial" | "starter" | "pro" | "max" | "none";
+export type PaidPlan = "starter" | "pro" | "max";
+export type AccountStatus = "trial" | "active" | "past_due" | "ended";
+/** Why the server is not answering for this account: each has its own card and one button. */
+export type AccountGate = "trial_ended" | "subscription_ended" | "payment_failed" | "allowance_used" | "signed_out";
+export interface AccountState {
+  /** Does the server offer "Continue with Google"? null: not asked yet, or not reached. */
+  offered: boolean | null;
+  /** Are invite codes still taken? */
+  invite_codes: boolean;
+  signed_in: boolean;
+  /** They signed out (or the sign-in ran out): the sign-in step comes up by itself. */
+  ask_sign_in: boolean;
+  email: string;
+  plan: AccountPlan | null;
+  status: AccountStatus | null;
+  trial_ends_at: string | null;
+  /** Whole days of trial left; 0 on the last day. */
+  days_left: number | null;
+  /** When the paid period renews, or ends when `cancels`. */
+  renews_at: string | null;
+  cancels: boolean;
+  /** This month's allowance (model cost; shown as a share, never as money). */
+  allowance: { used_usd: number; limit_usd: number; resets_at: string | null } | null;
+  /** What Pyxi is in the middle of for the account ("" when nothing). */
+  busy: "" | "sign_in" | "checkout" | "portal" | "sign_out";
+  gate: AccountGate | null;
+}
+/** The account, and (when something was just tried) how that went, in words for the user. */
+export interface AccountEvent {
+  type: "account";
+  account: AccountState;
+  what?: "config" | "sign_in" | "sign_out" | "checkout" | "portal" | "plan";
+  ok?: boolean;
+  message?: string;
+  /** It may work on another try (no internet, the server was down): offer "Try again". */
+  retry?: boolean;
+  /** They closed the sign-in themselves: nothing to say. */
+  cancelled?: boolean;
+  /** There is no plan to manage yet: show the plans. */
+  pick?: boolean;
+}
+export type AccountMessage =
+  /** `get`: what is known (asking the server when needed). `config`: ask the server again
+   * whether sign-in is on. `refresh`: ask the server about the plan and allowance now. */
+  | { type: "account"; action: "get" | "config" | "sign_in" | "cancel_sign_in" | "sign_out" | "portal" }
+  | { type: "account"; action: "refresh"; force?: boolean }
+  /** Open Stripe Checkout for this plan in the browser. */
+  | { type: "account"; action: "checkout"; plan: PaidPlan; yearly: boolean };
 
 /**
  * The first-run tour (pyxi/onboarding.py; played by overlay/onboarding). The overlay runs it
@@ -448,8 +505,10 @@ export interface OnboardingDetails {
 }
 export type OnboardingEvent =
   /** Play it. `have`: what is already saved (someone updating), so the card can show it.
-   * `code`: it opens with the invite code step (the brain agrees they need one). */
-  | { type: "onboarding"; event: "start"; replay: boolean; code?: boolean; have:Partial<Record<"first_name" | "email" | "date_of_birth", string>> }
+   * `code`: it opens with the step before the tour (the brain agrees they need it): "Continue
+   * with Google" when the server has `sign_in` on, else the invite code. `offline`: the server
+   * could not be asked. `only`: that step by itself, for someone who signed out. */
+  | { type: "onboarding"; event: "start"; replay: boolean; code?: boolean; only?: boolean; sign_in?: boolean; invite_codes?: boolean; offline?: boolean; have:Partial<Record<"first_name" | "email" | "date_of_birth", string>> }
   /** Which step it is on, told to every screen (the notch and the firefly may be on another). */
   | { type: "onboarding"; event: "step"; step: OnboardingStep }
   /** One of the tour's lines in Pyxi's voice (`audio` null: quiet was asked for, or no voice yet). */
@@ -463,6 +522,8 @@ export type OnboardingMessage =
   /** The overlay is about to play it (ignored when it isn't due); `replay` from Settings.
    * `code`: it would open with the invite code step, which is not yet a try at the tour. */
   | { type: "onboarding"; action: "start" | "replay"; code?: boolean }
+  /** Only the sign-in step: they signed out after the tour was over. */
+  | { type: "onboarding"; action: "signin" }
   | { type: "onboarding"; action: "step"; step: OnboardingStep }
   | { type: "onboarding"; action: "say"; line: string; text: string }
   | { type: "onboarding"; action: "save"; details: OnboardingDetails }
@@ -611,6 +672,7 @@ export type BrainEvent =
   | { type: "audit"; entries: AuditEntry[] }
   | { type: "memories"; memories: MemoryItem[] }
   | { type: "beta"; ok: boolean; message: string }
+  | AccountEvent
   | { type: "profile"; profile: Record<string, string>; saved?: boolean }
   | ({ type: "file_access" } & FileAccessState)
   | ({ type: "libreoffice" } & ConverterState)
@@ -653,6 +715,7 @@ export type ClientMessage =
   | { type: "look_ahead" }
   | { type: "beta_join"; code: string }
   | { type: "beta_leave" }
+  | AccountMessage
   | { type: "profile_get" }
   | { type: "profile_save"; profile: Record<string, string> }
   | { type: "file_access_get" }

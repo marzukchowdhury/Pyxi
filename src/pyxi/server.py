@@ -18,7 +18,16 @@ from typing import Any, get_args
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
-from pyxi import __version__, booking, brainkey, cloud, files_access, onboarding, plainwords
+from pyxi import (
+    __version__,
+    account,
+    booking,
+    brainkey,
+    cloud,
+    files_access,
+    onboarding,
+    plainwords,
+)
 from pyxi.companion import browsersetup, pricecheck
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
@@ -123,6 +132,12 @@ def create_app(
         return await onboarding.heard(tour, hub, text)
 
     brain.heard_hook = _tour_heard
+    # Signing in or out changes where every model call goes: the app starts the brain again.
+    brain.account.restart = lambda: asyncio.get_running_loop().call_later(0.8, os._exit, RESTART)
+    # Google asks a desktop client for its secret with the sign-in code: the one Pyxi ships.
+    brain.account.secret_for = lambda client_id: account.desktop_client_secret(
+        brain.connectors.google, client_id
+    )
 
     async def _routine_clock() -> None:
         while True:
@@ -294,6 +309,8 @@ def create_app(
                 "can_join": not cloud.in_beta(),
                 "own_key": cloud.had_own_key(),
             },
+            # The Pyxi account (pyxi/account.py): signed in or not, the plan, the allowance.
+            "account": brain.account.public(),
             "onboarding": tour.public(),  # is the first-run tour due at this start?
             "version": __version__,
             "demo": demo,
@@ -573,6 +590,8 @@ def create_app(
             brain._spawn(_beta_join(str(msg["code"])))
         elif kind == "beta_leave" and cloud.in_beta():
             brain._spawn(_beta_leave())
+        elif kind == "account":  # sign in or out, plans, "how much is left?" (pyxi/account.py)
+            brain._spawn(brain.account.on_message(msg))
         elif kind == "audio" and msg.get("data"):
             brain._spawn(brain.hear(base64.b64decode(msg["data"])))
         elif kind == "dictating" or (kind == "dictate" and not msg.get("data")):

@@ -68,6 +68,8 @@ def apply(data_dir: Path) -> bool:
         if os.environ.get(var) and os.environ[var] not in BETA_MODELS:
             os.environ[var] = ""
     os.environ["PYXI_BETA"] = "1"
+    # A token from signing in with Google (pyxi/account.py), not from an invite code.
+    os.environ["PYXI_ACCOUNT"] = "1" if beta.get("account") else "0"
     return True
 
 

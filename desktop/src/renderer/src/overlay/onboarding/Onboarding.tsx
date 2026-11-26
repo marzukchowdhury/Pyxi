@@ -12,6 +12,7 @@
 import { Component, type FormEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { bridge, cursorToLocal, keysOf } from "../../shared/bridge";
 import type { ConnectorStatus, OnboardingEnding } from "../../shared/protocol";
+import { useAccount } from "../../shared/account";
 import { brain } from "../../shared/socket";
 import { Interactive } from "../Interactive";
 import { isPrimary, useOverlay, voice } from "../store";
@@ -23,7 +24,7 @@ const TICK_MS = 100;
 const START_DELAY_MS = 1200; // after the brain says hello: let the app settle first
 const LEAVE_MS = 700; // the fade once it has ended
 /** Lines that are shown but not spoken (Pyxi is listening or answering then). */
-const UNSPOKEN = new Set(["screen-working", "about-thanks", "code-joined"]);
+const UNSPOKEN = new Set(["screen-working", "about-thanks", "code-joined", "signin-browser"]);
 const VOICE_OWNER = "tour";
 /** "Start the tour": with the invite code first, for someone who needs one (never in the
  * developer build, as in Settings). The brain has the last word on it. */
@@ -33,6 +34,8 @@ const askToStart = () => brain.send({ type: "onboarding", action: "start", code:
 const AUTO = bridge.electron || new URLSearchParams(location.search).get("tour") === "1";
 
 type Have = Partial<Record<"first_name" | "email" | "date_of_birth", string>>;
+/** What the step before the tour offers (the server's /api/config, through the brain). */
+type Way = { signIn: boolean; inviteCodes: boolean; offline: boolean; only: boolean };
 
 /** Where the cursor last was on this screen (null: on another one), and whether we ever heard. */
 const pointer: { at: [number, number] | null; heard: boolean } = { at: null, heard: false };
@@ -42,10 +45,12 @@ bridge.onCursor((p) => {
 });
 
 export function Onboarding() {
-  const [run, setRun] = useState<{ id: number; have: Have; code: boolean; anchor: [number, number] } | null>(null);
+  const [run, setRun] = useState<{ id: number; have: Have; code: boolean; way: Way; anchor: [number, number] } | null>(null);
   const runs = useRef(0);
   const asked = useRef(false);
+  const askedSignIn = useRef(false);
   const due = useOverlay((s) => s.tourDue);
+  const askSignIn = useAccount((s) => !!s.account?.ask_sign_in);
 
   // The brain says the tour is due (it waits for the brain: no hello, no tour). The main screen
   // asks for it, once.
@@ -55,6 +60,14 @@ export function Onboarding() {
     window.setTimeout(askToStart, START_DELAY_MS);
   }, [due]);
 
+  // They signed out (or the sign-in ran out) after the tour was over: only the sign-in step.
+  useEffect(() => {
+    if (!askSignIn) askedSignIn.current = false;
+    if (!askSignIn || due || !isPrimary || askedSignIn.current || !AUTO) return;
+    askedSignIn.current = true;
+    window.setTimeout(() => brain.send({ type: "onboarding", action: "signin" }), START_DELAY_MS);
+  }, [askSignIn, due]);
+
   useEffect(
     () =>
       brain.on((e) => {
@@ -63,7 +76,8 @@ export function Onboarding() {
         const mine = pointer.heard ? pointer.at !== null : isPrimary;
         if (!mine) return;
         const at = pointer.at;
-        setRun((now) => now ?? { id: ++runs.current, have: e.have ?? {}, code: !!e.code && !e.replay, anchor: at ? [at[0] + 36, at[1] - 30] : [innerWidth * 0.5 - 300, innerHeight * 0.26] });
+        const way: Way = { signIn: !!e.sign_in, inviteCodes: e.invite_codes ?? true, offline: !!e.offline, only: !!e.only };
+        setRun((now) => now ?? { id: ++runs.current, have: e.have ?? {}, code: !!e.code && !e.replay, way, anchor: at ? [at[0] + 36, at[1] - 30] : [innerWidth * 0.5 - 300, innerHeight * 0.26] });
       }),
     [],
   );
@@ -78,7 +92,7 @@ export function Onboarding() {
   };
   return (
     <Guard key={run.id} onError={() => over("failed", true)}>
-      <Play have={run.have} code={run.code} anchor={run.anchor} onOver={over} />
+      <Play have={run.have} code={run.code} way={run.way} anchor={run.anchor} onOver={over} />
     </Guard>
   );
 }
@@ -98,8 +112,8 @@ class Guard extends Component<{ children: ReactNode; onError: () => void }, { br
   }
 }
 
-function Play({ have, code, anchor, onOver }: { have: Have; code: boolean; anchor: [number, number]; onOver: (how: OnboardingEnding, tell: boolean) => void }) {
-  const [tour, setTour] = useState<Tour>(() => begin({ code, demo: useOverlay.getState().demo }));
+function Play({ have, code, way, anchor, onOver }: { have: Have; code: boolean; way: Way; anchor: [number, number]; onOver: (how: OnboardingEnding, tell: boolean) => void }) {
+  const [tour, setTour] = useState<Tour>(() => begin({ code, demo: useOverlay.getState().demo, ...way }));
   const send = (e: TourEvent) => setTour((t) => reduce(t, e));
   const [about, setAbout] = useState<About>(() => ({ ...EMPTY_ABOUT, email: have.email ?? "", birthday: birthdayFromIso(have.date_of_birth) }));
   const [google, setGoogle] = useState<{ status: ConnectorStatus | null; note: string }>({ status: null, note: "" });
@@ -141,6 +155,13 @@ function Play({ have, code, anchor, onOver }: { have: Have; code: boolean; ancho
         if (tourRef.current.step === "code") {
           // The beta server's answer to their code (the same one Settings shows).
           if (e.type === "beta") send(e.ok ? { type: "joined" } : { type: "join_failed", message: e.message });
+          // "Continue with Google": how it went, and (after "Try again") what the server offers.
+          else if (e.type === "account" && e.what === "sign_in") send(e.ok ? { type: "signed_in", welcome: e.message ?? "" } : { type: "sign_in_failed", message: e.message ?? "" });
+          else if (e.type === "account" && e.what === "config") send({ type: "config", signIn: !!e.account.offered, inviteCodes: e.account.invite_codes, offline: !e.ok });
+          // Signing back in, with no tour after it: the brain is back and signed in. That is all.
+          else if (e.type === "hello" && tourRef.current.only) {
+            if (e.beta?.joined) send({ type: "ready", demo: !!e.demo });
+          }
           // The brain is back from its restart: ask for the tour again. Joined now, it starts
           // with no code step, and the tour here carries on from "You're in." to its hello.
           else if (e.type === "hello") brain.send({ type: "onboarding", action: "start", code: needsCode(e.beta, import.meta.env.DEV) });
@@ -227,7 +248,7 @@ function Play({ have, code, anchor, onOver }: { have: Have; code: boolean; ancho
     const fit = () => {
       const { width, height } = el.getBoundingClientRect();
       // Asking about their screen: the words step aside to the bottom corner, out of the way.
-      const aside = screenClear(tourRef.current) && (tourRef.current.step === "screen" || tourRef.current.step === "google");
+      const aside = screenClear(tourRef.current) && (tourRef.current.step === "screen" || tourRef.current.step === "google" || tourRef.current.step === "code");
       const x = aside ? 64 : Math.max(40, Math.min(anchor[0], innerWidth - width - 40));
       const y = aside ? innerHeight - height - 96 : Math.max(120, Math.min(anchor[1], innerHeight - height - 64));
       setPlace((p) => (Math.abs(p[0] - x) < 0.5 && Math.abs(p[1] - y) < 0.5 ? p : [x, y]));
@@ -287,6 +308,25 @@ function Play({ have, code, anchor, onOver }: { have: Have; code: boolean; ancho
               brain.send({ type: "beta_join", code: invite }); // the same message Settings sends
               send({ type: "join" });
             }}
+            onNone={() => send({ type: "no_code" })}
+            onSignIn={tour.signIn ? () => send({ type: "use_sign_in" }) : undefined}
+          />
+        )}
+        {tour.step === "code" && (tour.phase === "signin" || tour.phase === "browser" || tour.phase === "offline") && (
+          <SignInBox
+            phase={tour.phase}
+            note={tour.note}
+            codes={tour.inviteCodes && !tour.only}
+            onSignIn={() => {
+              brain.send({ type: "account", action: "sign_in" }); // the same sign-in Settings uses
+              send({ type: "sign_in" });
+            }}
+            onCancel={() => {
+              brain.send({ type: "account", action: "cancel_sign_in" });
+              send({ type: "sign_in_failed", message: "" });
+            }}
+            onRetry={() => brain.send({ type: "account", action: "config" })}
+            onCode={() => send({ type: "use_code" })}
             onNone={() => send({ type: "no_code" })}
           />
         )}
@@ -398,7 +438,7 @@ function NameBox({ onName }: { onName: (name: string) => void }) {
 
 /** One box for the invite code (shown in capitals; any case and stray spaces are fine), the
  * beta server's own words when it says no, and a quiet way on without one. */
-function CodeBox({ busy, note, onCode, onNone }: { busy: boolean; note: string; onCode: (code: string) => void; onNone: () => void }) {
+function CodeBox({ busy, note, onCode, onNone, onSignIn }: { busy: boolean; note: string; onCode: (code: string) => void; onNone: () => void; onSignIn?: () => void }) {
   const [code, setCode] = useState("");
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -426,6 +466,40 @@ function CodeBox({ busy, note, onCode, onNone }: { busy: boolean; note: string; 
       </form>
       <p className={note ? "ob-wrong" : "ob-code-wait"} role="status">{busy ? "Checking your code." : note}</p>
       <button type="button" className="ob-none" disabled={busy} onClick={onNone}>I don't have one</button>
+      {onSignIn && <button type="button" className="ob-none ob-other" disabled={busy} onClick={onSignIn}>Sign in with Google instead</button>}
+    </Interactive>
+  );
+}
+
+/** "Continue with Google": one button, why it did not work when it did not (then it reads "Try
+ * again"), and the quiet ways on. While Google's page is open in the browser: Cancel. When the
+ * server could not be reached at all: plain words and "Try again". */
+function SignInBox({ phase, note, codes, onSignIn, onCancel, onRetry, onCode, onNone }: { phase: string; note: string; codes: boolean; onSignIn: () => void; onCancel: () => void; onRetry: () => void; onCode: () => void; onNone: () => void }) {
+  const waiting = phase === "browser";
+  const offline = phase === "offline";
+  const [asking, setAsking] = useState(false); // "Try again" was pressed: the brain is asking the server
+  useEffect(() => setAsking(false), [phase, note]);
+  useEffect(() => {
+    bridge.focusOverlay(); // so Enter and Esc reach the tour
+  }, []);
+  const retry = () => {
+    setAsking(true);
+    onRetry();
+    window.setTimeout(() => setAsking(false), 8000);
+  };
+  return (
+    <Interactive className="ob-name ob-code ob-signin">
+      <div className="ob-signin-row">
+        {offline ? (
+          <button type="button" className="ob-btn primary" disabled={asking} onClick={retry}>{asking ? "Trying" : "Try again"}</button>
+        ) : (
+          <button type="button" className="ob-btn primary" disabled={waiting} onClick={onSignIn}>{waiting ? "Check your browser" : note ? "Try again" : "Continue with Google"}</button>
+        )}
+        {waiting && <button type="button" className="ob-btn quiet" onClick={onCancel}>Cancel</button>}
+      </div>
+      <p className={note ? "ob-wrong" : "ob-code-wait"} role="status">{waiting ? "Waiting for you to finish on Google's page." : note}</p>
+      {!waiting && codes && <button type="button" className="ob-none" onClick={onCode}>I have an invite code</button>}
+      {!waiting && <button type="button" className="ob-none ob-other" onClick={onNone}>Not now</button>}
     </Interactive>
   );
 }

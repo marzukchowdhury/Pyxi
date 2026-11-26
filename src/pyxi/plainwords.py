@@ -17,6 +17,7 @@ import os
 import re
 from dataclasses import dataclass
 
+from pyxi import account
 from pyxi.connectors.google import GOOGLE_EXPIRED
 from pyxi.logscrub import scrub
 
@@ -98,14 +99,23 @@ TITLES = {GOOGLE_EXPIRED: "Sign in to Google again", GOOGLE_PERMISSION: "Google 
 
 
 def action_for(line: str) -> str:
-    """The card button that mends what this line says, or ""."""
-    return ACTIONS.get((line or "").strip(), "")
+    """The card button that mends what this line says, or "". The Pyxi account's own lines
+    (the trial or the plan ended, a payment failed, the allowance is used, signed out) carry
+    theirs: "choose_plan", "see_plans", "update_card", "pyxi_sign_in" (pyxi/account.py)."""
+    line = (line or "").strip()
+    return ACTIONS.get(line, "") or account.action_for(line)
+
+
+def title_for(line: str) -> str:
+    """The title of the card for a line that has a button, or ""."""
+    line = (line or "").strip()
+    return TITLES.get(line, "") or account.title_for(line)
 
 
 @dataclass(frozen=True)
 class Plain:
     line: str
-    kind: str  # "google", "model", "net", "file", "browser", "office"
+    kind: str  # "google", "model", "net", "file", "browser", "office", "plan" (the Pyxi account)
 
     @property
     def action(self) -> str:
@@ -365,6 +375,12 @@ def explain(exc: BaseException, *, beta: bool | None = None, job: bool = False) 
     names = _names(exc)
     if beta is None:
         beta = os.environ.get("PYXI_BETA") == "1"
+    # The Pyxi server said why it won't answer for this account (the trial or the plan ended,
+    # a payment failed, the allowance is used, the sign-in no longer holds): its own sentence,
+    # which has the date in it. First, because the model client wraps it as a 402 or a 429.
+    gate = account.gate_of(exc, account_device=account.signed_in_here())
+    if gate is not None:
+        return Plain(account.line_for(*gate), "plan")
     if "invalid_grant" in low or names & {"RefreshError", "GoogleExpired"}:
         return Plain(GOOGLE_EXPIRED, "google")
     if "switched off in Pyxi's Google Cloud project" in text:

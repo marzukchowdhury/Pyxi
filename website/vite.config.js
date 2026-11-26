@@ -75,6 +75,9 @@ export default defineConfig({
         privacy: resolve(root, "privacy.html"),
         terms: resolve(root, "terms.html"),
         404: resolve(root, "404.html"),
+        // where Stripe Checkout sends the browser back to (the server's success and cancel URLs)
+        welcome: resolve(root, "welcome.html"),
+        "billing-cancelled": resolve(root, "billing-cancelled.html"),
         // the RAM how-to, played inside the home page's 3D section
         ram: resolve(root, "film2/ram.html"),
       },

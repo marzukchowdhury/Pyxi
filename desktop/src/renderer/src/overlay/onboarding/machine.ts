@@ -3,7 +3,9 @@
  * way out can be tested without a screen (machine.test.ts). Onboarding.tsx feeds it what
  * happens (a key held, words heard, a clock tick) and draws what it says.
  *
- *   code     only for someone who needs one (needsCode): "First, your invite code."
+ *   code     only for someone who needs it (needsCode), before the tour itself. When the server
+ *            has sign-in on: "Continue with Google" (and a small "I have an invite code").
+ *            Otherwise, as before: "First, your invite code."
  *   arrival  the firefly flies in, says hello, asks what to call them
  *   talk     "Hold Ctrl and Alt, and say hello": their first words, answered by name
  *   screen   "point me at something": one real question about their screen (in demo mode,
@@ -24,6 +26,9 @@ export const STEPS: Step[] = ["arrival", "talk", "screen", "about", "google", "d
 export type Phase =
   // code: the box, asking the beta server, "You're in." (the brain restarts), going on without one
   | "enter" | "joining" | "joined" | "without"
+  // code, when the server has sign-in on: the button, Google's page open in the browser, and
+  // the server not reached at all ("Try again")
+  | "signin" | "browser" | "offline"
   // arrival (and "fly" opens the code step when there is one)
   | "fly" | "hello" | "ask"
   // talk and screen ("demo": the scripted brain can't answer about their screen, and says so)
@@ -58,8 +63,17 @@ export interface Tour {
   played: Demo[];
   /** Demo mode: no invite code and no key, so the brain is scripted and can't really answer. */
   demoMode: boolean;
-  /** Why the invite code did not work, in the beta server's own words. */
+  /** Why the invite code (or the sign-in) did not work, in the server's own words. */
   note: string;
+  /** The server's /api/config: it offers "Continue with Google"; it still takes invite codes. */
+  signIn: boolean;
+  inviteCodes: boolean;
+  /** The server could not be asked: nothing to offer until it can ("Try again"). */
+  offline: boolean;
+  /** Only this step, no tour after it: they signed out, and are signing back in. */
+  only: boolean;
+  /** Said once, under "You're in.": "3-day trial, 3 days left." */
+  welcome: string;
   /** Set once: the tour is over, and how. */
   ended: Ending | null;
 }
@@ -72,6 +86,15 @@ export type TourEvent =
   | { type: "join_failed"; message: string }
   | { type: "joined" }
   | { type: "no_code" }
+  /** What the server offers (asked again after "Try again"). */
+  | { type: "config"; signIn: boolean; inviteCodes: boolean; offline: boolean }
+  /** Continue with Google: pressed, did not finish (with why; "" when they cancelled), done. */
+  | { type: "sign_in" }
+  | { type: "sign_in_failed"; message: string }
+  | { type: "signed_in"; welcome: string }
+  /** The small links between the two ways in. */
+  | { type: "use_code" }
+  | { type: "use_sign_in" }
   /** The brain is ready for the tour itself (back from its restart after a join). */
   | { type: "ready"; demo: boolean }
   | { type: "name"; name: string }
@@ -114,7 +137,10 @@ export const T = {
   joining: 25000, // the beta server not answering never holds the code step
   restart: 90000, // "You're in.": the brain restarts; one that never comes back ends the tour
   screenDemo: 6000, // "That one needs your invite code."
+  signIn: 330000, // Google's page left open: the brain gives up at five minutes, this just after
 } as const;
+
+export const SIGN_IN_SLOW = "The sign-in took too long. Try again.";
 
 /** Is the invite code asked for first? Only from someone who needs one: they could join, have
  * not, and have no AI key of their own on this PC. Never in the developer build. */
@@ -122,8 +148,21 @@ export function needsCode(beta: { joined: boolean; can_join: boolean; own_key?: 
   return !dev && !!beta && beta.can_join && !beta.joined && !beta.own_key;
 }
 
-export function begin(opts: { code?: boolean; demo?: boolean } = {}): Tour {
-  return { step: opts.code ? "code" : "arrival", phase: "fly", name: "", elapsed: 0, hint: false, keys: false, again: false, demo: null, played: [], demoMode: !!opts.demo, note: "", ended: null };
+export function begin(opts: { code?: boolean; demo?: boolean; signIn?: boolean; inviteCodes?: boolean; offline?: boolean; only?: boolean } = {}): Tour {
+  return {
+    step: opts.code ? "code" : "arrival", phase: "fly", name: "", elapsed: 0, hint: false, keys: false, again: false, demo: null, played: [], demoMode: !!opts.demo, note: "",
+    signIn: !!opts.signIn, inviteCodes: opts.inviteCodes ?? true, offline: !!opts.offline, only: !!opts.only && !!opts.code, welcome: "", ended: null,
+  };
+}
+
+/** Where the code step opens: the server not reached, "Continue with Google", or the invite code. */
+function firstWay(t: Tour): Phase {
+  return t.offline ? "offline" : t.signIn ? "signin" : "enter";
+}
+
+/** Past the code step: on into the tour, or (signing back in, no tour) over. */
+function through(t: Tour, how: Ending): Tour {
+  return t.only ? { ...t, ended: how } : arrive(t);
 }
 
 const FIRST_PHASE: Record<Step, Phase> = { code: "fly", arrival: "fly", talk: "wait", screen: "wait", about: "form", google: "offer", demos: "pick", landing: "rise" };
@@ -162,6 +201,7 @@ function timeout(t: Tour): number | null {
     case "arrival/fly": return T.fly;
     case "code/joining": return T.joining;
     case "code/joined": return T.restart;
+    case "code/browser": return T.signIn;
     case "arrival/hello": return T.hello;
     case "talk/answered": return T.talkAnswered;
     case "screen/demo": return T.screenDemo;
@@ -180,7 +220,8 @@ function timeout(t: Tour): number | null {
 
 function timedOut(t: Tour): Tour {
   switch (`${t.step}/${t.phase}`) {
-    case "code/fly": return phase(t, "enter");
+    case "code/fly": return phase(t, firstWay(t));
+    case "code/browser": return { ...phase(t, "signin"), note: SIGN_IN_SLOW };
     case "code/joining": return { ...phase(t, "enter"), note: "I couldn't get an answer. Check your internet and try again." };
     case "code/joined": return { ...t, ended: "failed" };
     case "arrival/fly": return phase(t, "hello");
@@ -225,9 +266,28 @@ export function reduce(t: Tour, e: TourEvent): Tour {
     case "joined":
       return t.step === "code" && t.phase !== "joined" ? { ...phase(t, "joined"), note: "" } : t;
     case "no_code":
-      return t.step === "code" && (t.phase === "enter" || t.phase === "fly") ? { ...phase(t, "without"), note: "" } : t;
+      return t.step === "code" && (t.phase === "enter" || t.phase === "fly" || t.phase === "signin" || t.phase === "offline") ? { ...phase(t, "without"), note: "" } : t;
+    case "config": {
+      // The server's answer, asked again: only while nothing is under way.
+      if (t.step !== "code" || !["fly", "offline", "signin", "enter"].includes(t.phase)) return t;
+      const next = { ...t, signIn: e.signIn, inviteCodes: e.inviteCodes, offline: e.offline };
+      if (t.phase === "fly") return next;
+      // Still where they chose to be (typing a code), unless that way is gone.
+      const stay = t.phase === "enter" && !e.offline && (e.inviteCodes || !e.signIn);
+      return stay ? next : { ...phase(next, firstWay(next)), note: "" };
+    }
+    case "sign_in":
+      return t.step === "code" && t.phase === "signin" ? { ...phase(t, "browser"), note: "" } : t;
+    case "sign_in_failed":
+      return t.step === "code" && t.phase === "browser" ? { ...phase(t, "signin"), note: e.message } : t;
+    case "signed_in":
+      return t.step === "code" && t.phase !== "joined" ? { ...phase(t, "joined"), note: "", welcome: e.welcome } : t;
+    case "use_code":
+      return t.step === "code" && t.phase === "signin" && t.inviteCodes ? { ...phase(t, "enter"), note: "" } : t;
+    case "use_sign_in":
+      return t.step === "code" && t.phase === "enter" && t.signIn ? { ...phase(t, "signin"), note: "" } : t;
     case "ready":
-      return t.step === "code" ? arrive({ ...t, demoMode: e.demo }) : t;
+      return t.step === "code" ? through({ ...t, demoMode: e.demo }, "finished") : t;
     case "name":
       return t.step === "arrival" ? enter({ ...t, name: tidyName(e.name) }, "talk") : t;
     case "heard":
@@ -251,7 +311,7 @@ export function reduce(t: Tour, e: TourEvent): Tour {
       return t.step === "demos" ? { ...phase(t, "play"), demo: e.demo, played: t.played.includes(e.demo) ? t.played : [...t.played, e.demo] } : t;
     case "next":
       if (t.phase === "underage") return { ...t, ended: "underage" };
-      if (t.step === "code") return t.phase === "fly" ? phase(t, "enter") : t.phase === "without" ? arrive(t) : t; // the box's own form sends the code
+      if (t.step === "code") return t.phase === "fly" ? phase(t, firstWay(t)) : t.phase === "without" ? through(t, "skipped") : t; // the box's own form sends the code
       if (t.step === "arrival" && t.phase !== "ask") return phase(t, "ask"); // straight to the question
       if (t.step === "arrival") return enter(t, "talk"); // no name given
       if (t.step === "about" && t.phase === "form") return t; // the card's own button submits it
@@ -261,7 +321,8 @@ export function reduce(t: Tour, e: TourEvent): Tour {
     case "skip_step":
       if (t.phase === "underage") return { ...t, ended: "underage" };
       // Esc on the code: first what going without one means, then on. Never while it is joining.
-      if (t.step === "code") return t.phase === "without" ? arrive(t) : t.phase === "joining" || t.phase === "joined" ? t : { ...phase(t, "without"), note: "" };
+      // (Nor while Google's page is open: its own Cancel ends that.)
+      if (t.step === "code") return t.phase === "without" ? through(t, "skipped") : t.phase === "joining" || t.phase === "joined" || t.phase === "browser" ? t : { ...phase(t, "without"), note: "" };
       if (t.step === "demos" && t.phase === "play") return { ...phase(t, "pick"), demo: null };
       if (t.step === "landing") return { ...t, ended: "finished" };
       return onward(t);
@@ -283,9 +344,16 @@ export function lineFor(t: Tour, keys: string[] = ["Ctrl", "Alt"]): Line | null 
   switch (`${t.step}/${t.phase}`) {
     case "code/enter":
     case "code/joining": return { id: "code", text: "First, your invite code.", sub: "It came with your invitation. It lets me think." };
-    case "code/joined": return { id: "code-joined", text: "You're in.", sub: "One moment while I get ready." };
-    case "code/without": return { id: "code-without", text: "That's fine.", sub: "I'll run as a demo until you enter a code in Settings." };
-    case "screen/demo": return { id: "screen-demo", text: "Next, you'd ask me about your screen.", sub: "That one needs your invite code. You can add it in Settings any time." };
+    case "code/signin": return t.only
+      ? { id: "signin-again", text: "Sign in to carry on.", sub: "Everything you set up is still here." }
+      : { id: "signin", text: "First, sign in.", sub: "Your 3-day trial starts when you do. No card needed." };
+    case "code/browser": return { id: "signin-browser", text: "Finish in your browser.", sub: "Google's page opened on this PC. Pick your account there." };
+    case "code/offline": return { id: "signin-offline", text: "I can't reach Pyxi right now.", sub: "Check your internet, then try again." };
+    case "code/joined": return { id: "code-joined", text: "You're in.", sub: t.welcome ? `${t.welcome} One moment while I get ready.` : "One moment while I get ready." };
+    case "code/without": return { id: "code-without", text: "That's fine.", sub: t.signIn ? "I'll run as a demo until you sign in from Settings." : "I'll run as a demo until you enter a code in Settings." };
+    case "screen/demo": return t.signIn
+      ? { id: "screen-demo", text: "Next, you'd ask me about your screen.", sub: "That one needs you to sign in. You can do it in Settings any time." }
+      : { id: "screen-demo", text: "Next, you'd ask me about your screen.", sub: "That one needs your invite code. You can add it in Settings any time." };
     case "arrival/hello": return { id: "hello", text: "Hi. I'm Pyxi.", sub: "I live in the corner of your screen." };
     case "arrival/ask": return { id: "ask-name", text: "What should I call you?" };
     case "talk/wait":
@@ -321,5 +389,6 @@ export function screenClear(t: Tour): boolean {
   // Signing in to Google happens in their browser, under this: the dark hid the page and the
   // card sat on the list of accounts, so a tester could not see what to click.
   if (t.step === "google" && t.phase === "connecting") return true;
+  if (t.step === "code" && t.phase === "browser") return true; // the same, signing in to Pyxi
   return (t.step === "screen" && t.phase !== "demo") || (t.step === "landing" && t.phase === "glow");
 }

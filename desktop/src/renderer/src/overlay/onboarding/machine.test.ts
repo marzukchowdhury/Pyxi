@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { begin, lineFor, needsCode, reduce, screenClear, spoken, STEPS, T, type Tour, type TourEvent } from "./machine";
+import { begin, lineFor, needsCode, reduce, screenClear, SIGN_IN_SLOW, spoken, STEPS, T, type Tour, type TourEvent } from "./machine";
 
 const run = (t: Tour, ...events: TourEvent[]) => events.reduce(reduce, t);
 const wait = (ms: number, speaking = false): TourEvent => ({ type: "tick", ms, speaking });
@@ -312,6 +312,100 @@ describe("the invite code step", () => {
 
   it("keeps its lines free of em dashes and emoji", () => {
     for (const t of [box(), run(box(), { type: "join" }, { type: "joined" }), run(box(), { type: "no_code" })]) expect(spoken(lineFor(t)!)).not.toMatch(/[—–]|\p{Extended_Pictographic}/u);
+  });
+});
+
+describe("signing in, when the server has it on", () => {
+  /** The step before the tour, as the server's /api/config makes it. */
+  const first = (opts: { signIn?: boolean; inviteCodes?: boolean; offline?: boolean; only?: boolean } = { signIn: true }) => run(begin({ code: true, demo: true, ...opts }), wait(T.fly));
+
+  it("opens on Continue with Google when sign_in is true, and on the invite code when it is not", () => {
+    const on = first({ signIn: true });
+    expect([on.step, on.phase]).toEqual(["code", "signin"]);
+    expect(lineFor(on)).toEqual({ id: "signin", text: "First, sign in.", sub: "Your 3-day trial starts when you do. No card needed." });
+    const off = first({ signIn: false });
+    expect([off.step, off.phase]).toEqual(["code", "enter"]);
+    expect(lineFor(off)).toEqual({ id: "code", text: "First, your invite code.", sub: "It came with your invitation. It lets me think." });
+    // Enter on the way in lands on the same step.
+    expect(run(begin({ code: true, signIn: true }), { type: "next" }).phase).toBe("signin");
+    // Someone who needs neither gets neither.
+    expect(begin({ code: false, signIn: true }).step).toBe("arrival");
+  });
+
+  it("signs in through the browser, says the trial once, and goes on when the brain is back", () => {
+    let t = run(first(), { type: "sign_in" });
+    expect([t.phase, lineFor(t)?.text]).toEqual(["browser", "Finish in your browser."]);
+    expect(screenClear(t)).toBe(true); // Google's page is under it: no dim in the way
+    expect(run(t, { type: "skip_step" }).phase).toBe("browser"); // Esc does not drop a sign-in under way
+    t = run(t, { type: "signed_in", welcome: "Your 3-day trial has 3 days left." });
+    expect([t.phase, lineFor(t)?.text, lineFor(t)?.sub]).toEqual(["joined", "You're in.", "Your 3-day trial has 3 days left. One moment while I get ready."]);
+    t = run(t, wait(20_000)); // the brain restarts
+    expect([t.phase, t.ended]).toEqual(["joined", null]);
+    t = run(t, { type: "ready", demo: false });
+    expect([t.step, t.phase, t.demoMode]).toEqual(["arrival", "hello", false]); // the tour, as today
+    expect(run(t, wait(T.hello)).phase).toBe("ask");
+  });
+
+  it("a sign-in that fails, is cancelled or is left open comes back to the button", () => {
+    let t = run(first(), { type: "sign_in" }, { type: "sign_in_failed", message: "That Google sign-in didn't work. Try again." });
+    expect([t.phase, t.note]).toEqual(["signin", "That Google sign-in didn't work. Try again."]);
+    t = run(t, { type: "sign_in" });
+    expect([t.phase, t.note]).toEqual(["browser", ""]);
+    t = run(t, { type: "sign_in_failed", message: "" }); // Cancel
+    expect([t.phase, t.note]).toEqual(["signin", ""]);
+    t = run(t, { type: "sign_in" }, wait(T.signIn));
+    expect([t.phase, t.note]).toEqual(["signin", SIGN_IN_SLOW]);
+    expect(run(t, { type: "sign_in_failed", message: "late" }).note).toBe(SIGN_IN_SLOW); // an answer for a try that is over
+  });
+
+  it("offers the invite code only when the server still takes them, and the way back", () => {
+    let t = run(first({ signIn: true, inviteCodes: true }), { type: "use_code" });
+    expect([t.phase, lineFor(t)?.text]).toEqual(["enter", "First, your invite code."]);
+    t = run(t, { type: "join" }, { type: "joined" }, { type: "ready", demo: false });
+    expect([t.step, t.phase]).toEqual(["arrival", "hello"]); // the invite code works as it did
+    expect(run(first({ signIn: true, inviteCodes: true }), { type: "use_code" }, { type: "use_sign_in" }).phase).toBe("signin");
+    expect(run(first({ signIn: true, inviteCodes: false }), { type: "use_code" }).phase).toBe("signin");
+    expect(run(first({ signIn: false }), { type: "use_sign_in" }).phase).toBe("enter");
+  });
+
+  it("says so when the server can't be reached, and tries again", () => {
+    let t = first({ offline: true });
+    expect([t.phase, lineFor(t)?.text, lineFor(t)?.sub]).toEqual(["offline", "I can't reach Pyxi right now.", "Check your internet, then try again."]);
+    t = run(t, { type: "config", signIn: false, inviteCodes: true, offline: true }); // still down
+    expect(t.phase).toBe("offline");
+    expect(run(t, { type: "config", signIn: true, inviteCodes: true, offline: false }).phase).toBe("signin");
+    expect(run(t, { type: "config", signIn: false, inviteCodes: true, offline: false }).phase).toBe("enter");
+    expect(run(t, { type: "no_code" }).phase).toBe("without"); // or carry on without
+    // The server's answer never pulls them out of a sign-in or a code that is under way.
+    const busy = run(first(), { type: "sign_in" });
+    expect(run(busy, { type: "config", signIn: false, inviteCodes: true, offline: true }).phase).toBe("browser");
+    const typing = run(first(), { type: "use_code" });
+    expect(run(typing, { type: "config", signIn: true, inviteCodes: true, offline: false }).phase).toBe("enter");
+  });
+
+  it("going on without signing in is the demo, and says how to sign in later", () => {
+    let t = run(first(), { type: "no_code" });
+    expect(spoken(lineFor(t)!)).toBe("That's fine. I'll run as a demo until you sign in from Settings.");
+    t = run(t, { type: "next" });
+    expect([t.step, t.phase]).toEqual(["arrival", "hello"]);
+    t = run(t, { type: "next" }, { type: "name", name: "Sam" }, { type: "skip_step" });
+    expect(lineFor(t)?.sub).toBe("That one needs you to sign in. You can do it in Settings any time.");
+    expect(run(first(), { type: "skip_tour" }).ended).toBe("skipped");
+  });
+
+  it("signing back in after signing out is that one step, with no tour after it", () => {
+    let t = first({ signIn: true, only: true });
+    expect(lineFor(t)).toEqual({ id: "signin-again", text: "Sign in to carry on.", sub: "Everything you set up is still here." });
+    t = run(t, { type: "sign_in" }, { type: "signed_in", welcome: "You're on the Pro plan." }, { type: "ready", demo: false });
+    expect([t.step, t.ended]).toEqual(["code", "finished"]);
+    t = run(first({ signIn: true, only: true }), { type: "no_code" }, { type: "next" });
+    expect([t.step, t.ended]).toEqual(["code", "skipped"]);
+    expect(begin({ only: true }).only).toBe(false); // "only" means only the step before the tour
+  });
+
+  it("keeps its lines free of em dashes, emoji and jargon", () => {
+    const moments = [first(), first({ offline: true }), first({ signIn: true, only: true }), run(first(), { type: "sign_in" }), run(first(), { type: "signed_in", welcome: "Your 3-day trial has 3 days left." }), run(first(), { type: "no_code" })];
+    for (const t of moments) expect(spoken(lineFor(t)!)).not.toMatch(/[—–]|\p{Extended_Pictographic}|token|OAuth|webhook/u);
   });
 });
 
