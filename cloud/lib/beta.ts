@@ -270,6 +270,13 @@ export function earsProblem(body: Record<string, unknown>, cfg: Config): string 
   return "";
 }
 
+/** What chat says to a device whose token it doesn't know (never joined, signed out, revoked).
+ * With Google sign-in on, that is how anyone gets in, so it says to sign in. The invite
+ * wording is only for a server that still runs on invite codes alone. */
+export function notSignedIn(cfg: Config): string {
+  return cfg.googleClientId ? "Sign in to Pyxi to carry on." : "Sign in to the Pyxi beta first (Settings, invite code).";
+}
+
 /** OpenAI-style chat completions, passed through to OpenRouter with the beta's limits. */
 export async function chat(
   store: Store,
@@ -278,7 +285,7 @@ export async function chat(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
   const who = await identify(store, req, cfg);
-  if (!who) return json({ error: { code: "not_signed_in", message: "Sign in to the Pyxi beta first (Settings, invite code)." } }, 401);
+  if (!who) return json({ error: { code: "not_signed_in", message: notSignedIn(cfg) } }, 401);
   if (!cfg.openrouterKey) return json({ error: { message: "The beta server has no model key set." } }, 503);
   if (who.account) {
     // An account: the trial clock, the plan's standing and its allowance decide.

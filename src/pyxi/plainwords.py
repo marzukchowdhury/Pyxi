@@ -177,7 +177,7 @@ class Plain:
 
 _BETA_SAID = re.compile(
     r"(You've used today's Pyxi beta allowance[^\"'}]*|The Pyxi beta is at its limit[^\"'}]*|"
-    r"Sign in to the Pyxi beta first[^\"'}]*)"
+    r"Sign in to the Pyxi beta first[^\"'}]*|Sign in to Pyxi to carry on\.)"
 )
 _NO_NET = re.compile(
     r"(?i)getaddrinfo failed|name or service not known|temporary failure in name resolution|"

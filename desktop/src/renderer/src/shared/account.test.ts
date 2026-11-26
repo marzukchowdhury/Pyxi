@@ -7,7 +7,7 @@ vi.mock("./socket", () => ({
   brain: { on: (fn: (e: unknown) => void) => void wire.handlers.push(fn), send: (m: unknown) => void wire.sent.push(m) },
 }));
 
-const { allowanceLine, allowanceShare, ask, cardButton, friendlyDate, hasPlan, planLine, PLANS, price, showPlans, taken, trialLine, useAccount } = await import("./account");
+const { allowanceLine, allowanceShare, ask, cardButton, friendlyDate, hasPlan, planLine, PLANS, price, showPlans, taken, trialDaysLeft, trialLine, useAccount } = await import("./account");
 const fromBrain = (e: unknown) => wire.handlers.forEach((fn) => fn(e as BrainEvent));
 
 const account = (changes: Partial<AccountState> = {}): AccountState => ({
@@ -17,12 +17,30 @@ const account = (changes: Partial<AccountState> = {}): AccountState => ({
 const event = (changes: Partial<AccountEvent> = {}): AccountEvent => ({ type: "account", account: account(), ...changes });
 
 describe("the account's words", () => {
-  it("says the trial and its days left", () => {
-    expect(trialLine({ status: "trial", days_left: 3 })).toBe("3-day trial, 3 days left");
-    expect(trialLine({ status: "trial", days_left: 1 })).toBe("3-day trial, 1 day left");
-    expect(trialLine({ status: "trial", days_left: 0 })).toBe("3-day trial, last day");
+  it("counts the trial's days the way people do: 3 on day one, ends today on the last day", () => {
+    const HOUR = 3_600_000;
+    const ends = Date.parse("2026-11-29T12:00:00Z"); // a trial that began on the 26th at noon
+    const at = (hoursIn: number) => planLine(account(), ends - 72 * HOUR + hoursIn * HOUR);
+    expect(at(0)).toBe("3-day trial, 3 days left"); // the moment they sign in (the server says 2 here)
+    expect(at(1)).toBe("3-day trial, 3 days left");
+    expect(at(23.9)).toBe("3-day trial, 3 days left");
+    expect(at(24)).toBe("3-day trial, 2 days left");
+    expect(at(47)).toBe("3-day trial, 2 days left");
+    expect(at(48.5)).toBe("3-day trial, ends today"); // the last day
+    expect(at(71.9)).toBe("3-day trial, ends today");
+    expect(at(73)).toBe("3-day trial, ends today"); // a moment past the end, before the server has said so
+    expect(trialDaysLeft(account(), ends - 72 * HOUR)).toBe(3);
+    expect(trialDaysLeft(account(), ends - 1)).toBe(1);
+  });
+
+  it("falls back to the server's count of whole days when the end time is missing", () => {
+    // The server counts whole days still to come: 2 on day one, 0 on the last day.
+    expect(trialLine({ status: "trial", days_left: 2 })).toBe("3-day trial, 3 days left");
+    expect(trialLine({ status: "trial", days_left: 1 })).toBe("3-day trial, 2 days left");
+    expect(trialLine({ status: "trial", days_left: 0 })).toBe("3-day trial, ends today");
+    expect(trialLine({ status: "trial", days_left: null })).toBe("3-day trial");
+    expect(trialLine({ status: "trial", days_left: 0, trial_ends_at: "not a date" })).toBe("3-day trial, ends today");
     expect(trialLine({ status: "active", days_left: null })).toBe("");
-    expect(planLine(account())).toBe("3-day trial, 3 days left");
   });
 
   it("says the plan and when it renews or ends", () => {

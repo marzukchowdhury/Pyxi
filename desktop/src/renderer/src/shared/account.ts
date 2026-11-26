@@ -90,16 +90,29 @@ export function friendlyDate(iso: string | null | undefined): string {
 
 const NAMES: Record<string, string> = { starter: "Starter", pro: "Pro", max: "Max" };
 
-/** "3-day trial, 2 days left" (the tour says it once at the start; Settings always shows it). */
-export function trialLine(a: Pick<AccountState, "status" | "days_left">): string {
+const DAY_MS = 86_400_000;
+
+/** The days of the trial still to go, counted the way people count them: any part of a day is
+ * a day, so a 3-day trial has 3 left on day one and 1 on its last day. Worked out from when
+ * the trial ends. (The server's own count is of whole days still to come, one fewer: 2 on day
+ * one and 0 on the last day. It is used only when the end time is missing.) */
+export function trialDaysLeft(a: { trial_ends_at?: string | null; days_left: number | null }, now: number = Date.now()): number | null {
+  const ends = a.trial_ends_at ? new Date(a.trial_ends_at).getTime() : Number.NaN;
+  if (!Number.isNaN(ends)) return Math.max(0, Math.ceil((ends - now) / DAY_MS));
+  return a.days_left === null ? null : Math.max(0, a.days_left) + 1;
+}
+
+/** "3-day trial, 3 days left" on day one, "3-day trial, ends today" on the last day (Settings). */
+export function trialLine(a: Pick<AccountState, "status" | "days_left"> & { trial_ends_at?: string | null }, now: number = Date.now()): string {
   if (a.status !== "trial") return "";
-  if (a.days_left === null) return "3-day trial";
-  return a.days_left <= 0 ? "3-day trial, last day" : `3-day trial, ${a.days_left} day${a.days_left === 1 ? "" : "s"} left`;
+  const days = trialDaysLeft(a, now);
+  if (days === null) return "3-day trial";
+  return days <= 1 ? "3-day trial, ends today" : `3-day trial, ${days} days left`;
 }
 
 /** The plan in one line: the trial and its days, the plan and when it renews or ends. */
-export function planLine(a: AccountState): string {
-  if (a.status === "trial") return trialLine(a);
+export function planLine(a: AccountState, now: number = Date.now()): string {
+  if (a.status === "trial") return trialLine(a, now);
   const name = a.plan ? NAMES[a.plan] : undefined;
   const when = friendlyDate(a.renews_at);
   if (a.status === "ended" || !name) return a.trial_ends_at ? "Your trial has ended" : "Your plan has ended"; // the server drops the trial date once they have paid

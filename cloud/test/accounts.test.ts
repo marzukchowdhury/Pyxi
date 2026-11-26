@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { adminAccount, config, signIn, signOut, WORDS } from "../lib/accounts.js";
-import { chat, configFromEnv, join, me } from "../lib/beta.js";
+import { chat, configFromEnv, join, me, notSignedIn } from "../lib/beta.js";
 import { googleKeys, verifyGoogleIdToken } from "../lib/google.js";
 import { MemoryStore } from "../lib/store.js";
 import { as, cfg, CLIENT_ID, ENV, errorOf, post, type Signer, signer, stored } from "./helpers.js";
@@ -220,6 +220,26 @@ describe("one account, any number of devices, one trial", () => {
     expect((await meOf(store, pc.token)).account!.allowance.used_usd).toBeCloseTo(0.7);
     expect((await meOf(store, laptop.token)).account!.allowance.used_usd).toBeCloseTo(0.7);
     expect((await meOf(store, laptop.token)).spent_today_usd).toBeCloseTo(0.3); // this device, today
+  });
+
+  it("tells a device it doesn't know to sign in, and mentions an invite code only when sign-in is off", async () => {
+    at(T0);
+    const store = new MemoryStore();
+    const said = async (res: Response) => ((await res.json()) as { error: { code: string; message: string } }).error;
+    // Sign-in is on: a signed-out account device, and a token that was never real.
+    const pc = await signInAs(store);
+    await signOut(store, post("/api/auth/signout", {}, as(pc.token)));
+    for (const token of [pc.token, "pyxi_never_given_out"]) {
+      const res = await ask(store, token, never);
+      expect(res.status).toBe(401);
+      expect(await said(res)).toEqual({ code: "not_signed_in", message: "Sign in to Pyxi to carry on." });
+    }
+    // Sign-in is off (a server that still runs on invite codes alone): the invite wording stays.
+    const invitesOnly = configFromEnv({ ...ENV, GOOGLE_SIGNIN_CLIENT_ID: "" });
+    const res = await ask(store, "pyxi_never_given_out", never, invitesOnly);
+    expect(res.status).toBe(401);
+    expect(await said(res)).toEqual({ code: "not_signed_in", message: "Sign in to the Pyxi beta first (Settings, invite code)." });
+    expect(notSignedIn(cfg)).not.toMatch(/invite/i);
   });
 
   it("signing out stops only that device, and signing in again does not restart the trial", async () => {

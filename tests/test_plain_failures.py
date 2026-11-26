@@ -134,6 +134,9 @@ def test_the_beta_allowance_is_not_called_a_busy_model():
     assert both(exc) == "The Pyxi beta is at its limit for this month. Back soon."
     exc = model_error(401, "Sign in to the Pyxi beta first (Settings, invite code).")
     assert both(exc) == "Sign in to the Pyxi beta first (Settings, invite code)."
+    # What the server says instead once Google sign-in is on (cloud/lib/beta.ts, notSignedIn).
+    exc = model_error(401, "Sign in to Pyxi to carry on.")
+    assert both(exc) == "Sign in to Pyxi to carry on."
 
 
 def test_model_failures_each_have_their_own_line(monkeypatch):
