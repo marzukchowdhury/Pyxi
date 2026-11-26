@@ -366,6 +366,7 @@ code, kbd { font: 500 11.5px/1 "Inter", ui-monospace, Consolas, monospace; paddi
 .result-body { margin: 8px 0 0 19px; font-size: 13px; line-height: 1.5; color: var(--ink); }
 .result-changes { margin: 8px 0 0 19px; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12px; color: var(--ink-2); }
 .result-changes li { padding: 4px 8px; border-radius: 8px; background: rgba(255,255,255,.04); border: 1px solid var(--hair); }
+.result-retry { margin: 7px 0 0 19px; font-size: 12px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
 .result-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 11px 0 0 19px; }
 .result-actions button { height: 30px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--hair-hi); background: rgba(255,255,255,.04); color: var(--ink-2); font-size: 12.5px; font-weight: 500; }
 .result-actions button:hover { color: var(--ink); border-color: rgba(158,203,255,.35); }

@@ -641,7 +641,10 @@ class Listening:
                 problem = _plain(
                     exc, "Google Calendar didn't take them. Ask me again in a minute."
                 )
-                if isinstance(exc, GoogleExpired) or plainwords.action_for(problem):
+                if isinstance(exc, GoogleExpired) or plainwords.action_for(problem) not in (
+                    "",
+                    plainwords.RETRY,  # a passing failure: the next entry may well go in
+                ):
                     break  # the sign-in: every other entry would fail the same way
                 continue
             if isinstance(out, str) and out.startswith("CREATED"):

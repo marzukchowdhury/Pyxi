@@ -97,13 +97,54 @@ UNKNOWN = "Something went wrong on my side and I couldn't finish. Ask me again, 
 ACTIONS = {GOOGLE_EXPIRED: "google", GOOGLE_PERMISSION: "google"}
 TITLES = {GOOGLE_EXPIRED: "Sign in to Google again", GOOGLE_PERMISSION: "Google needs your OK"}
 
+# "Try again": the same request once more. The line only says the failure is the kind that
+# passes (no internet, the model busy, a timeout, Google's rate limit). Whether the button
+# may be shown is the brain's to decide, because it alone knows if anything was already
+# done: it is never offered after something was sent, posted, paid or changed
+# (companion/brain.py, ``_offer_retry``).
+RETRY = "retry"
+RETRY_LINES = frozenset({
+    OFFLINE, MODEL_OFFLINE, MODEL_BUSY, MODEL_SLOW, MODEL_DOWN, BETA_DOWN, SLOW,
+    GOOGLE_BUSY, GOOGLE_DOWN, GOOGLE_SLOW, SITE_UNREACHABLE, SITE_SLOW,
+})  # fmt: skip
+_RETRY_SAID = re.compile(
+    r"^(?:LinkedIn|Discord) is (?:asking me to slow down|having trouble right now)\."
+)
+# "Open Settings": Pyxi's own Settings, at the part that mends it ("settings:files").
+SETTINGS = "settings"
+_SETTINGS_PART = (
+    ("files", re.compile(r"(?i)\bunder Your files\b|search my files|file search is off")),
+    (
+        "accounts",
+        re.compile(
+            r"(?i)\bunder Connected accounts\b|\bisn't connected\b|\bConnect (?:Google|it) in Settings\b|"
+            r"Connecting the account again in Settings"
+        ),
+    ),
+    ("budget", re.compile(r"(?i)\bspending limit\b|today's budget is used up|used up today's budget")),
+    ("voice", re.compile(r"(?i)\bVoice tab\b")),
+)
+
+
+def settings_part(line: str) -> str:
+    """The part of Settings that mends this line ("files", "accounts", "budget", "voice"), or ""."""
+    return next((part for part, said in _SETTINGS_PART if said.search(line or "")), "")
+
 
 def action_for(line: str) -> str:
     """The card button that mends what this line says, or "". The Pyxi account's own lines
     (the trial or the plan ended, a payment failed, the allowance is used, signed out) carry
-    theirs: "choose_plan", "see_plans", "update_card", "pyxi_sign_in" (pyxi/account.py)."""
+    theirs: "choose_plan", "see_plans", "update_card", "pyxi_sign_in" (pyxi/account.py).
+    The rest: "google" (Sign in to Google), "retry" (Try again, see RETRY), and
+    "settings:<part>" (Open Settings, at that part). One button for a line, never two."""
     line = (line or "").strip()
-    return ACTIONS.get(line, "") or account.action_for(line)
+    if mend := ACTIONS.get(line, "") or account.action_for(line):
+        return mend
+    if part := settings_part(line):
+        return f"{SETTINGS}:{part}"
+    if line in RETRY_LINES or _RETRY_SAID.match(line):
+        return RETRY
+    return ""
 
 
 def title_for(line: str) -> str:

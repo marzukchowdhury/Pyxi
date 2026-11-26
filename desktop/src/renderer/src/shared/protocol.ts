@@ -638,7 +638,12 @@ export type BrainEvent =
    * or nothing at all (a password box, silence, Esc). `note` is the line for the sign. */
   | { type: "dictated"; text: string; how: DictationOutcome; note: string; seconds: number; tidied?: boolean }
   | { type: "alarm"; title: string; label: string; at: string }
-  | { type: "job_ready"; job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null }
+  /** A result card. `actions` name its buttons (overlay/cardButtons.ts shows two at most):
+   * "google", the account's ("choose_plan"...), "settings" or "settings:<part>" (Open Settings,
+   * at Your files, Connected accounts, the budget or the Voice tab), and "retry" (Try again),
+   * which comes with `retry`: what will be run again, in words. The brain sends "retry" only
+   * for a failure where nothing was done. */
+  | { type: "job_ready"; job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null; retry?: string | null }
   | { type: "guide"; active: boolean; step?: number; total?: number | null; goal?: string; label?: string; action?: string; finished?: boolean; at?: [number, number] | null }
   | { type: "stop_audio" }
   | { type: "annotate"; annotations: Annotation[] }
@@ -785,6 +790,8 @@ export type ClientMessage =
   | { type: "guide_cancel" }
   | { type: "object_closed"; by_them?: boolean }
   | { type: "voice_preview"; engine: string; voice: string; speed?: number }
+  /** "Try again" on a failure card: the brain runs what that card stands for, once. */
+  | { type: "retry"; job_id: string }
   /** Download Pyxi's own voice (`repair`: fetch it afresh over the one that is here). */
   | { type: "voice_pack"; repair?: boolean }
   /** Keep a cloud voice's key in the protected store on this PC, or (`forget`) remove it. */

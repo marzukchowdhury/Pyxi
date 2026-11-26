@@ -30,6 +30,7 @@ import re
 import secrets
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -2130,6 +2131,14 @@ class Brain:
                 errands.pop(old_id, None)
         waiting: dict[str, Any] = {"card": None}
         errands[job.id] = (task, asyncio.current_task(), waiting)
+        ran = {"tools": 0}  # how many of the errand's tools have been called (for Try again)
+
+        def counted(t: Any) -> Any:
+            async def handler(args: dict[str, Any], _run: Any = t.handler) -> Any:
+                ran["tools"] += 1
+                return await _run(args)
+
+            return dataclasses.replace(t, handler=handler)
 
         async def progress(line: str) -> None:
             await self.hub.emit(
@@ -2158,7 +2167,7 @@ class Brain:
                 user_text=user_text,
                 now=(await self._now()) + answers.where_line(),
                 llm=self._errand_llm(),
-                tools=self.connectors.tools(),
+                tools=[counted(t) for t in self.connectors.tools()],
                 approve=approve,
                 progress=progress,
                 reads=reads,
@@ -2175,6 +2184,18 @@ class Brain:
             self._errands.pop(job.id, None)
             why = friendly_error(exc)  # never the raw error: this is read on a card
             mend = plainwords.action_for(why)
+            again = ""
+            if mend == plainwords.RETRY:
+                # Try again only if the errand failed before any of its tools ran (so no
+                # mail was sent, nothing made or changed), and it was their own request.
+                if ran["tools"] == 0 and user_text.strip():
+                    again = self.offer_retry(
+                        job.id,
+                        task,
+                        lambda: self._run_errand(task, user_text, **({"reads": reads} if reads else {})),
+                    )
+                else:
+                    mend = ""
             await self.jobs.settle(job, ok=False, summary=why)
             await self._notify(
                 job.id,
@@ -2182,6 +2203,7 @@ class Brain:
                 title=plainwords.title_for(why) or "Couldn't finish that",
                 body=why,
                 actions=[mend] if mend else None,
+                retry=again,
             )
             self._spawn(self._say_when_free("I couldn't finish that. The notification says why."))
             return
@@ -2404,16 +2426,22 @@ class Brain:
         notes: list[str] | None = None,
         actions: list[str] | None = None,
         say: bool = False,
+        retry: str = "",
     ) -> None:
         """A notice on the notch. ``say``: also said aloud, in one short line, once the floor
         is free. For the result of something they asked for and then allowed on a card (the
         files renamed, the fix applied, the follow-up sent): live, such a result was a ten
-        second notice and nothing else, and "I didn't see anything"."""
+        second notice and nothing else, and "I didn't see anything". ``retry``: what Try
+        again on this card runs again, in words for the card (from :meth:`offer_retry`)."""
         if say and title:
             line = title if title[-1:] in ".!?" else f"{title}."
             self._spawn(self._say_when_free(hide_secrets(line)))
         # A failure that a button mends carries that button, whoever reports it.
         mend = [] if ok else [a for a in [plainwords.action_for(body)] if a]
+        if plainwords.RETRY in mend and not retry:
+            # Try again is only for a failure where nothing was done, and only the caller
+            # knows that: without its word (``retry``) the card has no such button.
+            mend = []
         if not ok:
             await self.account.noticed(body)  # the trial, the plan, the allowance: Settings too
         await self.hub.emit(
@@ -2428,7 +2456,59 @@ class Brain:
             changes=changes or [],
             notes=notes or [],
             actions=actions or mend or (["link"] if link else []),
+            retry=retry or None,
         )
+
+    # ------------------------------------------------------------------ "Try again"
+    def offer_retry(self, card_id: str, what: str, run: Callable[[], Awaitable[Any]]) -> str:
+        """Remember what Try again on this card runs, and return the words the card shows for
+        it, so it is plain what will be run again. Only ever called for a failure where
+        nothing was done: no message sent, nothing posted, paid, booked or changed. A card
+        offered this way runs once; pressing it again does nothing."""
+        retries = self.__dict__.setdefault("_retries", {})
+        retries.pop(card_id, None)
+        retries[card_id] = run
+        while len(retries) > 8:  # old cards have long since left the screen
+            retries.pop(next(iter(retries)))
+        return clip(" ".join(hide_secrets(what).split()), 120)
+
+    async def retry(self, card_id: str) -> bool:
+        """Try again was pressed on a card: run what it stands for, once."""
+        run = self.__dict__.get("_retries", {}).pop(card_id, None)
+        if run is None:
+            return False
+        if self.turns.spent_today() >= self.settings.budget.daily_cost_usd:
+            await self.say_line("Today's budget is used up, so I can't try that again today.")
+            return False
+        await run()
+        return True
+
+    @staticmethod
+    def job_untouched(job: Job) -> bool:
+        """Did this failed job stop before it could have done anything? True only where that
+        is certain: Scout's browser before its first step (and not a booking, a form or a
+        check-in), or Quill and Sketch asked for a draft or a scene from nothing but words.
+        Every other teammate may have sent, saved or changed something on the way, so its
+        card never offers Try again."""
+        if job.status != "failed" or job.then is not None:
+            return False
+        if job.role == "browser":
+            return job.kind == "task" and not job.params and job.steps == 0
+        if job.role in ("writer", "explainer"):
+            return not job.files and not job.params
+        return False
+
+    def job_retry(self, job: Job) -> str:
+        """The words for Try again on a failed job's card, or "" when it may not be offered."""
+        if plainwords.action_for(job.summary) != plainwords.RETRY or not self.job_untouched(job):
+            return ""
+
+        async def again() -> None:
+            await self.jobs.start(
+                job.agent_id, job.task, context=job.context, start_url=job.start_url
+            )
+
+        return self.offer_retry(job.id, f"{job.agent_name}: {job.task}", again)
 
     async def run_due_routines(self, now: datetime | None = None) -> int:
         """Run routines that are due, one at a time, when Pyxi isn't in the middle of something."""
@@ -3415,8 +3495,11 @@ class Brain:
                 # allowance used up, no internet, the key refused. "My brain hiccupped, try
                 # again" for those sent people round in circles. (Its card goes up too.)
                 known = plainwords.explain(exc)
+                # Nothing was done before it failed (no tool had run, and it was their own
+                # request, not a routine): the card may offer to ask the same words again.
+                untouched = not synthetic and not self._calls and not picture
                 await self.say_line(
-                    await self.failure_card(exc)
+                    await self.failure_card(exc, again=user_text if untouched else "")
                     if known is not None
                     else "Oops, my brain hiccupped. Mind trying that again?"
                 )
@@ -3556,9 +3639,10 @@ class Brain:
             cfg = state
             budget = self.settings.budget
             if self.turns.spent_today() >= budget.daily_cost_usd:
-                await self.say_line(
-                    "I've used up today's budget, so I'm taking a breather. You can raise it in settings."
-                )
+                line = "I've used up today's budget, so I'm taking a breather. You can raise it in settings."
+                await self.say_line(line)
+                # The same words on a card, with Open Settings (plainwords.action_for).
+                await self._notify("pyxi-budget", ok=False, title="Today's budget is used up", body=line)
                 return {"stop": "daily budget", "needs_more": False}
             if self._speech_gen != self._turn_gen:
                 # They spoke again before this round began: no model call for an answer that
@@ -5603,6 +5687,7 @@ class Brain:
             return
         fixed = data.get("fixed") or []
         files = [str(f) for f in (fixed or job.outputs)]
+        retry = ""  # what Try again on the card would run (only for a job that did nothing)
         # A Google file Ledger edited: its address is a button on the notice, not part of the
         # sentence. Live, the address in the sentence made the notice "too long", so the same
         # words came up a second time on a card beside it.
@@ -5668,9 +5753,15 @@ class Brain:
             actions = (["open"] if files else []) + (
                 ["walkthrough"] if job.role == "browser" else []
             )
-        elif job.status == "failed" and (mend := plainwords.action_for(job.summary)):
+        elif (
+            job.status == "failed"
+            and (mend := plainwords.action_for(job.summary))
+            # Try again only where the job did nothing before it failed (job_untouched).
+            and (mend != plainwords.RETRY or (retry := self.job_retry(job)))
+        ):
             # Not a dead end: the card carries the button that mends it.
-            title, body, actions = plainwords.title_for(job.summary), job.summary, [mend]
+            title = plainwords.title_for(job.summary) or f"{job.agent_name} couldn't finish"
+            body, actions = job.summary, [mend]
             await self.account.noticed(body)  # the trial, the plan, the allowance: Settings too
             if job.summary == GOOGLE_EXPIRED:
                 self.connectors.google.expired = True
@@ -5698,6 +5789,7 @@ class Brain:
             changes=(data.get("changes") or [])[:8],
             notes=(data.get("notes") or [])[:3],
             actions=[*actions, "link"] if link and "link" not in actions else actions,
+            retry=retry if plainwords.RETRY in actions else None,
             link=link,
             calendar=(
                 f"Add this booking to my Google Calendar, with a reminder the day before: {title}. {body}"
@@ -5755,11 +5847,26 @@ class Brain:
             f"say anyone is working on it, and don't call {tool} again in this reply."
         )
 
-    async def failure_card(self, exc: BaseException, job_id: str = "pyxi-problem") -> str:
+    async def failure_card(
+        self, exc: BaseException, job_id: str = "pyxi-problem", *, again: str = ""
+    ) -> str:
         """What a failure is, in plain words (plainwords.py). When pressing a button mends
-        it, the card with that button goes up as well. Returns the line."""
+        it, the card with that button goes up as well. Returns the line.
+
+        ``again``: their own words, given only when the request failed before anything was
+        done (no tool had run). Then a failure that passes by itself (no internet, the model
+        busy, a timeout) gets a card with Try again, which asks exactly those words again."""
         line = friendly_error(exc)
-        if plainwords.action_for(line) == "google":
+        mend = plainwords.action_for(line)
+        if mend == plainwords.RETRY:
+            if again.strip():
+                what = self.offer_retry(job_id, again, lambda: self.turn(again))
+                await self._notify(
+                    job_id, ok=False, title="That didn't go through", body=line, retry=what
+                )
+        elif mend.startswith(plainwords.SETTINGS):
+            await self._notify(job_id, ok=False, title="Couldn't do that yet", body=line)
+        elif mend == "google":
             if line == GOOGLE_EXPIRED:
                 await self.google_expired_card()
             else:
@@ -5783,7 +5890,7 @@ class Brain:
                 " A card with a Sign in to Google button is on screen now: tell them to press it."
                 if mend == "google"
                 else " A card with the button that fixes it is on screen now: tell them to press it."
-                if mend
+                if mend and mend != plainwords.RETRY  # (no Try again once a tool has run)
                 else ""
             )
             return (

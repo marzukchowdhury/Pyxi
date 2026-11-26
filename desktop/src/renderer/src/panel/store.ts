@@ -37,6 +37,8 @@ interface PanelState {
   voicePreview: { audio: string | null; text: string; at: number } | null;
   voicePack: VoicePack | null;
   voiceKey: { engine: string; ok: boolean; message: string } | null;
+  /** The part of Settings to bring into view next ("Open Settings" on a card): files, accounts, budget. */
+  settingsSection: string | null;
   connectors: ConnectorStatus[] | null;
   connectorMessage: string | null;
   routines: RoutineInfo[] | null;
@@ -59,6 +61,7 @@ export const usePanel = create<PanelState>(() => ({
   voicePreview: null,
   voicePack: null,
   voiceKey: null,
+  settingsSection: null,
   connectors: null,
   connectorMessage: null,
   routines: null,

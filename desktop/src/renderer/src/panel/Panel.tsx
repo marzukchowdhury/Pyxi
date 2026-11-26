@@ -600,6 +600,18 @@ export function Settings() {
     return bridge.onDictationPrefs(() => void bridge.hotkeys().then(setKeys)); // the dictation keys changed
   }, []);
   const k = (name: string) => keysOf(keys[name]).join("+") || "unavailable";
+  // "Open Settings" on a card names a part (Your files, Connected accounts, the budget): bring it into view.
+  const section = usePanel((s) => s.settingsSection);
+  const ready = !!hello;
+  useEffect(() => {
+    if (!section || !ready) return;
+    // A moment later: the parts above it (the account, the tour) are still taking their size.
+    const t = window.setTimeout(() => {
+      document.getElementById(`settings-${section}`)?.scrollIntoView({ block: "start" });
+      usePanel.setState({ settingsSection: null });
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [section, ready]);
   if (!hello) return <p className="muted">Waiting for Pyxi's brain…</p>;
   const set = (key: string, value: unknown) => brain.send({ type: "set", key, value });
   return (
@@ -608,7 +620,7 @@ export function Settings() {
       <BetaCard />
       <div className="kv"><span>Brain</span><b>{hello.model}{hello.local_mode ? " (local)" : ""}{hello.demo ? " · demo" : ""}</b></div>
       <div className="kv"><span>Voice</span><b>{hello.tts}</b></div>
-      <div className="kv"><span>Spent today</span><b>${hello.spent_today.toFixed(3)} of ${hello.daily_budget.toFixed(2)}</b></div>
+      <div className="kv" id="settings-budget"><span>Spent today</span><b>${hello.spent_today.toFixed(3)} of ${hello.daily_budget.toFixed(2)}</b></div>
       <label><input type="checkbox" checked={hello.privacy_paused} onChange={(e) => set("privacy_paused", e.target.checked)} /> Pause screen sharing (Ctrl+Alt+P)</label>
       <label><input type="checkbox" defaultChecked onChange={(e) => set("jobs_headed", e.target.checked)} /> Show teammates' browser windows</label>
       <ShareToggle />
@@ -616,7 +628,7 @@ export function Settings() {
       <TourSettings />
       <h4>Booking details</h4>
       <BookingDetails />
-      <h4>Your files</h4>
+      <h4 id="settings-files">Your files</h4>
       <FileAccess />
       <h4>Private apps</h4>
       <PrivateApps />
@@ -626,7 +638,7 @@ export function Settings() {
       <BrowserConnect />
       <h4>Shopping</h4>
       <PriceChecks />
-      <h4>Connected accounts</h4>
+      <h4 id="settings-accounts">Connected accounts</h4>
       <Connections />
       <h4>Hotkeys</h4>
       {keys.hold && <div className="kv"><span>Talk (hold, release to send)</span><kbd>{k("hold")}</kbd></div>}

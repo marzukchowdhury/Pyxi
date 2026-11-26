@@ -21,7 +21,9 @@ import { Routines } from "../panel/Connections";
 import { Chat, Gallery, Palace, Settings, type Tab, TABS, Team } from "../panel/Panel";
 import { Activity } from "../panel/Activity";
 import { VoiceStudio } from "../panel/VoiceStudio";
+import { usePanel } from "../panel/store";
 import { cardButton, showPlans } from "../shared/account";
+import { type CardButtonKind, cardButtons, retryLine, settingsTarget } from "./cardButtons";
 import { Close, Expand, Mic, Send } from "../shared/icons";
 import { PICTURE_ALONE, useChatPicture } from "../shared/pictureInput";
 import { brain } from "../shared/socket";
@@ -252,6 +254,44 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     bridge.releaseFocus();
   };
 
+  // The result card's buttons: what each one does. Those that hand the job on take the card down.
+  const buttons = result && !fileResult ? cardButtons({ ...result, account: accountButton?.label }) : [];
+  const press = (kind: CardButtonKind) => {
+    if (!result) return;
+    const done = () => dismissToast(result.job_id);
+    if (kind === "link") bridge.openExternal(result.link!);
+    else if (kind === "file") bridge.openFile(result.files[0]);
+    else if (kind === "folder") bridge.showInFolder(result.files[0]);
+    else if (kind === "update") bridge.installUpdate();
+    else if (kind === "google") {
+      brain.send({ type: "connect", id: "google" });
+      done();
+    } else if (kind === "account" && accountButton) {
+      // The trial, the plan, the allowance, the sign-in: the one button that fixes it.
+      if (accountButton.does === "plans") {
+        showPlans();
+        openFull("settings");
+      } else brain.send({ type: "account", action: accountButton.does });
+      done();
+    } else if (kind === "settings") {
+      // Pyxi's own Settings, at the part that mends it (Your files, Connected accounts, Voice).
+      const target = settingsTarget(result.actions);
+      usePanel.setState({ settingsSection: target?.section ?? null });
+      openFull(target?.tab ?? "settings");
+      done();
+    } else if (kind === "retry") {
+      // The brain runs what this card stands for, once (it only offers this when nothing was done).
+      brain.send({ type: "retry", job_id: result.job_id });
+      done();
+    } else if (kind === "calendar") {
+      brain.send({ type: "text", text: result.calendar! });
+      done();
+    } else if (kind === "send_back") {
+      brain.send({ type: "text", text: "Send the fixed file back to the person who emailed me the original, as a reply." });
+      done();
+    }
+  };
+
   const level = mode === "listening" ? micLevel : () => voice.level();
   // Say exactly what Pyxi is reading, so you're never unsure what it sees.
   const status = state === "looking" ? `Looking at ${seeing || "your screen"}` : state === "transcribing" ? "Got it" : "Thinking";
@@ -390,43 +430,18 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
               {result.changes.length > 0 && (
                 <ul className="result-changes">{result.changes.slice(0, 3).map((c) => <li key={c}>{c}</li>)}</ul>
               )}
+              {buttons.some((b) => b.kind === "retry") && result.retry && (
+                // What Try again will run, in words, before it is pressed.
+                <p className="result-retry">{retryLine(result.retry)}</p>
+              )}
               <div className="result-actions">
-                {result.link && (
-                  <button className="primary" onClick={() => bridge.openExternal(result.link!)}>
-                    {result.link.includes("meet.google.com") ? "Join Google Meet" : "Open"}
+                {/* Two buttons at most (cardButtons.ts): what mends a failure, then what opens the result. */}
+                {buttons.map((b) => (
+                  <button key={b.kind} className={b.primary ? "primary" : undefined} title={b.hint} onClick={(e) => { e.stopPropagation(); press(b.kind); }}>
+                    {b.label}
                   </button>
-                )}
-                {result.link?.includes("meet.google.com") && <span className="result-link">{result.link.replace("https://", "")}</span>}
-                {result.files[0] && <button className="primary" onClick={() => bridge.openFile(result.files[0])}>Open file</button>}
-                {result.actions.includes("folder") && result.files[0] && <button onClick={() => bridge.showInFolder(result.files[0])}>Show in folder</button>}
-                {result.actions.includes("update") && (
-                  <button className="primary" onClick={() => bridge.installUpdate()}>Restart to update</button>
-                )}
-                {result.actions.includes("google") && (
-                  <button className="primary" onClick={() => { brain.send({ type: "connect", id: "google" }); dismissToast(result.job_id); }}>Sign in to Google</button>
-                )}
-                {accountButton && (
-                  // The trial, the plan, the allowance, the sign-in: the one button that fixes it.
-                  <button
-                    className="primary"
-                    onClick={(e) => {
-                      e.stopPropagation(); // the notch opens only for the plans, on Settings
-                      if (accountButton.does === "plans") {
-                        showPlans();
-                        openFull("settings");
-                      } else brain.send({ type: "account", action: accountButton.does });
-                      dismissToast(result.job_id);
-                    }}
-                  >
-                    {accountButton.label}
-                  </button>
-                )}
-                {result.actions.includes("calendar") && result.calendar && (
-                  <button className="primary" onClick={() => { brain.send({ type: "text", text: result.calendar! }); dismissToast(result.job_id); }}>Add to calendar</button>
-                )}
-                {result.actions.includes("send_back") && (
-                  <button onClick={() => { brain.send({ type: "text", text: "Send the fixed file back to the person who emailed me the original, as a reply." }); dismissToast(result.job_id); }}>Send it back</button>
-                )}
+                ))}
+                {result.link?.includes("meet.google.com") && buttons.some((b) => b.kind === "link") && <span className="result-link">{result.link.replace("https://", "")}</span>}
               </div>
               <i className="result-timer" style={{ transform: `scaleX(${left})` }} />
             </div>

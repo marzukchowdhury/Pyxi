@@ -133,7 +133,7 @@ interface OverlayState {
   /** A guide they finished themselves: a brief moment of light where they made the last move. */
   cheer: { x: number; y: number; at: number } | null;
   /** Finished background jobs, shown quietly as cards (newest first). */
-  toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null }[];
+  toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null; retry?: string | null }[];
   /** The first-run tour is playing on some screen (overlay/onboarding): the notch keeps its own hint back. */
   touring: boolean;
   /** The brain said the tour has not been seen yet (or broke off last time). */

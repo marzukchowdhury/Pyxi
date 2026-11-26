@@ -572,6 +572,9 @@ def create_app(
             brain._spawn(
                 brain.turn(msg["text"].strip(), picture=picture, picture_problem=problem)
             )
+        elif kind == "retry" and msg.get("job_id"):
+            # Try again on a failure card: the brain runs what that card stands for, once.
+            brain._spawn(brain.retry(str(msg["job_id"])))
         elif kind == "ptt_start":
             brain.begin_listening()
         elif kind == "look_ahead":
