@@ -101,8 +101,8 @@ describe("POST /api/billing/checkout", () => {
       redirect: "https://evil.example.com",
     };
     await checkout(store, paidCfg, post("/api/billing/checkout?success_url=https://evil.example.com", sneaky, as(token, { Origin: "https://evil.example.com", Referer: "https://evil.example.com/x" })), stripe);
-    expect(stripe.checkouts[0].successUrl).toBe("https://www.heypyxi.com/pricing.html?checkout=done");
-    expect(stripe.checkouts[0].cancelUrl).toBe("https://www.heypyxi.com/pricing.html?checkout=cancelled");
+    expect(stripe.checkouts[0].successUrl).toBe("https://www.heypyxi.com/welcome");
+    expect(stripe.checkouts[0].cancelUrl).toBe("https://www.heypyxi.com/billing-cancelled");
     // SITE_URL itself must be a plain https address; anything else falls back to the real site.
     expect(configFromEnv({ SITE_URL: "https://staging.example.com/" }).siteUrl).toBe("https://staging.example.com");
     for (const bad of ["javascript:alert(1)", "http://www.heypyxi.com", "https://user:pw@evil.example.com", "not a url", ""])
@@ -186,7 +186,7 @@ describe("POST /api/billing/portal", () => {
     const res = await portal(store, paidCfg, post("/api/billing/portal", { customer: "cus_someone_else", return_url: "https://evil.example.com" }, as(token)), stripe);
     expect(res.status).toBe(200);
     expect(((await res.json()) as { url: string }).url).toMatch(/^https:\/\/billing\.stripe\.com\//);
-    expect(stripe.portals).toEqual([{ customer: "cus_test1", returnUrl: "https://www.heypyxi.com/pricing.html" }]);
+    expect(stripe.portals).toEqual([{ customer: "cus_test1", returnUrl: "https://www.heypyxi.com/welcome" }]);
     stripe.down = true;
     expect((await portal(store, paidCfg, post("/api/billing/portal", {}, as(token)), stripe)).status).toBe(502);
   });

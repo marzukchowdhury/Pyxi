@@ -37,7 +37,11 @@ def _reader(src: Path, password: str | None = None):
     try:
         reader = PdfReader(str(src))
     except Exception as exc:
-        raise PixelError(f"{src.name} doesn't open as a PDF ({type(exc).__name__}).") from None
+        log.info("pdf: %s would not open (%s)", src.suffix, type(exc).__name__)
+        raise PixelError(
+            f"{src.name} doesn't open as a PDF. It may be damaged, or not really a PDF. Open "
+            "it yourself to check, save a fresh copy, then ask again."
+        ) from None
     if reader.is_encrypted:
         if password is None:
             # Many "protected" PDFs only restrict printing and open with an empty password.
@@ -812,7 +816,10 @@ def pdf_to_excel(files: list[Path], out: Path | None = None) -> PixelResult:
     (src,) = need(files, {".pdf"}, "PDF")
     layout = read_layout(src)
     if layout is None:
-        raise PixelError(f"I couldn't read the layout of {src.name}, so I can't pull its tables out.")
+        raise PixelError(
+            f"I couldn't read the layout of {src.name}, so I can't pull its tables out. Open it "
+            "yourself and save a fresh copy, then ask again, or ask me for its text instead."
+        )
     if not layout.words and layout.no_reader:
         raise PixelError(layout.no_reader)
     tables = [t for t in layout.tables if len(t.rows) >= 2 and t.cols >= 2]

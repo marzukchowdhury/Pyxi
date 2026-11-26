@@ -17,10 +17,11 @@ import httpx
 import pytest
 
 from conftest import Recorder
-from pyxi import account, account_signin, cloud, onboarding
+from pyxi import account, account_signin, cloud, onboarding, plainwords
 from pyxi.account import GATES, SENTENCES, SIGNED_OUT, Account, gate_of
 from pyxi.account_signin import SignInError
 from pyxi.agents.jobs import Job, describe_failure
+from pyxi.companion.brain import friendly_error
 from pyxi.connectors.signin_page import page
 from pyxi.hub import Hub
 from test_answer_card import make_brain, settle
@@ -518,7 +519,25 @@ def test_a_signed_out_account_is_told_apart_from_an_invite_code(monkeypatch):
     monkeypatch.setenv("PYXI_ACCOUNT", "1")
     assert describe_failure(refused) == SIGNED_OUT
     monkeypatch.setenv("PYXI_ACCOUNT", "0")
-    assert describe_failure(refused) == "The AI model turned the key down. Check the model settings, then try again."
+    assert describe_failure(refused) == plainwords.MODEL_KEY_BETA  # an invite code: as before
+    # A turn and a job say the same line, with the same button and title.
+    monkeypatch.setenv("PYXI_ACCOUNT", "1")
+    assert friendly_error(refused) == describe_failure(refused) == SIGNED_OUT
+    assert plainwords.explain(refused) == plainwords.Plain(SIGNED_OUT, "plan")
+    assert plainwords.action_for(SIGNED_OUT) == "pyxi_sign_in"
+    assert plainwords.title_for(SIGNED_OUT) == "Sign in to Pyxi"
+
+
+@pytest.mark.parametrize(("code", "status", "said", "button"), GATE_CASES)
+def test_the_gates_go_through_the_same_plain_words_as_every_failure(code, status, said, button):
+    error = model_error(status, code, said)
+    assert plainwords.explain(error) == plainwords.Plain(said, "plan")
+    assert friendly_error(error) == describe_failure(error) == said
+    assert plainwords.action_for(said) == (button or "")
+    assert plainwords.title_for(said) != ""
+    # The lines that were there before keep their own buttons.
+    assert plainwords.action_for(plainwords.GOOGLE_PERMISSION) == "google"
+    assert plainwords.action_for("That site wouldn't load.") == ""
 
 
 def test_what_the_beta_already_said_is_not_a_gate():
@@ -587,9 +606,15 @@ async def test_a_background_job_the_server_turns_down_shows_the_same_card(settin
     await brain._job_done(job)
     await settle(brain)
     (card,) = cards(rec)
-    assert card["job_id"] == f"account-{code}" and card["body"] == said
+    assert card["job_id"] == job.id and card["body"] == said and card["ok"] is False
     assert card["actions"] == ([button] if button else [])
-    assert "couldn't finish" not in json.dumps(rec.events)
+    # The same title and button as the turn's card (one funnel: pyxi/plainwords.py).
+    trial = said == account.TRIAL_ALLOWANCE_USED
+    named = "Your trial's allowance is used" if trial else GATES[code][0]
+    assert card["title"] == (named if button else "Scout couldn't finish")
+    # And Settings knows why Pyxi stopped, without being told separately.
+    assert brain.account.gate == (None if code == "billing_off" else code)
+    assert "Error code" not in json.dumps(rec.events)
 
 
 async def test_a_job_that_failed_for_its_own_reasons_is_told_as_before(settings):

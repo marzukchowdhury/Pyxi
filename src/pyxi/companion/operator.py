@@ -487,6 +487,7 @@ class Operator:
         self.llm = llm
         self.strong_llm = strong_llm  # takes over when the quick model gets stuck
         self.escalated = False
+        self.model_problem = ""  # why the model could not be asked, in words to say
         self.aim_llm = aim_llm or llm  # checks guessed click spots up close
         self.capture = capture
         self.confirm = confirm
@@ -636,8 +637,12 @@ class Operator:
                 log.info("hands: stuck after %d looks, handing over to the stronger model", n)
             call = await self._decide(task, steps, ctx)
             if call is None:
+                # The model could not be asked (no internet, the allowance used up, the key
+                # refused): said as that. "Want me to try again?" could never work for those.
                 return Outcome(
-                    False, "I lost my train of thought there. Want me to try again?", steps
+                    False,
+                    getattr(self, "model_problem", "") or "I lost my train of thought there. Want me to try again?",
+                    steps,
                 )
             if call.name == "done":
                 ok = bool(call.arguments.get("ok", True))
@@ -974,8 +979,13 @@ class Operator:
                 )
             except Exception as exc:
                 log.warning("operator model failed: %s", exc)
+                from pyxi import plainwords
+
+                known = plainwords.explain(exc)
+                self.model_problem = f"I had to stop there. {known.line}" if known else ""
                 await asyncio.sleep(1)
                 continue
+            self.model_problem = ""
             self.usage = res.usage if self.usage is None else self.usage + res.usage
             calls = [c for c in res.tool_calls if c.name in ("act", "done", "ask_user")]
             if calls:

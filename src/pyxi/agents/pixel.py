@@ -557,6 +557,15 @@ def libreoffice() -> str | None:
     return None
 
 
+def _one_failed(file: Any, exc: BaseException) -> str:
+    """One file of several that broke, in plain words (the rest are still reported)."""
+    from pyxi.plainwords import plain_failure
+
+    name = Path(str(file)).name
+    why = plain_failure(exc, "It may be damaged, or open in another app.", 200)
+    return why if name in why else f"{name}: {why}"
+
+
 def to_pdf(files: list[Path], out: Path | None = None, *, sheet: str = "") -> PixelResult:
     """Office files go through LibreOffice when it's installed (exact layout), otherwise through the
     built-in renderer; Markdown, HTML and text always use the built-in one."""
@@ -583,6 +592,11 @@ def to_pdf(files: list[Path], out: Path | None = None, *, sheet: str = "") -> Pi
             if len(files) == 1:
                 raise
             failed.append(str(exc))  # the others are still made, and this one is said
+            continue
+        except Exception as exc:  # a damaged or locked file: the others are still made
+            if len(files) == 1:
+                raise
+            failed.append(_one_failed(src, exc))
             continue
         outputs.append(target)
     if not outputs:
@@ -774,6 +788,10 @@ def run(
                 # The files already done are on the disk: they are reported, with this one's
                 # trouble said after them, not lost behind a "failed".
                 failed.append(str(exc))
+            except Exception as exc:  # a damaged file, a full disk: the same goes for those
+                if len(files) == 1:
+                    raise
+                failed.append(_one_failed(f, exc))
         if not results:
             raise PixelError(" ".join(failed))
         outputs = [o for r in results for o in r.outputs]

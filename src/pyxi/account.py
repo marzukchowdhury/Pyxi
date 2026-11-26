@@ -190,6 +190,36 @@ def gate_of(error: BaseException | str, *, account_device: bool = False) -> tupl
     return None
 
 
+def line_for(code: str, said: str = "") -> str:
+    """The sentence to show for a gate: the server's own, else the contract's."""
+    return said or sentence(code)
+
+
+def _trial_words(line: str) -> bool:
+    return TRIAL_ALLOWANCE_USED in line
+
+
+def action_for(line: str) -> str:
+    """The card button that mends what this line says (pyxi/plainwords.py asks, for every
+    failure card), or "" when the line is not one of the account's."""
+    found = gate_of(line or "")
+    if found is None:
+        return ""
+    if found[0] == "allowance_used" and _trial_words(line):
+        return "choose_plan"  # a trial has no next month to wait for
+    return GATES[found[0]][1] or ""
+
+
+def title_for(line: str) -> str:
+    """The title of the card for this line, or "" when it is not one of the account's."""
+    found = gate_of(line or "")
+    if found is None:
+        return ""
+    if found[0] == "allowance_used" and _trial_words(line):
+        return "Your trial's allowance is used"
+    return GATES[found[0]][0]
+
+
 def signed_in_here() -> bool:
     """Is this brain running on an account's token (not an invite code, not their own key)?"""
     return cloud.in_beta() and os.environ.get("PYXI_ACCOUNT") == "1"
@@ -538,25 +568,41 @@ class Account:
     async def show_gate(self, code: str, said: str = "") -> str:
         """The card for one of the server's gates: its sentence and the button that fixes it.
         Returns the sentence."""
-        title, action = GATES[code]
         resets = (self.info or {}).get("allowance", {}).get("resets_at")
         trial = (self.info or {}).get("status") == "trial" or said == TRIAL_ALLOWANCE_USED
         # The server's own sentence (it has the date in it); the contract's when there is none.
         body = said or sentence(code, resets, trial=trial)
-        if code == "allowance_used" and trial:
-            # A trial has no next month to wait for and no plan to move up from.
-            title, action = "Your trial's allowance is used", "choose_plan"
-        if code != "billing_off":  # plans not being open is not something wrong with the account
-            self.gate = code
+        await self.noticed(body, code)
+        await self._emit()  # (also frees a button that was waiting on the server)
+        # The title and the button come from the line, as for every failure card.
+        await self._card(f"account-{code}", title_for(body), body, action_for(body) or None)
+        return body
+
+    def gate_card(self, line: str) -> str | None:
+        """Is this failure line one of the account's gates? The id its card goes up under
+        (one card per gate, however many turns meet it), else None."""
+        found = gate_of(line or "")
+        return f"account-{found[0]}" if found else None
+
+    async def noticed(self, line: str, code: str = "") -> None:
+        """A failure card with this line is going up, from a turn or a job (the plain-words
+        funnel put the button on it). When it is one of the account's gates, the account
+        knows it too, so Settings shows the same thing."""
+        if not code:
+            found = gate_of(line or "")
+            if found is None:
+                return
+            code = found[0]
         self._shown.add(code)
+        if code == "billing_off" or self.gate == code:
+            return  # plans not being open is not something wrong with the account
+        self.gate = code
         if code == "signed_out":
             self._flag(signed_out=True)
         await self._emit()
-        await self._card(f"account-{code}", title, body, action)
-        return body
 
     async def gate_from(self, error: BaseException | str) -> str | None:
-        """A turn or a job failed: if the server's gate is why, show its card and return its
+        """Something failed: if the server's gate is why, show its card and return its
         sentence (else None, and the caller says what it always said)."""
         found = gate_of(error, account_device=signed_in_here())
         if found is None:

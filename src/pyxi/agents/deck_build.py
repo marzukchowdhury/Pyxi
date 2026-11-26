@@ -234,7 +234,13 @@ def read_source(paths: list[Path]) -> Source:
         except DeckError:
             raise
         except Exception as exc:
-            raise DeckError(f"I couldn't read {path.name}: {str(exc)[:160]}") from None
+            from pyxi.plainwords import plain_failure
+
+            log.warning("deck: %s could not be read: %s", path.suffix, type(exc).__name__)
+            why = plain_failure(
+                exc, "It may be damaged, or open in another app. Close it and ask again.", 200
+            )
+            raise DeckError(f"I couldn't read {path.name}. {why}") from None
         if not text.strip() and len(src.tables) == before:
             raise DeckError(
                 f"{path.name} has nothing in it to make slides from. If it's a scan, ask Pixel "
@@ -262,7 +268,14 @@ def _read_one(path: Path, src: Source) -> str:
 
         layout = read_layout(path)
         if layout is None:
-            raise DeckError(f"I couldn't read {path.name}.")
+            raise DeckError(
+                f"I couldn't read {path.name}. It may be damaged, or locked with a password. "
+                "Open it yourself to check, save a fresh copy, then ask again."
+            )
+        if not layout.words and layout.no_reader:
+            # A scan, and the reader for scans isn't there: said as that. "Ask Pixel to make
+            # it searchable first" sent them to the same missing reader.
+            raise DeckError(layout.no_reader)
         out = []
         for b in layout.blocks:
             if hasattr(b, "rows"):

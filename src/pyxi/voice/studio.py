@@ -458,7 +458,8 @@ class VoiceStudio:
                 )
             self._eleven_voices = voices
         except Exception as exc:  # a bad key shouldn't break the settings page
-            self.last_error = f"Couldn't load your ElevenLabs voices: {exc}"
+            log.warning("ElevenLabs voices could not be listed: %s", _short(exc))
+            self.last_error = f"Couldn't load your ElevenLabs voices: {_why(exc)}. {_next('ElevenLabs', exc)}"
             self._eleven_voices = []
         return self._eleven_voices
 
@@ -491,9 +492,15 @@ class VoiceStudio:
             if engine == "gemini":
                 return await self._gemini(voice, text, tone, speed)
         except Exception as exc:
-            msg = f"{engine} voice failed ({_short(exc)}); using the on-device voice for now."
+            # The panel shows this: why in plain words and what to check, not the raw reply
+            # (it used to read "elevenlabs voice failed (HTTP 401: {"detail": ...").
+            name = {"elevenlabs": "ElevenLabs", "gemini": "Gemini"}.get(engine, engine)
+            msg = (
+                f"The {name} voice failed ({_why(exc)}), so Pyxi's own voice is speaking for "
+                f"now. {_next(name, exc)}"
+            )
             if msg != self.last_error:
-                log.warning(msg)
+                log.warning("%s voice failed: %s", name, _short(exc))
             self.last_error = msg
             voice = self.kokoro.config.voice
             if bengali:
@@ -606,6 +613,34 @@ class VoiceStudio:
             "languages": LANGUAGES,
             "error": self.last_error,
         }
+
+
+def _kind(exc: Exception) -> str:
+    s = f"{type(exc).__name__} {exc}".lower()
+    if re.search(r"\b40[13]\b|unauthori[sz]ed|invalid.{0,12}key|api key not valid|permission", s):
+        return "key"
+    if re.search(r"\b402\b|\b429\b|quota|credits|limit", s):
+        return "quota"
+    if re.search(r"connect|getaddrinfo|network|timeout|timed out|unreachable", s):
+        return "net"
+    return ""
+
+
+def _why(exc: Exception) -> str:
+    """Why a cloud voice didn't work, in a few plain words (the log keeps the raw reply)."""
+    return {
+        "key": "its key was turned down",
+        "quota": "its allowance is used up",
+        "net": "it can't be reached",
+    }.get(_kind(exc), "it didn't answer properly")
+
+
+def _next(name: str, exc: Exception) -> str:
+    return {
+        "key": f"Check the {name} key.",
+        "quota": f"Top up the {name} account, or pick another voice.",
+        "net": "Check the internet connection.",
+    }.get(_kind(exc), "Try again in a minute, or pick another voice.")
 
 
 def _short(exc: Exception) -> str:

@@ -427,7 +427,8 @@ class Meeting:
                 False,
                 "Transcript saved, no notes yet",
                 f"{why}. The transcript of the meeting ({minutes} min) is saved as "
-                f"{script.name}, so nothing that was said is lost.",
+                f"{script.name}, so nothing that was said is lost. Ask me to summarise that "
+                "file later and I'll write the notes from it.",
                 files=[str(script)],
                 minutes=minutes,
                 cost_usd=self.cost,

@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any
 
 from otto.llm.base import ToolSpec
 
+from pyxi import plainwords
+from pyxi.connectors.google import GoogleExpired
 from pyxi.listen import captions as cap_mod
 from pyxi.listen import meeting as meet_mod
 from pyxi.listen.live import MIC, SYSTEM, Heard, LiveEars
@@ -509,7 +511,7 @@ class Listening:
                 result = await writing
             except Exception as exc:
                 log.exception("meeting notes failed")
-                result = meet_mod.Result(False, "The notes didn't work out", _plain(exc))
+                result = _notes_lost(self.brain, meeting, exc)
         finally:
             self._open.discard(id(meeting))
             self._cut_short.discard(id(meeting))
@@ -525,7 +527,10 @@ class Listening:
 
         b = self.brain
         job = await b.jobs.track("Scribe", "Meeting notes (live)", role="meetings")
-        made.record(b.settings.data_dir, result.files)  # so the app will open them
+        try:
+            made.record(b.settings.data_dir, result.files)  # so the app will open them
+        except OSError:  # a full disk: the card still goes up
+            log.warning("the meeting's files could not be noted for the app", exc_info=True)
         job.outputs = list(result.files)
         job.cost_usd = result.cost_usd
         body = result.body
@@ -632,7 +637,12 @@ class Listening:
                     }
                 )
             except Exception as exc:
-                problem = _plain(exc)
+                log.warning("a meeting action item did not go into the calendar: %s", type(exc).__name__)
+                problem = _plain(
+                    exc, "Google Calendar didn't take them. Ask me again in a minute."
+                )
+                if isinstance(exc, GoogleExpired) or plainwords.action_for(problem):
+                    break  # the sign-in: every other entry would fail the same way
                 continue
             if isinstance(out, str) and out.startswith("CREATED"):
                 added += 1
@@ -870,6 +880,11 @@ class Listening:
                 # Pyxi's own hands were on the mouse just then: this press may be its own,
                 # and Pyxi never turns the listening on by itself. (Stop always counts.)
                 log.warning("ignored a press to start listening during Pyxi's own input")
+                await self.brain.hub.emit(
+                    "notice",
+                    message="I was using the mouse just then, so I didn't count that press. "
+                    "Press it again to start listening.",
+                )
                 return
         if what == "meeting":
             if action == "start":
@@ -911,11 +926,48 @@ def _action_title(action: dict[str, str]) -> str:
     return (f"{who}: {what}" if who and who != "You" else what)[:120]
 
 
-def _plain(exc: BaseException) -> str:
-    text = str(exc).strip()
-    if text and text[0].isupper() and len(text) < 300 and "Error" not in text.split(" ", 1)[0]:
-        return text if text.endswith(".") else text + "."
-    return "I couldn't listen to this PC's sound just now."
+def _plain(exc: BaseException, fallback: str = "I couldn't listen to this PC's sound just now.") -> str:
+    """Why something of the listening failed. A cause Pyxi knows (no internet, the Google
+    sign-in, a full disk) in its own words; a sentence of Pyxi's own as it is; anything else
+    is ``fallback``, which each caller words for what it was doing: a failed save used to be
+    reported as "I couldn't listen to this PC's sound"."""
+    known = plainwords.explain(exc)
+    if known is not None:
+        return known.line
+    text = plainwords.safe_line(str(exc).strip(), "", 300)
+    if text:
+        return text if text.endswith((".", "?", "!")) else text + "."
+    return fallback
+
+
+def _notes_lost(brain: Brain, meeting: Any, exc: BaseException) -> meet_mod.Result:
+    """The notes could not be written or saved (Documents not writable, the disk full). What
+    was said is still kept, as plain text in Pyxi's own folder, and the card says where."""
+    why = _plain(exc, "I couldn't save the notes.")
+    kept: Path | None = None
+    try:
+        from datetime import datetime
+
+        folder = Path(brain.settings.data_dir) / "meetings"
+        folder.mkdir(parents=True, exist_ok=True)
+        started = float(getattr(meeting, "started", 0) or time.time())
+        kept = folder / f"Meeting {datetime.fromtimestamp(started):%Y-%m-%d %H.%M} transcript.md"
+        text = meet_mod.transcript_markdown(meeting.lines, started, getattr(meeting, "about", "") or "Meeting")
+        kept.write_bytes(text.encode("utf-8"))
+    except Exception:
+        log.warning("the meeting's transcript could not be kept either", exc_info=True)
+        kept = None
+    if kept is not None:
+        body = (
+            f"{why} What was said is kept as {kept.name}, so nothing is lost. Ask me to "
+            "summarise that file and I'll write the notes from it."
+        )
+    else:
+        body = (
+            f"{why} Nothing could be saved this time. Check that this PC's disk isn't full "
+            "and that your Documents folder can be written to."
+        )
+    return meet_mod.Result(False, "The notes didn't work out", body, files=[str(kept)] if kept else [])
 
 
 def setup(brain: Brain) -> Listening:

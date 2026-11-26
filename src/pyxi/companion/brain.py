@@ -41,7 +41,7 @@ from otto.types import ToolCall, Usage
 from PIL import Image
 from pydantic import ValidationError
 
-from pyxi import alarms, booking, hands, media, safety, tidy, weather, web, windows
+from pyxi import alarms, booking, hands, media, plainwords, safety, tidy, weather, web, windows
 from pyxi.agents import AgentProfile, AgentRegistry, Job, JobManager
 from pyxi.companion import (
     addresscheck,
@@ -376,9 +376,14 @@ class Brain:
             )
             if studio:
                 studio.detected_language = spoken
-        except Exception:
+        except Exception as exc:
             log.exception("transcription failed")
-            await self.hub.emit("error", message="I couldn't make out the audio. Try again?")
+            # Why, when it is known (no internet, the listening pack missing, the allowance
+            # used up): "try again" alone could never work for those.
+            await self.hub.emit(
+                "error",
+                message=plainwords.hearing_failure(exc, "I couldn't make out the audio. Try again?"),
+            )
             self._prefetch = None
             await self.set_state("idle")
             return
@@ -565,7 +570,13 @@ class Brain:
         from pyxi import dictation
 
         await self.hub.emit(
-            "dictated", text=text, how=how, note=dictation.NOTES.get(why, ""), seconds=round(seconds, 2), tidied=tidied
+            "dictated",
+            text=text,
+            how=how,
+            # (A reason given as a whole sentence is the note itself: why it could not be heard.)
+            note=dictation.NOTES.get(why, why if " " in why else ""),
+            seconds=round(seconds, 2),
+            tidied=tidied,
         )
 
     def _dictation_polisher(self) -> Any:
@@ -644,10 +655,12 @@ class Brain:
                 heard, took, _ = await self.stt.transcribe(
                     audio, studio.prefs.language if studio else "en", **({"here": True} if here else {})
                 )
-            except Exception:
+            except Exception as exc:
                 log.exception("dictation transcription failed")
                 if gen == self._dictation_gen:
-                    await self._dictated("", "failed", "failed")
+                    # Why, when it is known (no internet, the listening pack missing): "try
+                    # again" alone could never work for those.
+                    await self._dictated("", "failed", plainwords.hearing_failure(exc, dictation.NOTES["failed"]))
                 return ""
             text = dictation.clean(heard)
             tidied = False
@@ -736,7 +749,7 @@ class Brain:
             await self._count_sent(out)
         except Exception as exc:
             log.exception("approved action failed")
-            await self.say_line(f"That didn't go through. {friendly_error(exc)}")
+            await self.say_line(f"That didn't go through. {await self.failure_card(exc)}")
             return
         await self.say_line(line if not line.startswith(("CREATED", "SENT")) else "Done.")
 
@@ -1145,7 +1158,9 @@ class Brain:
                     played = await media.play(query, music=app != "youtube", back_to=here)
             except Exception as exc:  # never leave the notch saying it's still starting
                 log.warning("play_music failed", exc_info=True)
-                await self.jobs.settle(job, ok=False, summary=f"Couldn't play that: {exc}")
+                await self.jobs.settle(
+                    job, ok=False, summary=f"I couldn't play that. {friendly_error(exc)}"
+                )
                 return
             log.info("play_music: %r -> %s (%s)", query, played.title, played.ok or played.note)
             if played.ok:
@@ -1970,7 +1985,8 @@ class Brain:
         subject = str(args.get("subject") or "the model")[:80]
         if self.turns.spent_today() >= self.settings.budget.daily_cost_usd:
             await self.say_line(
-                "I'd love to build that, but today's budget is used up.", record=False
+                "I'd love to build that, but today's budget is used up. You can raise it in Settings.",
+                record=False,
             )
             return
         brief = f"{subject}. {args.get('show', '')}".strip()
@@ -2157,11 +2173,16 @@ class Brain:
         except Exception as exc:
             log.exception("errand failed")
             self._errands.pop(job.id, None)
-            if (gate := await self.account.gate_from(exc)) is not None:
-                await self.jobs.settle(job, ok=False, summary=gate)  # its own card is up
-                return
-            await self.jobs.settle(job, ok=False, summary=str(exc)[:200])
-            await self._notify(job.id, ok=False, title="Couldn't finish that", body=str(exc)[:200])
+            why = friendly_error(exc)  # never the raw error: this is read on a card
+            mend = plainwords.action_for(why)
+            await self.jobs.settle(job, ok=False, summary=why)
+            await self._notify(
+                job.id,
+                ok=False,
+                title=plainwords.title_for(why) or "Couldn't finish that",
+                body=why,
+                actions=[mend] if mend else None,
+            )
             self._spawn(self._say_when_free("I couldn't finish that. The notification says why."))
             return
         self._errands.pop(job.id, None)
@@ -2391,6 +2412,10 @@ class Brain:
         if say and title:
             line = title if title[-1:] in ".!?" else f"{title}."
             self._spawn(self._say_when_free(hide_secrets(line)))
+        # A failure that a button mends carries that button, whoever reports it.
+        mend = [] if ok else [a for a in [plainwords.action_for(body)] if a]
+        if not ok:
+            await self.account.noticed(body)  # the trial, the plan, the allowance: Settings too
         await self.hub.emit(
             "job_ready",
             job_id=job_id,
@@ -2402,7 +2427,7 @@ class Brain:
             files=files or [],
             changes=changes or [],
             notes=notes or [],
-            actions=actions or (["link"] if link else []),
+            actions=actions or mend or (["link"] if link else []),
         )
 
     async def run_due_routines(self, now: datetime | None = None) -> int:
@@ -3386,10 +3411,15 @@ class Brain:
             except Exception as exc:
                 log.exception("turn failed")
                 error = f"{type(exc).__name__}: {exc}"
-                # The trial, the plan or the allowance: the server's own sentence, and a card
-                # with the button that fixes it (pyxi/account.py).
-                gate = await self.account.gate_from(exc)
-                await self.say_line(gate or "Oops, my brain hiccupped. Mind trying that again?")
+                # A failure with a known cause is said, with what to do about it: the beta
+                # allowance used up, no internet, the key refused. "My brain hiccupped, try
+                # again" for those sent people round in circles. (Its card goes up too.)
+                known = plainwords.explain(exc)
+                await self.say_line(
+                    await self.failure_card(exc)
+                    if known is not None
+                    else "Oops, my brain hiccupped. Mind trying that again?"
+                )
             if self._guide is not None and not any(
                 c.get("tool") == "guide" and c.get("outcome") not in ("refused", "failed")
                 for c in self._calls
@@ -3993,7 +4023,7 @@ class Brain:
                     note = await self._act(call.name, args)
                 except Exception as exc:
                     log.exception("tool %s failed", call.name)
-                    note = f"{call.name} failed: {exc}"
+                    note = await self._tool_failed(call.name, exc)
                 if (
                     call.name == "show_answer"
                     and note
@@ -4892,7 +4922,16 @@ class Brain:
             if not self.connectors.tools():
                 return "errand: no accounts are connected yet; tell the user to connect one in Settings."
             if self.turns.spent_today() >= self.settings.budget.daily_cost_usd:
-                return "errand: today's budget is used up, so I can't start it. Tell the user."
+                return (
+                    "errand: today's budget is used up, so I can't start it. Tell the user, "
+                    "and that they can raise the daily limit in Settings."
+                )
+            # Google is the only account there is: if its sign-in has run out, say so now,
+            # with the button, not "On it" and a failure a second later.
+            if not any(c.connected() for c in self.connectors.all if c.id != "google") and (
+                note := await self.google_run_out("errand")
+            ):
+                return note
             words = "" if getattr(self, "_synthetic", False) else self._user_text
             reads = list(getattr(self, "_turn_reads", []))
             self._spawn(self._run_errand(task, words, **({"reads": reads} if reads else {})))
@@ -4900,6 +4939,8 @@ class Brain:
         if name in ("subscriptions", "returns"):
             if not self.connectors.google.connected():
                 return f"{name}: Gmail isn't connected yet; tell the user to connect Google in Settings."
+            if note := await self.google_run_out(name):
+                return note
             if name == "returns":
                 self._spawn(self._watch_returns())
             elif args.get("action") == "cancel" and args.get("service"):
@@ -5517,8 +5558,6 @@ class Brain:
         )
         if job.then and job.status == "done":
             return  # the next teammate takes it from here
-        if job.status == "failed" and await self.account.gate_from(job.summary or ""):
-            return  # the trial, the plan or the allowance: its own card, with the button
         # Background work never talks over you, but it is never missed either: a notification
         # with the result and the files, one short spoken line once nobody is talking, and the
         # whole result on a card when the notification can't hold it (_announce).
@@ -5619,11 +5658,13 @@ class Brain:
             actions = (["open"] if files else []) + (
                 ["walkthrough"] if job.role == "browser" else []
             )
-        elif job.status == "failed" and job.summary == GOOGLE_EXPIRED:
+        elif job.status == "failed" and (mend := plainwords.action_for(job.summary)):
             # Not a dead end: the card carries the button that mends it.
-            title, body, actions = "Sign in to Google again", GOOGLE_EXPIRED, ["google"]
-            self.connectors.google.expired = True
-            await self.hub.emit("connectors", connectors=self.connectors.statuses())
+            title, body, actions = plainwords.title_for(job.summary), job.summary, [mend]
+            await self.account.noticed(body)  # the trial, the plan, the allowance: Settings too
+            if job.summary == GOOGLE_EXPIRED:
+                self.connectors.google.expired = True
+                await self.hub.emit("connectors", connectors=self.connectors.statuses())
         else:
             title = f"{job.agent_name} couldn't finish"
             body = clip(job.summary or job.status, 220)
@@ -5688,6 +5729,62 @@ class Brain:
             actions=["google"],
             link=None,
             calendar=None,
+        )
+
+    async def google_run_out(self, tool: str) -> str | None:
+        """Before anything of Google's is started: if Google has already refused the sign-in
+        this session, put up the card that mends it and give the model the line to say. Not
+        "Atlas is on it" and a failure half a second later. None when the sign-in is fine."""
+        if not getattr(self.connectors.google, "expired", False):
+            return None
+        await self.google_expired_card()
+        return (
+            f"{tool}: their Google sign-in has run out, so Pyxi can't reach their Google "
+            "account until they sign in again. A card with a Sign in to Google button is on "
+            "screen now. Tell them in one short line to press it and then ask again. Don't "
+            f"say anyone is working on it, and don't call {tool} again in this reply."
+        )
+
+    async def failure_card(self, exc: BaseException, job_id: str = "pyxi-problem") -> str:
+        """What a failure is, in plain words (plainwords.py). When pressing a button mends
+        it, the card with that button goes up as well. Returns the line."""
+        line = friendly_error(exc)
+        if plainwords.action_for(line) == "google":
+            if line == GOOGLE_EXPIRED:
+                await self.google_expired_card()
+            else:
+                await self._notify(
+                    job_id, ok=False, title=plainwords.title_for(line), body=line, actions=["google"]
+                )
+        elif (gate := self.account.gate_card(line)) is not None:
+            # The trial, the plan, the allowance or the sign-in (pyxi/account.py): the
+            # server's own sentence, and the one button that fixes it.
+            await self._notify(gate, ok=False, title=plainwords.title_for(line), body=line)
+        return line
+
+    async def _tool_failed(self, name: str, exc: BaseException) -> str:
+        """A tool that broke mid-turn, as a note for the model. A failure Pyxi knows is given
+        in the words to say, and its card (with the button) is already up. Anything else is
+        for the model only: live, a raw Google error was read out word for word."""
+        if plainwords.explain(exc) is not None:
+            line = await self.failure_card(exc)
+            mend = plainwords.action_for(line)
+            button = (
+                " A card with a Sign in to Google button is on screen now: tell them to press it."
+                if mend == "google"
+                else " A card with the button that fixes it is on screen now: tell them to press it."
+                if mend
+                else ""
+            )
+            return (
+                f"{name} failed: {line}{button} Tell them that in one short line, in those "
+                f"words. Don't say it is being worked on, and don't call {name} again in this reply."
+            )
+        return (
+            f"{name} failed: {hide_secrets(str(exc))[:200] or type(exc).__name__} (That is the "
+            "raw error, for you only: never read it out or show it. If calling the tool another "
+            "way can't fix it, tell them in plain words that it didn't work and what they can "
+            "try instead.)"
         )
 
     def _gets_card(self, job: Job, body: str, whole: str | None, own_card: bool) -> bool:
@@ -6155,28 +6252,24 @@ _COUNTER = re.compile(r"^\s*[\(\[]\d+\+?[\)\]]\s*|^\s*[•●]\s*|\s*[\(\[]\d+\+
 def friendly_error(exc: BaseException) -> str:
     """'Google said 400: {"error": ...}' becomes 'Google said the request was invalid.'"""
     text = str(exc)
-    # The Pyxi beta server says why in plain words ("You've used today's Pyxi beta allowance...");
-    # show exactly that, without the "OpenRouter API error: Error code: 429 - " in front.
-    beta = re.search(
-        r"(You've used today's Pyxi beta allowance[^\"'}]*|The Pyxi beta is at its limit[^\"'}]*|Sign in to the Pyxi beta first[^\"'}]*)",
-        text,
-    )
-    if beta:
-        return beta.group(1).strip()
-    if "invalid_grant" in text or type(exc).__name__ in ("RefreshError", "GoogleExpired"):
-        return GOOGLE_EXPIRED
-    if "is switched off in Pyxi's Google Cloud project" in text:
-        return text[:260]  # already says what to do, with the link
+    # A failure Pyxi knows (the sign-in ran out, the beta allowance is used up, no internet,
+    # the file is open elsewhere...) is said one way everywhere, with its next step.
+    if (known := plainwords.explain(exc)) is not None:
+        return known.line
     m = re.search(r'"message":\s*"([^"]{3,140})"', text)
-    detail = m.group(1) if m else ""
-    service = "Google" if "Google" in text else "The service"
+    detail = plainwords.safe_line(m.group(1), "") if m else ""
+    service = next((s for s in ("Google", "LinkedIn", "Discord") if s in text), "The service")
     if re.search(r"\b40[13]\b", text):
-        return f"{service} says I'm not allowed to do that; reconnecting the account may fix it."
+        return (
+            f"{service} says I'm not allowed to do that. Connecting the account again in "
+            "Settings may fix it."
+        )
     if re.search(r"\b400\b", text):
         return f"{service} rejected the request{f': {detail}' if detail else ''}."
     if re.search(r"\b5\d\d\b|timed? ?out|Timeout", text):
         return f"{service} didn't answer in time. Want me to try again?"
-    return (detail or re.sub(r"[{}\[\]\"]", "", text))[:140]
+    # Never Python's own words, a path with their Windows name in it, or anything like a key.
+    return detail or plainwords.safe_line(text, plainwords.UNKNOWN, 140)
 
 
 _FILLER_LEAD = re.compile(
