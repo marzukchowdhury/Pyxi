@@ -36,10 +36,10 @@ from pydantic import BaseModel, Field
 from pyxi.agents.registry import AgentProfile, AgentRegistry
 from pyxi.booking import CHECKIN_PATTERNS, CHECKIN_SAFE, CONFIRM_PATTERNS, HANDOVER
 from pyxi.config import PyxiSettings
-from pyxi.connectors.google import GOOGLE_EXPIRED
 from pyxi.docs import SUMMARY_EXTS, SUPPORTED, document_mode, fix_document, summarize_document
 from pyxi.hub import Hub
 from pyxi.llm import otto_settings
+from pyxi.plainwords import plain_failure
 from pyxi.safety import RULE as UNTRUSTED_RULE
 
 log = logging.getLogger(__name__)
@@ -157,35 +157,14 @@ def named_draft(job: Any) -> Path | None:
 def describe_failure(exc: BaseException) -> str:
     """What went wrong, the way you'd tell a person (the notch shows this, never a stack)."""
     text = str(exc)
-    low = text.lower()
     if type(exc).__name__ in ("PixelError", "LedgerError"):
         # Already said plainly, and it may name a file ("Budget 2026.xlsx is locked"), which
-        # mustn't be mistaken for the spending limit below.
+        # mustn't be mistaken for the spending limit.
         return text.strip()[:300] or "That didn't work."
-    if "invalid_grant" in low or type(exc).__name__ in ("RefreshError", "GoogleExpired"):
-        # Google ends a sign-in after a while (a week, for an app still in testing). On 26
-        # November a sheet job showed the raw "('invalid_grant: Token has been expired..." line.
-        return GOOGLE_EXPIRED
-    if "browsertype.launch" in low or "executable doesn't exist" in low:
-        return "I couldn't open a browser window on this PC. Restarting Pyxi usually fixes it."
-    if re.search(r"\b401\b|authentication|invalid (x-)?api.?key", low):
-        return "The AI model turned the key down. Check the model settings, then try again."
-    if re.search(r"\b429\b|rate.?limit|overloaded", low):
-        return "The AI model is busy right now. Try again in a minute."
-    if "net::err_name_not_resolved" in low or "net::err_internet" in low:
-        return "I couldn't reach that site. Is the internet connection up?"
-    if "net::err" in low:
-        return "That site wouldn't load."
-    if "timeout" in low:
-        return "The site took too long to respond."
-    if type(exc).__name__ == "BudgetExceededError" or re.search(
-        r"budget[ _](exceeded|exhausted|reached)|cost limit|max_cost", low
-    ):
-        return "I stopped before going over the spending limit for this job."
-    if "switched off in Pyxi's Google Cloud project" in text:
-        return text.strip()[:300]  # says what to turn on, with the link: keep it whole
-    first = text.strip().splitlines()[0] if text.strip() else type(exc).__name__
-    return first[:160]
+    # Every failure Pyxi knows is said one way everywhere, with its next step; anything else
+    # is shown only if it reads as a sentence, never as Python's own words (pyxi/plainwords.py).
+    # On 26 November a sheet job showed the raw "('invalid_grant: Token has been expired..." line.
+    return plain_failure(exc)
 
 
 # How Pyxi's browser teammates work. The user is waiting for a notification, so quick and

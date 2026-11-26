@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from otto.llm.base import ToolSpec
 
+from pyxi import plainwords
 from pyxi.agents.specialists import RUNNERS
 
 if TYPE_CHECKING:
@@ -274,6 +275,8 @@ async def _travel(brain: Brain, args: dict[str, Any]) -> str:
             "travel: Gmail isn't connected, so Atlas can't read their bookings. Tell them to "
             "connect Google in Settings, in one sentence."
         )
+    if note := await brain.google_run_out("travel"):
+        return note
     trip = str(args.get("trip") or "").strip()
     job = await brain.jobs.start(
         "atlas",
@@ -387,6 +390,8 @@ async def _money(brain: Brain, args: dict[str, Any]) -> str:
             "money: Gmail isn't connected, so Penny can't read their receipts. Tell them to "
             "connect Google in Settings, in one sentence."
         )
+    if note := await brain.google_run_out("money"):
+        return note
     month = str(args.get("month") or "this month").strip()
     target = str(args.get("target") or "").strip().strip('"')
     own_file = action == "sheet" and target.lower().endswith((".xlsx", ".xlsm"))
@@ -487,7 +492,7 @@ async def after_meeting(brain: Brain, job: Job) -> bool:
     except Exception as exc:
         log.exception("follow-up email failed")
         await brain._notify(
-            job.id, ok=False, title="The follow-up didn't send", body=str(exc)[:200], say=True
+            job.id, ok=False, title="The follow-up didn't send", body=plainwords.plain_failure(exc, limit=200), say=True
         )
         return False
     # Said as well as shown (say=True): what came of a card they allowed was a ten second
@@ -716,7 +721,7 @@ async def after_fix(brain: Brain, job: Job) -> bool:
         )
     except (OSError, RuntimeError, UnicodeDecodeError) as exc:
         await brain._notify(
-            job.id, ok=False, title=f"{name} wasn't changed", body=str(exc)[:200], say=True
+            job.id, ok=False, title=f"{name} wasn't changed", body=plainwords.plain_failure(exc, limit=200), say=True
         )
         return False
     await brain._notify(  # said too: the fix they allowed was a silent notice (audit)
