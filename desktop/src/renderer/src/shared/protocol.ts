@@ -386,8 +386,19 @@ export interface VoicePublic {
   /** Speech is turned into text on this PC only (less accurate; nothing of the voice is sent). */
   listen_here?: boolean;
   available: Record<"kokoro" | "elevenlabs" | "gemini", boolean> & { bengali?: boolean };
+  /** Whether a key of theirs is kept on this PC for each cloud voice. Never the key itself. */
+  own_keys?: Partial<Record<"elevenlabs" | "gemini", boolean>>;
   languages: Record<string, string>;
   error: string | null;
+}
+
+/** Pyxi's own voice being downloaded (the Voice tab's button, or a first start). */
+export interface VoicePack {
+  state: "downloading" | "ready" | "failed";
+  /** 0 to 100 while downloading. */
+  percent: number;
+  /** One plain line: that it is ready, or why it failed and what to do. */
+  message: string;
 }
 
 export interface RoutineInfo {
@@ -664,6 +675,9 @@ export type BrainEvent =
   | { type: "connectors"; connectors: ConnectorStatus[]; message?: string }
   | { type: "routines"; routines: RoutineInfo[] }
   | { type: "voice_preview"; engine: string; voice: string; text: string; audio: string | null; error: string | null }
+  | ({ type: "voice_pack" } & VoicePack)
+  /** How saving or removing a cloud voice's key went. The key is never sent back. */
+  | { type: "voice_key"; engine: string; ok: boolean; message: string }
   | { type: "error"; message: string }
   | { type: "notice"; message: string }
   | { type: "private_apps"; apps: string[]; built_in: string[] }
@@ -771,4 +785,8 @@ export type ClientMessage =
   | { type: "guide_cancel" }
   | { type: "object_closed"; by_them?: boolean }
   | { type: "voice_preview"; engine: string; voice: string; speed?: number }
+  /** Download Pyxi's own voice (`repair`: fetch it afresh over the one that is here). */
+  | { type: "voice_pack"; repair?: boolean }
+  /** Keep a cloud voice's key in the protected store on this PC, or (`forget`) remove it. */
+  | { type: "voice_key"; engine: string; key?: string; forget?: boolean }
   | OnboardingMessage;

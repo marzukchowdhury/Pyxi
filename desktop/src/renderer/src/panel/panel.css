@@ -248,6 +248,13 @@ html.web-preview { background: radial-gradient(120% 80% at 30% 0%, #1a1f2b, #070
 .studio-setup ol { margin: 0; padding-left: 18px; color: var(--ink-2); line-height: 1.7; font-size: 12.5px; }
 .studio-setup p { margin: 0; color: var(--ink-2); font-size: 12.5px; }
 .studio-setup button { justify-self: start; }
+.studio-repair { display: grid; gap: 6px; justify-items: start; }
+.studio-repair p { margin: 0; color: var(--ink-2); font-size: 12px; }
+.studio-setup .studio-key { justify-self: stretch; } .studio-setup .studio-key input { text-transform: none; letter-spacing: 0; }
+.studio-setup p.studio-warn, .studio-repair p.studio-warn { color: #ff9ea0; }
+.studio-setup p.studio-good, .studio-repair p.studio-good { color: #ffc861; }
+.studio-progress { height: 5px; border-radius: 3px; background: var(--hair-hi); overflow: hidden; justify-self: stretch; width: 100%; }
+.studio-progress i { display: block; height: 100%; background: #ffc861; transition: width .3s ease; }
 .voice-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .voice-card { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 14px 6px 11px; border-radius: 14px; border: 1px solid var(--hair); background: var(--surface); text-align: center; transition: border-color .2s, background .2s, transform .25s var(--spring); }
 .voice-card:hover { border-color: rgba(158,203,255,.35); background: var(--surface-hi); transform: translateY(-1px); }

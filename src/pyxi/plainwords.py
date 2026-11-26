@@ -309,6 +309,33 @@ BENGALI_OFFLINE = (
 )
 
 
+# Pyxi's own voice (about 350 MB, fetched on first start or from the Voice tab's button).
+VOICE_PACK_LATER = (
+    "Pyxi's own voice couldn't be downloaded just now, so the Windows voice is talking for "
+    "it. Open the Voice tab and press Download to try again."
+)
+VOICE_PACK_OFFLINE = "The voice couldn't be downloaded. Check the internet connection, then press Download again."
+VOICE_PACK_DISK = "This PC's disk is too full for the voice. Free up about 400 MB, then press Download again."
+VOICE_PACK_IN_USE = "The voice is in use right now. Close Pyxi from the tray, open it again, then press Download again."
+VOICE_PACK_FAILED = "The voice couldn't be downloaded just now. Press Download to try again in a minute."
+
+
+def voice_pack_failure(exc: BaseException) -> str:
+    """Why the voice pack didn't download, as one line for the Voice tab: what to do, never
+    the download library's own words."""
+    known = explain(exc)
+    if known and known.line == DISK_FULL:
+        return VOICE_PACK_DISK
+    if isinstance(exc, PermissionError) or (known and known.kind == "file"):
+        return VOICE_PACK_IN_USE
+    names = _names(exc)
+    if (known and known.kind == "net") or "broke off" in str(exc) or names & {
+        "HTTPError", "TransportError", "StreamError", "HTTPStatusError",
+    }:  # fmt: skip
+        return VOICE_PACK_OFFLINE
+    return VOICE_PACK_FAILED
+
+
 def hearing_failure(exc: BaseException, fallback: str) -> str:
     """Why speech could not be turned into words, when the cause is one a person can mend.
     Bad audio (the usual cause) keeps the caller's own line."""

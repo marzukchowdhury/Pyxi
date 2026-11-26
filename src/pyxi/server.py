@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gc
 import json
 import logging
 import os
@@ -186,16 +187,56 @@ def create_app(
     async def _fetch_voice() -> None:
         """A fresh install has no voice model yet (about 350 MB): fetch it in the background on
         first run, so nobody has to run `pyxi setup-voice`. Until it's there, the OS voice talks."""
-        from pyxi.voice.tts import download_kokoro
-
         models = settings.models_dir
         if (models / "kokoro-v1.0.onnx").exists() and (models / "voices-v1.0.bin").exists():
             return
         if os.environ.get("PYXI_AUTO_VOICE", "1") == "0":
             return
+        await _voice_pack(started_by_them=False)
+
+    voice_pack: dict[str, Any] = {"busy": False}
+
+    async def _voice_pack(*, repair: bool = False, started_by_them: bool = True) -> None:
+        """Download Pyxi's own voice (about 350 MB), or fetch it afresh (``repair``), saying
+        how far along it is. The Voice tab's button starts it; so does a first start. One at
+        a time: a second press while it runs changes nothing."""
+        from pyxi.voice import tts as voice_tts
+
+        if voice_pack["busy"]:
+            return
+        voice_pack["busy"] = True
+        models = settings.models_dir
+        now = {"percent": 0}
+
+        async def tell(state: str, percent: int = 0, message: str = "") -> None:
+            await hub.emit("voice_pack", state=state, percent=percent, message=message)
+
+        def progress(done: int, total: int) -> None:
+            now["percent"] = min(99, int(done * 100 / total))
+
+        async def say_how_far() -> None:
+            # In order, and a few times a second at most: never a late "downloading" that
+            # lands after "ready" and leaves the button stuck.
+            sent = -1
+            while True:
+                if now["percent"] != sent:
+                    sent = now["percent"]
+                    await tell("downloading", sent)
+                await asyncio.sleep(0.2)
+
+        telling = asyncio.create_task(say_how_far())
         try:
             log.info("downloading the voice model to %s", models)
-            await download_kokoro(models)
+            studio = brain.studio
+            if repair and studio is not None:
+                # Windows won't replace a file that is open: let the loaded voice go first.
+                studio.kokoro._engine = None
+                gc.collect()
+            try:
+                await voice_tts.download_kokoro(models, force=repair, progress=progress)
+            finally:
+                telling.cancel()
+                await asyncio.gather(telling, return_exceptions=True)
             log.info("voice model ready")
             # A line spoken while it was still downloading switched Pyxi to the Windows voice
             # "for good" (tts.FallbackTTS.failed): with the voice here, that is undone, or
@@ -203,14 +244,39 @@ def create_app(
             voice = getattr(brain, "tts", None)
             if getattr(voice, "failed", None) is not None:
                 voice.failed = None
+            await tell("ready", 100, "Pyxi's voice is ready.")
             await hub.emit("notice", message="Pyxi's voice is ready.")
-        except Exception as exc:  # offline, or the download host is down: try again next start
-            log.warning("voice model download failed: %s", exc)
-            await hub.emit(
-                "notice",
-                message="Pyxi's own voice couldn't be downloaded just now, so the Windows voice "
-                "is talking for it. I'll try again the next time Pyxi starts.",
-            )
+            if studio is not None:
+                await hub.emit(
+                    "voice_catalog", catalog=await studio.catalog(), voice=studio.public()
+                )
+        except Exception as exc:  # offline, the disk is full, or the download host is down
+            log.warning("voice model download failed: %s", type(exc).__name__)
+            await tell("failed", 0, plainwords.voice_pack_failure(exc))
+            if not started_by_them:
+                # Nobody is looking at the Voice tab: a card, with the way to try again.
+                await brain._notify(
+                    "voice-pack",
+                    ok=False,
+                    title="Pyxi's voice isn't downloaded yet",
+                    body=plainwords.VOICE_PACK_LATER,
+                )
+        finally:
+            voice_pack["busy"] = False
+
+    async def _voice_key(msg: dict[str, Any]) -> None:
+        """A cloud voice's key from the Voice tab: kept in the protected store, or removed.
+        What comes back says how it went and never carries the key."""
+        studio = brain.studio
+        engine = str(msg.get("engine") or "")
+        if studio is None:
+            return
+        if msg.get("forget"):
+            ok, message = True, studio.forget_key(engine)
+        else:
+            ok, message = await studio.save_key(engine, str(msg.get("key") or ""))
+        await hub.emit("voice_key", engine=engine, ok=ok, message=message)
+        await hub.emit("voice_catalog", catalog=await studio.catalog(), voice=studio.public())
 
     async def _on_window(app: str) -> None:
         await brain.emit_pins(app)
@@ -703,6 +769,10 @@ def create_app(
             )
         elif kind == "voice_preview" and brain.studio:
             brain._spawn(_preview(msg))
+        elif kind == "voice_pack":  # the Voice tab's Download (or Download again) button
+            brain._spawn(_voice_pack(repair=bool(msg.get("repair"))))
+        elif kind == "voice_key" and brain.studio:
+            brain._spawn(_voice_key(msg))
         elif kind == "palace_seek" and msg.get("snapshot_id"):
             brain._spawn(brain.time_travel("", snapshot_id=int(msg["snapshot_id"])))
         elif kind == "time_travel":

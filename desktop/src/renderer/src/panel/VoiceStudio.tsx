@@ -3,28 +3,73 @@
  * drawn from its name, so no two look alike) and a personality, and tapping one plays a short
  * line in character. Engine, speed, language and captions apply from the next sentence.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AudioQueue } from "../shared/audio";
 import { bridge } from "../shared/bridge";
 import { Play, Stop } from "../shared/icons";
 import type { VoiceInfo, VoicePublic } from "../shared/protocol";
 import { brain } from "../shared/socket";
 import { usePanel } from "./store";
+import { type Engine, ENGINES, keySteps, looksLikeKey, packButton, packLine } from "./voiceText";
 
 const player = new AudioQueue();
 
-const ENGINES: { id: VoicePublic["engine"]; name: string; blurb: string; site?: string; env?: string }[] = [
-  { id: "kokoro", name: "On this PC", blurb: "Free and private. Works offline." },
-  { id: "elevenlabs", name: "ElevenLabs", blurb: "The most human-sounding. Uses your ElevenLabs credits.", site: "https://elevenlabs.io/app/settings/api-keys", env: "ELEVENLABS_API_KEY" },
-  { id: "gemini", name: "Google Gemini", blurb: "Expressive, acts out the tone of each line. Uses your Google AI key.", site: "https://aistudio.google.com/apikey", env: "GEMINI_API_KEY" },
-];
 const SPEEDS = [0.8, 0.9, 1, 1.1, 1.25];
+
+/** Pyxi's own voice: download it, or fetch a fresh copy, with how far along it is. */
+function VoicePackBox({ installed }: { installed: boolean }) {
+  const pack = usePanel((s) => s.voicePack);
+  const button = packButton(pack, installed);
+  const line = packLine(pack, installed);
+  const fetch = () => {
+    usePanel.setState({ voicePack: { state: "downloading", percent: 0, message: "" } });
+    brain.send({ type: "voice_pack", repair: installed });
+  };
+  return (
+    <div className={installed ? "studio-repair" : "studio-setup"}>
+      {!installed && <b>Pyxi's own voice isn't on this PC yet</b>}
+      <button className={installed ? "ghost" : "primary"} disabled={button.busy} onClick={fetch}>{button.label}</button>
+      {pack?.state === "downloading" && <div className="studio-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pack.percent}><i style={{ width: `${pack.percent}%` }} /></div>}
+      <p className={line.tone === "warn" ? "studio-warn" : line.tone === "good" ? "studio-good" : ""}>{line.text}</p>
+    </div>
+  );
+}
+
+/** A cloud voice's key: pasted here, kept encrypted on this PC by the brain, never shown again. */
+function KeyBox({ engine, name, site }: { engine: Engine; name: string; site: string }) {
+  const result = usePanel((s) => s.voiceKey);
+  const [key, setKey] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setSaving(false), [result]);
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    if (!looksLikeKey(key)) return;
+    setSaving(true);
+    usePanel.setState({ voiceKey: null });
+    brain.send({ type: "voice_key", engine, key: key.trim() });
+    setKey(""); // it is with the brain now: nothing of it stays in this window
+  };
+  const said = result && result.engine === engine ? result : null;
+  return (
+    <form className="studio-setup" onSubmit={save}>
+      <b>Connect {name}</b>
+      <ol>{keySteps(name).map((s) => <li key={s}>{s}</li>)}</ol>
+      <button type="button" className="ghost" onClick={() => bridge.openExternal(site)}>Open {name}</button>
+      <div className="beta-row studio-key">
+        <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={`Paste your ${name} key`} autoComplete="off" spellCheck={false} aria-label={`${name} key`} />
+        <button className="primary" type="submit" disabled={saving || !looksLikeKey(key)}>{saving ? "Checking" : "Save"}</button>
+      </div>
+      {said && <p className={said.ok ? "studio-good" : "studio-warn"}>{said.message}</p>}
+    </form>
+  );
+}
 
 export function VoiceStudio() {
   const hello = usePanel((s) => s.hello);
   const catalog = usePanel((s) => s.voiceCatalog);
   const live = usePanel((s) => s.voice) ?? hello?.voice ?? null;
   const preview = usePanel((s) => s.voicePreview);
+  const keyResult = usePanel((s) => s.voiceKey);
   const [playing, setPlaying] = useState<string | null>(null);
   const [engine, setEngine] = useState<VoicePublic["engine"]>(live?.engine ?? "kokoro");
 
@@ -89,18 +134,10 @@ export function VoiceStudio() {
       </div>
       <p className="studio-blurb">{info.blurb}</p>
 
-      {!ready && info.env ? (
-        <div className="studio-setup">
-          <b>Connect {info.name}</b>
-          <ol>
-            <li>Create an API key on the {info.name} website.</li>
-            <li>Add <code>{info.env}=your-key</code> to <code>pyxi/.env</code>.</li>
-            <li>Restart Pyxi. Your voices appear here.</li>
-          </ol>
-          <button className="primary" onClick={() => bridge.openExternal(info.site!)}>Open {info.name}</button>
-        </div>
+      {!ready && info.site ? (
+        <KeyBox engine={engine} name={info.name} site={info.site} />
       ) : !ready ? (
-        <div className="studio-setup"><b>The on-device voice isn't installed</b><p>Run <code>pyxi setup-voice</code> once (about 350 MB).</p></div>
+        <VoicePackBox installed={false} />
       ) : (
         <div className="voice-grid">
           {voices.map((v) => (
@@ -111,6 +148,13 @@ export function VoiceStudio() {
             </button>
           ))}
           {!voices.length && <p className="muted">Loading voices…</p>}
+        </div>
+      )}
+      {ready && engine === "kokoro" && <VoicePackBox installed />}
+      {ready && engine !== "kokoro" && live.own_keys?.[engine] && (
+        <div className="studio-repair">
+          <button className="ghost" onClick={() => brain.send({ type: "voice_key", engine, forget: true })}>Remove my {info.name} key from this PC</button>
+          {keyResult?.engine === engine && <p className={keyResult.ok ? "studio-good" : "studio-warn"}>{keyResult.message}</p>}
         </div>
       )}
 
@@ -132,7 +176,7 @@ export function VoiceStudio() {
         {live.language === "auto"
           ? "Pyxi listens for the language you speak and answers in it. The first time, it downloads a multilingual listening model (about 480 MB). English is heard on this PC; Bengali is heard online and answered by Mitali, the Bengali voice."
           : live.language === "bn"
-            ? `Pyxi listens in Bengali and answers in Bengali. Mitali, the Bengali voice, runs on this PC${live.available.bengali ? "" : " and downloads once (about 108 MB)"}${live.engine !== "kokoro" ? `, and takes over if ${ENGINES.find((e) => e.id === live.engine)?.name} can't speak` : ""}. Listening to Bengali needs the internet (the Pyxi beta or your OpenRouter key).`
+            ? `Pyxi listens in Bengali and answers in Bengali. Mitali, the Bengali voice, runs on this PC${live.available.bengali ? "" : " and downloads once (about 108 MB)"}${live.engine !== "kokoro" ? `, and takes over if ${ENGINES.find((e) => e.id === live.engine)?.name} can't speak` : ""}. Listening to Bengali needs the internet.`
             : "Pyxi listens and answers in this language."}
       </p>
 

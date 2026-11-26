@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { brainUrl } from "../shared/bridge";
-import type { Agent, BrainEvent, BrainState, ConnectorStatus, Hello, Job, RoutineInfo, VoiceInfo, VoicePublic } from "../shared/protocol";
+import type { Agent, BrainEvent, BrainState, ConnectorStatus, Hello, Job, RoutineInfo, VoiceInfo, VoicePack, VoicePublic } from "../shared/protocol";
 import { brain } from "../shared/socket";
 
 export interface ChatLine {
@@ -35,6 +35,8 @@ interface PanelState {
   voice: VoicePublic | null;
   voiceCatalog: Record<string, VoiceInfo[]> | null;
   voicePreview: { audio: string | null; text: string; at: number } | null;
+  voicePack: VoicePack | null;
+  voiceKey: { engine: string; ok: boolean; message: string } | null;
   connectors: ConnectorStatus[] | null;
   connectorMessage: string | null;
   routines: RoutineInfo[] | null;
@@ -55,6 +57,8 @@ export const usePanel = create<PanelState>(() => ({
   voice: null,
   voiceCatalog: null,
   voicePreview: null,
+  voicePack: null,
+  voiceKey: null,
   connectors: null,
   connectorMessage: null,
   routines: null,
@@ -134,6 +138,12 @@ brain.on((e: BrainEvent) => {
     case "voice_preview":
       usePanel.setState({ voicePreview: { audio: e.audio, text: e.text, at: Date.now() } });
       if (e.error) usePanel.setState((s) => ({ voice: s.voice ? { ...s.voice, error: e.error } : s.voice }));
+      break;
+    case "voice_pack":
+      usePanel.setState({ voicePack: { state: e.state, percent: e.percent, message: e.message } });
+      break;
+    case "voice_key":
+      usePanel.setState({ voiceKey: { engine: e.engine, ok: e.ok, message: e.message } });
       break;
     case "turn_done":
       usePanel.setState({ spentToday: e.spent_today, lastTurnCost: e.cost_usd });
