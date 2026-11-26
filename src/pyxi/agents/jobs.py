@@ -153,6 +153,9 @@ def named_draft(job: Any) -> Path | None:
     return path
 
 
+GOOGLE_EXPIRED = "Your Google sign-in has run out. Connect Google again in Settings and ask me once more."
+
+
 def describe_failure(exc: BaseException) -> str:
     """What went wrong, the way you'd tell a person (the notch shows this, never a stack)."""
     text = str(exc)
@@ -161,6 +164,10 @@ def describe_failure(exc: BaseException) -> str:
         # Already said plainly, and it may name a file ("Budget 2026.xlsx is locked"), which
         # mustn't be mistaken for the spending limit below.
         return text.strip()[:300] or "That didn't work."
+    if "invalid_grant" in low or type(exc).__name__ == "RefreshError":
+        # Google ends a sign-in after a while (a week, for an app still in testing). On 26
+        # November a sheet job showed the raw "('invalid_grant: Token has been expired..." line.
+        return GOOGLE_EXPIRED
     if "browsertype.launch" in low or "executable doesn't exist" in low:
         return "I couldn't open a browser window on this PC. Restarting Pyxi usually fixes it."
     if re.search(r"\b401\b|authentication|invalid (x-)?api.?key", low):

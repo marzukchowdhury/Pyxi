@@ -6125,6 +6125,10 @@ def friendly_error(exc: BaseException) -> str:
     )
     if beta:
         return beta.group(1).strip()
+    if "invalid_grant" in text or type(exc).__name__ == "RefreshError":
+        from pyxi.agents.jobs import GOOGLE_EXPIRED
+
+        return GOOGLE_EXPIRED
     if "is switched off in Pyxi's Google Cloud project" in text:
         return text[:260]  # already says what to do, with the link
     m = re.search(r'"message":\s*"([^"]{3,140})"', text)
