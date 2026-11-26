@@ -61,8 +61,8 @@ export async function checkout(store: Store, cfg: Config, req: Request, stripe: 
     const url = await stripe.createCheckout({
       customer,
       price,
-      successUrl: `${cfg.siteUrl}/pricing.html?checkout=done`,
-      cancelUrl: `${cfg.siteUrl}/pricing.html?checkout=cancelled`,
+      successUrl: `${cfg.siteUrl}/welcome`,
+      cancelUrl: `${cfg.siteUrl}/billing-cancelled`,
     });
     return json({ url });
   } catch {
@@ -77,7 +77,7 @@ export async function portal(store: Store, cfg: Config, req: Request, stripe: St
   if (!stripe || !billingOn(cfg)) return fail(503, "billing_off", WORDS.billing_off);
   if (!acct.customer || !acct.subscription) return fail(409, "no_subscription", "You don't have a plan yet. Choose one first.");
   try {
-    return json({ url: await stripe.createPortal(acct.customer, `${cfg.siteUrl}/pricing.html`) });
+    return json({ url: await stripe.createPortal(acct.customer, `${cfg.siteUrl}/welcome`) });
   } catch {
     return fail(502, "billing_trouble", "Your plan page didn't open. Try again in a moment.");
   }
