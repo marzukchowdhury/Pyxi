@@ -642,7 +642,7 @@ COMPANION_TOOLS += [
     _tool(
         "errand",
         "Do something in the background with the user's connected accounts: set up a meeting or "
-        "invite, write or reply to an email, create a doc, post to Discord or LinkedIn. You say one short "
+        "invite, write or reply to an email, create a doc. You say one short "
         "line first that names the job ('Writing to Sam about Friday.') and they're told when it's "
         "done. Write the task completely and exactly: every name, email address, date and time as the "
         "user said them. If something essential is missing (like when the meeting is), ask the user "

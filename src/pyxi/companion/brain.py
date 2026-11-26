@@ -3572,6 +3572,7 @@ class Brain:
                 pyxi.persona if pyxi else "", self.registry.roster_text()
             )
             system += tabwork.prompt(self)  # only while a browser is connected
+            system += self.connectors.prompt_note()  # LinkedIn and Discord: on offer here, or not
             now_t = time.time()
             jobs = "\n".join(
                 j.brief()
@@ -4860,6 +4861,9 @@ class Brain:
             else:
                 return "forget: say which key, or everything=true."
             return f"Forgot {n} memor{'y' if n == 1 else 'ies'}."
+        if line := self.connectors.not_yet_tool(name):
+            # LinkedIn or Discord, which a customer has no way to connect: one plain line.
+            return f'{name}: say exactly this, and nothing about set-up: "{line}"'
         if (connector_tool := self.connectors.find(name)) is not None:
             result = await connector_tool.handler(args)
             if isinstance(result, Outgoing):
@@ -4919,6 +4923,12 @@ class Brain:
             task = str(args.get("task", "")).strip()
             if not task:
                 return "errand: say what to do."
+            if line := self.connectors.not_yet(task):
+                # A LinkedIn post or a Discord message, with no way to send one from here.
+                return (
+                    f'errand: not started. Say exactly this, and nothing about set-up: "{line}" '
+                    "If they want it, write the text in a note they can copy."
+                )
             if not self.connectors.tools():
                 return "errand: no accounts are connected yet; tell the user to connect one in Settings."
             if self.turns.spent_today() >= self.settings.budget.daily_cost_usd:

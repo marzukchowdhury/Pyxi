@@ -401,6 +401,11 @@ def create_app(
             raise HTTPException(404)
         return FileResponse(target)
 
+    def _can_sign_in() -> set[str]:
+        """The accounts with a sign-in page that are on offer on this PC (LinkedIn only where
+        its developer set-up is present: nobody is sent to a page that cannot work)."""
+        return {c.id for c in brain.connectors.shown()} & {"google", "linkedin"}
+
     async def _connect(service: str) -> None:
         """Run the service's browser sign-in (it opens on this PC) and report back."""
         connector = getattr(brain.connectors, service)
@@ -678,9 +683,9 @@ def create_app(
                 )
         elif kind == "connectors":
             await hub.emit("connectors", connectors=brain.connectors.statuses())
-        elif kind == "connect" and msg.get("id") in ("google", "linkedin"):
+        elif kind == "connect" and msg.get("id") in _can_sign_in():
             brain._spawn(_connect(str(msg["id"])))
-        elif kind == "disconnect" and msg.get("id") in ("google", "linkedin"):
+        elif kind == "disconnect" and msg.get("id") in _can_sign_in():
             getattr(brain.connectors, str(msg["id"])).disconnect()
             await hub.emit("connectors", connectors=brain.connectors.statuses())
         elif kind == "guide_clicked":

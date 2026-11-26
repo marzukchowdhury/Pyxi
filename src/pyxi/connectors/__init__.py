@@ -1,4 +1,9 @@
-"""Connected accounts: Gmail, Google Calendar, Google Docs, Discord and LinkedIn.
+"""Connected accounts: Gmail, Google Calendar, Google Docs, and (set up by a developer only)
+Discord and LinkedIn.
+
+Discord and LinkedIn need a bot token or a developer app that a customer cannot make, so they
+are hidden everywhere (Settings, the model's tools, the prompt) unless that set-up is already
+on this PC: see :meth:`Connector.available`.
 
 Each connector offers tools to the model only once it is connected, so an unconnected service
 costs nothing per turn. Reading is immediate. Anything that reaches other people (sending an
@@ -10,6 +15,7 @@ Credentials live on this PC only, under ``.pyxi/connectors/`` (git-ignored), or 
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -70,11 +76,36 @@ class Connector:
     def connected(self) -> bool:
         raise NotImplementedError
 
+    def available(self) -> bool:
+        """Can someone using Pyxi connect this by themselves? False hides it everywhere."""
+        return True
+
     def status(self) -> Status:
         raise NotImplementedError
 
     def tools(self) -> list[Tool]:
         raise NotImplementedError
+
+
+# What Pyxi cannot do yet for a customer, and what it offers instead. One plain line each:
+# never a word about developer apps, bot tokens, keys or set-up files.
+NOT_YET = {
+    "linkedin": "I can't post to LinkedIn for you yet. I can write the post for you to paste in.",
+    "discord": "I can't read or send Discord messages yet. I can write the message for you to paste in.",
+}
+_NAMES = {"linkedin": "LinkedIn", "discord": "Discord"}
+# A request to post or message there (not one that only names the site: "email Sam the
+# LinkedIn link" is Gmail's work).
+_ASKS = {
+    "linkedin": re.compile(
+        r"(?i)\b(?:post|share|publish|put|announce)\w*\b[^.?!\n]{0,80}\b(?:on|to)\s+(?:my\s+)?linkedin\b"
+        r"|\blinkedin\s+post\b"
+    ),
+    "discord": re.compile(
+        r"(?i)\b(?:post|send|message|share|announce|read|check|reply|write)\w*\b[^.?!\n]{0,80}"
+        r"\b(?:on|to|in|from)\s+(?:my\s+|the\s+)?discord\b|\bdiscord\s+(?:message|channel|server)s?\b"
+    ),
+}
 
 
 class Connectors:
@@ -90,11 +121,55 @@ class Connectors:
         self.linkedin = LinkedInConnector(self.dir)
         self.all: list[Connector] = [self.google, self.discord, self.linkedin]
 
+    def shown(self) -> list[Connector]:
+        """The accounts someone can connect on this PC (Settings lists these and no others)."""
+        return [c for c in self.all if c.available()]
+
+    def hidden(self) -> list[Connector]:
+        return [c for c in self.all if not c.available()]
+
     def tools(self) -> list[Tool]:
-        return [t for c in self.all if c.connected() for t in c.tools()]
+        return [t for c in self.shown() if c.connected() for t in c.tools()]
 
     def find(self, name: str) -> Tool | None:
         return next((t for t in self.tools() if t.spec.name == name), None)
 
-    def statuses(self) -> list[dict[str, Any]]:
-        return [vars(c.status()) for c in self.all]
+    def statuses(self, everything: bool = False) -> list[dict[str, Any]]:
+        """The rows of Settings' Connected accounts. ``everything``: the hidden ones too (the
+        developer's ``pyxi connect status``)."""
+        return [vars(c.status()) for c in (self.all if everything else self.shown())]
+
+    def not_yet(self, text: str) -> str:
+        """The one plain line for a request that needs a hidden account ("post this on
+        LinkedIn"), or "" when the request needs none of them."""
+        return next(
+            (NOT_YET[c.id] for c in self.hidden() if c.id in _ASKS and _ASKS[c.id].search(text or "")),
+            "",
+        )
+
+    def not_yet_tool(self, name: str) -> str:
+        """The same line for a tool of a hidden account that the model called anyway."""
+        return next(
+            (NOT_YET[c.id] for c in self.hidden() if name.startswith(c.id + "_") and c.id in NOT_YET),
+            "",
+        )
+
+    def prompt_note(self) -> str:
+        """Rules for the system prompt about the accounts that are, or are not, on offer here."""
+        lines = []
+        shown = [c.name for c in self.shown() if c.id in NOT_YET]
+        if shown:
+            lines.append(
+                f"- {' and '.join(shown)} can be a connected account on this PC too: posting "
+                "there is an `errand`, and they approve the exact text first."
+            )
+        for c in self.hidden():
+            if c.id not in NOT_YET:
+                continue
+            lines.append(
+                f"- {_NAMES.get(c.id, c.name)}: you have no way to reach it yet. If they ask "
+                f'for it, say exactly this and nothing about set-up: "{NOT_YET[c.id]}" Then, if '
+                "they want it, write the text in a note they can copy. Never start an `errand` "
+                "for it, and never mention developer apps, bots, keys, tokens or files to edit."
+            )
+        return ("\n" + "\n".join(lines)) if lines else ""
