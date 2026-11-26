@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass
 
 from pyxi import account
-from pyxi.connectors.google import GOOGLE_EXPIRED
+from pyxi.connectors.google import GOOGLE_EXPIRED, GOOGLE_OUR_SIDE
 from pyxi.logscrub import scrub
 
 # ------------------------------------------------------------------ the lines
@@ -383,8 +383,12 @@ def explain(exc: BaseException, *, beta: bool | None = None, job: bool = False) 
         return Plain(account.line_for(*gate), "plan")
     if "invalid_grant" in low or names & {"RefreshError", "GoogleExpired"}:
         return Plain(GOOGLE_EXPIRED, "google")
+    if GOOGLE_OUR_SIDE in text:
+        return Plain(GOOGLE_OUR_SIDE, "google")  # an API of ours is off: nothing for them to do
     if "switched off in Pyxi's Google Cloud project" in text:
-        return Plain(text.strip()[:300], "google")  # says what to turn on, with the link
+        # Only someone with a Google client of their own gets this (connectors/google.py):
+        # it says what to turn on, with the link.
+        return Plain(text.strip()[:300], "google")
     if "Google said " in text and (line := _google(text, low)):
         return Plain(line, "google")
     said = re.search(r"\b(LinkedIn|Discord) said (\d{3})", text)

@@ -80,10 +80,17 @@ SLIDES_SCOPE = "https://www.googleapis.com/auth/presentations"
 DOCS_SCOPE = "https://www.googleapis.com/auth/documents"
 
 
-def google_error(status: int, body: str) -> str:
+# A Google API that is switched off in the Google Cloud project behind the Google client the
+# installer ships. Someone using Pyxi cannot turn it on: it is ours to mend.
+GOOGLE_OUR_SIDE = "That's a problem on our side with Google, not something you did. Try again later."
+
+
+def google_error(status: int, body: str, *, own_client: bool = False) -> str:
     """Google's refusal in words someone can act on. An API switched off in the Google Cloud
-    project (Sheets was added after the first setup guide) says which one and where to turn it
-    on, instead of 'Google said 403: {'."""
+    project (Sheets was added after the first setup guide): with their own Google client
+    (``own_client``, a developer) it says which one and where to turn it on, instead of
+    'Google said 403: {'. On the client Pyxi ships nobody but us can do that, so they are
+    told it is on our side, and which API and where goes to the log only."""
     try:
         err = json.loads(body).get("error") or {}
     except (ValueError, AttributeError):
@@ -101,6 +108,9 @@ def google_error(status: int, body: str) -> str:
             if service
             else "https://console.cloud.google.com/apis/library"
         )
+        if not own_client:
+            log.error("the %s is switched off in Pyxi's Google Cloud project: %s", name, link)
+            return GOOGLE_OUR_SIDE
         return (
             f"The {name} is switched off in Pyxi's Google Cloud project. Turn it on at {link} "
             "(press Enable), wait a minute, then ask again."
@@ -435,6 +445,14 @@ class GoogleConnector(Connector):
             return json.loads(shipped.read_text(encoding="utf-8"))
         return None
 
+    def own_client(self) -> bool:
+        """Is the Google client their own (a file in the data folder, or the two values in the
+        environment)? That is a developer, who can open the Google Cloud console. Otherwise
+        it is the one the installer ships, which only we can change."""
+        return self.client_path.exists() or bool(
+            os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET")
+        )
+
     def _saved(self) -> dict[str, Any] | None:
         """The saved token (encrypted with DPAPI; an old plain file migrates on first read).
         None when there's none, or it was unreadable: then they simply connect again."""
@@ -608,7 +626,7 @@ class GoogleConnector(Connector):
         headers = {"Authorization": f"Bearer {await self._token()}"}
         r = await self._client().request(method, url, headers=headers, **kw)
         if r.status_code >= 400:
-            raise RuntimeError(google_error(r.status_code, r.text))
+            raise RuntimeError(google_error(r.status_code, r.text, own_client=self.own_client()))
         return r.json() if r.content else {}
 
     # ------------------------------------------------------------------ gmail

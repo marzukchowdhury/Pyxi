@@ -786,7 +786,23 @@ async def test_sample_data_then_a_pivot_on_an_empty_sheet_in_one_go():
     assert any(c[0] == "batch" and "updateCells" in c[1][0] for c in g.calls)  # the pivot
 
 
-def test_a_switched_off_google_api_says_which_and_where_to_turn_it_on():
+def test_whose_google_client_it_is(tmp_path, monkeypatch):
+    from pyxi.connectors.google import GoogleConnector
+
+    monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+    g = GoogleConnector(tmp_path / "connectors", tmp_path)
+    assert not g.own_client()  # the one the installer ships, or none: a customer
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "made-up")
+    assert not g.own_client()
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "made-up")
+    assert g.own_client()
+    monkeypatch.delenv("GOOGLE_CLIENT_SECRET")
+    g.client_path.write_bytes(b"{}")
+    assert g.own_client()
+
+
+def test_a_switched_off_google_api_says_which_and_where_to_turn_it_on(caplog):
     from pyxi.agents.jobs import describe_failure
     from pyxi.companion.brain import friendly_error
     from pyxi.connectors.google import google_error
@@ -803,12 +819,23 @@ def test_a_switched_off_google_api_says_which_and_where_to_turn_it_on():
             }
         }
     )
-    said = google_error(403, body)
+    # A developer, on a Google client of their own: which API, and where to turn it on.
+    said = google_error(403, body, own_client=True)
     assert said.startswith("The Google Sheets API is switched off in Pyxi's Google Cloud project")
     assert "console.cloud.google.com/apis/library/sheets.googleapis.com?project=83793709681" in said
     assert "{" not in said
     assert describe_failure(RuntimeError(said)) == said  # the notification keeps all of it
     assert friendly_error(RuntimeError(said)) == said
+    # Everyone else is on the Google client Pyxi ships and cannot turn anything on: it is
+    # ours to mend, and they are told so. Which API and where goes to the log only.
+    ours = "That's a problem on our side with Google, not something you did. Try again later."
+    with caplog.at_level("ERROR", logger="pyxi.connectors.google"):
+        said = google_error(403, body)
+    assert said == ours
+    assert "console.cloud" not in said and "API" not in said and "Cloud project" not in said
+    assert "sheets.googleapis.com?project=83793709681" in caplog.text
+    assert describe_failure(RuntimeError(said)) == ours
+    assert friendly_error(RuntimeError(said)) == ours
     other = google_error(404, json.dumps({"error": {"message": "Requested entity was not found."}}))
     assert other == "Google said 404: Requested entity was not found."
 
