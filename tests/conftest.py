@@ -103,6 +103,22 @@ def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_real_account_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test reaches the real Pyxi server, Google's sign-in or a browser for the account
+    (pyxi/account.py): every request finds no internet (a test of the account gives its own
+    pretend server and browser)."""
+    import httpx
+
+    from pyxi.account import Account
+
+    def no_internet(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("tests never reach the real server", request=request)
+
+    monkeypatch.setattr(Account, "transport", httpx.MockTransport(no_internet))
+    monkeypatch.delenv("PYXI_ACCOUNT", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_windows_read(monkeypatch: pytest.MonkeyPatch) -> None:
     """No test reads the other windows that are really on this PC's screen: a look at the
     screen finds none besides the one it is given (a test of several gives its own)."""

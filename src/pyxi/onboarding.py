@@ -200,6 +200,17 @@ class Tour:
         self.step_at = time.monotonic()
         return True
 
+    def start_sign_in(self) -> bool:
+        """Only the sign-in step, for someone who signed out (or whose sign-in ran out) after
+        the tour was over. Like a replay, it never touches the marker. False: this install
+        does not need to sign in, or the tour itself is playing."""
+        if self.active or not self.needs_code():
+            return False
+        self.counted = True
+        self.active, self.replay = True, True
+        self.step, self.step_at = CODE_STEP, time.monotonic()
+        return True
+
     def _count(self) -> None:
         """Write this run to the marker as a try, once."""
         if self.counted:
@@ -356,19 +367,39 @@ async def heard(tour: Tour, hub: Any, text: str) -> bool:
     return True
 
 
+async def first_step(brain: Any) -> dict[str, bool]:
+    """What the step before the tour offers, from the server's ``/api/config``: sign in with
+    Google (``sign_in``), an invite code (``invite_codes``), or neither for now because the
+    server could not be reached (``offline``). No account on this brain: the invite code."""
+    account = getattr(brain, "account", None)
+    if account is None:
+        return {"sign_in": False, "invite_codes": True, "offline": False}
+    reached = await account.config()
+    return {
+        "sign_in": bool(account.offered),
+        "invite_codes": bool(account.invite_codes),
+        "offline": not reached,
+    }
+
+
 async def handle(tour: Tour, brain: Any, hub: Any, msg: dict[str, Any]) -> None:
     """Everything the overlay (and Settings) sends about the tour."""
     action = msg.get("action")
-    if action in ("start", "replay"):
+    if action in ("start", "replay", "signin"):
         replay = action == "replay"
-        if tour.start(replay=replay, code=bool(msg.get("code"))):
+        only = action == "signin"  # signed out: the sign-in step by itself, not the tour
+        if tour.start_sign_in() if only else tour.start(replay=replay, code=bool(msg.get("code"))):
             brain.warm_voice()  # so the first line can be spoken, if the voice is on this PC
             profile = booking.load(tour.data_dir)
             await hub.emit(
                 "onboarding",
                 event="start",
                 replay=replay,
-                code=tour.step == CODE_STEP,  # it opens by asking for their invite code
+                code=tour.step == CODE_STEP,  # it opens by asking them to sign in (or for a code)
+                only=only,
+                # What the first step offers: "Continue with Google" when the server has
+                # sign-in on, else the invite code, as before.
+                **(await first_step(brain) if tour.step == CODE_STEP else {}),
                 # What is already saved, so someone updating isn't asked for it twice.
                 have={
                     k: profile[k] for k in ("first_name", "email", "date_of_birth") if k in profile

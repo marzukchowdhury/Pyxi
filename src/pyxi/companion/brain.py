@@ -227,6 +227,10 @@ class Brain:
             settings.data_dir / "audit.jsonl", settings.screen.turn_retention_days
         )
         self.jobs.audit = self.audit
+        # The signed-in account, its plan and the server's gates (pyxi/account.py).
+        from pyxi.account import Account
+
+        self.account = Account(settings.data_dir, hub)
         self.history: list[tuple[str, str]] = []
         self.state: State = "idle"
         self._lock = asyncio.Lock()
@@ -2153,6 +2157,9 @@ class Brain:
         except Exception as exc:
             log.exception("errand failed")
             self._errands.pop(job.id, None)
+            if (gate := await self.account.gate_from(exc)) is not None:
+                await self.jobs.settle(job, ok=False, summary=gate)  # its own card is up
+                return
             await self.jobs.settle(job, ok=False, summary=str(exc)[:200])
             await self._notify(job.id, ok=False, title="Couldn't finish that", body=str(exc)[:200])
             self._spawn(self._say_when_free("I couldn't finish that. The notification says why."))
@@ -3379,7 +3386,10 @@ class Brain:
             except Exception as exc:
                 log.exception("turn failed")
                 error = f"{type(exc).__name__}: {exc}"
-                await self.say_line("Oops, my brain hiccupped. Mind trying that again?")
+                # The trial, the plan or the allowance: the server's own sentence, and a card
+                # with the button that fixes it (pyxi/account.py).
+                gate = await self.account.gate_from(exc)
+                await self.say_line(gate or "Oops, my brain hiccupped. Mind trying that again?")
             if self._guide is not None and not any(
                 c.get("tool") == "guide" and c.get("outcome") not in ("refused", "failed")
                 for c in self._calls
@@ -5507,6 +5517,8 @@ class Brain:
         )
         if job.then and job.status == "done":
             return  # the next teammate takes it from here
+        if job.status == "failed" and await self.account.gate_from(job.summary or ""):
+            return  # the trial, the plan or the allowance: its own card, with the button
         # Background work never talks over you, but it is never missed either: a notification
         # with the result and the files, one short spoken line once nobody is talking, and the
         # whole result on a card when the notification can't hold it (_announce).

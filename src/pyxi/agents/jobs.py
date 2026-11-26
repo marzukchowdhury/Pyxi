@@ -158,6 +158,11 @@ def describe_failure(exc: BaseException) -> str:
     """What went wrong, the way you'd tell a person (the notch shows this, never a stack)."""
     text = str(exc)
     low = text.lower()
+    from pyxi import account
+
+    if (gate := account.gate_of(exc, account_device=account.signed_in_here())) is not None:
+        # The trial, the plan or the allowance (pyxi/account.py): the brain shows its card.
+        return gate[1] or account.sentence(gate[0])
     if type(exc).__name__ in ("PixelError", "LedgerError"):
         # Already said plainly, and it may name a file ("Budget 2026.xlsx is locked"), which
         # mustn't be mistaken for the spending limit below.

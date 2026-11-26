@@ -84,12 +84,35 @@ _REFUSED = (
 )
 
 
-def page(ok: bool, reason: str = "") -> bytes:
-    """The closing page: connected, or not (with Google's own short reason when it gave one)."""
+# The other sign-in: to Pyxi itself (pyxi/account_signin.py). It asks Google only who they
+# are; no mail, calendar or files, and the connected Google apps are not touched by it.
+_ACCOUNT_DONE = (
+    "<p>You can close this tab and go back to Pyxi.</p>"
+    "<ul>"
+    "<li>Pyxi is getting ready on your PC. It takes a moment.</li>"
+    "<li>This only told Pyxi who you are. It can't read your mail, calendar or files.</li>"
+    "<li>You can sign out at any time in Pyxi's Settings, under Account.</li>"
+    "</ul>"
+)
+_ACCOUNT_REFUSED = (
+    "<p>The sign-in didn't finish, so nothing has changed.</p>"
+    "<ul>"
+    "<li>Close this tab and go back to Pyxi.</li>"
+    "<li>Press the sign-in button there to try again.</li>"
+    "</ul>"
+)
+
+
+def page(ok: bool, reason: str = "", *, account: bool = False) -> bytes:
+    """The closing page: connected, or not (with Google's own short reason when it gave one).
+    ``account``: the page for signing in to Pyxi itself, not for connecting Google's apps."""
+    done, refused = (_ACCOUNT_DONE, _ACCOUNT_REFUSED) if account else (_DONE, _REFUSED)
+    yes = "You're signed in to Pyxi" if account else "Pyxi is connected to Google"
+    no = "Pyxi couldn't sign you in" if account else "Pyxi couldn't connect to Google"
     fill = {
-        "__TITLE__": "Pyxi is connected to Google" if ok else "Pyxi couldn't connect to Google",
-        "__HEADING__": "Pyxi is connected to Google" if ok else "That didn't connect",
-        "__BODY__": _DONE if ok else _REFUSED,
+        "__TITLE__": yes if ok else no,
+        "__HEADING__": yes if ok else ("That didn't work" if account else "That didn't connect"),
+        "__BODY__": done if ok else refused,
         "__FOOT__": (
             "Pyxi never sees your Google password."
             if ok
