@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { chat, configFromEnv, join, joinRequest, me, revoke, usage } from "../lib/beta.js";
 import { MemoryStore } from "../lib/store.js";
+import { adminAccount, signIn, signOut } from "../lib/accounts.js";
+import { checkout, portal, webhook } from "../lib/billing.js";
+import { as, FakeStripe, paidCfg, post, signer, STRIPE_ENV, stripeEvent, WEBHOOK_SECRET } from "./helpers.js";
 
 const cfg = configFromEnv({
   OPENROUTER_API_KEY: "sk-or-test",
@@ -283,6 +286,93 @@ describe("the beta server keeps nothing it doesn't need", () => {
       expect([...kinds].sort()).toEqual(["code", "rl", "spend", "tok"]);
       const [, record] = [...store.data.entries()].find(([k]) => k.startsWith("tok:"))!;
       expect(Object.keys(JSON.parse(record)).sort()).toEqual(["code", "created"]);
+      expect(logged).toEqual([]); // nothing written to the function logs either
+    } finally {
+      spies.forEach((undo) => undo());
+    }
+  });
+
+  it("for an account, stores only what the README lists: no Google token, card details, prompts or replies", async () => {
+    const store = new MemoryStore();
+    const stripe = new FakeStripe();
+    const google = await signer();
+    const logged: unknown[] = [];
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((m) => {
+      const orig = console[m];
+      console[m] = (...a: unknown[]) => void logged.push(a);
+      return () => (console[m] = orig);
+    });
+    try {
+      // Sign in from two devices, chat (plain and streamed), pay, get Stripe's events (with card
+      // details in them, as real ones have), open the portal, be looked up by the founder, sign out.
+      const from = { "x-forwarded-for": "203.0.113.77" };
+      const idToken = await google.token({ name: "Anna Example", picture: "https://example.com/anna.png", given_name: "Anna", locale: "en-GB" });
+      const first = await signIn(store, paidCfg, post("/api/auth/google", { id_token: idToken }, from), google.keys);
+      const { token } = (await first.json()) as { token: string };
+      const second = await signIn(store, paidCfg, post("/api/auth/google", { id_token: idToken }, from), google.keys);
+      const other = ((await second.json()) as { token: string }).token;
+      await signIn(store, paidCfg, post("/api/auth/google", { id_token: "BAD-ID-TOKEN" }, from), google.keys);
+      const secret = "PROMPT-TEXT the user's screen says their lease is at 12 Main St";
+      const plain = (async () => new Response(JSON.stringify({ choices: [{ message: { content: "REPLY-TEXT about the lease" } }], usage: { cost: 0.01 } }), { status: 200 })) as unknown as typeof fetch;
+      await chat(store, paidCfg, chatRequest(token, { model: "anthropic/claude-haiku-5.5", messages: [{ role: "user", content: secret }] }), plain);
+      const streamed = (async () => sse(['data: {"choices":[{"delta":{"content":"REPLY-TEXT streamed"}}]}\n', 'data: {"usage":{"cost":0.02}}\n'])) as unknown as typeof fetch;
+      await (await chat(store, paidCfg, chatRequest(other, { model: "anthropic/claude-haiku-5.5", stream: true, messages: [{ role: "user", content: secret }] }), streamed)).text();
+      expect((await checkout(store, paidCfg, post("/api/billing/checkout", { plan: "pro", yearly: false }, { ...as(token), ...from }), stripe)).status).toBe(200);
+      stripe.put("sub_1", "cus_test1", "active", "price_pro_m");
+      const card = { payment_method_details: { card: { brand: "visa", last4: "LAST4-4242", number: "4242424242424242", exp_year: 2031, fingerprint: "CARD-FINGERPRINT" } }, customer_email: "anna@example.com", customer_name: "Anna Example", customer_address: { line1: "12 Main St" }, hosted_invoice_url: "https://invoice.stripe.com/i/RECEIPT-LINK" };
+      for (const [type, object] of [
+        ["checkout.session.completed", { id: "cs_1", mode: "subscription", subscription: "sub_1", customer: "cus_test1", customer_details: { name: "Anna Example", address: { line1: "12 Main St" } } }],
+        ["customer.subscription.created", { id: "sub_1", customer: "cus_test1", default_payment_method: "pm_CARD-ID" }],
+        ["invoice.paid", { id: "in_1", subscription: "sub_1", customer: "cus_test1", ...card }],
+        ["customer.subscription.updated", { id: "sub_1", customer: "cus_test1", default_payment_method: "pm_CARD-ID" }],
+        ["invoice.payment_failed", { id: "in_2", subscription: "sub_1", customer: "cus_test1", ...card }],
+        ["customer.subscription.deleted", { id: "sub_1", customer: "cus_test1" }],
+      ] as [string, Record<string, unknown>][])
+        expect((await webhook(store, paidCfg, await stripeEvent(type, object), stripe)).status).toBe(200);
+      await chat(store, paidCfg, chatRequest(token, { model: "anthropic/claude-haiku-5.5", messages: [{ role: "user", content: secret }] }), plain);
+      expect((await portal(store, paidCfg, post("/api/billing/portal", {}, { ...as(token), ...from }), stripe)).status).toBe(200);
+      const admin = configFromEnv({ ...STRIPE_ENV, ADMIN_TOKEN: "founder-secret" });
+      expect((await adminAccount(store, admin, post("/api/admin/account", { email: "anna@example.com" }, { Authorization: "Bearer founder-secret" }))).status).toBe(200);
+      expect((await signOut(store, post("/api/auth/signout", {}, as(other)))).status).toBe(200);
+
+      const everything = JSON.stringify([...store.data.entries()]);
+      const leaks = [
+        "PROMPT-TEXT", "REPLY-TEXT", "lease", "12 Main St", token, other, "203.0.113.77",
+        idToken, ...idToken.split("."), "BAD-ID-TOKEN", "Anna Example", "anna.png", "en-GB",
+        "LAST4", "4242424242424242", "visa", "CARD", "pm_", "RECEIPT", "invoice.stripe.com",
+        "sk_test_only", WEBHOOK_SECRET, "sk-or-test", "founder-secret",
+      ];
+      for (const leak of leaks) expect(everything).not.toContain(leak);
+      expect(everything.split("anna@example.com").length - 1).toBe(1); // the email: once, in the account
+
+      const kinds = new Set([...store.data.keys()].map((k) => k.split(":")[0]));
+      expect([...kinds].sort()).toEqual(["acct", "cus", "email", "evt", "rl", "spend", "tok"]);
+      const shapes = new Set([...store.data.keys()].map((k) => k.replace(/[0-9a-f]{24,}/g, "<hash>").replace(/\d{4}-\d\d(-\d\d)?/, "<date>").replace(/evt_test_\d+/, "<event>").replace(/:\d{6}$/, ":<hour>")));
+      expect([...shapes].sort()).toEqual([
+        "acct:108000000000000000001",
+        "cus:cus_test1",
+        "email:<hash>",
+        "evt:<event>",
+        "rl:auth:<hash>:<hour>",
+        "rl:bill:<hash>:<hour>",
+        "spend:<hash>:<date>",
+        "spend:acct:108000000000000000001:<date>",
+        "spend:all:<date>",
+        "spend:trial:108000000000000000001",
+        "tok:<hash>",
+      ]);
+      const record = JSON.parse(store.data.get("acct:108000000000000000001")!);
+      expect(Object.keys(record).sort()).toEqual([
+        "cancels", "created", "customer", "email", "erased", "past_due_since", "period_end", "plan", "revoked", "status", "sub", "subscription", "trial_ends",
+      ]);
+      const toks = [...store.data.entries()].filter(([k]) => k.startsWith("tok:"));
+      expect(toks.length).toBe(1); // the signed-out device's is gone
+      expect(JSON.parse(toks[0][1])).toEqual({ acct: "108000000000000000001", created: expect.any(Number) });
+      for (const [k, v] of store.data.entries()) {
+        if (k.startsWith("email:") || k.startsWith("cus:")) expect(v).toBe("108000000000000000001");
+        if (k.startsWith("evt:")) expect(v).toBe("1");
+        if (k.startsWith("rl:") || k.startsWith("spend:")) expect(Number.isFinite(Number(v))).toBe(true);
+      }
       expect(logged).toEqual([]); // nothing written to the function logs either
     } finally {
       spies.forEach((undo) => undo());

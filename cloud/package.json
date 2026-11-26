@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Pyxi beta: invite codes, per-user daily allowance and a monthly cap in front of OpenRouter.",
+  "description": "Pyxi server: invite codes, Google sign-in, a trial and Stripe plans, with allowances and a monthly cap in front of OpenRouter.",
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

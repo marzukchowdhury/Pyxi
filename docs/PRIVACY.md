@@ -119,9 +119,10 @@ Pyxi never sends an email, posts, messages, invites someone or cancels anything 
 
 **The Pyxi beta server** forwards your requests to OpenRouter with our key, so you don't need one. It **doesn't store what you ask, what's on your screen, or your voice**. It keeps only:
 
-- a scrambled (hashed) form of your beta token, with the invite code you used and the date you joined;
+- a scrambled (hashed) form of each device's Pyxi token, with the date it was made and either the invite code you used or which account it belongs to;
 - how many devices have used each invite code;
-- what you spent each day (kept 3 days) and what the whole beta spent each month (kept about 40 days), to enforce the free allowance.
+- what each device spent each day (kept 3 days), what your account spent during its trial and in each month (months kept about 40 days), and what the whole service spent each month (kept about 40 days), to enforce the allowance;
+- if you sign in with Google: your Google account's ID and email address, when the account was made, when its trial ends, your plan and its status, when the paid period ends, and Stripe's customer and subscription IDs. It never keeps the Google sign-in itself, and never card details: you type those on Stripe's own page, and Stripe keeps them. When you choose a plan, your email address is given to Stripe so it can take the payment and send receipts.
 
 It sends OpenRouter an anonymous per-user ID, not your name or email, so abuse can be spotted. The server runs on Vercel and keeps its data in Upstash. Like any web host, they may keep standard technical logs, such as IP addresses and times, under their own policies.
 

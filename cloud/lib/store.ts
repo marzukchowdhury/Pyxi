@@ -1,4 +1,4 @@
-// Where the beta keeps its few facts: who has a token, and how much each spent today.
+// Where the server keeps its few facts: who has a token, each account, and what was spent.
 // Production uses Upstash Redis over its REST API (Vercel's marketplace "Upstash for Redis" sets
 // KV_REST_API_URL and KV_REST_API_TOKEN); tests use the in-memory store.
 
@@ -8,6 +8,8 @@ export interface Store {
   /** Add to a number (cents as floats are fine) and return the new total. */
   incr(key: string, by: number, ttlSeconds?: number): Promise<number>;
   del(key: string): Promise<void>;
+  /** Set only if the key doesn't exist yet; true when this call created it. */
+  add(key: string, value: string, ttlSeconds?: number): Promise<boolean>;
 }
 
 export class MemoryStore implements Store {
@@ -25,6 +27,11 @@ export class MemoryStore implements Store {
   }
   async del(key: string) {
     this.data.delete(key);
+  }
+  async add(key: string, value: string) {
+    if (this.data.has(key)) return false;
+    this.data.set(key, value);
+    return true;
   }
 }
 
@@ -59,6 +66,10 @@ export class UpstashStore implements Store {
   }
   async del(key: string) {
     await this.call("DEL", key);
+  }
+  async add(key: string, value: string, ttlSeconds?: number) {
+    const done = await (ttlSeconds ? this.call("SET", key, value, "NX", "EX", ttlSeconds) : this.call("SET", key, value, "NX"));
+    return done !== null;
   }
 }
 
