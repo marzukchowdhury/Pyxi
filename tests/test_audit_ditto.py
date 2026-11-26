@@ -172,7 +172,7 @@ async def test_a_card_number_typed_while_watching_is_never_kept(tmp_path):
     # one run in a dozen. They are taken out before looking for what was typed.)
     import re
 
-    everywhere = re.sub(r"\d{9,}\.\d+", "", everywhere)
+    everywhere = re.sub(r"\d{9,}(\.\d+)?", "", everywhere)  # whole-second readings too
     assert "4111" not in everywhere and "737" not in everywhere
     assert 'typed "Alex Morgan" into edit "Full name"' in recording.text()  # the rest is kept
     assert 'typed something private (not kept) into edit "Card number"' in recording.text()
