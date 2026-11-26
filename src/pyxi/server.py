@@ -18,7 +18,7 @@ from typing import Any, get_args
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
-from pyxi import __version__, booking, brainkey, cloud, files_access, onboarding
+from pyxi import __version__, booking, brainkey, cloud, files_access, onboarding, plainwords
 from pyxi.companion import browsersetup, pricecheck
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
@@ -182,9 +182,20 @@ def create_app(
             log.info("downloading the voice model to %s", models)
             await download_kokoro(models)
             log.info("voice model ready")
+            # A line spoken while it was still downloading switched Pyxi to the Windows voice
+            # "for good" (tts.FallbackTTS.failed): with the voice here, that is undone, or
+            # "the voice is ready" was not true until the next start.
+            voice = getattr(brain, "tts", None)
+            if getattr(voice, "failed", None) is not None:
+                voice.failed = None
             await hub.emit("notice", message="Pyxi's voice is ready.")
         except Exception as exc:  # offline, or the download host is down: try again next start
             log.warning("voice model download failed: %s", exc)
+            await hub.emit(
+                "notice",
+                message="Pyxi's own voice couldn't be downloaded just now, so the Windows voice "
+                "is talking for it. I'll try again the next time Pyxi starts.",
+            )
 
     async def _on_window(app: str) -> None:
         await brain.emit_pins(app)
@@ -380,7 +391,10 @@ def create_app(
             who = await asyncio.to_thread(connector.sign_in)
             message = f"Connected {connector.name} as {who}."
         except Exception as exc:
-            message = f"Couldn't connect {connector.name}: {exc}"
+            # Why, and what to press: never the sign-in library's own error (a cancelled
+            # Google sign-in read "(access_denied) ..." and LinkedIn's printed its whole reply).
+            log.warning("connecting %s failed: %s", connector.name, type(exc).__name__)
+            message = plainwords.connect_failure(connector.name.split(" (")[0], exc)
         await hub.emit("connectors", connectors=brain.connectors.statuses(), message=message)
         # Also by the notch: the sign-in may have been started from a card, with Settings shut.
         again = " Ask me again now." if message.startswith("Connected") else ""

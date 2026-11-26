@@ -254,6 +254,8 @@ def connect_failure(name: str, exc: BaseException) -> str:
     """Why a sign-in from Settings (or a card's button) didn't connect, and what to press."""
     low = str(exc).lower()
     again = f"The {name} sign-in didn't go through. Press Connect to try again."
+    if ".env" in low or ".pyxi" in low:
+        return str(exc)[:220]  # a set-up step for someone running Pyxi from the code
     if "access_denied" in low or "denied" in low:
         return f"The {name} sign-in was cancelled, so nothing changed. Press Connect to try again."
     if "didn't finish" in low or "timed out" in low or "timeout" in low:
@@ -262,6 +264,39 @@ def connect_failure(name: str, exc: BaseException) -> str:
     if known and known.kind == "net":
         return OFFLINE
     return safe_line(str(exc), again, 220)
+
+
+HEARING_OFFLINE = (
+    "I couldn't write down what you said: the listening pack for that language isn't on "
+    "this PC yet and I can't get online to fetch it. Check the internet connection, then "
+    "try again."
+)
+BENGALI_OFFLINE = (
+    "Bengali listening needs the internet right now. Check the connection, then try again."
+)
+
+
+def hearing_failure(exc: BaseException, fallback: str) -> str:
+    """Why speech could not be turned into words, when the cause is one a person can mend.
+    Bad audio (the usual cause) keeps the caller's own line."""
+    text = str(exc)
+    low = text.lower()
+    if "bengali listening needs the internet" in low:
+        return BENGALI_OFFLINE
+    known = explain(exc)
+    if known and known.kind in ("model", "net"):
+        if known.line in (OFFLINE, MODEL_OFFLINE, SLOW, SITE_SLOW, SITE_UNREACHABLE, MODEL_SLOW):
+            return "I couldn't write down what you said. " + OFFLINE
+        return "I couldn't write down what you said. " + known.line
+    if re.search(
+        r"localentrynotfound|snapshot|huggingface|hf_hub|model files? (?:are|is) missing|"
+        r"unable to open file 'model\.bin'|cannot find.*model|no such file.*model",
+        low,
+    ) or "LocalEntryNotFoundError" in _names(exc):
+        return HEARING_OFFLINE
+    if known and known.line == DISK_FULL:
+        return "I couldn't write down what you said. " + DISK_FULL
+    return fallback
 
 
 def _file(exc: BaseException, text: str, low: str, names: set[str]) -> str:

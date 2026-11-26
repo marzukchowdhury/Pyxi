@@ -372,9 +372,14 @@ class Brain:
             )
             if studio:
                 studio.detected_language = spoken
-        except Exception:
+        except Exception as exc:
             log.exception("transcription failed")
-            await self.hub.emit("error", message="I couldn't make out the audio. Try again?")
+            # Why, when it is known (no internet, the listening pack missing, the allowance
+            # used up): "try again" alone could never work for those.
+            await self.hub.emit(
+                "error",
+                message=plainwords.hearing_failure(exc, "I couldn't make out the audio. Try again?"),
+            )
             self._prefetch = None
             await self.set_state("idle")
             return
@@ -561,7 +566,13 @@ class Brain:
         from pyxi import dictation
 
         await self.hub.emit(
-            "dictated", text=text, how=how, note=dictation.NOTES.get(why, ""), seconds=round(seconds, 2), tidied=tidied
+            "dictated",
+            text=text,
+            how=how,
+            # (A reason given as a whole sentence is the note itself: why it could not be heard.)
+            note=dictation.NOTES.get(why, why if " " in why else ""),
+            seconds=round(seconds, 2),
+            tidied=tidied,
         )
 
     def _dictation_polisher(self) -> Any:
@@ -640,10 +651,12 @@ class Brain:
                 heard, took, _ = await self.stt.transcribe(
                     audio, studio.prefs.language if studio else "en", **({"here": True} if here else {})
                 )
-            except Exception:
+            except Exception as exc:
                 log.exception("dictation transcription failed")
                 if gen == self._dictation_gen:
-                    await self._dictated("", "failed", "failed")
+                    # Why, when it is known (no internet, the listening pack missing): "try
+                    # again" alone could never work for those.
+                    await self._dictated("", "failed", plainwords.hearing_failure(exc, dictation.NOTES["failed"]))
                 return ""
             text = dictation.clean(heard)
             tidied = False

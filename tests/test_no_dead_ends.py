@@ -206,3 +206,33 @@ async def test_a_spent_budget_says_where_to_raise_it(settings):
     brain.turns.spent_today = lambda: 999.0
     note = await brain._act("errand", {"task": "email Sam"})
     assert "raise the daily limit in Settings" in note
+
+
+# ---------------------------------------------------------------- connecting an account
+def test_a_cancelled_sign_in_says_so_and_what_to_press(settings):
+    import json
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from conftest import FakeScreen
+    from pyxi.demo import DemoLLM
+    from pyxi.hub import Hub
+    from pyxi.server import create_app
+
+    brain = Brain(settings, Hub(), llm=DemoLLM(), screen=FakeScreen())
+
+    def cancelled():
+        raise RuntimeError("(access_denied) The user did not grant the permissions: {'error': 'access_denied'}")
+
+    brain.connectors.google.sign_in = cancelled
+    app = create_app(settings, demo=True, brain=brain, key="k")
+    with TestClient(app) as client, client.websocket_connect("/ws?key=k") as ws:
+        ws.receive_text()
+        ws.send_text(json.dumps({"type": "connect", "id": "google"}))
+        seen, deadline = [], time.time() + 10
+        while time.time() < deadline and not any(e["type"] == "notice" for e in seen):
+            seen.append(json.loads(ws.receive_text()))
+    want = "The Google sign-in was cancelled, so nothing changed. Press Connect to try again."
+    assert [e["message"] for e in seen if e["type"] == "notice"] == [want]
+    assert [e.get("message") for e in seen if e["type"] == "connectors"] == [want]
