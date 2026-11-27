@@ -406,6 +406,9 @@ SIMPLE_SCENARIOS = [
     ("tab find here", SHOP_SCREEN, "Find wireless earbuds on this website.", "tab:use_tab"),
     ("tab add to cart", SHOP_SCREEN, "Add the first one to my cart.", "tab:use_tab"),
     ("tab read page", SHOP_SCREEN, "What does this page say about returns and refunds?", "tab:read_tab"),
+    # Live, with the extension just added: this went to Scout's separate browser, which the
+    # site turned away, while Pyxi said it was using "your own Firefox".
+    ("tab named browser", FIREFOX, "Go through Expedia on Mozilla Firefox and find me round-trip flights for one adult from Vancouver to Dhaka, leaving on the 24th of December and back on the 10th of January.", "tab:use_tab"),
     # Google is not connected (most people cannot connect it until Google has verified Pyxi),
     # but Pyxi is in their browser: their mail and calendar are done in their own tab, and
     # they are never sent off to connect Google first.

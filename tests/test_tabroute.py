@@ -126,3 +126,32 @@ async def test_do_it_in_my_browser_runs_the_same_task_in_their_tab(settings, mon
     await brain.in_own_tab(job.id)
     await brain.in_own_tab("job_nope")  # a card whose job is gone does nothing
     assert asked == [("use_tab", {"task": "Find flights to Dhaka", "url": "https://www.expedia.ca/"})]
+
+
+# ------------------------------------------------------------------ "on my Firefox" means their Firefox
+async def test_asked_for_in_their_own_browser_it_never_goes_to_scouts(settings):
+    from pyxi.companion import tabwork
+    from test_audit_tabwork import on_site
+    from test_brain_and_server import make_brain
+
+    brain, _ = on_site(settings)  # their browser is connected
+    args = {"agent": "scout", "task": "Find round-trip flights to Dhaka", "start_url": "https://www.expedia.ca/"}
+    for said in [
+        "Can you again go through Expedia on Mozilla Firefox?",
+        "Do it in my browser this time.",
+        "Search Expedia using Chrome for flights to Dhaka",
+        "Check my orders on Amazon",  # signed-in work is their own tab's too
+    ]:
+        brain._user_text = said
+        note = tabwork.their_browser_instead(brain, args)
+        assert note and note.startswith("delegate: not started.") and 'url "https://www.expedia.ca/"' in note, said
+    # A plain research request still goes to Scout, and so does a writer's job.
+    brain._user_text = "Find me the three best laptops under a thousand dollars."
+    assert tabwork.their_browser_instead(brain, args) is None
+    brain._user_text = "Do it in my browser this time."
+    assert tabwork.their_browser_instead(brain, {"agent": "quill", "task": "Write a note"}) is None
+    # With no browser connected there is nothing to turn to.
+    made = make_brain(settings)
+    alone = made[0]
+    alone._user_text = "Do it in my browser this time."
+    assert tabwork.their_browser_instead(alone, args) is None

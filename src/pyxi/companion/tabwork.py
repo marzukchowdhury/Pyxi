@@ -1593,11 +1593,46 @@ def _was_read(url: str, reads: list[tuple[str, str]]) -> bool:
     return bool(bare) and any(bare in (body or "").lower() for _, body in reads)
 
 
+# "On Firefox", "in my browser", "through Chrome": they mean the browser in front of them.
+_NAMED_BROWSER = re.compile(
+    r"(?i)\b(?:on|in|using|through|with|inside|from)\s+(?:my\s+|the\s+)?(?:own\s+)?"
+    r"(?:mozilla\s+|google\s+|microsoft\s+)?(?:firefox|chrome|edge|brave|opera|browser)\b"
+    r"|\bmy\s+(?:own\s+)?(?:browser|firefox|chrome|edge|brave|opera)\b"
+)
+
+
+def their_browser_instead(brain: Brain, args: dict[str, Any]) -> str | None:
+    """A note that turns a job for the browser teammate into work in the user's own tab, when
+    their browser is connected and that is where they asked for it. Live: with the extension
+    just added, "go through Expedia on Mozilla Firefox" was answered "Scout's back on Expedia,
+    this time through your own Firefox" and sent to Scout's separate browser, which the site
+    turned away again."""
+    link = getattr(brain, "browser", None)
+    if link is None or not link.connected:
+        return None
+    agent = brain.registry.get(str(args.get("agent") or "").strip().lower())
+    if agent is None or agent.role != "browser":
+        return None
+    said = str(getattr(brain, "_user_text", "") or "")
+    if not (_NAMED_BROWSER.search(said) or browsersetup._OWN_TAB.search(said)):
+        return None
+    url = str(args.get("start_url") or "").strip()
+    return (
+        "delegate: not started. Their browser is connected and they asked for this in it, so "
+        "the teammate's separate browser is the wrong place: it isn't signed in as them, and "
+        "sites turn it away. Call use_tab now with the same task"
+        + (f' and url "{url}"' if url else "")
+        + ". Say one short line: that you're doing it in their own browser."
+    )
+
+
 async def before_fetch(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
     """read_page and web_search, once this turn has read outside content (mail, a page, a
     document, a browser tab): an address the model wrote itself, which the user didn't say
     and which wasn't in what was read, could be carrying what was read to someone. They're
     asked first. Returns a note for the model when they say no, else None."""
+    if name == "delegate" and (note := their_browser_instead(brain, args)):
+        return note
     if name in browsersetup.OFFERS:
         return await browsersetup.offer(brain, name, args)
     reads = list(getattr(brain, "_turn_reads", []) or [])
