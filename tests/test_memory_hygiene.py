@@ -64,7 +64,10 @@ async def test_pyxi_says_it_wont_remember_a_secret(settings):
     brain = Brain(settings, Hub(), llm=DemoLLM(), screen=FakeScreen())
     note = await brain._act("remember", {"key": "bank", "content": "PIN is 4321"})
     assert note.startswith("remember: That looks like a password or code") and not brain.memory.all()
-    assert await brain._act("remember", {"key": "coffee", "content": "flat white"}) is None
+    # Saved, and never in silence: with nothing said yet this turn, the model is told to say so.
+    assert await brain._act("remember", {"key": "coffee", "content": "flat white"}) == (
+        "remember: saved. Say so in one short line, with what you'll remember."
+    )
 
 
 def test_forget_this_and_wipe_everything_after_a_card(settings):
