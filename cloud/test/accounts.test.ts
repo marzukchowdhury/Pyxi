@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { adminAccount, config, signIn, signOut, WORDS } from "../lib/accounts.js";
+import { adminAccount, config, signIn, signInWeb, signOut, WORDS } from "../lib/accounts.js";
 import { chat, configFromEnv, join, me, notSignedIn } from "../lib/beta.js";
 import { googleKeys, verifyGoogleIdToken } from "../lib/google.js";
 import { MemoryStore } from "../lib/store.js";
@@ -125,10 +125,11 @@ describe("checking a Google ID token", () => {
 
 describe("GET /api/config", () => {
   it("says whether sign-in and invite codes are on, and nothing secret", async () => {
-    expect(await config(cfg).json()).toEqual({ sign_in: true, google_client_id: CLIENT_ID, invite_codes: true });
+    expect(await config(cfg).json()).toEqual({ sign_in: true, google_client_id: CLIENT_ID, google_web_client_id: null, invite_codes: true });
+    expect(((await config({ ...cfg, googleWebClientId: "web-test.apps.googleusercontent.com" }).json()) as { google_web_client_id: string }).google_web_client_id).toBe("web-test.apps.googleusercontent.com");
     const off = configFromEnv({ OPENROUTER_API_KEY: "sk-or-test", STRIPE_SECRET_KEY: "sk_test_only" });
     const body = await config(off).json();
-    expect(body).toEqual({ sign_in: false, google_client_id: null, invite_codes: false });
+    expect(body).toEqual({ sign_in: false, google_client_id: null, google_web_client_id: null, invite_codes: false });
     expect(JSON.stringify(body)).not.toContain("sk_");
   });
 });
@@ -558,5 +559,64 @@ describe("the founder's account admin", () => {
     expect(lines.join(" ")).not.toContain("s3cret");
     expect(await cli(["extend-trial", "anna@example.com"], env, fake, (l) => lines.push(l))).toBe(2);
     expect(sent.length).toBe(2);
+  });
+});
+
+describe("POST /api/auth/web (the website's account page)", () => {
+  const WEB_ID = "web-test.apps.googleusercontent.com";
+  const web = { ...cfg, googleWebClientId: WEB_ID };
+  const webSignIn = async (store: MemoryStore, claims: Record<string, unknown> = {}, c = web) =>
+    signInWeb(store, c, post("/api/auth/web", { id_token: await google.token({ aud: WEB_ID, ...claims }) }), google.keys);
+
+  it("never makes an account: the trial starts in the app", async () => {
+    const store = new MemoryStore();
+    const res = await webSignIn(store);
+    expect(res.status).toBe(404);
+    expect(await errorOf(res)).toEqual({ code: "no_account", message: WORDS.no_account });
+    expect([...store.data.keys()].some((k) => k.startsWith("acct:") || k.startsWith("tok:"))).toBe(false);
+  });
+
+  it("signs an existing account in to see its plan, and to nothing else", async () => {
+    const store = new MemoryStore();
+    await signInAs(store, {}, web);
+    const res = await webSignIn(store);
+    expect(res.status).toBe(200);
+    const { token, account } = (await res.json()) as { token: string; account: Account };
+    expect(account.email).toBe("anna@example.com");
+    expect((await meOf(store, token, web)).account?.status).toBe("trial");
+    // To a model it is nobody.
+    const asked = await ask(store, token, never, web);
+    expect(asked.status).toBe(401);
+  });
+
+  it("lasts an hour", async () => {
+    const store = new MemoryStore();
+    at(T0);
+    await signInAs(store, { iat: T0 / 1000, exp: T0 / 1000 + 600 }, web);
+    const { token } = (await (await webSignIn(store, { iat: T0 / 1000, exp: T0 / 1000 + 600 })).json()) as { token: string };
+    at(T0 + 59 * 60_000);
+    expect((await me(store, web, new Request("https://x/api/me", { headers: as(token) }))).status).toBe(200);
+    at(T0 + 61 * 60_000);
+    expect((await me(store, web, new Request("https://x/api/me", { headers: as(token) }))).status).toBe(401);
+  });
+
+  it("takes only the website's own Google client, and is off until one is set", async () => {
+    const store = new MemoryStore();
+    await signInAs(store, {}, web);
+    // a token made for the desktop app is not the website's
+    const desktop = await signInWeb(store, web, post("/api/auth/web", { id_token: await google.token() }), google.keys);
+    expect(desktop.status).toBe(401);
+    // and the website's token does not sign a device in
+    const device = await signIn(store, web, post("/api/auth/google", { id_token: await google.token({ aud: WEB_ID }) }), google.keys);
+    expect(device.status).toBe(401);
+    const off = await webSignIn(store, {}, cfg);
+    expect(off.status).toBe(503);
+  });
+
+  it("stays shut for an account that was switched off", async () => {
+    const store = new MemoryStore();
+    await signInAs(store, {}, web);
+    store.data.set("acct:108000000000000000001", JSON.stringify({ ...stored(store, "108000000000000000001"), revoked: Date.now() }));
+    expect((await webSignIn(store)).status).toBe(403);
   });
 });

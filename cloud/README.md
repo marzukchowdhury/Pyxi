@@ -28,7 +28,7 @@ It stores no prompts, replies, screen content or voice, no card details and no G
 
 | Route | What it does |
 |---|---|
-| `GET /api/config` | `{"sign_in", "google_client_id", "invite_codes"}`: what the app should offer. `sign_in` is true once `GOOGLE_SIGNIN_CLIENT_ID` is set |
+| `GET /api/config` | `{"sign_in", "google_client_id", "google_web_client_id", "invite_codes"}`: what the app and the website's account page should offer. `sign_in` is true once `GOOGLE_SIGNIN_CLIENT_ID` is set |
 | `POST /api/join` `{"code": "..."}` | Invite code → `{"token": "pyxi_..."}`. Each code works on `USES_PER_CODE` devices |
 | `POST /api/auth/google` `{"id_token": "..."}` | A Google sign-in → `{"token": "pyxi_...", "account": {...}}`. The first one makes the account and starts the trial. 401 `bad_sign_in` |
 | `POST /api/auth/signout` | This device's token stops working. Other devices carry on |
@@ -183,6 +183,16 @@ Everything here is done by hand, once. Do the whole thing in Stripe's **test mod
 3. In Vercel, open the project, then **Settings**, then **Environment Variables**, and add `GOOGLE_SIGNIN_CLIENT_ID` with that value.
 
 The app and the server must use the same client ID: the server only accepts a sign-in that Google made out to that ID.
+
+#### The website's account page (optional)
+
+`https://www.heypyxi.com/account` lets someone see their plan, choose one or open Stripe's page without opening the app. It stays switched off (it says "choose your plan inside Pyxi") until the website has a Google client of its own:
+
+1. In the same **Credentials** page, press **Create credentials**, then **OAuth client ID**, type **Web application**.
+2. Under **Authorized JavaScript origins** add `https://www.heypyxi.com`. No redirect address is needed.
+3. Copy its **Client ID** and add it in Vercel as `GOOGLE_WEB_CLIENT_ID`, then redeploy the server.
+
+`POST /api/auth/web` takes only a sign-in made out to that ID. What it answers with lasts an hour, can read the account and open Stripe's pages, and never reaches a model. It never makes an account: the trial starts in the app.
 
 ### 2. Stripe products and the six prices
 

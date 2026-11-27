@@ -14,6 +14,9 @@ export const PAID_PLANS: readonly PaidPlan[] = ["starter", "pro", "max"];
 export interface Config {
   /** The Google client the desktop app signs in with; empty means sign-in is off. */
   googleClientId: string;
+  /** The Google "Web application" client the website's account page signs in with; empty means
+   * that page has no sign-in (it then says to choose a plan inside Pyxi). */
+  googleWebClientId: string;
   /** Stripe's secret key and the webhook signing secret; either empty means plans aren't open. */
   stripeKey: string;
   stripeWebhookSecret: string;
@@ -69,6 +72,7 @@ export function configFromEnv(env: Record<string, string | undefined> = process.
   }
   return {
     googleClientId: (env.GOOGLE_SIGNIN_CLIENT_ID ?? "").trim(),
+    googleWebClientId: (env.GOOGLE_WEB_CLIENT_ID ?? "").trim(),
     stripeKey: (env.STRIPE_SECRET_KEY ?? "").trim(),
     stripeWebhookSecret: (env.STRIPE_WEBHOOK_SECRET ?? "").trim(),
     prices,
@@ -155,6 +159,9 @@ export interface Who {
   code: string;
   /** The account this device is signed in to (Google sign-in), if any. */
   account?: AccountRecord;
+  /** A sign-in from the website's account page: it can see the plan and open Stripe's pages,
+   * and nothing else. It never reaches a model. */
+  web?: boolean;
 }
 
 /** A device's short id: what /api/me shows, OpenRouter sees as X-User, and revoking takes. */
@@ -169,8 +176,13 @@ export async function identify(store: Store, req: Request, cfg?: Config): Promis
   const id = await sha256(token);
   const raw = await store.get(`tok:${id}`);
   if (!raw) return null;
-  const rec = JSON.parse(raw) as { code?: string; acct?: string; created?: number };
+  const rec = JSON.parse(raw) as { code?: string; acct?: string; created?: number; web?: boolean; expires?: number };
+  if (rec.expires && Date.now() >= rec.expires) {
+    await store.del(`tok:${id}`); // a website sign-in lasts an hour
+    return null;
+  }
   const who: Who = { id, code: rec.code ?? "" };
+  if (rec.web) who.web = true;
   if ((await store.get(`revoked:${userId(who)}`)) !== null) return null;
   const before = Number((await store.get("revoked-before")) ?? 0);
   if (before && Number(rec.created ?? 0) <= before) return null; // "revoke all" happened since
@@ -285,7 +297,8 @@ export async function chat(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
   const who = await identify(store, req, cfg);
-  if (!who) return json({ error: { code: "not_signed_in", message: notSignedIn(cfg) } }, 401);
+  // A website sign-in is for the plan pages only: to a model it is nobody.
+  if (!who || who.web) return json({ error: { code: "not_signed_in", message: notSignedIn(cfg) } }, 401);
   if (!cfg.openrouterKey) return json({ error: { message: "The beta server has no model key set." } }, 503);
   if (who.account) {
     // An account: the trial clock, the plan's standing and its allowance decide.

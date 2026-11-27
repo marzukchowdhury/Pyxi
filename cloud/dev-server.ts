@@ -19,7 +19,7 @@ registerHooks({
   },
 });
 const { chat, configFromEnv, joinRequest, json, me, revoke } = await import("./lib/beta.ts");
-const { adminAccount, config, signIn, signOut } = await import("./lib/accounts.ts");
+const { adminAccount, config, signIn, signInWeb, signOut } = await import("./lib/accounts.ts");
 const { checkout, portal, stripeFromConfig, webhook } = await import("./lib/billing.ts");
 const { googleKeys } = await import("./lib/google.ts");
 const { MemoryStore } = await import("./lib/store.ts");
@@ -58,6 +58,8 @@ createServer(async (req, res) => {
     response = config(cfg);
   } else if (req.url === "/api/auth/google" && post) {
     response = await signIn(store, cfg, request, keys);
+  } else if (req.url === "/api/auth/web" && post) {
+    response = await signInWeb(store, cfg, request, keys);
   } else if (req.url === "/api/auth/signout" && post) {
     response = await signOut(store, request);
   } else if (req.url === "/api/billing/checkout" && post) {

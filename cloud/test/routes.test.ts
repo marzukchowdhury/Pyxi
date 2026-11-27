@@ -57,7 +57,7 @@ describe("the route files", () => {
     env({ GOOGLE_SIGNIN_CLIENT_ID: CLIENT_ID, INVITE_CODES: "FIREFLY" });
     const { GET, OPTIONS } = await import("../api/config");
     const res = GET();
-    expect(await res.json()).toEqual({ sign_in: true, google_client_id: CLIENT_ID, invite_codes: true });
+    expect(await res.json()).toEqual({ sign_in: true, google_client_id: CLIENT_ID, google_web_client_id: null, invite_codes: true });
     // A page on the site may call it from the browser; no other site is named.
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://www.heypyxi.com");
     const pre = OPTIONS();
@@ -65,7 +65,7 @@ describe("the route files", () => {
     expect(pre.headers.get("Access-Control-Allow-Origin")).toBe("https://www.heypyxi.com");
     expect(pre.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
     env({});
-    expect(await GET().json()).toEqual({ sign_in: false, google_client_id: null, invite_codes: false });
+    expect(await GET().json()).toEqual({ sign_in: false, google_client_id: null, google_web_client_id: null, invite_codes: false });
   });
 
   it("sign-in and billing routes answer in the contract's shape before any store is touched", async () => {

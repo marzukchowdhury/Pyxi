@@ -23,6 +23,7 @@ export const WORDS = {
   bad_sign_in: "That Google sign-in didn't work. Try again.",
   sign_in_off: "Signing in with Google isn't open yet.",
   account_closed: "This Pyxi account has been switched off.",
+  no_account: "There's no Pyxi account for this Google address yet. Download Pyxi and sign in there to start your free trial.",
   not_signed_in: "Sign in to Pyxi first.",
 } as const;
 
@@ -158,6 +159,7 @@ export function config(cfg: Config): Response {
   return json({
     sign_in: Boolean(cfg.googleClientId),
     google_client_id: cfg.googleClientId || null,
+    google_web_client_id: (cfg.googleClientId && cfg.googleWebClientId) || null,
     invite_codes: cfg.inviteCodes.size > 0,
   });
 }
@@ -208,6 +210,30 @@ export async function signIn(store: Store, cfg: Config, req: Request, keys: KeyS
 
   const token = randomToken();
   await store.set(`tok:${await sha256(token)}`, JSON.stringify({ acct: user.sub, created: now }));
+  return json({ token, account: await accountView(store, cfg, acct, now) });
+}
+
+const WEB_SIGN_IN_MS = 60 * 60 * 1000;
+
+/** POST /api/auth/web {"id_token"}: the website's account page. A checked Google sign-in (from
+ * the website's own Google client) becomes a token that lasts an hour and is good for two
+ * things: reading the account (/api/me) and opening Stripe's pages (/api/billing/...). It never
+ * reaches a model, so a token lifted from a browser can't spend anyone's allowance.
+ * It never makes an account either: the trial starts in the app, the first time they sign in
+ * there, so nobody burns their 3 days by visiting a web page. */
+export async function signInWeb(store: Store, cfg: Config, req: Request, keys: KeySource): Promise<Response> {
+  if (!cfg.googleClientId || !cfg.googleWebClientId) return fail(503, "sign_in_off", WORDS.sign_in_off);
+  const wait = await overLimit(store, "auth", req, cfg.authPerIpPerHour);
+  if (wait) return tooMany(wait);
+  const body = (await req.json().catch(() => null)) as { id_token?: unknown } | null;
+  const user = await verifyGoogleIdToken(body?.id_token, cfg.googleWebClientId, keys);
+  if (!user) return fail(401, "bad_sign_in", WORDS.bad_sign_in);
+  const acct = await accountOf(store, user.sub);
+  if (!acct || acct.erased) return fail(404, "no_account", WORDS.no_account);
+  if (acct.revoked) return fail(403, "account_closed", WORDS.account_closed);
+  const now = Date.now();
+  const token = randomToken();
+  await store.set(`tok:${await sha256(token)}`, JSON.stringify({ acct: user.sub, created: now, web: true, expires: now + WEB_SIGN_IN_MS }));
   return json({ token, account: await accountView(store, cfg, acct, now) });
 }
 
