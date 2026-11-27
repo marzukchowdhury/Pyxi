@@ -472,11 +472,12 @@ def test_dictation_on_a_mac_never_types_into_a_password_box(monkeypatch):
 
 
 def test_dictation_says_command_v_on_a_mac(monkeypatch):
-    mod = _load_as_mac(monkeypatch, "dictation.py")
-    assert "Command+V" in mod.NOTES["no_field"] and "Ctrl" not in " ".join(mod.NOTES.values())
     from pyxi import dictation
 
-    assert "Ctrl+V" in dictation.NOTES["no_field"]  # Windows is as it was
+    really_a_mac = sys.platform == "darwin"  # these tests also run on GitHub's Macs
+    mod = _load_as_mac(monkeypatch, "dictation.py")
+    assert "Command+V" in mod.NOTES["no_field"] and "Ctrl" not in " ".join(mod.NOTES.values())
+    assert ("Ctrl+V" in dictation.NOTES["no_field"]) is not really_a_mac  # Windows is as it was
 
 
 def test_a_new_workbook_opens_with_open_on_a_mac(tmp_path, monkeypatch):
