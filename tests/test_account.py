@@ -1026,3 +1026,43 @@ def test_the_hello_carries_the_account_and_no_token(settings, monkeypatch):
             if event["type"] == "account":
                 break
         assert event["account"]["signed_in"] is True and "pyxi_" not in json.dumps(event)
+
+
+# ------------------------------------------------------------------ the plans, offered once in a trial
+async def test_a_trial_getting_real_use_is_shown_the_plans_once(world):
+    signed_in(world, days_left=2, allowance={"used_usd": 0.2, "limit_usd": 1.5, "resets_at": None})
+    await world.account.refresh()
+    assert cards(world.rec) == []  # hardly used yet: nothing to offer
+    world.server.account["allowance"]["used_usd"] = 0.5  # a third of the trial's allowance
+    await world.account.refresh()
+    await world.account.refresh()
+    (card,) = cards(world.rec)
+    assert card["title"] == "Getting good use out of Pyxi?"
+    assert card["body"] == (
+        "You're on the free trial. Choose a plan now and nothing stops when it ends: plans start "
+        "at $9 a month. You pay on Stripe's page, and you can cancel any time."
+    )
+    assert card["actions"] == ["see_plans"] and card["ok"] is True
+    # Once a trial: not again after a restart.
+    later = Account(world.dir, world.account.hub)
+    later.transport = world.account.transport
+    await later.refresh()
+    assert len(cards(world.rec)) == 1
+
+
+async def test_the_offer_names_the_plan_they_picked_and_stays_out_of_the_way(world):
+    signed_in(world, days_left=2, allowance={"used_usd": 0.6, "limit_usd": 1.5, "resets_at": None})
+    world.account._flag(pick={"plan": "starter", "yearly": False})
+    await world.account.refresh()
+    (card,) = cards(world.rec)
+    assert "Starter, the one you picked, is ready." in card["body"]
+    # Never for someone who has a plan, and never on top of the last-day card.
+    for info in (
+        {"plan": "pro", "status": "active", "days_left": None, "allowance": {"used_usd": 4.0, "limit_usd": 9.0, "resets_at": RESETS}},
+        {"days_left": 0, "trial_ends_at": "2026-12-05T12:00:00Z", "allowance": {"used_usd": 0.6, "limit_usd": 1.5, "resets_at": None}},
+    ):
+        fresh = Account(world.dir / str(len(cards(world.rec))), world.account.hub)
+        fresh.transport = world.account.transport
+        signed_in(type("W", (), {"dir": fresh.data_dir, "server": world.server})(), **info)
+        await fresh.refresh()
+    assert not [c for c in cards(world.rec)[1:] if c["title"] == "Getting good use out of Pyxi?"]

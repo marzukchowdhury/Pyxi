@@ -78,6 +78,10 @@ GATES: dict[str, tuple[str, str | None]] = {
 }
 
 WARN_AT = 0.8  # of the month's allowance: said once
+# Of the trial's allowance: someone who has used this much is getting real use out of Pyxi, and
+# is shown the plans once, while there is trial left to enjoy. Otherwise the first they hear of
+# plans is the day it stops.
+OFFER_AT = 0.3
 POLL_S = 3.0  # after checkout opens: ask the server this often...
 POLL_FOR_S = 600.0  # ...for this long
 REFRESH_EVERY_S = 30.0  # an unforced refresh is not repeated sooner than this
@@ -555,6 +559,28 @@ class Account:
                     "choose_plan",
                     ok=True,
                 )
+        if (
+            info["status"] == "trial"
+            and limit > 0
+            and OFFER_AT * limit <= used < WARN_AT * limit
+            and (info["days_left"] is None or info["days_left"] > 0)
+            and warned.get("offer") != str(info["trial_ends_at"] or "trial")
+        ):
+            # Once a trial, and not on its last day or with the allowance nearly gone: each
+            # of those has its own card, and two at once is a nag.
+            warned["offer"] = str(info["trial_ends_at"] or "trial")
+            self._flag(warned=warned)
+            pick = self.picked()
+            name = PLAN_NAMES[pick["plan"]] if pick else ""
+            await self._card(
+                "account-plan-offer",
+                "Getting good use out of Pyxi?",
+                "You're on the free trial. Choose a plan now and nothing stops when it ends: "
+                + (f"{name}, the one you picked, is ready." if name else "plans start at $9 a month.")
+                + " You pay on Stripe's page, and you can cancel any time.",
+                "see_plans",
+                ok=True,
+            )
         if limit > 0 and WARN_AT * limit <= used < limit and warned.get("allowance") != month:
             self._flag(warned={**warned, "allowance": month})
             resets = friendly_date(allowance["resets_at"])
