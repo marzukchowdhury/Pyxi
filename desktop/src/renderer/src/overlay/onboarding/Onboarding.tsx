@@ -13,6 +13,7 @@ import { Component, type FormEvent, type ReactNode, useEffect, useLayoutEffect, 
 import { bridge, cursorToLocal, keysOf } from "../../shared/bridge";
 import type { ConnectorStatus, OnboardingEnding } from "../../shared/protocol";
 import { useAccount } from "../../shared/account";
+import { STUCK_MS, STUCK_WORDS } from "../../shared/connectWait";
 import { brain } from "../../shared/socket";
 import { Interactive } from "../Interactive";
 import { isPrimary, useOverlay, voice } from "../store";
@@ -607,6 +608,14 @@ function GoogleCard({ status, note, phase, onConnect, onLater }: { status: Conne
   const connected = !!status?.connected && !status.needs;
   const ready = !!status && !status.connected && status.detail.startsWith("Ready");
   const waiting = phase === "connecting";
+  // Google's page may never come back (it refuses an account it has not let in yet).
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (!waiting) return undefined;
+    const id = window.setTimeout(() => setSlow(true), STUCK_MS);
+    return () => window.clearTimeout(id);
+  }, [waiting]);
   return (
     <Interactive className="ob-card ob-google">
       <ul>
@@ -619,7 +628,7 @@ function GoogleCard({ status, note, phase, onConnect, onLater }: { status: Conne
       <div className="ob-actions">
         <span className="ob-private">
           {connected ? `Already connected${status?.detail && status.detail !== "Connected" ? ` as ${status.detail}` : ""}.`
-            : waiting ? "Finish signing in in your browser. It opened on this PC."
+            : waiting ? (slow ? STUCK_WORDS : "Finish signing in in your browser. It opened on this PC.")
             : status && !ready ? "Google isn't set up on this PC yet. Settings, Connected accounts, shows how."
             : "You can connect it any time from Settings."}
         </span>

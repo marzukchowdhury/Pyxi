@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { BrandLogo } from "../shared/brands";
 import { Clock } from "../shared/icons";
+import { STUCK_MS, STUCK_WORDS } from "../shared/connectWait";
 import { brain } from "../shared/socket";
 import { usePanel } from "./store";
 
@@ -17,7 +18,25 @@ export function Connections() {
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => brain.send({ type: "connectors" }), []);
-  useEffect(() => setBusy(null), [list]);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    setBusy(null);
+    setStuck(false);
+  }, [list]);
+  // The browser never came back: say so, and give the button back.
+  useEffect(() => {
+    if (!busy) return undefined;
+    const id = window.setTimeout(() => {
+      setStuck(true);
+      setBusy(null);
+    }, STUCK_MS);
+    return () => window.clearTimeout(id);
+  }, [busy]);
+  const connect = (id: string) => {
+    setStuck(false);
+    setBusy(id);
+    brain.send({ type: "connect", id });
+  };
   if (!list) return null;
   return (
     <div className="connections">
@@ -30,14 +49,14 @@ export function Connections() {
               <span>{c.detail}</span>
             </div>
             {c.connected && c.needs && SIGN_IN.has(c.id) ? (
-              <button className="primary" disabled={busy === c.id} onClick={() => { setBusy(c.id); brain.send({ type: "connect", id: c.id }); }}>
+              <button className="primary" disabled={busy === c.id} onClick={() => connect(c.id)}>
                 {busy === c.id ? "Check your browser" : c.needs}
               </button>
             ) : c.connected ? (
               SIGN_IN.has(c.id) && <button className="ghost" onClick={() => brain.send({ type: "disconnect", id: c.id })}>Disconnect</button>
             ) : SIGN_IN.has(c.id) && c.detail.startsWith("Ready") ? (
-              <button className="primary" disabled={busy === c.id} onClick={() => { setBusy(c.id); brain.send({ type: "connect", id: c.id }); }}>
-                {busy === c.id ? "Check your browser" : "Connect"}
+              <button className="primary" disabled={busy === c.id} onClick={() => connect(c.id)}>
+                {busy === c.id ? "Check your browser" : stuck ? "Try again" : "Connect"}
               </button>
             ) : (
               <button className="ghost" onClick={() => setOpen(open === c.id ? null : c.id)}>{open === c.id ? "Hide" : "Set up"}</button>
@@ -49,6 +68,7 @@ export function Connections() {
         </div>
       ))}
       {message && <p className="muted">{message}</p>}
+      {stuck && <p className="muted" role="status">{STUCK_WORDS}</p>}
       <p className="muted">Reading is instant. Sending, posting and invites always show you an approval card first.</p>
     </div>
   );
