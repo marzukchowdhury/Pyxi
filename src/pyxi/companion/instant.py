@@ -165,6 +165,7 @@ _SEARCHES = {
     "wikipedia": "https://en.wikipedia.org/w/index.php?search={q}",
     "reddit": "https://www.reddit.com/search/?q={q}",
 }
+_NO_TOPIC = re.compile(r"(?i)^(?:it|that|this|them|those|these|one|the song|the video|the same)(?:\s+(?:up|out|one|thing|again|for me))*$")
 _SEARCH_RE = re.compile(
     _LEAD
     + r"(?:(?:search|look up|find)\s+(?:on\s+)?(?P<site>youtube|google maps|google|amazon|maps|wikipedia|reddit)\s+(?:for\s+)?(?P<q>.{2,80}?)"
@@ -223,7 +224,10 @@ def _match(text: str) -> Instant | None:
 
         site = (m.group("site") or m.group("site2") or "google").lower()
         q = (m.group("q") or m.group("q2") or m.group("q3") or "").strip()
-        if q:
+        # "Search it up on YouTube", "look that up": the thing to search for is what they
+        # were just talking about, which only the model knows. Live: this opened YouTube's
+        # results for "it up".
+        if q and not _NO_TOPIC.match(q):
             return Instant("open_url", _SEARCHES[site].format(q=quote_plus(q)), f"Here are the {site.title().replace('Youtube', 'YouTube')} results for {q}.")
     if _CLEAR.match(t) and re.search(r"(?i)\b(close|hide|dismiss|clear|remove|rid|away)\b", t):
         return Instant("clear", "all", "Cleared away.")

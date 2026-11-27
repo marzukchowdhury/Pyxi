@@ -305,3 +305,13 @@ def test_a_program_said_with_its_makers_name(monkeypatch):
     assert found("Firefox browser")[0] == "Firefox"  # its whole name is most of what was said
     assert found("uninstall firefox") is None
     assert found("a very long sentence about firefox") is None
+
+
+def test_search_it_up_is_left_to_the_model_which_knows_what_it_is():
+    # Live: "It's a song. Just search it up on YouTube." opened YouTube's results for "it up".
+    from pyxi.companion import instant as quick
+
+    for said in ["search it up on YouTube", "Just search it up on YouTube.", "look that up on Google", "search it on YouTube", "google it", "find this one on Amazon"]:
+        assert quick.match(said) is None, said
+    got = quick.match("search the color violet on YouTube")
+    assert got is not None and got.value.endswith("search_query=the+color+violet")
