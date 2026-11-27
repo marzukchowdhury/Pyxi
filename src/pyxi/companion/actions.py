@@ -355,10 +355,16 @@ _GOOGLE_HOSTS = ("docs.google.com", "drive.google.com", "mail.google.com", "cale
 def in_account(url: str, email: str | None) -> str:
     """Open a Google page in the account Pyxi is connected to, not whichever account the browser
     signs in first: a sheet made in another account is one Pyxi's Ledger can't edit."""
-    if not email:
-        return url
     parsed = urlparse(url)
     host = parsed.netloc.lower().removeprefix("www.")
+    if host in _NEW_GOOGLE_FILE and parsed.path in ("", "/") and "authuser=" in parsed.query:
+        # An account named on the shortcut itself ("a blank sheet on this Google account").
+        # Google's .new shortcuts don't take one: live, sheets.new?authuser=... landed on
+        # google.com twice and no sheet was made. The address behind the shortcut does take it,
+        # and the account they named is the one used, connected to Pyxi or not.
+        return f"{_NEW_GOOGLE_FILE[host]}?{parsed.query}"
+    if not email:
+        return url
     if host in _NEW_GOOGLE_FILE and parsed.path in ("", "/"):
         url, host = _NEW_GOOGLE_FILE[host], "docs.google.com"
         parsed = urlparse(url)

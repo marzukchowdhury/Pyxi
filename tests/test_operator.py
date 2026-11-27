@@ -6,7 +6,7 @@ import pytest
 from otto.types import LLMResponse, ToolCall, Usage
 from PIL import Image
 
-from pyxi.companion.operator import CLOSING_KEYS, RISKY, Operator
+from pyxi.companion.operator import CLOSING_KEYS, RISKY, Operator, only_closes
 from pyxi.hands import parse_keys
 from pyxi.screen.context import ScreenContext, UIElement, WindowInfo
 
@@ -256,3 +256,44 @@ async def test_it_does_not_undo_its_own_step_unless_asked():
     op = operator(Scripted(("act", {"actions": [{"do": "press", "text": "ctrl+z"}]})), box)
     await op.run("Undo that last change.")
     assert ("press", "ctrl+z") in box[0].did
+
+
+# ---------------------------------------------------------------- closing tabs: one OK a job
+def test_a_plain_close_is_told_apart_from_a_close_that_does_more():
+    for name in ["Close tab", "Close Tab (first tab)", "Close this window", "close document"]:
+        assert only_closes(name), name
+    for name in ["Close tab and delete draft", "Close account", "Send", "Close app", "Quit", "Close Tables panel"]:
+        assert not only_closes(name), name
+
+
+async def test_closing_all_the_tabs_asks_once_not_before_every_tab():
+    box, asked = [], []
+    presses = [("act", {"actions": [{"do": "press", "text": "ctrl+w"}]}) for _ in range(2)]
+    op = operator(Scripted(*presses, ("done", {"ok": True, "summary": "Closed them."})), box, allow=True, asked=asked)
+    await op.run("close all the tabs in this window")
+    assert asked == ["Close the tab in front (ctrl+w)"]  # no empty brackets, and only once
+    assert [d for d in box[0].did if d[0] == "press"] == [("press", "ctrl+w")] * 2
+
+
+async def test_a_job_that_is_not_about_closing_still_asks_each_time():
+    box, asked = [], []
+    presses = [("act", {"actions": [{"do": "press", "text": "ctrl+w"}]}) for _ in range(2)]
+    op = operator(Scripted(*presses, ("done", {"ok": True, "summary": "Done."})), box, allow=True, asked=asked)
+    await op.run("tidy up my spreadsheet")
+    assert asked == ["Close the tab in front (ctrl+w)"] * 2
+
+
+async def test_closing_a_whole_app_is_asked_every_time_whatever_the_job():
+    box, asked = [], []
+    presses = [("act", {"actions": [{"do": "press", "text": "alt+f4"}]}) for _ in range(2)]
+    op = operator(Scripted(*presses, ("done", {"ok": True, "summary": "Done."})), box, allow=True, asked=asked)
+    await op.run("close all the tabs in this window")
+    assert asked == ["Press alt+f4"] * 2
+
+
+async def test_a_declined_close_closes_nothing():
+    box, asked = [], []
+    op = operator(Scripted(("act", {"actions": [{"do": "press", "text": "ctrl+w"}]})), box, asked=asked)
+    await op.run("close all the tabs")
+    assert asked == ["Close the tab in front (ctrl+w)"]
+    assert not [d for d in box[0].did if d[0] == "press"]

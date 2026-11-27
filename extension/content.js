@@ -456,6 +456,57 @@
     return false;
   }
 
+  // ---- what is in front of the page: an open menu, a dialog, a pop-up
+  // A read carries a limited number of items and characters, taken in the page's own order,
+  // and a menu that has just opened usually sits at the very end of the page (sites append
+  // their pop-ups to the body). On a busy page it fell off the end of every read: the click
+  // that opened it looked as if it had done nothing. So what is in front is read first.
+  const FRONT_ROLES = new Set(["dialog", "alertdialog", "menu", "listbox", "tooltip"]);
+  const FRONT_Z = 100; // a stacking order no ordinary part of a page's flow has
+
+  /** How far in front of the page this element itself puts its contents (0: not at all). */
+  function frontOf(el) {
+    const role = (el.getAttribute("role") || "").toLowerCase();
+    if (FRONT_ROLES.has(role) || el.getAttribute("aria-modal") === "true") return 1e6;
+    if (el.tagName === "DIALOG" && el.open) return 1e6;
+    try {
+      if (el.matches(":popover-open")) return 1e6;
+    } catch {
+      /* a browser without popovers */
+    }
+    const style = getComputedStyle(el);
+    if (style.position === "static" || style.position === "relative") return 0;
+    const z = Number.parseInt(style.zIndex, 10);
+    return Number.isFinite(z) && z >= FRONT_Z ? Math.min(z, 1e6 - 1) : 0;
+  }
+
+  function parentOf(el) {
+    if (el.parentElement) return el.parentElement;
+    const root = el.getRootNode();
+    return root && root.host ? root.host : null; // out of a shadow tree, to its host
+  }
+
+  /** { layer, root }: how far in front an element is, and the outermost thing that puts it
+   * there (the menu or dialog as a whole). `known` remembers every ancestor looked at. */
+  function layerOf(el, known) {
+    const chain = [];
+    let at = null;
+    for (let up = el; up; up = parentOf(up)) {
+      at = known.get(up);
+      if (at) break;
+      chain.push(up);
+      if (chain.length > 60) break;
+    }
+    at = at || { layer: 0, root: null };
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const own = frontOf(chain[i]);
+      // The outermost front thing is the root; a deeper one only raises the layer.
+      if (own > at.layer) at = { layer: own, root: at.root || chain[i] };
+      known.set(chain[i], at);
+    }
+    return at;
+  }
+
   function collect(max) {
     const picked = new Set();
     const every = roots();
@@ -489,11 +540,20 @@
       if (el.tagName === "LABEL" && el.control) continue; // its field is listed
       (box.bottom > 0 && box.top < height ? here : beyond).push(el);
     }
-    const all = [...here, ...beyond]; // what's on screen first
-    return { items: all.slice(0, max).map(describe), more: all.length > max };
+    // What is in front of the page comes first (the frontmost first), then the rest of what
+    // is on screen in the page's order, then what is off screen.
+    const known = new Map();
+    const layer = new Map(here.map((el) => [el, layerOf(el, known)]));
+    const fronts = [];
+    for (const at of [...new Set(layer.values())].sort((a, b) => b.layer - a.layer)) {
+      if (at.layer > 0 && at.root && !fronts.includes(at.root)) fronts.push(at.root);
+    }
+    here.sort((a, b) => layer.get(b).layer - layer.get(a).layer); // stable: page order within a layer
+    const all = [...here, ...beyond];
+    return { items: all.slice(0, max).map(describe), more: all.length > max, fronts: fronts.slice(0, 4) };
   }
 
-  function pageText(max, fromView) {
+  function pageText(max, fromView, fronts = []) {
     const out = [];
     let size = 0;
     let more = false;
@@ -534,11 +594,22 @@
             continue;
           }
           if (!shown(child)) continue; // hidden: not something the user sees, so not read
+          if (read.has(child)) continue; // an open menu or dialog, already read first
           if (child.shadowRoot) walk(child.shadowRoot);
           walk(child);
         }
       }
     };
+    // What is open in front of the page is read first, so it is never the part cut off.
+    const read = new Set();
+    for (const front of fronts) {
+      if (more || !front.isConnected || !shown(front) || inside(front, read)) continue;
+      if (front.shadowRoot) walk(front.shadowRoot);
+      walk(front);
+      read.add(front);
+      lastBlock = null;
+      if (out.length) out.push("\n\n");
+    }
     if (document.body) walk(document.body);
     const text = hideNumbers(out.join("").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim());
     return { text: text.slice(0, max), more };
@@ -572,8 +643,8 @@
   function read({ max_chars = 4000, max_items = 90, from_view = true } = {}) {
     forgetGone();
     watchFrames();
-    const text = pageText(Math.min(20000, Math.max(200, max_chars)), from_view);
     const list = collect(Math.min(200, Math.max(1, max_items)));
+    const text = pageText(Math.min(20000, Math.max(200, max_chars)), from_view, list.fronts);
     return {
       page: pageId,
       text: text.text,

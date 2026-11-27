@@ -82,6 +82,21 @@ RISKY = re.compile(
 AREA = re.compile(r"\b(body|page|canvas|area|blank|empty|background|grid|document|editor)\b", re.I)
 # Shortcuts that close a tab, a window or an app.
 CLOSING_KEYS = {"ctrl+w", "ctrl+f4", "alt+f4", "ctrl+shift+w", "ctrl+q", "ctrl+shift+q"}
+# The ones that close one tab or document, not the whole app.
+TAB_CLOSING_KEYS = {"ctrl+w", "ctrl+f4"}
+# A control that closes a tab, a window or a document, and the same words taken out of a name
+# to see whether anything else risky is left in it ("Close tab and delete draft" is not only a close).
+_CLOSES = re.compile(r"\bclose (this |the |all )?(tabs?|windows?|document|file)\b", re.I)
+# The job itself is to close things ("close all the tabs"): then one OK covers its closes.
+_ASKS_CLOSE = re.compile(r"\bclos(e|es|ing)\b", re.I)
+CLOSES_PER_OK = 30  # one OK does not cover an endless run of closes
+CLOSE_REASON = "This closes it, and anything unsaved in it is lost."
+CLOSE_REASON_JOB = CLOSE_REASON + " Your OK covers the other closes in this job."
+
+
+def only_closes(name: str) -> bool:
+    """Is this control a plain close of a tab, window or document, and nothing more?"""
+    return bool(_CLOSES.search(name)) and not RISKY.search(_CLOSES.sub(" ", name))
 
 _TARGET = {
     "element_id": {"type": "integer", "description": "A UI element or OCR line id (best)."},
@@ -504,10 +519,26 @@ class Operator:
         self._urls: dict[tuple[int, str], str | None] = {}  # a browser window's page
         self.learning: set[asyncio.Task] = set()  # notes being written after a task
 
+    async def _ok_to_close(self, ask: str, h: Any) -> bool:
+        """The OK for closing one tab, window or document. Asked once in a job whose task is to
+        close things: "close all the tabs" showed a card before every single tab (live, 27 Nov
+        2026: six cards in a row). Any other job asks each time, as before."""
+        if getattr(self, "_closes_ok", 0) > 0:
+            self._closes_ok -= 1
+            return True
+        covers = bool(_ASKS_CLOSE.search(getattr(self, "_task", "")))
+        if not await self.confirm(ask, CLOSE_REASON_JOB if covers else CLOSE_REASON):
+            return False
+        self._answered(h)
+        if covers:
+            self._closes_ok = CLOSES_PER_OK
+        return True
+
     async def run(self, task: str, window: int | None = None, come_back: bool = False) -> Outcome:
         """``window``: the one they were in. With ``come_back``, it's put back in front when the
         task is done (music playing behind it, a file saved), so they carry on where they were."""
         self._task = task
+        self._closes_ok = 0  # closes still covered by the OK given in this job
         self._where_at.clear()
         self._shown.clear()
         out = await self._run(task, window)
@@ -1223,9 +1254,16 @@ class Operator:
                     "If you can't see that it worked, click an empty cell so the selection's "
                     "highlight is gone and look again; if it did, you are done",
                 )
-            closing = keys.lower().replace(" ", "") in CLOSING_KEYS
-            if closing or RISKY.search(label) or a.get("risky"):
-                if not await self.confirm(f"Press {keys} ({label})", "This may send or delete something."):
+            combo = keys.lower().replace(" ", "")
+            closing = combo in CLOSING_KEYS
+            ask = f"Press {keys}" + (f" ({label})" if label.strip() else "")
+            if combo in TAB_CLOSING_KEYS and not RISKY.search(_CLOSES.sub(" ", label)):
+                # Closes the tab or document in front, and nothing else.
+                if not await self._ok_to_close(f"Close the tab in front ({keys})", h):
+                    return f"press {keys}", "declined by the user"
+            elif closing or RISKY.search(label) or a.get("risky"):
+                reason = "This closes the whole app or window." if closing else "This may send or delete something."
+                if not await self.confirm(ask, reason):
                     return f"press {keys}", "declined by the user"
                 self._answered(h)
             await self.report(f"Pressing {keys}", n)
@@ -1311,7 +1349,10 @@ class Operator:
             await asyncio.to_thread(h.drag, cx, cy, tx, ty)
             return f"dragged {name} to ({tx},{ty})", ""
         risky = bool(a.get("risky") or RISKY.search(name))
-        if risky:
+        if do == "click" and only_closes(name):
+            if not await self._ok_to_close(f"Click “{name}”", h):
+                return f"{do} {name}", "declined by the user"
+        elif risky:
             if not await self.confirm(
                 f"Click “{name or 'that'}”", "This may send, buy, post or delete something."
             ):

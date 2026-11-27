@@ -85,6 +85,21 @@ def test_google_pages_open_in_the_account_pyxi_is_connected_to():
     assert in_account("https://sheets.new", None) == "https://sheets.new"  # not connected
 
 
+def test_an_account_named_on_a_new_file_shortcut_goes_to_the_address_that_takes_one():
+    # Live: "a blank spreadsheet on this Google account" was opened as sheets.new?authuser=...,
+    # which Google sends to google.com: two blank tabs and no sheet. Pyxi was not connected to
+    # Google at the time, so nothing put it right.
+    from pyxi.companion.actions import in_account
+
+    named = "https://sheets.new?authuser=sam@example.com"
+    want = "https://docs.google.com/spreadsheets/create?authuser=sam@example.com"
+    assert in_account(named, None) == want
+    assert in_account("https://sheets.new/?authuser=sam@example.com", None) == want
+    # The account they named wins over the one Pyxi is connected to.
+    assert in_account(named, "alex@example.com") == want
+    assert in_account("https://docs.new?authuser=1", None) == "https://docs.google.com/document/create?authuser=1"
+
+
 def test_speech_hearing_bank_for_blank_still_takes_the_instant_route():
     hit = match("Open a bank spreadsheet.")
     assert hit is not None and hit.value == "https://sheets.new"

@@ -1,7 +1,7 @@
 {
   "siteUrl": "https://www.heypyxi.com",
   "apiUrl": "https://api.heypyxi.com",
-  "version": "0.1.12",
+  "version": "0.1.16",
   "downloadUrl": "https://github.com/marzukchowdhury/Pyxi/releases/latest/download/Pyxi-Setup.exe",
   "downloadFile": "Pyxi-Setup.exe",
   "downloadSize": "166 MB",

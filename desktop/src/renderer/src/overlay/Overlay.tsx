@@ -265,7 +265,7 @@ export function Overlay() {
       {isPrimary && <Notch micLevel={micLevel} />}
       {isPrimary && <DictationSign level={dictationLevel} onCancel={stopDictation} />}
       {/* The main screen shows connection and privacy state in the notch. */}
-      {!isPrimary && !connected && <div className="notice">Waiting for Pyxi's brain <code>pyxi serve</code></div>}
+      {!isPrimary && !connected && <div className="notice">{import.meta.env.DEV ? <>Waiting for Pyxi's brain <code>pyxi serve</code></> : "Pyxi is waking up"}</div>}
     </div>
   );
 }

@@ -85,7 +85,7 @@ export function VoiceStudio() {
     player.enqueue({ b64: preview.audio, text: preview.text, onEnd: () => setPlaying(null) });
   }, [preview]);
 
-  if (!live) return <p className="muted">Waiting for Pyxi's brain…</p>;
+  if (!live) return <p className="muted">Pyxi is waking up…</p>;
   const set = (key: string, value: unknown) => brain.send({ type: "set", key, value });
   const voices = catalog?.[engine] ?? [];
   const current = [...(catalog?.[live.engine] ?? [])].find((v) => v.id === live.voice);

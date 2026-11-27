@@ -30,6 +30,7 @@ import { brain } from "../shared/socket";
 import { FileReady } from "./FileReady";
 import { Interactive } from "./Interactive";
 import { useOverlay, voice } from "./store";
+import { offlineWords } from "../shared/waking";
 
 type Mode = "idle" | "peek" | "hint" | "working" | "paused" | "offline" | "notice" | "speaking" | "thinking" | "listening" | "open" | "full" | "result";
 // Resting states: the pointer on the notch turns these (and only these) into the small tab.
@@ -60,7 +61,6 @@ installPanelStyles();
 
 const NOTICE_MS = 7000;
 const HINT_MS = 6500;
-const WAKE_MS = 15000; // after this long without the brain, say how to start it
 
 function useHoldKeys(): { verb: string; keys: string[] } {
   const [k, setK] = useState({ verb: "Hold", keys: ["Ctrl", "Alt"] });
@@ -104,7 +104,15 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const chatPicture = useChatPicture(); // a picture pasted or dropped into the chat box
   const [now, setNow] = useState(() => performance.now());
   const [hintUntil, setHintUntil] = useState(0);
-  const bornAt = useRef(performance.now());
+  // Since when the brain has been out of reach: from the start, and again from each time it
+  // goes away (it restarts by itself after a sign-in), so a restart reads as waking up too.
+  const offlineSince = useRef(performance.now());
+  const wasConnected = useRef(connected);
+  if (wasConnected.current !== connected) {
+    wasConnected.current = connected;
+    if (!connected) offlineSince.current = performance.now();
+  }
+  const offline = offlineWords(now - offlineSince.current, import.meta.env.DEV);
   const leaveTimer = useRef<number>(0);
   const dwellTimer = useRef<number>(0);
   // After you close it, the pointer is still on it: don't reopen until it has left once.
@@ -385,11 +393,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
           {mode === "offline" && (
             <div className="notch-row">
               <Firefly spin />
-              {now - bornAt.current < WAKE_MS ? (
-                <span className="notch-text shimmer">Waking up</span>
-              ) : (
-                <span className="notch-text">Can't reach Pyxi's brain. Run <kbd>pyxi serve</kbd></span>
-              )}
+              <span className={`notch-text ${offline.busy ? "shimmer" : ""}`}>{offline.text}{offline.command && <> <kbd>pyxi serve</kbd></>}</span>
             </div>
           )}
 

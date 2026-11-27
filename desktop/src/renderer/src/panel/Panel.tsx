@@ -17,6 +17,7 @@ import { Connections, Routines } from "./Connections";
 import { FileAccess } from "./FileAccess";
 import { PriceChecks } from "./PriceChecks";
 import { VoiceStudio } from "./VoiceStudio";
+import { offlineLabel } from "../shared/waking";
 
 export type Tab = "chat" | "team" | "routines" | "palace" | "activity" | "gallery" | "voice" | "settings";
 export const TABS: [Tab, string][] = [["chat", "Chat"], ["team", "Team"], ["routines", "Routines"], ["palace", "Memory"], ["activity", "Activity"], ["gallery", "3D"], ["voice", "Voice"], ["settings", "Settings"]];
@@ -34,7 +35,7 @@ export function Panel() {
         <div className={`mark state-${state}`}><Mark size={22} /></div>
         <div className="who">
           <div className="name">Pyxi</div>
-          <div className="status">{connected ? STATE_LABEL[state] ?? state : "Brain offline: run pyxi serve"}</div>
+          <div className="status">{connected ? STATE_LABEL[state] ?? state : offlineLabel(import.meta.env.DEV)}</div>
         </div>
         <div className="spacer" />
         {hello && (
@@ -612,7 +613,7 @@ export function Settings() {
     }, 120);
     return () => window.clearTimeout(t);
   }, [section, ready]);
-  if (!hello) return <p className="muted">Waiting for Pyxi's brain…</p>;
+  if (!hello) return <p className="muted">Pyxi is waking up…</p>;
   const set = (key: string, value: unknown) => brain.send({ type: "set", key, value });
   return (
     <div className="settings">
