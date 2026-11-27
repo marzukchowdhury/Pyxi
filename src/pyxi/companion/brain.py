@@ -5013,7 +5013,10 @@ class Brain:
                     f'errand: not started. Say exactly this, and nothing about set-up: "{line}" '
                     "If they want it, write the text in a note they can copy."
                 )
-            if not self.connectors.google.connected():
+            googles = ("gmail_", "calendar_", "docs_", "sheets_", "drive_")
+            if not self.connectors.google.connected() and not any(
+                t.spec.name.startswith(googles) for t in self.connectors.tools()
+            ):
                 # Their mail, calendar and Google files are still within reach: in a tab of
                 # their own browser, which is signed in already (companion/tabroute.py).
                 from pyxi.companion import tabroute
