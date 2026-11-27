@@ -1,0 +1,13 @@
+/* The booking clips' shared look: Scout's own browser window, opened over the screen (a
+   booking runs in a browser you can watch), the spot where Scout clicks, and where the app's
+   cards sit. The cards themselves (.request) are the kit's, copied from the app. */
+#scout { position: absolute; left: 330px; top: 138px; width: 1260px; height: 790px; border-radius: 18px; overflow: hidden; background: #fff; opacity: 0;
+  box-shadow: 0 50px 130px rgba(0, 0, 0, .6), 0 0 0 1.5px rgba(158, 203, 255, .5), 0 0 60px rgba(158, 203, 255, .22); }
+#scout .tabs .by { margin-left: 18px; margin-bottom: 8px; display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 650; color: #24457a; white-space: nowrap; }
+#scout .tabs .by i { display: block; width: 10px; height: 10px; border-radius: 50%; background: #3f8cff; box-shadow: 0 0 10px #3f8cff; }
+#pages { position: absolute; left: 0; right: 0; top: 88px; bottom: 0; overflow: hidden; }
+.pg { position: absolute; inset: 0; opacity: 0; }
+#sdot { position: absolute; left: -17px; top: -17px; width: 34px; height: 34px; border-radius: 50%; background: rgba(63, 140, 255, .28); border: 3px solid #3f8cff; box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 0 18px rgba(63, 140, 255, .8); opacity: 0; }
+#sring { position: absolute; left: -30px; top: -30px; width: 60px; height: 60px; border-radius: 50%; border: 3px solid #3f8cff; opacity: 0; }
+.request { z-index: 5; }
+.request .rb u.on { background: rgba(158, 203, 255, .38); }

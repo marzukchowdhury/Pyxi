@@ -26,6 +26,7 @@
 .shows { padding: clamp(70px, 9vw, 130px) 0 clamp(50px, 7vw, 90px); }
 .shows .h2 { margin-bottom: clamp(36px, 5vw, 64px); }
 .show { display: grid; grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.4fr); gap: clamp(26px, 4.4vw, 68px); align-items: center; margin-bottom: clamp(52px, 7vw, 104px); }
+.shows-more { margin: 0 0 clamp(40px, 5vw, 72px); text-align: center; font-size: clamp(30px, 3.4vw, 48px); font-weight: 680; line-height: 1.06; letter-spacing: -0.035em; }
 .show.flip .show-copy { order: 2; }
 .show.flip { grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.92fr); }
 .show-ask { margin: 0 0 14px; font: italic 500 clamp(17px, 1.5vw, 20px) / 1.35 "Fraunces Variable", "Fraunces", Georgia, serif; color: var(--fly); }

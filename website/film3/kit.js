@@ -70,11 +70,13 @@ Film.scene = function (S) {
       <div id="fly">${FLY}</div>
     </div></div>
     <div id="flash"></div>
+    <div class="type" id="typeE"><div class="slam" id="e1">${story.lesson[0]}</div><div class="slam" id="e2">${story.lesson[1]}</div><div id="how">${story.how}</div></div>
+    <div class="type" id="typeR"><div id="rhead">${window.STORY.recap.head}</div><div id="rrows">${window.STORY.recap.rows.map((r) => `<div class="rrow"><i><svg viewBox="0 0 24 24"><path d="M5 12.5 L10 17.5 L19 7"/></svg></i><span>${r}</span></div>`).join("")}</div></div>
     <div class="type" id="typeC"><div id="name"><div class="mark"></div><div class="word">${window.STORY.name}</div></div><div id="tag">${window.STORY.tag}</div><div id="where"></div></div>
     <div id="fine">${window.STORY.fine}</div>
     <div id="band"></div><div id="cap"></div>
   </div>`;
-  for (const id of ["a1", "a2"]) if ($("#" + id).textContent.length > 15) $("#" + id).classList.add("long");
+  for (const id of ["a1", "a2", "e1", "e2"]) if ($("#" + id).textContent.length > 15) $("#" + id).classList.add("long");
 };
 
 /** Lay the clip out. cfg: { durs: seconds of each spoken line, env: the voice's loudness a
@@ -86,24 +88,28 @@ function setup(cfg = {}) {
   // the opening is the same in every clip: two lines land, the camera flies through them,
   // the screen arrives, Pyxi listens, hears the ask, and looks
   const B = { a1: 0.5, a2: 1.0, b: 2.0, listen: 2.5 };
-  B.words = [2.7, 2.7 + Math.max(0.9, story.ask.length * 0.04)];
+  // the ask is spoken by the person, in a voice of their own: its real length when the renderer gives it
+  B.words = [2.7, 2.7 + (C.askDur ? C.askDur + 0.15 : Math.max(0.9, story.ask.length * 0.04))];
   B.look = onBeat(B.words[1] + 0.1);
   B.act = B.look + BEAT;
   const T = (Film.T = Object.assign(B, S.plan(C.durs, B)));
-  T.total = C.mode === "clip" ? T.c + 2.75 : C.mode === "heroEnd" ? T.c + 3.5 : T.c;
+  // after the screen: the lesson (E seconds), in the film's last scene the recap (R), then the name
+  T.E = 2.5; T.R = C.mode === "heroEnd" ? 4.0 : 0;
+  T.r = T.c + T.E; T.n = T.r + T.R;
+  T.total = C.mode === "clip" ? T.n + 2.75 : C.mode === "heroEnd" ? T.n + 3.5 : C.mode === "hero" ? T.r : T.c;
   T.phrases = story.says.map((text, i) => ({ text, at: T.voice[i], until: T.voice[i] + C.durs[i] + 0.35 }));
   T.phrases.forEach((p, i) => { const n = T.phrases[i + 1]; if (n) p.until = Math.min(p.until, n.at - 0.04); else p.until = Math.min(p.until, T.c - 0.5); });
   $("#where").textContent = C.mode === "heroEnd" ? window.STORY.heroEnd : story.payoff;
 
   // measure with nothing transformed
   $("#world").style.transform = "none"; $("#cam").style.transform = "none";
-  $("#typeA").style.display = $("#typeC").style.display = "none";
+  for (const id of ["typeA", "typeC", "typeE", "typeR"]) $("#" + id).style.display = "none";
   const notch = $("#notch");
   Film.notch = S.notch(T, Notch);
   notch.innerHTML = Film.notch.map((n) => `<div class="nrow ${n.cls || ""}">${n.html}</div>`).join("");
   Film.notch.forEach((n, i) => { const r = notch.children[i].getBoundingClientRect(); n.w = r.width; n.h = r.height; n.el = notch.children[i]; });
   if (S.init) S.init(T);
-  $("#typeA").style.display = $("#typeC").style.display = "";
+  for (const id of ["typeA", "typeC", "typeE", "typeR"]) $("#" + id).style.display = "";
   draw(0);
   return {
     T, total: T.total, says: story.says, ask: story.ask,
@@ -143,7 +149,10 @@ function drawNotch(t, loud) {
 function draw(t) {
   const S = Film.S, T = Film.T, C = Film.C, P = T.c;
   const hasC = C.mode === "clip" || C.mode === "heroEnd";
-  const shot = t < T.b ? "a" : t < T.c || !hasC ? "b" : "c";
+  const shot = t < T.b ? "a" : t < T.c || C.mode === "loop" ? "b" : t < T.r ? "e" : t < T.n ? "r" : hasC ? "c" : "e";
+  const typeE = $("#typeE"), typeR = $("#typeR");
+  typeE.style.visibility = shot === "e" ? "visible" : "hidden";
+  typeR.style.visibility = shot === "r" ? "visible" : "hidden";
   const typeA = $("#typeA"), typeC = $("#typeC"), cam = $("#cam"), world = $("#world"), flash = $("#flash"), band = $("#band"), cap = $("#cap");
   typeA.style.visibility = shot === "a" ? "visible" : "hidden";
   cam.style.visibility = shot === "b" ? "visible" : "hidden";
@@ -169,12 +178,43 @@ function draw(t) {
     flash.style.opacity = C.flashIn ? 1 - out3(seg(t, 0.5, 0.95)) : 0;
     return;
   }
-  if (shot === "c") {
-    const s = t - T.c;
-    // the light it flew into clears, and the firefly it was is the mark beside the name
-    const m = $("#name .mark").getBoundingClientRect();
-    flash.style.setProperty("--x", m.left + m.width / 2 + "px"); flash.style.setProperty("--y", m.top + m.height / 2 + "px");
+  if (shot === "e") {
+    // the lesson: the light the camera flew into clears, and what Pyxi just did is said in big words
+    const s = t - T.c, E = T.E;
+    flash.style.setProperty("--x", "960px"); flash.style.setProperty("--y", "540px");
     flash.style.opacity = 1 - out3(seg(s, 0, 0.4));
+    slam($("#e1"), t, T.c + 0.05);
+    slam($("#e2"), t, T.c + 0.5);
+    const h = out3(seg(s, 1.0, 1.35));
+    $("#how").style.opacity = h; $("#how").style.transform = `translateY(${20 * (1 - h)}px)`;
+    const through = Math.pow(seg(s, E - 0.34, E), 3);
+    typeE.style.transform = `scale(${1 + 0.03 * seg(s, 0, E) + 6 * through})`;
+    typeE.style.filter = through > 0 ? `blur(${through * 16}px)` : "none";
+    typeE.style.opacity = 1 - seg(s, E - 0.12, E);
+    band.style.opacity = cap.style.opacity = 0;
+    return;
+  }
+  if (shot === "r") {
+    // the film's last list: the four lessons, one on every beat
+    const s = t - T.r, R = T.R;
+    flash.style.opacity = 0;
+    const h = out3(seg(s, 0.0, 0.35));
+    $("#rhead").style.opacity = h; $("#rhead").style.transform = `translateY(${18 * (1 - h)}px)`;
+    $$("#rrows .rrow").forEach((row, k) => {
+      const at = 0.5 + k * 0.5, u = expo(seg(s, at, at + 0.4));
+      row.style.opacity = seg(s, at, at + 0.08); row.style.transform = `translateX(${mix(70, 0, u)}px)`;
+      row.querySelector("i").style.transform = `scale(${back(seg(s, at + 0.1, at + 0.45))})`;
+    });
+    const through = Math.pow(seg(s, R - 0.34, R), 3);
+    typeR.style.transform = `scale(${1 + 0.02 * seg(s, 0, R) + 5 * through})`;
+    typeR.style.filter = through > 0 ? `blur(${through * 16}px)` : "none";
+    typeR.style.opacity = 1 - seg(s, R - 0.12, R);
+    band.style.opacity = cap.style.opacity = 0;
+    return;
+  }
+  if (shot === "c") {
+    const s = t - T.n;
+    flash.style.opacity = 0;
     const u = expo(seg(s, 0, 0.36));
     $("#name").style.opacity = seg(s, 0, 0.05);
     $("#name").style.transform = `scale(${mix(1.5, 1, u)})`;
@@ -238,11 +278,17 @@ function draw(t) {
   }
 
   // captions: the ask in quotes, then Pyxi's own words, a line at a time
-  let text = "", on = 0;
+  let text = "", on = 0, who = "";
   const askOff = T.voice[0] - 0.1;
-  if (t >= T.words[0] - 0.1 && t < askOff) { text = `“${window.STORY[S.id].ask}”`; on = seg(t, T.words[0] - 0.1, T.words[0] + 0.1) * (1 - seg(t, askOff - 0.2, askOff)); }
-  for (const p of T.phrases) if (t >= p.at && t < p.until) { text = p.text; on = seg(t, p.at, p.at + 0.12) * (1 - seg(t, p.until - 0.14, p.until)); }
-  if (cap.textContent !== text) cap.textContent = text;
+  if (t >= T.words[0] - 0.1 && t < askOff) { text = `“${window.STORY[S.id].ask}”`; who = "you"; on = seg(t, T.words[0] - 0.1, T.words[0] + 0.1) * (1 - seg(t, askOff - 0.2, askOff)); }
+  for (const p of T.phrases) if (t >= p.at && t < p.until) { text = p.text; who = "pyxi"; on = seg(t, p.at, p.at + 0.12) * (1 - seg(t, p.until - 0.14, p.until)); }
+  const key = who + text;
+  if (cap.dataset.key !== key) {
+    cap.dataset.key = key;
+    const label = who === "you" ? `<span class="keys">${window.STORY.intro.keys.map((k) => `<kbd>${k}</kbd>`).join("")}</span>${window.STORY.you}` : `<i></i>${window.STORY.name}`;
+    cap.innerHTML = text ? `<div class="who ${who}">${label}</div><div class="line"></div>` : "";
+    if (text) cap.querySelector(".line").textContent = text;
+  }
   cap.style.opacity = on;
   band.style.opacity = seg(t, T.words[0] - 0.4, T.words[0] - 0.1) * (1 - seg(t, T.c - 0.9, T.c - 0.6));
 }

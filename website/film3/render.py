@@ -3,7 +3,8 @@
     <venv python> website/film3/render.py look  <scene>            a contact sheet, quickly, to check the drawing
     <venv python> website/film3/render.py frame <scene> 5.5 9.0    single frames at full size
     <venv python> website/film3/render.py clip  <scene>            the master, the web loop, the poster, the sheet
-    <venv python> website/film3/render.py hero                     the film cut from the four, and its preview loop
+    <venv python> website/film3/render.py intro                    the film's opening, where Pyxi says what it is
+    <venv python> website/film3/render.py hero                     the film: the opening, the four, the list, the name
     <venv python> website/film3/render.py all
 
 Scenes: setting, post, pivot, desktop (the words are in story.js). Nothing is recorded from a
@@ -43,8 +44,10 @@ from film import RATE, read_wav  # noqa: E402  (the first film's sound helpers)
 FPS, W, H = 60, 1920, 1080
 BEAT = 0.5
 SPEED = 1.1  # Pyxi speaks a little quicker than its default in the clips
+ASKER = "am_michael"  # the person who asks: another of the voice pack's voices, so it is plainly not Pyxi
 SCENES = ["setting", "post", "pivot", "desktop"]
 WORKERS = 4
+RECAP = 4.0  # the film's last list (kit.js: T.R in the film's last scene)
 LOOP_BYTES = 1_500_000  # a web loop stays under this
 MASTER_BYTES = 4_700_000  # a master that goes in git stays under this
 # The frames are JPEGs (full-range colour). Video players expect the limited "TV" range, and
@@ -67,13 +70,13 @@ def run(*args: str) -> None:
 
 
 # ------------------------------------------------------------------ the voice
-async def voice(scene: str, says: list[str]) -> list[np.ndarray]:
+async def voice(scene: str, says: list[str], who: str | None = None) -> list[np.ndarray]:
     """Each line Pyxi speaks, in its own voice. Kept between runs unless the words change."""
     folder = WORK / "voice"
     folder.mkdir(parents=True, exist_ok=True)
     clips, tts = [], None
     for i, text in enumerate(says):
-        key = hashlib.sha1(f"{SPEED}|{text}".encode()).hexdigest()[:10]
+        key = hashlib.sha1(f"{SPEED}|{who or ''}|{text}".encode()).hexdigest()[:10]
         path = folder / f"{scene}_{i}_{key}.wav"
         if not path.exists():
             if tts is None:
@@ -83,7 +86,7 @@ async def voice(scene: str, says: list[str]) -> list[np.ndarray]:
                 # the voice pack lives in the main checkout's .pyxi (a worktree has none of its own)
                 models = next(d / ".pyxi" / "models" for d in [REPO, *REPO.parents] if (d / ".pyxi" / "models").exists())
                 tts = KokoroTTS(VoiceConfig(speed=SPEED), models)
-            speech = await tts.synthesize(text)
+            speech = await tts.synthesize(text, who)
             path.write_bytes(speech.wav)
         clip = read_wav(path)
         # trim the silence either side, so a line starts when it is placed
@@ -286,11 +289,14 @@ def sheet(paths: list[tuple[str, Path | bytes]], target: Path, cols: int = 6, wi
 async def plan(scene: str) -> dict:
     """The clip's timeline from the real lengths of the lines, and its sound."""
     async with Stage(scene) as st:
-        says = (await st.setup({}))["says"]
+        first = await st.setup({})
+    says = first["says"]
     clips = await voice(scene, says)
     durs = [len(c) / RATE for c in clips]
+    asked = (await voice(scene + "_ask", [first["ask"]], ASKER))[0]
+    ask_dur = len(asked) / RATE
     async with Stage(scene) as st:
-        got = await st.setup({"durs": durs, "mode": "clip"})
+        got = await st.setup({"durs": durs, "askDur": ask_dur, "mode": "clip"})
     T = got["T"]
     total = got["total"]
     n = int(total * RATE)
@@ -301,11 +307,20 @@ async def plan(scene: str) -> dict:
     per = RATE // FPS
     env = np.abs(speech[: n // per * per]).reshape(-1, per).mean(1)
     env = np.convolve(env, np.ones(5) / 5, mode="same") / max(1e-6, env.max())
-    return {"scene": scene, "says": says, "ask": got["ask"], "durs": durs, "T": T, "total": total, "speech": speech, "env": [round(float(v), 3) for v in env]}
+    # the person's question, in their own voice (the firefly glows only with Pyxi's)
+    j = int(T["words"][0] * RATE)
+    speech[j : j + len(asked)] += asked[: n - j] * 0.9
+    return {"scene": scene, "says": says, "ask": got["ask"], "askDur": ask_dur, "durs": durs, "T": T, "total": total, "speech": speech, "env": [round(float(v), 3) for v in env]}
 
 
-def sound(p: dict, total: float | None = None) -> np.ndarray:
-    """The clip's sound: the stand-in track, Pyxi's small sounds, and its voice on top."""
+def film_order() -> list[str]:
+    done = subprocess.run(["node", "-e", f"global.window={{}};require({json.dumps(str(HERE / 'story.js'))});console.log(JSON.stringify(window.STORY.film))"], capture_output=True, text=True, check=True)
+    return json.loads(done.stdout)
+
+
+def sound(p: dict, total: float | None = None, hits: tuple = (), extra: tuple = ()) -> np.ndarray:
+    """The clip's sound: the stand-in track, Pyxi's small sounds, and its voice on top.
+    `hits`: times a low hit lands (the name arriving); `extra`: more small sounds, (kind, at)."""
     T = p["T"]
     total = total or p["total"]
     n = int(total * RATE)
@@ -313,8 +328,9 @@ def sound(p: dict, total: float | None = None) -> np.ndarray:
     k = min(n, len(p["speech"]))
     speech[:k] = p["speech"][:k]
     fx = np.zeros(n, dtype=np.float32)
-    for kind, at in [("whoosh", T["listen"] - 0.3), *T.get("sfx", [])]:
-        sig = small_sound(kind)
+    low = impact(np.random.default_rng(5)) * 0.5
+    for kind, at in [("whoosh", T["listen"] - 0.3), *T.get("sfx", []), *extra, *[("hit", h) for h in hits]]:
+        sig = low if kind == "hit" else small_sound(kind)
         j = int(at * RATE)
         if 0 <= j < n:
             m = min(len(sig), n - j)
@@ -323,7 +339,7 @@ def sound(p: dict, total: float | None = None) -> np.ndarray:
     csum = np.concatenate([[0.0], np.cumsum(np.abs(speech), dtype=np.float64)])
     idx = np.arange(n)
     level = ((csum[np.minimum(idx + win // 2, n)] - csum[np.maximum(idx - win // 2, 0)]) / win).astype(np.float32)
-    bed = groove(total, T["b"], [T["a1"], T["a2"]], T["c"]) * 0.42 * (1 - 0.62 * np.clip(level / 0.04, 0, 1))[:, None]
+    bed = groove(total, T["b"], [T["a1"], T["a2"], T["c"] + 0.5], T["c"]) * 0.42 * (1 - 0.62 * np.clip(level / 0.04, 0, 1))[:, None]
     return np.clip(bed + (fx + speech)[:, None], -1, 1)
 
 
@@ -380,7 +396,7 @@ async def clip(scene: str) -> dict:
     p = await plan(scene)
     T, total = p["T"], p["total"]
     c = T["c"]
-    base = {"durs": p["durs"]}
+    base = {"durs": p["durs"], "askDur": p["askDur"]}
     folder = WORK / scene
     n = int(round(total * FPS))
     nc = int(round(c * FPS))
@@ -389,16 +405,58 @@ async def clip(scene: str) -> dict:
     # the pieces that differ in the other cuts: a loop's soft end, the film's way in, the film's end card
     tail = int(0.5 * FPS)
     await frames(scene, {**base, "mode": "loop"}, p["env"], [(k, k / FPS) for k in range(nc - tail, nc)], folder / "loop")
-    await frames(scene, {**base, "mode": "hero", "flashIn": True}, p["env"], [(k, k / FPS) for k in range(tail, 2 * tail)], folder / "herohead")
-    await frames(scene, {**base, "mode": "heroEnd"}, p["env"], [(k, k / FPS) for k in range(nc, nc + int(3.5 * FPS))], folder / "heroend")
+    if scene == film_order()[-1]:  # the film ends on this one: after its lesson, the list, then the name
+        nr = int(round(T["r"] * FPS))
+        await frames(scene, {**base, "mode": "heroEnd"}, p["env"], [(k, k / FPS) for k in range(nr, nr + int((RECAP + 3.5) * FPS))], folder / "heroend")
 
-    write_wav(folder / "sound.wav", sound(p))
-    meta = {"scene": scene, "total": total, "c": c, "durs": p["durs"], "voice": T["voice"], "says": p["says"], "ask": p["ask"], "poster": T.get("poster", c - 1.2), "show": T.get("show", [T["act"], c - 0.6])}
+    write_wav(folder / "sound.wav", sound(p, hits=(T["n"],)))
+    meta = {"scene": scene, "total": total, "c": c, "r": T["r"], "durs": p["durs"], "voice": T["voice"], "says": p["says"], "ask": p["ask"], "poster": T.get("poster", c - 1.2), "show": T.get("show", [T["act"], c - 0.6])}
     (folder / "meta.json").write_text(json.dumps(meta, indent=1))
     np.save(folder / "speech.npy", p["speech"])
     (folder / "T.json").write_text(json.dumps(T))
     pack(scene)
     return meta
+
+
+async def intro() -> None:
+    """The film's opening: Pyxi says what it is, in its own voice, and the words land as it does."""
+    async with Stage("intro") as st:
+        says = (await st.setup({}))["says"]
+    clips = await voice("intro", says)
+    durs = [len(c) / RATE for c in clips]
+    async with Stage("intro") as st:
+        got = await st.setup({"durs": durs})
+    T, total = got["T"], got["total"]
+    n = int(total * RATE)
+    speech = np.zeros(n, dtype=np.float32)
+    for at, one in zip(T["voice"], clips):
+        j = int(at * RATE)
+        k = min(len(one), n - j)
+        speech[j : j + k] += one[:k]
+    per = RATE // FPS
+    env = np.abs(speech[: n // per * per]).reshape(-1, per).mean(1)
+    env = np.convolve(env, np.ones(5) / 5, mode="same") / max(1e-6, env.max())
+    env = [round(float(v), 3) for v in env]
+    folder = WORK / "intro"
+    print(f"intro: {total:.2f} s; lines {[round(d, 2) for d in durs]} at {[round(v, 2) for v in T['voice']]}", flush=True)
+    await frames("intro", {"durs": durs}, env, [(k, k / FPS) for k in range(int(round(total * FPS)))], folder / "clip")
+    fx = np.zeros(n, dtype=np.float32)
+    for kind, at in T["sfx"]:
+        sig = small_sound(kind)
+        j = int(at * RATE)
+        if 0 <= j < n:
+            m = min(len(sig), n - j)
+            fx[j : j + m] += sig[:m]
+    win = int(0.3 * RATE)
+    csum = np.concatenate([[0.0], np.cumsum(np.abs(speech), dtype=np.float64)])
+    idx = np.arange(n)
+    level = ((csum[np.minimum(idx + win // 2, n)] - csum[np.maximum(idx - win // 2, 0)]) / win).astype(np.float32)
+    # only the plucked notes of the stand-in track: the beat waits for the first scene
+    bed = groove(total, total + 10, T["slams"], total + 12) * 0.42 * (1 - 0.62 * np.clip(level / 0.04, 0, 1))[:, None]
+    np.save(folder / "mix.npy", np.clip(bed + (fx + speech)[:, None], -1, 1))
+    (folder / "meta.json").write_text(json.dumps({"total": total, "says": says, "voice": T["voice"]}, indent=1))
+    paths = sorted((folder / "clip").glob("*.jpg"))
+    sheet([(f"{k / FPS:.1f}", paths[k]) for k in range(0, len(paths), FPS // 2)], WORK / "sheets" / "intro.jpg")
 
 
 def pack(scene: str) -> None:
@@ -425,34 +483,35 @@ def pack(scene: str) -> None:
 def hero() -> None:
     """The film: the four scenes one after another, each opening out of the light the last ended
     in, then the name. And a short silent loop of it for the top of the home page."""
-    order = json.loads(subprocess.run(["node", "-e", f"global.window={{}};require({json.dumps(str(HERE / 'story.js'))});console.log(JSON.stringify(window.STORY.film))"], capture_output=True, text=True, check=True).stdout)
+    order = film_order()
     metas = [json.loads((WORK / s / "meta.json").read_text()) for s in order]
-    paths: list[Path] = []
+    opening = sorted((WORK / "intro" / "clip").glob("*.jpg"))
+    paths: list[Path] = list(opening)
     starts = []
     tail = int(0.5 * FPS)
-    for i, m in enumerate(metas):
+    for m in metas:
         folder = WORK / m["scene"]
-        nc = int(round(m["c"] * FPS))
-        # after the first, a scene skips its half second of dark: its first line lands out of the light
-        starts.append(len(paths) / FPS - (0.5 if i else 0))
-        head = [folder / "herohead" / f"{k:05d}.jpg" for k in range(tail, 2 * tail)] if i else [folder / "clip" / f"{k:05d}.jpg" for k in range(2 * tail)]
-        paths += head + [folder / "clip" / f"{k:05d}.jpg" for k in range(2 * tail, nc)]
+        # a scene skips its half second of dark: its first line lands on the cut
+        starts.append(len(paths) / FPS - 0.5)
+        paths += [folder / "clip" / f"{k:05d}.jpg" for k in range(tail, int(round(m["r"] * FPS)))]
     last = WORK / metas[-1]["scene"]
     paths += sorted((last / "heroend").glob("*.jpg"))
     total = len(paths) / FPS
-    # the sound: each scene's own, laid at its start; a scene's last chord rings on under the next one's opening
+    # the sound: the opening, then each scene's own, laid at its start; a scene's last chord rings on under the next one's opening
     mix = np.zeros((int(total * RATE), 2), dtype=np.float32)
+    first = np.load(WORK / "intro" / "mix.npy")
+    mix[: len(first)] += first
     for i, m in enumerate(metas):
         p = {"T": json.loads((WORK / m["scene"] / "T.json").read_text()), "speech": np.load(WORK / m["scene"] / "speech.npy"), "total": m["total"]}
-        length = m["c"] + (3.5 if i == len(metas) - 1 else 2.0)
-        part = sound(p, length)
         if i < len(metas) - 1:  # let the ring die away under the next scene
+            length = m["r"] + 1.6
+            part = sound(p, length)
             fade = np.clip((length - np.arange(len(part)) / RATE) / 1.6, 0, 1) ** 2
-            part[int(m["c"] * RATE) :] *= 0.5
             part *= fade[:, None]
+        else:  # the list, a note for each row, and a low hit as the name lands
+            length = m["r"] + RECAP + 3.5
+            part = sound(p, length, hits=(m["r"] + RECAP,), extra=tuple(("pin", m["r"] + 0.5 + k * 0.5) for k in range(4)))
         j = int(starts[i] * RATE)
-        if j < 0:
-            part, j = part[-j:], 0
         k = min(len(part), len(mix) - j)
         mix[j : j + k] += part[:k]
     mix = np.clip(mix, -1, 1)
@@ -487,8 +546,12 @@ def hero() -> None:
 async def look(scene: str, step: float = 0.5, mode: str = "clip") -> None:
     async with Stage(scene) as st:
         says = (await st.setup({}))["says"]
+        first = await st.setup({})
         durs = [len(c) / RATE for c in await voice(scene, says)]
-        got = await st.setup({"mode": mode, "durs": durs})
+        cfg = {"mode": mode, "durs": durs}
+        if first["ask"]:
+            cfg["askDur"] = len((await voice(scene + "_ask", [first["ask"]], ASKER))[0]) / RATE
+        got = await st.setup(cfg)
         total = got["total"]
         shots = [(f"{t:.1f}", await st.shot(t)) for t in np.arange(0, total, step)]
         assert not st.errors, st.errors[:3]
@@ -501,7 +564,11 @@ async def frame(scene: str, times: list[float], mode: str = "clip") -> None:
     (WORK / "look").mkdir(parents=True, exist_ok=True)
     async with Stage(scene) as st:
         says = (await st.setup({}))["says"]
-        await st.setup({"mode": mode, "durs": [len(c) / RATE for c in await voice(scene, says)]})
+        first = await st.setup({})
+        cfg = {"mode": mode, "durs": [len(c) / RATE for c in await voice(scene, says)]}
+        if first["ask"]:
+            cfg["askDur"] = len((await voice(scene + "_ask", [first["ask"]], ASKER))[0]) / RATE
+        await st.setup(cfg)
         for t in times:
             await st.shot(t, WORK / "look" / f"{scene}_{t:05.2f}.jpg")
         assert not st.errors, st.errors[:3]
@@ -511,9 +578,11 @@ async def frame(scene: str, times: list[float], mode: str = "clip") -> None:
 async def main() -> None:
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
     if what == "look":
-        await look(sys.argv[2], float(sys.argv[3]) if len(sys.argv) > 3 else 0.5)
+        await look(sys.argv[2], float(sys.argv[3]) if len(sys.argv) > 3 else 0.5, sys.argv[4] if len(sys.argv) > 4 else "clip")
     elif what == "frame":
         await frame(sys.argv[2], [float(x) for x in sys.argv[3:]])
+    elif what == "intro":
+        await intro()
     elif what == "clip":
         for s in sys.argv[2:]:
             await clip(s)
@@ -524,6 +593,7 @@ async def main() -> None:
     elif what == "hero":
         hero()
     else:
+        await intro()
         for s in SCENES:
             await clip(s)
         hero()

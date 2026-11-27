@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pyxi demo clip: "Movie tonight. Seats going fast."</title>
+<!--
+  A built mock-up, not a recording. What it shows is the app's booking (pyxi/booking.py, the
+  `book` tool): Pyxi's OK card first, with the app's own words; then Scout's browser, which you
+  can watch, picks the showing and the seats; and at the payment page it stops and hands the
+  window over on a "Your turn" card (overlay/Requests.tsx). Scout never types a card number,
+  so the card fields stay empty. Two tickets at $13.50 are $27.00.
+  Made up: the chat app (Pebble), the friend, the cinema (Orbit), the film (Starfall).
+-->
+<link rel="stylesheet" href="kit.css">
+<link rel="stylesheet" href="booking.css">
+<style>
+/* underneath: a chat with a friend */
+#win { background: #f4f1ec; }
+#chatbar { height: 64px; background: #fff; border-bottom: 1px solid #e6e1d8; display: flex; align-items: center; gap: 16px; padding: 0 28px; font-size: 22px; font-weight: 700; color: #2b2520; }
+#chatbar em { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #ffb37a, #e2587a); display: block; }
+#chatbar small { font-size: 16px; font-weight: 500; color: #8b8378; margin-left: 4px; }
+#people { position: absolute; left: 0; top: 64px; bottom: 0; width: 330px; background: #fbf9f5; border-right: 1px solid #e6e1d8; padding: 26px 24px; }
+#people p { height: 54px; border-radius: 14px; background: #ece7de; margin-bottom: 16px; }
+#people p.me { background: #ffe3c9; }
+#talk { position: absolute; left: 330px; right: 0; top: 64px; bottom: 0; padding: 40px 60px; display: flex; flex-direction: column; gap: 18px; }
+#talk div { max-width: 640px; padding: 18px 26px; border-radius: 26px; font-size: 27px; line-height: 1.35; color: #2b2520; background: #fff; box-shadow: 0 1px 3px rgba(60, 40, 20, .1); align-self: flex-start; }
+#talk div.me { align-self: flex-end; background: #ff8a4c; color: #fff; }
+/* Orbit Cinema */
+.pg { background: #14121d; color: #fff; padding: 34px 44px; }
+.pg h2 { font-size: 40px; font-weight: 800; letter-spacing: -.02em; }
+.pg h2 small { display: block; font-size: 20px; font-weight: 500; color: #a9a4bd; letter-spacing: 0; margin-top: 6px; }
+#poster { position: absolute; left: 44px; top: 150px; width: 300px; height: 440px; border-radius: 18px; background: radial-gradient(circle at 70% 22%, #fff7d6 0 4%, transparent 5%), radial-gradient(circle at 30% 35%, #ffffff 0 1%, transparent 1.6%), radial-gradient(circle at 55% 12%, #ffffff 0 .8%, transparent 1.4%), linear-gradient(180deg, #1c1250, #6b2d7a 60%, #e2587a); }
+#poster b { position: absolute; left: 24px; bottom: 26px; font-size: 44px; font-weight: 800; letter-spacing: -.03em; }
+#times { position: absolute; left: 400px; top: 160px; right: 44px; }
+#times p { font-size: 21px; color: #a9a4bd; margin-bottom: 16px; font-weight: 600; }
+#times .row { display: flex; gap: 18px; margin-bottom: 44px; }
+.tm { width: 190px; height: 82px; border-radius: 16px; border: 2px solid #3b3652; display: grid; place-items: center; font-size: 30px; font-weight: 700; }
+.tm.sel { background: #e2445c; border-color: #e2445c; }
+.tm.off { color: #5c5773; text-decoration: line-through; }
+.qty { display: inline-flex; align-items: center; gap: 22px; font-size: 30px; font-weight: 700; border: 2px solid #3b3652; border-radius: 16px; padding: 16px 26px; }
+.qty i { font-style: normal; color: #a9a4bd; }
+#screenarc { position: absolute; left: 150px; top: 120px; width: 620px; height: 40px; border-top: 6px solid #cfc8ff; border-radius: 50% 50% 0 0 / 100% 100% 0 0; box-shadow: 0 -14px 30px rgba(190, 180, 255, .3); }
+#screenarc span { position: absolute; left: 0; right: 0; top: 16px; text-align: center; font-size: 16px; letter-spacing: .3em; color: #a9a4bd; font-weight: 600; }
+#seats { position: absolute; left: 110px; top: 200px; display: grid; grid-template-columns: 34px repeat(12, 46px); gap: 12px; align-items: center; }
+#seats b { font-size: 18px; color: #7d7896; font-weight: 600; }
+.st { width: 46px; height: 42px; border-radius: 10px 10px 6px 6px; background: #34304a; }
+.st.gone { background: #201d2e; box-shadow: inset 0 0 0 2px #2b2740; }
+.st.pick { background: #ffc24a; box-shadow: 0 0 22px rgba(255, 194, 74, .75); }
+#order, #order2 { position: absolute; right: 44px; top: 130px; width: 330px; padding: 26px; border-radius: 18px; background: #1e1b2c; border: 1.5px solid #322e48; font-size: 21px; line-height: 1.6; color: #cdc9de; }
+#order b, #order2 b { display: block; font-size: 28px; color: #fff; }
+#order strong, #order2 strong { display: block; margin-top: 14px; padding-top: 14px; border-top: 1.5px solid #322e48; font-size: 28px; color: #fff; }
+#go { margin-top: 20px; height: 62px; border-radius: 14px; background: #e2445c; color: #fff; font-size: 23px; font-weight: 700; display: grid; place-items: center; }
+#held { display: inline-flex; align-items: center; gap: 12px; margin-top: 18px; padding: 12px 20px; border-radius: 12px; background: rgba(255, 194, 74, .14); border: 1.5px solid rgba(255, 194, 74, .5); color: #ffd98a; font-size: 22px; font-weight: 650; }
+#pay { position: absolute; left: 44px; top: 230px; width: 760px; }
+#pay label { display: block; font-size: 19px; color: #a9a4bd; font-weight: 600; margin: 0 0 8px; }
+#pay .f { height: 66px; border-radius: 14px; border: 2px solid #3b3652; background: #1a1727; margin-bottom: 22px; display: flex; align-items: center; padding: 0 20px; font-size: 22px; color: #5c5773; }
+#pay .two { display: flex; gap: 22px; }
+#pay .two > div { flex: 1; }
+#paybtn { height: 68px; border-radius: 14px; background: #3b3652; color: #a9a4bd; font-size: 24px; font-weight: 700; display: grid; place-items: center; }
+</style>
+</head>
+<body>
+<script src="story.js"></script>
+<script src="kit.js"></script>
+<script src="booking.js"></script>
+<script>
+const EACH = 13.5, HOW_MANY = 2, TOTAL = EACH * HOW_MANY;
+if (TOTAL !== 27) throw new Error("the tickets do not add up");
+const money = (n) => "$" + n.toFixed(2);
+const ROWS = "ABCDEFG", TAKEN = new Set(["A3", "A4", "B7", "B8", "C2", "C5", "C6", "D6", "D7", "D8", "E4", "E5", "E9", "F3", "F4", "F9", "F10", "G6", "G7"]);
+const MINE = ["F6", "F7"];
+const seatsHtml = [...ROWS].map((r) => `<b>${r}</b>` + Array.from({ length: 12 }, (_, k) => { const id = r + (k + 1); return `<div class="st ${TAKEN.has(id) ? "gone" : ""}" id="s${id}"></div>`; }).join("")).join("");
+const SUMMARY = `<b>Starfall</b>Tonight, Thu 26 Nov<br>7:10 pm, Screen 3`;
+
+Booking.make({
+  id: "movie",
+  base: `
+    <div id="chatbar"><em></em>Sam<small>Pebble</small></div>
+    <div id="people"><p class="me"></p><p></p><p></p><p></p><p></p></div>
+    <div id="talk"><div>Starfall is finally out!! Tonight?</div><div>You book, I'll bring the snacks</div><div class="me">Deal. Around seven?</div><div>Yes. Middle seats or I riot</div></div>`,
+  site: { tab: "Orbit Cinema: Starfall", url: "orbitcinema.example/starfall/tonight", color: "#e2445c" },
+  pages: [
+    `<h2>Starfall<small>Orbit Cinema, Harbour Street</small></h2><div id="poster"><b>STARFALL</b></div>
+     <div id="times"><p>Tonight, Thursday 26 November</p><div class="row"><div class="tm off">4:30 pm</div><div class="tm" id="t710">7:10 pm</div><div class="tm">9:45 pm</div></div>
+     <p>Tickets</p><div class="qty"><i>&minus;</i><span>${HOW_MANY}</span><i>+</i></div></div>`,
+    `<h2>Pick your seats<small>Starfall, 7:10 pm, Screen 3</small></h2><div id="screenarc"><span>SCREEN</span></div><div id="seats">${seatsHtml}</div>
+     <div id="order">${SUMMARY}<br>Seats <span id="picked">none yet</span><strong>${HOW_MANY} &times; ${money(EACH)} = ${money(TOTAL)}</strong><div id="go">Continue</div></div>`,
+    `<h2>Payment<small>Your card details</small></h2><div id="held">Seats ${MINE.join(" and ")} are held for 8 minutes</div>
+     <div id="pay"><label>Card number</label><div class="f"></div><div class="two"><div><label>Expiry</label><div class="f"></div></div><div><label>Security code</label><div class="f"></div></div></div><div id="paybtn">Pay ${money(TOTAL)}</div></div>
+     <div id="order2">${SUMMARY}<br>Seats ${MINE.join(", ")}<strong>Total ${money(TOTAL)}</strong></div>`,
+  ],
+  cards: [
+    { at: "card", click: "click", x: 630, y: 300, title: "Pyxi needs your OK", action: `Book ${HOW_MANY} tickets for Starfall at Orbit Cinema`,
+      reason: "Scout opens a browser you can watch and uses your name and email on that site. It asks you before the final booking click, and never pays: at the payment page it hands the window to you.", yes: "Allow", no: "Don't" },
+    { at: "turn", x: 1010, y: 520, title: "Your turn", action: `${HOW_MANY} seats for Starfall, 7:10 pm, are held for 8 minutes. Total ${money(TOTAL)}. Pay in this browser window, then press Done.`,
+      reason: "Scout has the browser window open for you and will read the confirmation once you're done.", yes: "Done", no: "Cancel" },
+  ],
+
+  // Your OK first; then Scout picks the showing and two seats; at the payment page it stops.
+  plan(d, B) {
+    const v0 = B.act, card = v0 + 0.25;
+    const click = onBeat(Math.max(card + 2.0, v0 + d[0] + 0.8));
+    const open = click + 0.25, v1 = open + 0.3;
+    const time = open + 1.25, seats = time + 0.5, s1 = seats + 0.75, s2 = s1 + 0.5, go = s2 + 0.75, pay = go + 0.5;
+    const turn = pay + 0.5, v2 = Math.max(turn + 0.1, v1 + d[1] + 0.3);
+    return {
+      card, click, open, time, seats, s1, s2, go, pay, turn, voice: [v0 + 0.05, v1, v2], taps: [click],
+      c: onBeat(v2 + d[2] + 1.4), poster: v2 + d[2] + 0.6, show: [open + 0.5, open + 5.0],
+      sfx: [["listen", B.listen], ["pin", card], ["click", click], ["whoosh", open - 0.2], ["tick", time], ["tick", s1], ["tick", s2], ["tick", go], ["pin", turn]],
+    };
+  },
+  script: (T) => [
+    { at: 0, page: 0 }, { at: T.time, click: "#t710" }, { at: T.time, on: "#t710", cls: "sel" },
+    { at: T.seats, page: 1 }, { at: T.s1, click: "#s" + MINE[0] }, { at: T.s1, on: "#s" + MINE[0], cls: "pick" },
+    { at: T.s2, click: "#s" + MINE[1] }, { at: T.s2, on: "#s" + MINE[1], cls: "pick" },
+    { at: T.go, click: "#go" }, { at: T.pay, page: 2 },
+  ],
+  draw(t, T) { $("#picked").textContent = t >= T.s2 ? MINE.join(", ") : t >= T.s1 ? MINE[0] : "none yet"; },
+  notch(T, N) {
+    const says = window.STORY.movie.says;
+    return [N.idle(0), N.listen(T.listen), N.look(T.look, "Looking at your screen"), N.say(T.voice[0] - 0.05, says[0]), N.idle(T.voice[0] + 1.6),
+      N.say(T.voice[1] - 0.05, says[1]), N.work(T.voice[1] + 2.2, "Scout", "Booking", "#9ecbff"), N.say(T.voice[2] - 0.05, says[2]), N.idle(T.c - 0.9)];
+  },
+  cam: (T, box, cards) => [
+    { at: T.card - 0.1, d: 0.8, v: [cards[0].cx, cards[0].cy + 40, 1.5, -3, 1.2] },     // in on the card, to read it
+    { at: T.open - 0.1, d: 0.8, v: [960, 540, 1.16, 2, 1] },                              // Scout's window opens
+    { at: T.seats - 0.1, d: 0.9, v: [850, 520, 1.32, 3, 1.2] },                           // in on the seats
+    { at: T.pay - 0.1, d: 0.9, v: [1000, 600, 1.22, -2, 1] },                             // the payment page, and the hand-over
+    { at: T.turn + 0.8, d: T.c - T.turn, v: [1130, 640, 1.36, -3, 0.8], ease: out3 },
+  ],
+});
+</script>
+</body>
+</html>

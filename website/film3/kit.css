@@ -136,5 +136,21 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: #06070
 #dip { position: absolute; inset: 0; background: #06070c; opacity: 0; }
 
 /* captions: outside the camera, plain */
-#band { position: absolute; left: 0; right: 0; bottom: 0; height: 250px; background: linear-gradient(180deg, transparent, rgba(4, 6, 12, .86)); opacity: 0; }
-#cap { position: absolute; left: 0; right: 0; bottom: 66px; text-align: center; font-size: 46px; font-weight: 600; letter-spacing: -.012em; color: #fff; text-shadow: 0 2px 14px rgba(0, 0, 0, .6); opacity: 0; white-space: nowrap; }
+#band { position: absolute; left: 0; right: 0; bottom: 0; height: 330px; background: linear-gradient(180deg, transparent, rgba(4, 6, 12, .8) 45%, rgba(4, 6, 12, .95)); opacity: 0; }
+#cap { position: absolute; left: 0; right: 0; bottom: 56px; text-align: center; color: #fff; opacity: 0; white-space: nowrap; }
+#cap .line { font-size: 54px; font-weight: 650; letter-spacing: -.016em; text-shadow: 0 2px 16px rgba(0, 0, 0, .7); }
+#cap .who { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 28px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+#cap .who.you { color: var(--ice-hi); }
+#cap .who.pyxi { color: #ffd98a; }
+#cap .who.pyxi i { display: block; width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle at 40% 38%, #fff8e0, #ffd27a 55%, #f3a93a); box-shadow: 0 0 14px 4px rgba(255, 190, 80, .6); }
+#cap .keys { display: inline-flex; gap: 7px; margin-right: 6px; }
+kbd { font: 650 19px/1 "Inter"; letter-spacing: 0; text-transform: none; color: #fff; padding: 8px 12px 9px; border-radius: 9px; background: rgba(255, 255, 255, .12); border: 1.5px solid rgba(255, 255, 255, .28); box-shadow: 0 3px 0 rgba(255, 255, 255, .16); }
+
+/* the lesson after the screen, and the film's last list */
+#how { margin-top: 46px; font-size: 40px; font-weight: 550; letter-spacing: -.01em; color: #c4cddd; opacity: 0; }
+#rhead { font-family: "Fraunces"; font-style: italic; font-weight: 500; font-size: 62px; color: #ffd98a; margin-bottom: 44px; opacity: 0; }
+#rrows { display: grid; gap: 22px; }
+.rrow { display: flex; align-items: center; gap: 34px; font-size: 88px; font-weight: 800; letter-spacing: -.04em; color: #fff; line-height: 1.08; opacity: 0; white-space: nowrap; }
+.rrow i { flex: none; display: grid; place-items: center; width: 76px; height: 76px; border-radius: 50%; background: linear-gradient(135deg, #ffd27a, #ff9f43); box-shadow: 0 0 46px rgba(255, 176, 60, .5); }
+.rrow svg { width: 46px; height: 46px; }
+.rrow path { fill: none; stroke: #1a1206; stroke-width: 3.6; stroke-linecap: round; stroke-linejoin: round; }
