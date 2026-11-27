@@ -286,3 +286,18 @@ async def test_scouts_job_is_held_to_what_its_summary_says(settings, monkeypatch
     # A booking answers for itself (a confirmation, a card they approved): left alone.
     job = await _scout(settings, monkeypatch, "I couldn't find an earlier slot, so nothing changed.", kind="booking")
     assert job.status == "done" and not job.summary.startswith("Best guess")
+
+
+async def test_saying_stop_ends_the_work_in_their_tab(settings):
+    """Live: told to stop, a tab job ran on and read its failure out over a later request."""
+    brain, _ = on_site(settings)
+
+    class Running:
+        cancelled = False
+        by_user = False
+
+    brain._tab_operator = op = Running()
+    brain._stop_tab_work("And open YouTube too.")
+    assert not op.cancelled  # a new request is not a stop
+    brain._stop_tab_work("You can stop now.")
+    assert op.cancelled and op.by_user

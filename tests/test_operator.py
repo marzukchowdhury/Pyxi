@@ -297,3 +297,17 @@ async def test_a_declined_close_closes_nothing():
     await op.run("close all the tabs")
     assert asked == ["Close the tab in front (ctrl+w)"]
     assert not [d for d in box[0].did if d[0] == "press"]
+
+
+# ---------------------------------------------------------------- words that stop the mouse
+def test_stop_is_heard_after_a_few_polite_words_too():
+    from pyxi.companion.brain import _HANDS_OFF
+
+    for said in [
+        "Stop.", "stop it", "Pyxi, stop", "You can stop now.", "Okay, please stop.", "Alright, that's enough.",
+        "Can you stop?", "I said stop!", "Just leave it.", "No no, not that.", "Hang on a second", "Yeah, you can pause now",
+    ]:
+        assert _HANDS_OFF.match(said.strip()), said
+    # Anything else lets the work carry on: a new request, a thank-you, a question.
+    for said in ["Open YouTube too.", "Thanks, that's great.", "What are you doing now?", "And put Facebook on the left.", "You can carry on."]:
+        assert not _HANDS_OFF.match(said.strip()), said

@@ -3102,6 +3102,15 @@ class Brain:
             op.cancelled = True
         op.held = False
 
+    def _stop_tab_work(self, words: str) -> None:
+        """"Stop", "no, not that", "wait": the same words that end the mouse's work end what
+        Pyxi is doing in their browser tab. Live: a tab job they had told to stop ran on for
+        most of a minute and then read its failure out over a later request."""
+        op = getattr(self, "_tab_operator", None)
+        if op is not None and not getattr(op, "cancelled", False) and _HANDS_OFF.match(words.strip()):
+            op.cancelled = True
+            op.by_user = True
+
     def _done_so_far(self) -> list[str]:
         """What this turn's tool calls started or did, a few words each (not speech, not lookups)."""
         lookups = INFO_TOOLS | {t.spec.name for t in self.connectors.tools() if t.info}
@@ -3360,6 +3369,7 @@ class Brain:
             self._stages = [("start", started)]
             if not synthetic:
                 self._release_hands(user_text)
+                self._stop_tab_work(user_text)
             await self.hub.emit("user", text=shown or user_text, turn_id=turn_id)
             error = None
             cut_off: list[str] = []  # what a turn they talked over had already done, if it had
@@ -6321,8 +6331,14 @@ _SMALL_WORDS = {"the", "and", "for", "from", "with", "that", "this", "his", "her
 
 
 # Said while Pyxi is using the mouse: these end that work. Anything else lets it carry on.
+# The stop word may follow a few polite words ("you can stop now", "okay, please stop"). Live:
+# "You can stop now" was answered "Stopping now" and the mouse carried on, because only a
+# sentence that began with the word counted.
 _HANDS_OFF = re.compile(
-    r"(?i)^\W*(?:(?:hey\s+)?pyxi\W+)?(?:stop|wait|no|nope|don'?t|do not|cancel|hold on|hang on|"
+    r"(?i)^\W*(?:(?:hey\s+)?pyxi\W+)?"
+    r"(?:(?:ok(?:ay)?|alright|all right|please|just|now|so|yeah|yes|well|you can|you may|you should|"
+    r"can you|could you|i said|i want you to|i need you to|that's|that is)\W+)*"
+    r"(?:stop|wait|no|nope|don'?t|do not|cancel|hold on|hang on|"
     r"not that|never\s?mind|leave it|pause|enough|quit|hands off|that's wrong|wrong)\b"
 )
 CAN_REFUSE = {
