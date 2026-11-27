@@ -613,7 +613,8 @@ export function initSwarm({ reduced = false } = {}) {
   const refresh = () => {
     const mid = innerHeight * 0.5;
     let next = "field";
-    let op = 0.5;
+    // how bright the field is where no section asks for a shape (a page may ask for none: 0)
+    let op = Number(document.body.dataset.swarmRest ?? 0.5);
     let at = null;
     for (const cue of cues) {
       const r = cue.el.getBoundingClientRect();

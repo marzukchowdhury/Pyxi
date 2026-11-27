@@ -27,9 +27,10 @@
     <script type="module" src="/src/main.js"></script>
     <script type="module" src="/src/pages/home.js"></script>
   </head>
-  <body class="home">
+  <body class="home" data-swarm-rest="0">
     <!--include:nav-->
     <!--include:firefly-->
+    <div class="sky" aria-hidden="true"><i></i><i></i><i></i></div>
     <canvas class="swarm" aria-hidden="true"></canvas>
     <nav class="rail" aria-label="On this page">
       <a href="#shows"><i></i><b>01</b><span>See it work</span></a>
@@ -42,7 +43,7 @@
 
     <main id="main">
       <!-- ============================================================ hero -->
-      <section class="hero" data-swarm="vortex" data-swarm-at="#film" data-say="Hi, I'm Pyxi. Move your mouse, I'll keep you company.">
+      <section class="hero" data-say="Hi, I'm Pyxi. Move your mouse, I'll keep you company.">
         <div class="wrap hero-grid">
           <div class="hero-copy">
             <p class="eyebrow reveal"><span class="chip chip-fly">3-day free trial</span> For Windows 10 and 11 &middot; Speaks English and Bengali</p>
@@ -226,7 +227,7 @@
       </section>
 
       <!-- ============================================================ explained in 3D, live -->
-      <section class="in3d" id="in3d" data-swarm="field" data-swarm-opacity="0.45" data-say="Ask how something works. I'll build it for you.">
+      <section class="in3d" id="in3d" data-say="Ask how something works. I'll build it for you.">
         <div class="wrap">
           <p class="kicker reveal">Explained in 3D</p>
           <h2 class="h2 reveal" data-scrub>Ask how it works.<br /><span class="dim">Pyxi builds it on your screen.</span></h2>
@@ -279,7 +280,7 @@
       </section>
 
       <!-- ============================================================ explains any picture, on the picture -->
-      <section class="onpic" id="onpicture" data-swarm="field" data-swarm-opacity="0.45" data-say="Show me any picture. I'll explain it right on it.">
+      <section class="onpic" id="onpicture" data-say="Show me any picture. I'll explain it right on it.">
         <div class="wrap">
           <p class="kicker reveal">Explains any picture</p>
           <h2 class="h2 reveal" data-scrub>Ask about a diagram.<br /><span class="dim">Pyxi explains it on the diagram.</span></h2>

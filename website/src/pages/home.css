@@ -2,6 +2,16 @@
    sees" section, and the price and questions. Every clip's box has its shape before the video
    loads (aspect-ratio 16 / 9), so nothing on the page moves when one arrives. */
 
+/* ---- the backdrop: three soft lights that drift very slowly, in place of the firefly swarm
+   (which now only gathers at the very end of the page) */
+.sky { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.sky i { position: absolute; border-radius: 50%; filter: blur(90px); will-change: transform; animation: sky-drift 46s ease-in-out infinite alternate; }
+.sky i:nth-child(1) { right: -8vw; top: -6vh; width: 62vw; height: 62vw; max-width: 980px; max-height: 980px; background: radial-gradient(closest-side, rgba(255, 200, 97, 0.17), rgba(255, 200, 97, 0.05) 55%, transparent); }
+.sky i:nth-child(2) { left: -16vw; bottom: -22vh; width: 58vw; height: 58vw; max-width: 900px; max-height: 900px; background: radial-gradient(closest-side, rgba(158, 203, 255, 0.14), rgba(158, 203, 255, 0.04) 55%, transparent); animation-duration: 58s; animation-delay: -20s; }
+.sky i:nth-child(3) { left: 30vw; top: 38vh; width: 36vw; height: 36vw; max-width: 560px; max-height: 560px; background: radial-gradient(closest-side, rgba(190, 150, 255, 0.07), transparent); animation-duration: 70s; animation-delay: -35s; }
+@keyframes sky-drift { from { transform: translate3d(-3vw, -2vh, 0) scale(1); } to { transform: translate3d(4vw, 5vh, 0) scale(1.12); } }
+@media (prefers-reduced-motion: reduce) { .sky i { animation: none; } }
+
 /* ---- the film, in the hero */
 .film { position: relative; margin: 0; }
 .film-frame { position: relative; aspect-ratio: 16 / 9; border-radius: 20px; overflow: hidden; background: #06070c; border: 1px solid var(--hair-hi); box-shadow: 0 40px 110px rgba(0, 0, 0, 0.55), 0 0 90px rgba(255, 200, 97, 0.07); }
