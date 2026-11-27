@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pyxi demo clip: "That check-up. Put off since March."</title>
+<!--
+  A built mock-up, not a recording. What it shows is the app's booking (pyxi/booking.py, the
+  `book` tool): Pyxi's OK card first; then Scout's browser, which you can watch, picks the day
+  and the time and fills the form from the details saved once in Settings; before the final
+  click it stops for an Allow card with the app's own words (agents/jobs.py plain_card); then
+  the clinic's confirmation, and the notch says Scout finished.
+  Made up: the list app, the clinic, the doctor, the person, the phone number.
+  26 November 2026 is a Thursday, so the 27th is a Friday.
+-->
+<link rel="stylesheet" href="kit.css">
+<link rel="stylesheet" href="booking.css">
+<style>
+/* underneath: a to-do list */
+#win { background: #fbf8ef; }
+#todobar { height: 64px; display: flex; align-items: center; padding: 0 44px; font-family: "Fraunces"; font-size: 30px; font-weight: 650; color: #3a3324; border-bottom: 1.5px solid #ebe4d0; }
+#todo { position: absolute; left: 150px; top: 130px; width: 900px; }
+#todo div { display: flex; align-items: center; gap: 26px; padding: 26px 0; border-bottom: 1.5px solid #ebe4d0; font-size: 36px; color: #3a3324; font-weight: 500; }
+#todo div u { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 3px solid #c9bf9f; display: block; }
+#todo div.done { color: #b3aa90; text-decoration: line-through; }
+#todo div.done u { background: #c9bf9f; }
+#todo div small { margin-left: auto; font-size: 22px; font-weight: 650; color: #c8553d; background: #fbe3dc; padding: 8px 16px; border-radius: 12px; text-decoration: none; }
+/* Maple Grove Clinic */
+.pg { background: #f6faf8; color: #17332a; padding: 34px 44px; }
+.pg h2 { font-size: 38px; font-weight: 800; letter-spacing: -.02em; }
+.pg h2 small { display: block; font-size: 20px; font-weight: 500; color: #5d7a70; letter-spacing: 0; margin-top: 6px; }
+.lab { font-size: 20px; font-weight: 650; color: #5d7a70; margin: 30px 0 14px; }
+.chips { display: flex; gap: 16px; }
+.chip2 { height: 74px; padding: 0 30px; border-radius: 16px; border: 2px solid #cfe1da; background: #fff; display: grid; place-items: center; font-size: 26px; font-weight: 650; }
+.chip2 small { display: block; font-size: 17px; font-weight: 600; color: #5d7a70; text-align: center; }
+.chip2.day { width: 150px; height: 96px; line-height: 1.2; }
+.chip2.sel { background: #2f9e77; border-color: #2f9e77; color: #fff; }
+.chip2.sel small { color: #d9f3e8; }
+.chip2.off { color: #a9bdb5; background: #eef4f1; text-decoration: line-through; }
+#form { position: absolute; left: 44px; top: 150px; width: 700px; display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+#form label { display: block; font-size: 19px; font-weight: 650; color: #5d7a70; margin-bottom: 8px; }
+#form .f { height: 68px; border-radius: 14px; border: 2px solid #cfe1da; background: #fff; display: flex; align-items: center; padding: 0 20px; font-size: 26px; font-weight: 550; }
+#form .wide { grid-column: 1 / 3; }
+#visit { position: absolute; right: 44px; top: 150px; width: 400px; padding: 28px; border-radius: 18px; background: #fff; border: 2px solid #cfe1da; font-size: 22px; line-height: 1.6; color: #45635a; }
+#visit b { display: block; font-size: 28px; color: #17332a; }
+#bk { margin-top: 22px; height: 70px; border-radius: 14px; background: #2f9e77; color: #fff; font-size: 25px; font-weight: 700; display: grid; place-items: center; }
+#yes { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+#yes i { width: 120px; height: 120px; border-radius: 50%; background: #2f9e77; display: grid; place-items: center; box-shadow: 0 0 0 16px rgba(47, 158, 119, .16); margin-bottom: 30px; }
+#yes i svg { width: 66px; height: 66px; }
+#yes i path { fill: none; stroke: #fff; stroke-width: 3.4; stroke-linecap: round; stroke-linejoin: round; }
+#yes b { font-size: 58px; font-weight: 800; letter-spacing: -.03em; }
+#yes p { font-size: 30px; margin-top: 12px; color: #45635a; font-weight: 550; }
+#yes p.big { font-size: 38px; color: #17332a; font-weight: 700; margin-top: 18px; }
+#yes small { margin-top: 26px; font-size: 22px; color: #5d7a70; font-weight: 600; padding: 10px 20px; border-radius: 12px; background: #e3f1eb; }
+#notch .nrow.result { width: 640px; }
+</style>
+</head>
+<body>
+<script src="story.js"></script>
+<script src="kit.js"></script>
+<script src="booking.js"></script>
+<script>
+const WHO = { first: "Nora", last: "Whitfield", email: "nora@example.com", phone: "555 0142" };
+const WHEN = "Friday 27 November, 9:40 am", REF = "MG-48213";
+const VISIT = `<b>Check-up</b>Dr. A. Okafor<br>Fri 27 Nov, 9:40 am<br>Maple Grove Clinic`;
+const DONE = `Booked a check-up at Maple Grove Clinic for ${WHEN}. Confirmation ${REF}.`;
+
+Booking.make({
+  id: "doctor",
+  base: `
+    <div id="todobar">This week</div>
+    <div id="todo"><div class="done"><u></u>Renew library card</div><div><u></u>Book a check-up<small>since March</small></div><div><u></u>Water the fern</div><div><u></u>Call Mum back</div><div class="done"><u></u>Pay the plumber</div></div>`,
+  site: { tab: "Maple Grove Clinic: book a visit", url: "maplegroveclinic.example/book", color: "#2f9e77" },
+  pages: [
+    `<h2>Book a visit<small>Maple Grove Clinic</small></h2>
+     <div class="lab">What for?</div><div class="chips"><div class="chip2 sel">Check-up</div><div class="chip2">Vaccination</div><div class="chip2">Follow-up</div></div>
+     <div class="lab">Which day?</div><div class="chips"><div class="chip2 day off">Thu<small>26 Nov</small></div><div class="chip2 day" id="fri">Fri<small>27 Nov</small></div><div class="chip2 day">Mon<small>30 Nov</small></div><div class="chip2 day">Tue<small>1 Dec</small></div></div>
+     <div class="lab">What time?</div><div class="chips"><div class="chip2 off">8:20 am</div><div class="chip2 off">9:00 am</div><div class="chip2" id="t940">9:40 am</div><div class="chip2">10:20 am</div><div class="chip2">11:00 am</div></div>`,
+    `<h2>Your details<small>So the clinic knows who is coming</small></h2>
+     <div id="form"><div><label>First name</label><div class="f" id="f1"></div></div><div><label>Last name</label><div class="f" id="f2"></div></div>
+       <div class="wide"><label>Email</label><div class="f" id="f3"></div></div><div class="wide"><label>Phone</label><div class="f" id="f4"></div></div></div>
+     <div id="visit">${VISIT}<div id="bk">Book appointment</div></div>`,
+    `<div id="yes"><i><svg viewBox="0 0 24 24"><path d="M5 12.5 L10 17.5 L19 7"/></svg></i><b>You're booked</b><p>Check-up with Dr. A. Okafor</p><p class="big">${WHEN}</p><small>Confirmation ${REF}</small></div>`,
+  ],
+  cards: [
+    { at: "card", click: "click", x: 630, y: 300, title: "Pyxi needs your OK", action: "Book a check-up at Maple Grove Clinic",
+      reason: "Scout opens a browser you can watch and uses your name, email and phone on that site. It asks you before the final booking click, and never pays: at the payment page it hands the window to you.", yes: "Allow", no: "Don't" },
+    { at: "last", click: "click2", x: 1010, y: 560, title: "Scout needs your OK", action: `Click "Book appointment"`,
+      reason: "This makes the booking with the details on that page. Check them in the window first.", yes: "Allow", no: "Don't" },
+  ],
+
+  // Your OK first; Scout picks Friday at 9:40 and fills the form; your OK again before the last click.
+  plan(d, B) {
+    const v0 = B.act, card = v0 + 0.25;
+    const click = onBeat(Math.max(card + 2.0, v0 + d[0] + 0.8));
+    const open = click + 0.25, v1 = open + 0.3;
+    const day = open + 1.25, time = day + 0.5, form = time + 0.5;
+    const fill = [form + 0.25, form + 0.7, form + 1.15, form + 1.8], filled = form + 2.4;
+    const last = filled + 0.1, click2 = onBeat(last + 1.6), press = click2 + 0.5, booked = press + 0.25;
+    const v2 = booked + 0.3;
+    return {
+      card, click, open, day, time, form, fill, last, click2, press, booked, voice: [v0 + 0.05, v1, v2], taps: [click, click2],
+      c: onBeat(v2 + d[2] + 1.4), poster: v2 + d[2] + 0.6, show: [open + 0.5, open + 5.0],
+      sfx: [["listen", B.listen], ["pin", card], ["click", click], ["whoosh", open - 0.2], ["tick", day], ["tick", time], ...fill.map((f) => ["tick", f]), ["pin", last], ["click", click2], ["tick", press], ["done", booked]],
+    };
+  },
+  script: (T) => [
+    { at: 0, page: 0 }, { at: T.day, click: "#fri" }, { at: T.day, on: "#fri", cls: "sel" }, { at: T.time, click: "#t940" }, { at: T.time, on: "#t940", cls: "sel" },
+    { at: T.form, page: 1 },
+    { at: T.fill[0], type: "#f1", text: WHO.first, d: 0.3 }, { at: T.fill[1], type: "#f2", text: WHO.last, d: 0.35 },
+    { at: T.fill[2], type: "#f3", text: WHO.email, d: 0.55 }, { at: T.fill[3], type: "#f4", text: WHO.phone, d: 0.4 },
+    { at: T.press, click: "#bk" }, { at: T.booked, page: 2 },
+  ],
+  notch(T, N) {
+    const says = window.STORY.doctor.says;
+    return [N.idle(0), N.listen(T.listen), N.look(T.look, "Looking at your screen"), N.say(T.voice[0] - 0.05, says[0]), N.idle(T.voice[0] + 1.6),
+      N.say(T.voice[1] - 0.05, says[1]), N.work(T.voice[1] + 2.2, "Scout", "Booking", "#9ecbff"), N.result(T.booked + 0.1, "Scout finished", DONE)];
+  },
+  cam: (T, box, cards) => [
+    { at: T.card - 0.1, d: 0.8, v: [cards[0].cx, cards[0].cy + 40, 1.5, -3, 1.2] },     // in on the card, to read it
+    { at: T.open - 0.1, d: 0.8, v: [900, 640, 1.2, 2, 1] },                               // Scout's window opens: the day, the time
+    { at: T.form - 0.1, d: 0.8, v: [820, 590, 1.34, 3, 1.2] },                            // the form filling itself in
+    { at: T.last - 0.1, d: 0.8, v: [1120, 640, 1.32, -3, 1] },                            // the last click is yours to allow
+    { at: T.booked - 0.1, d: 0.9, v: [960, 500, 1.16, -1.5, 0.8] },                       // booked
+    { at: T.booked + 0.9, d: T.c - T.booked, v: [960, 520, 1.28, 1.5, 0.6], ease: out3 },
+  ],
+});
+</script>
+</body>
+</html>

@@ -32,6 +32,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from pyxi import secretstore
 from pyxi.config import VoiceConfig
 from pyxi.voice.bengali import VOICE_ID as BENGALI_VOICE
 from pyxi.voice.bengali import BengaliVoice, is_bengali
@@ -276,6 +277,7 @@ class VoicePrefs(BaseModel):
     speed: float = Field(1.0, ge=0.5, le=1.6)
     language: str = "en"  # Automatic is opt-in: it downloads a bigger multilingual model
     captions: bool = True
+    listen_here: bool = False  # True: speech is turned into text on this PC only (less accurate)
 
 
 def _key(*names: str) -> str | None:
@@ -283,6 +285,58 @@ def _key(*names: str) -> str | None:
         if v := os.environ.get(n):
             return v
     return None
+
+
+# A cloud voice's key: from the environment (someone running Pyxi from the code), else the
+# one pasted into the Voice tab, which is kept in the protected store (pyxi/secretstore.py).
+KEY_ENV = {
+    "elevenlabs": ("ELEVENLABS_API_KEY", "XI_API_KEY"),
+    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+}
+KEY_NAMES = {"elevenlabs": "ElevenLabs", "gemini": "Google Gemini"}
+KEY_BAD_SHAPE = "That doesn't look like a key. Copy the whole key and paste it again."
+
+
+class VoiceKeys:
+    """The keys pasted into the Voice tab, encrypted on this PC. A key goes in and is used;
+    it is never sent back to the window, shown, or written to the log."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._saved: dict[str, str] | None = None
+
+    def _load(self) -> dict[str, str]:
+        if self._saved is None:
+            data = secretstore.read_json(self.path) or {}
+            self._saved = {k: v for k, v in data.items() if k in KEY_ENV and isinstance(v, str) and v}
+        return self._saved
+
+    def get(self, engine: str) -> str | None:
+        return _key(*KEY_ENV.get(engine, ())) or self._load().get(engine)
+
+    def saved(self) -> dict[str, bool]:
+        """Which engines have a key of theirs in the store (never the keys)."""
+        return {e: e in self._load() for e in KEY_ENV}
+
+    def save(self, engine: str, key: str) -> str:
+        """Keep a pasted key. Returns "" when kept, else why not, in plain words."""
+        key = (key or "").strip().strip("\"'")
+        if engine not in KEY_ENV:
+            return "Pick a voice service first."
+        if not (12 <= len(key) <= 400) or re.search(r"\s", key) or not key.isascii():
+            return KEY_BAD_SHAPE
+        data = {**self._load(), engine: key}
+        secretstore.write_json(self.path, data)
+        self._saved = data
+        return ""
+
+    def forget(self, engine: str) -> None:
+        data = {k: v for k, v in self._load().items() if k != engine}
+        if data:
+            secretstore.write_json(self.path, data)
+        else:
+            self.path.unlink(missing_ok=True)
+        self._saved = data
 
 
 def _wav_duration(data: bytes) -> float:
@@ -308,6 +362,7 @@ class VoiceStudio:
         self.config = config
         self.kokoro = KokoroTTS(config, models_dir)
         self.prefs_path = prefs_path
+        self.keys = VoiceKeys(prefs_path.with_name("voice_keys.json"))
         self.prefs = self._load()
         self.bengali = BengaliVoice(models_dir)
         self.last_error: str | None = None
@@ -404,10 +459,39 @@ class VoiceStudio:
     def available(self) -> dict[str, bool]:
         return {
             "kokoro": self.kokoro.installed(),
-            "elevenlabs": bool(_key("ELEVENLABS_API_KEY", "XI_API_KEY")),
-            "gemini": bool(_key("GEMINI_API_KEY", "GOOGLE_API_KEY")),
+            "elevenlabs": bool(self.keys.get("elevenlabs")),
+            "gemini": bool(self.keys.get("gemini")),
             "bengali": self.bengali.installed(),
         }
+
+    async def save_key(self, engine: str, key: str) -> tuple[bool, str]:
+        """A key pasted into the Voice tab: kept in the protected store, then tried once
+        where that costs nothing (ElevenLabs lists the voices). (kept, a line to show)."""
+        if problem := self.keys.save(engine, key):
+            return False, problem
+        name = KEY_NAMES[engine]
+        self.last_error = None
+        if engine == "elevenlabs":
+            self._eleven_voices = None
+            voices = await self._eleven_catalog()
+            if not voices and self.last_error:
+                why, self.last_error = self.last_error, None
+                self._eleven_voices = None
+                if "key was turned down" in why:
+                    self.keys.forget(engine)
+                    return False, f"{name} turned that key down. Copy it again from the {name} website and paste it here."
+                return True, f"Saved. {name} couldn't be reached to load your voices just now. Open this tab again in a minute."
+        return True, f"Saved on this PC. {name} voices are ready to pick."
+
+    def forget_key(self, engine: str) -> str:
+        if engine not in KEY_ENV:
+            return ""
+        self.keys.forget(engine)
+        if engine == "elevenlabs":
+            self._eleven_voices = None
+        if self.prefs.engine == engine and not self.keys.get(engine):
+            self.update(engine="kokoro")  # back to the voice on this PC
+        return f"The {KEY_NAMES[engine]} key was removed from this PC."
 
     @property
     def engine_name(self) -> str:
@@ -433,7 +517,7 @@ class VoiceStudio:
             async with httpx.AsyncClient(timeout=15) as client:
                 r = await client.get(
                     f"{ELEVEN_URL}/voices",
-                    headers={"xi-api-key": _key("ELEVENLABS_API_KEY", "XI_API_KEY") or ""},
+                    headers={"xi-api-key": self.keys.get("elevenlabs") or ""},
                 )
                 r.raise_for_status()
             voices = []
@@ -457,7 +541,8 @@ class VoiceStudio:
                 )
             self._eleven_voices = voices
         except Exception as exc:  # a bad key shouldn't break the settings page
-            self.last_error = f"Couldn't load your ElevenLabs voices: {exc}"
+            log.warning("ElevenLabs voices could not be listed: %s", _short(exc))
+            self.last_error = f"Couldn't load your ElevenLabs voices: {_why(exc)}. {_next('ElevenLabs', exc)}"
             self._eleven_voices = []
         return self._eleven_voices
 
@@ -490,9 +575,15 @@ class VoiceStudio:
             if engine == "gemini":
                 return await self._gemini(voice, text, tone, speed)
         except Exception as exc:
-            msg = f"{engine} voice failed ({_short(exc)}); using the on-device voice for now."
+            # The panel shows this: why in plain words and what to check, not the raw reply
+            # (it used to read "elevenlabs voice failed (HTTP 401: {"detail": ...").
+            name = {"elevenlabs": "ElevenLabs", "gemini": "Gemini"}.get(engine, engine)
+            msg = (
+                f"The {name} voice failed ({_why(exc)}), so Pyxi's own voice is speaking for "
+                f"now. {_next(name, exc)}"
+            )
             if msg != self.last_error:
-                log.warning(msg)
+                log.warning("%s voice failed: %s", name, _short(exc))
             self.last_error = msg
             voice = self.kokoro.config.voice
             if bengali:
@@ -514,9 +605,9 @@ class VoiceStudio:
     async def _eleven(self, voice: str, text: str, speed: float) -> Speech:
         import httpx
 
-        key = _key("ELEVENLABS_API_KEY", "XI_API_KEY")
+        key = self.keys.get("elevenlabs")
         if not key:
-            raise RuntimeError("no ELEVENLABS_API_KEY")
+            raise RuntimeError("no ElevenLabs key")
         clean = strip_tags(text)
         body = {
             "text": clean,
@@ -544,9 +635,9 @@ class VoiceStudio:
     async def _gemini(self, voice: str, text: str, tone: Tone, speed: float) -> Speech:
         import httpx
 
-        key = _key("GEMINI_API_KEY", "GOOGLE_API_KEY")
+        key = self.keys.get("gemini")
         if not key:
-            raise RuntimeError("no GEMINI_API_KEY")
+            raise RuntimeError("no Gemini key")
         clean = strip_tags(text)
         spoken = TAG.sub(
             lambda m: f"<{m.group(1).lower()}>", text
@@ -602,9 +693,39 @@ class VoiceStudio:
         return {
             **self.prefs.model_dump(),
             "available": self.available(),
+            # Whether a key of theirs is kept for each cloud voice. Never the key itself.
+            "own_keys": self.keys.saved(),
             "languages": LANGUAGES,
             "error": self.last_error,
         }
+
+
+def _kind(exc: Exception) -> str:
+    s = f"{type(exc).__name__} {exc}".lower()
+    if re.search(r"\b40[13]\b|unauthori[sz]ed|invalid.{0,12}key|api key not valid|permission", s):
+        return "key"
+    if re.search(r"\b402\b|\b429\b|quota|credits|limit", s):
+        return "quota"
+    if re.search(r"connect|getaddrinfo|network|timeout|timed out|unreachable", s):
+        return "net"
+    return ""
+
+
+def _why(exc: Exception) -> str:
+    """Why a cloud voice didn't work, in a few plain words (the log keeps the raw reply)."""
+    return {
+        "key": "its key was turned down",
+        "quota": "its allowance is used up",
+        "net": "it can't be reached",
+    }.get(_kind(exc), "it didn't answer properly")
+
+
+def _next(name: str, exc: Exception) -> str:
+    return {
+        "key": f"Check the {name} key.",
+        "quota": f"Top up the {name} account, or pick another voice.",
+        "net": "Check the internet connection.",
+    }.get(_kind(exc), "Try again in a minute, or pick another voice.")
 
 
 def _short(exc: Exception) -> str:

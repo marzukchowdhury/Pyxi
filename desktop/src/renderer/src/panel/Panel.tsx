@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { bridge, keysOf } from "../shared/bridge";
+import { bridge, type DictationPrefs, keysOf } from "../shared/bridge";
 import { trusted } from "../shared/trusted";
+import { useAccount } from "../shared/account";
+import { AccountCard } from "./Account";
 import { Activity } from "./Activity";
 import { Grants } from "./Grants";
 import { BrowserConnect } from "./BrowserConnect";
 import { Memories } from "./Memories";
 import { PrivateApps } from "./PrivateApps";
 import { Close, Compass, Cube, Feather, FileStack, Grid, Mark, Mic, Minus, Plus, Replay, Send, Spark, Thread } from "../shared/icons";
+import { PICTURE_ALONE, useChatPicture } from "../shared/pictureInput";
 import type { Agent, Job } from "../shared/protocol";
 import { brain } from "../shared/socket";
 import { answer, getJson, usePanel } from "./store";
@@ -45,7 +48,9 @@ export function Panel() {
       {hello?.demo && (
         <div className="demo-banner">
           {hello.beta?.can_join
-            ? <>Demo mode: Pyxi is using a scripted brain. Have an invite code? Join the beta in <b>Settings</b>.</>
+            ? hello.account?.offered
+              ? <>Demo mode: Pyxi is using a scripted brain. Sign in from <b>Settings</b> to start your 3-day trial.</>
+              : <>Demo mode: Pyxi is using a scripted brain. Have an invite code? Join the beta in <b>Settings</b>.</>
             : <>Demo mode: no API key found, so Pyxi uses a scripted brain. Add OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) to <code>.env</code>, or run <code>pyxi serve --local</code>.</>}
         </div>
       )}
@@ -99,9 +104,13 @@ export function Chat() {
     end.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat.length]);
   const color = (name?: string) => agents.find((a) => a.name === name)?.color ?? "#a78bfa";
+  const chatPicture = useChatPicture(); // a picture pasted or dropped into the chat box
   const send = (t: string) => {
-    if (!t.trim()) return;
-    brain.send({ type: "text", text: t.trim() });
+    if (!t.trim() && !chatPicture.picture) return;
+    // A picture in the box goes with the words; with no words it is a picture to model.
+    if (chatPicture.picture) brain.send({ type: "text", text: t.trim() || PICTURE_ALONE, picture: { data: chatPicture.picture.data } });
+    else brain.send({ type: "text", text: t.trim() });
+    chatPicture.clear();
     setText("");
   };
   return (
@@ -129,10 +138,17 @@ export function Chat() {
         {(state === "thinking" || state === "looking") && <div className="line agent pending"><span className="avatar" /><div className="text shimmer-text">{state === "looking" ? "Looking at your screen" : "Thinking"}</div></div>}
         <div ref={end} />
       </div>
-      <form className="composer" onSubmit={(e) => { e.preventDefault(); send(text); }}>
+      {(chatPicture.picture || chatPicture.problem) && (
+        <div className="chat-picture">
+          {chatPicture.picture && <img src={chatPicture.picture.data} alt="" draggable={false} />}
+          <span>{chatPicture.picture ? "Picture added. Say what to do with it, or press Enter for a 3D model." : chatPicture.problem}</span>
+          <button type="button" aria-label="Remove the picture" title="Remove the picture" onClick={chatPicture.clear}><Close /></button>
+        </div>
+      )}
+      <form className={`composer ${chatPicture.over ? "dropping" : ""}`} onSubmit={(e) => { e.preventDefault(); send(text); }} {...chatPicture.handlers}>
         <button type="button" className={`mic ${state === "listening" ? "live" : ""}`} onClick={() => bridge.ptt()} title={`Talk (${talk.keys.join("+") || "click"})`}><Mic /></button>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask Pyxi anything" />
-        <button type="submit" className="send" disabled={!text.trim()} aria-label="Send"><Send /></button>
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder={chatPicture.picture ? "What should I do with it?" : "Ask Pyxi anything, or paste a picture"} />
+        <button type="submit" className="send" disabled={!text.trim() && !chatPicture.picture} aria-label="Send"><Send /></button>
       </form>
     </div>
   );
@@ -362,6 +378,19 @@ const DETAILS: [string, string, string][] = [
   ["preferences", "Preferences (mornings, aisle seats, Dr. Lee)", "off"],
 ];
 
+/** The first-run tour: play it again, or delete what it was told (pyxi/onboarding.py). */
+function TourSettings() {
+  return (
+    <div className="tour-settings">
+      <p className="muted">The firefly's tour of Pyxi takes about two minutes. What you told it stays on this PC: your name, email and date of birth are in Booking details below, and what you like is in the Memory tab.</p>
+      <div className="booking-row">
+        <button className="primary" onClick={() => brain.send({ type: "onboarding", action: "replay" })}>Replay the tour</button>
+        <button className="ghost" onClick={() => brain.send({ type: "onboarding", action: "forget" })}>Delete what I told the tour</button>
+      </div>
+    </div>
+  );
+}
+
 /** What Scout may fill in when it books something for you. Kept only on this PC. */
 function BookingDetails() {
   const [profile, setProfile] = useState<Record<string, string>>({});
@@ -405,6 +434,7 @@ function BetaCard() {
   const [left, setLeft] = useState<number | null>(null);
   const joined = !!hello?.beta?.joined;
   const ownKey = !!hello?.beta?.own_key;
+  const account = useAccount((s) => s.account);
   useEffect(() => brain.on((e) => {
     if (e.type === "beta") setMessage({ ok: e.ok, text: e.message });
   }), []);
@@ -415,6 +445,10 @@ function BetaCard() {
       .catch(() => setLeft(null));
   }, [joined]);
   if (!hello?.beta || (!joined && !hello.beta.can_join)) return null;
+  // Signed in to a Pyxi account: the Account card above says it all (panel/Account.tsx).
+  if (account?.signed_in || account?.gate === "signed_out") return null;
+  // The server has stopped taking invite codes: nothing to type one into.
+  if (!joined && account?.offered && !account.invite_codes) return null;
   // The developer version (Pyxi Dev, run from the code) uses the developer's own key: no invite.
   if (import.meta.env.DEV && !joined) return null;
   if (joined)
@@ -487,27 +521,122 @@ function ShareToggle() {
   );
 }
 
+// On a Mac the same keys by position: Command where the Windows key is, Option for Alt.
+const ON_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+const DICTATION_KEYS: { id: DictationPrefs["keys"]; name: string }[] = ON_MAC
+  ? [
+      { id: "ctrl+win", name: "Control + Command" },
+      { id: "alt+win", name: "Option + Command" },
+      { id: "shift+win", name: "Shift + Command" },
+    ]
+  : [
+      { id: "ctrl+win", name: "Ctrl + Windows" },
+      { id: "alt+win", name: "Alt + Windows" },
+      { id: "shift+win", name: "Shift + Windows" },
+    ];
+
+/** Dictation: on or off, which keys, hold or press, and whether a model may tidy long ones. */
+function DictationSettings({ available }: { available: boolean }) {
+  const [prefs, setPrefs] = useState<DictationPrefs | null>(null);
+  useEffect(() => {
+    void bridge.dictationPrefs().then(setPrefs);
+    return bridge.onDictationPrefs(setPrefs);
+  }, []);
+  if (!prefs) return null;
+  const change = (part: Partial<DictationPrefs>) => {
+    setPrefs({ ...prefs, ...part });
+    bridge.setDictationPrefs(part);
+  };
+  const keys = DICTATION_KEYS.find((k) => k.id === prefs.keys)?.name ?? "the keys";
+  return (
+    <>
+      <label className="toggle-row">
+        <span>Dictate into any app</span>
+        <input type="checkbox" className="switch" checked={prefs.enabled} onChange={(e) => change({ enabled: e.target.checked })} />
+      </label>
+      <p className="muted">
+        {!available
+          ? "The keyboard hook could not start on this PC, so the dictation keys are not available."
+          : prefs.enabled
+            ? `${prefs.mode === "hold" ? `Hold ${keys}, speak, and let go` : `Press ${keys} for a moment, speak, and press it again`}: your words are typed where your cursor is, in any app. Pyxi does not answer. Esc cancels. Say "new line", "new paragraph", "comma", "full stop" or "question mark" for those. A password box is never typed into, and with no text box in front the words are copied instead.`
+            : "Off: the keys do nothing and the microphone is never opened for dictation."}
+      </p>
+      {prefs.enabled && (
+        <>
+          <label className="select-row">
+            <span>Keys</span>
+            <select value={prefs.keys} onChange={(e) => change({ keys: e.target.value as DictationPrefs["keys"] })}>
+              {DICTATION_KEYS.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+            </select>
+          </label>
+          <label className="select-row">
+            <span>How</span>
+            <select value={prefs.mode} onChange={(e) => change({ mode: e.target.value as DictationPrefs["mode"] })}>
+              <option value="hold">Hold while I speak</option>
+              <option value="toggle">Press to start, press again to stop</option>
+            </select>
+          </label>
+          <label className="toggle-row">
+            <span>Tidy long dictations with a quick model</span>
+            <input type="checkbox" className="switch" checked={prefs.polish} onChange={(e) => change({ polish: e.target.checked })} />
+          </label>
+          <p className="muted">
+            {prefs.polish
+              ? "Dictations of 30 words or more get one quick pass by a model for punctuation and filler words. It may not add or change words: if it does, its version is thrown away. The words (not your voice) are sent for that. Shorter ones are tidied on this PC and typed at once."
+              : "Every dictation is tidied by rules on this PC only, and typed at once."}
+          </p>
+          <label className="toggle-row">
+            <span>Write dictation down with the cloud listener</span>
+            <input type="checkbox" className="switch" checked={prefs.cloud} onChange={(e) => change({ cloud: e.target.checked })} />
+          </label>
+          <p className="muted">
+            {prefs.cloud
+              ? "Dictation is heard the way your questions are (see Voice, Listening): better with names and accents, about two seconds slower, and your voice is sent to be written down."
+              : "Dictation is written down on this PC: the quickest, free, and your voice stays here. Names and unusual words are misheard more often. Bengali and Automatic are heard the way your questions are."}
+          </p>
+        </>
+      )}
+    </>
+  );
+}
+
 export function Settings() {
   const { hello } = usePanel();
   const [keys, setKeys] = useState<Record<string, string | null>>({});
   useEffect(() => {
     void bridge.hotkeys().then(setKeys);
+    return bridge.onDictationPrefs(() => void bridge.hotkeys().then(setKeys)); // the dictation keys changed
   }, []);
   const k = (name: string) => keysOf(keys[name]).join("+") || "unavailable";
+  // "Open Settings" on a card names a part (Your files, Connected accounts, the budget): bring it into view.
+  const section = usePanel((s) => s.settingsSection);
+  const ready = !!hello;
+  useEffect(() => {
+    if (!section || !ready) return;
+    // A moment later: the parts above it (the account, the tour) are still taking their size.
+    const t = window.setTimeout(() => {
+      document.getElementById(`settings-${section}`)?.scrollIntoView({ block: "start" });
+      usePanel.setState({ settingsSection: null });
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [section, ready]);
   if (!hello) return <p className="muted">Waiting for Pyxi's brain…</p>;
   const set = (key: string, value: unknown) => brain.send({ type: "set", key, value });
   return (
     <div className="settings">
+      <AccountCard />
       <BetaCard />
       <div className="kv"><span>Brain</span><b>{hello.model}{hello.local_mode ? " (local)" : ""}{hello.demo ? " · demo" : ""}</b></div>
       <div className="kv"><span>Voice</span><b>{hello.tts}</b></div>
-      <div className="kv"><span>Spent today</span><b>${hello.spent_today.toFixed(3)} of ${hello.daily_budget.toFixed(2)}</b></div>
+      <div className="kv" id="settings-budget"><span>Spent today</span><b>${hello.spent_today.toFixed(3)} of ${hello.daily_budget.toFixed(2)}</b></div>
       <label><input type="checkbox" checked={hello.privacy_paused} onChange={(e) => set("privacy_paused", e.target.checked)} /> Pause screen sharing (Ctrl+Alt+P)</label>
       <label><input type="checkbox" defaultChecked onChange={(e) => set("jobs_headed", e.target.checked)} /> Show teammates' browser windows</label>
       <ShareToggle />
+      <h4>The tour</h4>
+      <TourSettings />
       <h4>Booking details</h4>
       <BookingDetails />
-      <h4>Your files</h4>
+      <h4 id="settings-files">Your files</h4>
       <FileAccess />
       <h4>Private apps</h4>
       <PrivateApps />
@@ -517,11 +646,11 @@ export function Settings() {
       <BrowserConnect />
       <h4>Shopping</h4>
       <PriceChecks />
-      <h4>Connected accounts</h4>
+      <h4 id="settings-accounts">Connected accounts</h4>
       <Connections />
       <h4>Hotkeys</h4>
       {keys.hold && <div className="kv"><span>Talk (hold, release to send)</span><kbd>{k("hold")}</kbd></div>}
-      {keys.dictate && <div className="kv"><span>Dictate (hold, types where your cursor is)</span><kbd>{k("dictate")}</kbd></div>}
+      {keys.dictate && <div className="kv"><span>Dictate (types where your cursor is)</span><kbd>{k("dictate")}</kbd></div>}
       <div className="kv"><span>Type to Pyxi</span><kbd>Ctrl, Ctrl</kbd></div>
       <div className="kv"><span>Talk (press to start or stop)</span><kbd>{k("talk")}</kbd></div>
       <div className="kv"><span>Show or hide this panel</span><kbd>{k("panel")}</kbd></div>
@@ -529,6 +658,8 @@ export function Settings() {
       <div className="kv"><span>Pause screen sharing</span><kbd>{k("privacy")}</kbd></div>
       <div className="kv"><span>Stop everything (every teammate, the mouse, Scout's browser, anything waiting)</span><kbd>{k("stop")}</kbd></div>
       <button className="danger" onClick={() => brain.send({ type: "stop_everything" })}>Stop everything now</button>
+      <h4>Dictation</h4>
+      <DictationSettings available={!!keys.hold} />
       <h4>Privacy</h4>
       <p className="muted">Pyxi only looks at your screen when you talk to it, plus lightweight UI metadata for the Memory Palace. Password managers, banking and password fields are never captured. Everything is stored locally in <code>.pyxi/</code>. Pyxi v{hello.version}.</p>
     </div>

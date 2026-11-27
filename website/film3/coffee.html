@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pyxi demo clip: "Need coffee. Which one?"</title>
+<!--
+  A built mock-up, not a recording. What it shows is what the app does for "coffee near me"
+  (companion/prompts.py): it opens a map search in your browser, looks at the results, and
+  marks the best few right on the page with the notes card (explain_on_screen): one point per
+  pick, each underlined on the page and tied to the card by a thread (overlay/NotesCard.tsx).
+  Made up: the map site (Waymark), the start page, every coffee shop, rating and review.
+-->
+<link rel="stylesheet" href="kit.css">
+<style>
+#start, #mapp { position: absolute; inset: 0; }
+#start { background: #f7f8fb; display: flex; flex-direction: column; align-items: center; padding-top: 210px; }
+#start b { font-family: "Fraunces"; font-size: 64px; font-weight: 650; color: #2a3140; margin-bottom: 40px; }
+#start div { width: 820px; height: 76px; border-radius: 38px; background: #fff; box-shadow: 0 2px 10px rgba(20, 30, 60, .12); }
+#start p { display: flex; gap: 30px; margin-top: 60px; }
+#start p i { display: block; width: 110px; height: 110px; border-radius: 26px; background: #e4e8f0; }
+#mapp { opacity: 0; background: #e9efe6; }
+#list { position: absolute; left: 0; top: 0; bottom: 0; width: 610px; background: #fff; box-shadow: 2px 0 12px rgba(20, 30, 60, .12); padding: 22px 30px; z-index: 2; }
+#list .find { height: 60px; border-radius: 30px; background: #eef1f5; display: flex; align-items: center; padding: 0 26px; font-size: 22px; color: #2a3140; font-weight: 550; margin-bottom: 8px; }
+.place { padding: 20px 0 18px; border-bottom: 1.5px solid #eceff4; }
+.place strong { display: block; font-size: 28px; color: #151a26; font-weight: 700; letter-spacing: -.01em; }
+.place p { font-size: 21px; color: #4b5364; margin-top: 7px; font-weight: 500; }
+.place p b { color: #c77700; font-weight: 700; }
+.place p em { font-style: italic; color: #5d6676; }
+.place.dim strong, .place.dim p { color: #9aa3b2; }
+.place.dim p b { color: #b9a47c; }
+#map { position: absolute; left: 610px; right: 0; top: 0; bottom: 0; overflow: hidden; }
+#map .rd { position: absolute; background: #fff; box-shadow: 0 0 0 1.5px #d6ddd0; }
+#map .park { position: absolute; background: #cfe5c4; border-radius: 30px; }
+#map .water { position: absolute; background: #bcd9ee; border-radius: 80px; }
+.pin { position: absolute; width: 58px; height: 58px; margin: -58px 0 0 -29px; border-radius: 50% 50% 50% 0; transform-origin: 50% 100%; background: #d94a38; box-shadow: 0 6px 14px rgba(0, 0, 0, .3); display: grid; place-items: center; }
+.pin b { font-size: 24px; color: #fff; font-weight: 700; }
+.pin.dim { background: #9aa3b2; }
+#you { position: absolute; left: 430px; top: 470px; width: 30px; height: 30px; margin: -15px; border-radius: 50%; background: #2f6bff; border: 5px solid #fff; box-shadow: 0 0 0 14px rgba(47, 107, 255, .2); }
+#card { left: 1240px; top: 300px; width: 500px; }
+</style>
+</head>
+<body>
+<script src="story.js"></script>
+<script src="kit.js"></script>
+<script>
+const PLACES = [
+  { name: "Fern & Finch", line: `<span id="h1"><b>4.8</b> (412) &middot; 3 min walk</span>`, more: "Open till 6 pm", x: 330, y: 380 },
+  { name: "Marlow's Coffee", line: `<b>4.6</b> (268) &middot; 6 min walk`, more: `<span id="h2">Open till 9 pm</span>`, x: 640, y: 560 },
+  { name: "Tin Kettle Bakery", line: `<b>4.7</b> (530) &middot; 8 min walk`, more: `<span id="h3"><em>&ldquo;Best almond croissant in town&rdquo;</em></span>`, x: 250, y: 690 },
+  { name: "Daily Grind Express", line: `<b>3.9</b> (97) &middot; 9 min walk`, more: "Open till 5 pm", x: 800, y: 250, dim: true },
+];
+const POINTS = [
+  { h: "h1", text: "Fern & Finch: 4.8, 3 min walk" },
+  { h: "h2", text: "Marlow's: open till 9 pm" },
+  { h: "h3", text: "Tin Kettle: best pastries" },
+];
+Film.scene({
+  id: "coffee",
+  screen: `
+    <div class="tabs"><div class="tab"><u id="tabdot"></u><span id="tabname">New tab</span></div><div class="dots"><s></s><s></s><s></s></div></div>
+    <div class="addr"><b></b><b></b><div id="url"></div></div>
+    <div class="page">
+      <div id="start"><b>Good afternoon</b><div></div><p><i></i><i></i><i></i><i></i><i></i></p></div>
+      <div id="mapp">
+        <div id="list"><div class="find">coffee open now</div>
+          ${PLACES.map((p) => `<div class="place ${p.dim ? "dim" : ""}"><strong>${p.name}</strong><p>${p.line}</p><p>${p.more}</p></div>`).join("")}</div>
+        <div id="map">
+          <div class="water" style="left:700px; top:-60px; width:420px; height:230px"></div>
+          <div class="park" style="left:60px; top:60px; width:230px; height:190px"></div><div class="park" style="left:560px; top:650px; width:300px; height:190px"></div>
+          <div class="rd" style="left:0; right:0; top:440px; height:34px"></div><div class="rd" style="left:0; right:0; top:230px; height:20px; transform:rotate(-4deg)"></div>
+          <div class="rd" style="left:0; right:0; top:660px; height:20px; transform:rotate(3deg)"></div>
+          <div class="rd" style="left:400px; top:-40px; bottom:-40px; width:34px"></div><div class="rd" style="left:720px; top:-40px; bottom:-40px; width:20px; transform:rotate(5deg)"></div>
+          <div class="rd" style="left:170px; top:-40px; bottom:-40px; width:20px; transform:rotate(-3deg)"></div>
+          <div id="you"></div>
+          ${PLACES.map((p, k) => `<div class="pin ${p.dim ? "dim" : ""}" style="left:${p.x}px; top:${p.y}px"><b style="transform:rotate(45deg)">${k + 1}</b></div>`).join("")}
+        </div>
+      </div>
+    </div>`,
+  overlay: `<svg id="ink" class="ov ink" width="1920" height="1080" style="overflow:visible"></svg>
+    <div class="notes" id="card"><div class="nt">Coffee near you</div><div class="rule"></div>
+      ${POINTS.map((p, k) => `<div class="row"><i></i><span>${p.text}</span><b>${k + 1}</b></div>`).join("")}</div>`,
+
+  // The map opens as Pyxi says so; then the card pins, and each pick is written as it is said.
+  plan(d, B) {
+    const open = B.act, v0 = open + 0.05;
+    const card = onBeat(v0 + d[0] + 0.2), v1 = card + 0.25;
+    const v2 = v1 + d[1] + 0.3, v3 = v2 + d[2] + 0.3;
+    return {
+      open, card, voice: [v0, v1, v2, v3], points: [v1 + 0.1, v2 + 0.1, v3 + 0.1], taps: [], show: [card - 0.5, card + 4.5], poster: v3 + d[3] + 0.2,
+      c: onBeat(v3 + d[3] + 0.8),
+      sfx: [["listen", B.listen], ["whoosh", open - 0.1], ...PLACES.map((_, k) => ["tick", open + 0.45 + k * 0.12]), ["pin", card], ["tick", v1 + 0.2], ["tick", v2 + 0.2], ["tick", v3 + 0.2]],
+    };
+  },
+  notch(T, N) {
+    const says = window.STORY.coffee.says;
+    return [N.idle(0), N.listen(T.listen), N.look(T.look, "Looking at your screen"), N.say(T.voice[0] - 0.05, says[0]), N.look(T.voice[0] + 1.3, "Looking at the map"),
+      ...says.slice(1).map((s, i) => N.say(T.voice[i + 1] - 0.05, s)), N.idle(T.c - 0.9)];
+  },
+
+  init(T) {
+    const ink = $("#ink"), card = $("#card");
+    ink.innerHTML = "";
+    card.style.opacity = 1; card.style.height = "auto";
+    const rows = $$(".row", card), edge = boxOf("#list");
+    this.rows = rows.map((row, k) => {
+      const rects = [...document.getElementById(POINTS[k].h).getClientRects()];
+      const under = rects.map((r) => { const p = svg("path", { d: `M ${r.left} ${r.bottom + 1} Q ${r.left + r.width / 2} ${r.bottom + 4.5} ${r.right} ${r.bottom + 1}`, pathLength: 1, "stroke-dasharray": "1 1" }); ink.append(p); return p; });
+      const last = rects[rects.length - 1], dot = row.querySelector("i").getBoundingClientRect();
+      const x0 = edge.x + edge.w - 44, y0 = last.top + last.height / 2, x1 = dot.left - 14, y1 = dot.top + dot.height / 2;
+      const thread = svg("path", { class: "thread", d: `M ${x1} ${y1} C ${x1 - 140} ${y1} ${x0 + 160} ${y0} ${x0 + 16} ${y0}`, pathLength: 1, "stroke-dasharray": "1 1" });
+      const badge = svg("g");
+      badge.append(svg("circle", { cx: x0, cy: y0, r: 15 }), Object.assign(svg("text", { x: x0, y: y0 + 6.5 }), { textContent: k + 1 }));
+      ink.append(thread, badge);
+      return { row, under, thread, badge, text: row.querySelector("span"), num: row.querySelector("b"), dot: row.querySelector("i") };
+    });
+    const top = card.getBoundingClientRect().top;
+    this.heights = [$(".rule", card).getBoundingClientRect().bottom - top + 26, ...rows.map((r) => r.getBoundingClientRect().bottom - top + 24)];
+    this.pins = $$(".pin");
+    this.stops = [{ at: 0, d: 0, x: 1120, y: 560 }, { at: T.open + 0.3, d: 0.9, x: 1000, y: 800 }];
+    this.cam = [
+      { at: 0, v: [960, 539, 0.97, -8, 4] },
+      { at: T.listen - 0.2, d: 0.6, v: [960, 300, 1.55, -4, 2] },
+      { at: T.look - 0.2, d: 0.7, v: [960, 539, 0.97, -3, 1.4] },
+      { at: T.open + 0.2, d: 1.0, v: [960, 520, 1.06, 2, 1] },                 // the map, opened
+      { at: T.card - 0.3, d: 0.9, v: [940, 470, 1.2, -3, 1.2] },                // the picks, and the card beside them
+      { at: T.card + 0.6, d: T.c - T.card, v: [930, 490, 1.28, -1.5, 1], ease: out3 },
+    ];
+  },
+
+  draw(t, T) {
+    // the map search opens in the browser
+    const on = seg(t, T.open + 0.1, T.open + 0.35);
+    $("#mapp").style.opacity = on; $("#start").style.opacity = 1 - on;
+    const went = t >= T.open + 0.1;
+    $("#url").textContent = went ? "waymark.example/search/coffee+open+now" : "";
+    $("#tabname").textContent = went ? "coffee open now on Waymark" : "New tab";
+    $("#tabdot").style.background = went ? "#d94a38" : "#b9c0cc";
+    this.pins.forEach((p, k) => { const u = back(seg(t, T.open + 0.4 + k * 0.12, T.open + 0.75 + k * 0.12)); p.style.transform = `rotate(-45deg) scale(${u})`; });
+    $("#you").style.boxShadow = `0 0 0 ${10 + 8 * Math.sin(t * 3) ** 2}px rgba(47, 107, 255, .2)`;
+
+    const card = $("#card");
+    const c = back(seg(t, T.card, T.card + 0.42));
+    card.style.opacity = seg(t, T.card, T.card + 0.1);
+    card.style.transform = `translate(${40 * (1 - c)}px, ${14 * (1 - c)}px) scale(${mix(0.9, 1, c)})`;
+    let tall = this.heights[0];
+    this.rows.forEach((r, k) => {
+      const at = T.points[k];
+      tall += (this.heights[k + 1] - this.heights[k]) * out3(seg(t, at - 0.12, at + 0.3));
+      const wr = io3(seg(t, at, at + 0.8));
+      r.row.style.opacity = seg(t, at - 0.1, at + 0.05);
+      r.text.style.clipPath = `inset(0 ${(1 - wr) * 100}% 0 0)`;
+      r.dot.style.opacity = seg(t, at, at + 0.2); r.num.style.opacity = 0.8 * seg(t, at + 0.7, at + 0.9);
+      const n = r.under.length;
+      r.under.forEach((p, i) => { const u = io3(seg(t, at + 0.15 + (0.6 * i) / n, at + 0.15 + (0.6 * (i + 1)) / n)); p.setAttribute("stroke-dashoffset", 1 - u); p.style.opacity = u > 0 ? 1 : 0; });
+      const th = io3(seg(t, at + 0.4, at + 0.95));
+      r.thread.setAttribute("stroke-dashoffset", 1 - th); r.thread.style.opacity = th > 0 ? 1 : 0;
+      const b = back(seg(t, at + 0.75, at + 1.05));
+      r.badge.style.opacity = seg(t, at + 0.75, at + 0.85); r.badge.style.transformBox = "fill-box"; r.badge.style.transformOrigin = "center"; r.badge.style.transform = `scale(${mix(0.4, 1, b)})`;
+    });
+    card.style.height = tall + "px";
+    // the firefly leaves the pointer for the corner of the card as it pins it
+    const ptr = pointer(t, this.stops);
+    const go = io3(seg(t, T.card - 0.3, T.card + 0.4));
+    const fly = [mix(ptr[0] + 44, 1228, go), mix(ptr[1] + 42, 288, go) - 34 * Math.sin(Math.PI * go)];
+    const k = keyed(t, this.cam);
+    return { ptr, fly, cam: { x: k[0], y: k[1], s: k[2], ry: k[3], rx: k[4] } };
+  },
+});
+</script>
+</body>
+</html>

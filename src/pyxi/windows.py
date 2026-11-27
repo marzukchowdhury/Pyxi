@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
-import re
 import ctypes.wintypes as wt
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -122,13 +122,27 @@ def snap(hwnd: int, where: str) -> None:
     place(hwnd, *rects[where])
 
 
+_NO_KEY = 0xE8  # unassigned in Windows; the usual key for masking a lone Alt
+
+
 def focus(hwnd: int) -> bool:
     """Bring a window to the front so typing goes to it. Windows only lets the app the user
-    last used do this, so a harmless Alt tap first marks this process as "in use"."""
+    last used do this, so an Alt tap first marks this process as "in use".
+
+    A window that is already in front is left exactly as it is. The Alt tap used to be sent
+    then too, and a lone Alt in most apps moves the keyboard to the menu bar: the paste that
+    followed went there and vanished (live: a table pasted three times into the spreadsheet
+    in front of the founder, nothing in the sheet, and "Done" each time). When the tap is
+    needed, a key that means nothing is pressed inside it, so no menu opens in the app that
+    is in front at that moment either."""
     u = _user32()
+    if int(u.GetForegroundWindow() or 0) == int(hwnd) and not u.IsIconic(hwnd):
+        return True
     if u.IsIconic(hwnd):
         u.ShowWindow(hwnd, SW_RESTORE)
     u.keybd_event(0x12, 0, 0, 0)  # Alt down
+    u.keybd_event(_NO_KEY, 0, 0, 0)  # a key no app listens for: Alt+that is not "Alt alone"
+    u.keybd_event(_NO_KEY, 0, 2, 0)
     u.keybd_event(0x12, 0, 2, 0)  # Alt up
     ok = bool(u.SetForegroundWindow(hwnd))
     for _ in range(10):  # the switch takes a moment, with no window in front meanwhile
@@ -168,15 +182,118 @@ def exe_of(hwnd: int) -> str:
         k.CloseHandle(handle)
 
 
+# The default browser, as Windows names its choice for https links -> the program.
+_DEFAULT_BROWSERS = {
+    "firefox": "firefox.exe",
+    "chrome": "chrome.exe",
+    "msedge": "msedge.exe",
+    "brave": "brave.exe",
+}
+
+
+def _program_path(name: str) -> str:
+    """Where a program is installed ("chrome.exe" -> its full path), as Windows records it."""
+    try:
+        import winreg
+
+        for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                with winreg.OpenKey(
+                    root, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{name}"
+                ) as key:
+                    path = str(winreg.QueryValueEx(key, "")[0]).strip('"')
+                if path and Path(path).is_file():
+                    return path
+            except OSError:
+                continue
+    except ImportError:
+        pass
+    return ""
+
+
+def default_browser() -> str:
+    """The full path of the browser Windows opens links with, if it is one Pyxi can open a
+    new window in ('' otherwise)."""
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
+        ) as key:
+            choice = str(winreg.QueryValueEx(key, "ProgId")[0]).lower()
+    except (OSError, ImportError):
+        return ""
+    name = next((exe for word, exe in _DEFAULT_BROWSERS.items() if word in choice), "")
+    return _program_path(name) if name else ""
+
+
+_NAMED_BROWSER = re.compile(r"(?i)\b(chrome|firefox|edge|brave)\b")
+_BROWSER_EXE = {"chrome": "chrome.exe", "firefox": "firefox.exe", "edge": "msedge.exe", "brave": "brave.exe"}
+
+
+def browser_for(words: str, like: int | None = None) -> str:
+    """The browser a site should open in: the one their words name ("on Chrome"), else the
+    one they are in, else the one they have open. '' when that is their default browser
+    anyway or none is known: the link is then opened the ordinary way.
+
+    Live: "open Google Sheets on Chrome", three times. Each one opened in Edge, the default
+    browser, behind the Chrome window they were looking at: "still not done"."""
+    if not available():
+        return ""
+    named = _NAMED_BROWSER.search(words or "")
+    if named:
+        want = _BROWSER_EXE[named.group(1).lower()]
+        for hwnd, _title, _exe in open_windows():
+            exe = exe_of(hwnd)
+            if Path(exe).name.lower() == want:
+                return exe
+        return _program_path(want)
+    exe = exe_of(like) if like else ""
+    if Path(exe).name.lower() not in BROWSER_FLAGS:
+        exe = their_browser()
+    default = default_browser()
+    return "" if not exe or (default and Path(exe).name.lower() == Path(default).name.lower()) else exe
+
+
+def open_in(exe: str, url: str, window: int | None = None) -> None:
+    """Open an address in that browser: a new tab in its window that was used last. ``window``:
+    the one they are in. When it is a window of that browser it is brought to the front
+    first, so the tab lands there.
+
+    Live, three times running: "open techlandbd.com on a new tab", with Firefox on the
+    screen in front of them and a second Firefox window on another screen. The tab went to
+    the other window each time, and "then why not opening it?"."""
+    if window and Path(exe_of(window)).name.lower() == Path(exe).name.lower():
+        focus(window)
+        time.sleep(0.15)  # the browser has to notice which of its windows is in front
+    subprocess.Popen([exe, url])
+
+
+def their_browser() -> str:
+    """The browser to open a site in when they are not in one: the one they have open (the
+    window nearest the front), else their default one. '' when neither is one Pyxi knows."""
+    for hwnd, _title, _exe in open_windows():
+        exe = exe_of(hwnd)
+        if Path(exe).name.lower() in BROWSER_FLAGS:
+            return exe
+    return default_browser()
+
+
 async def open_new_window(target: str, like: int | None = None, is_url: bool = True) -> int | None:
     """Open a site or app in its own new window and return that window (None if it never showed).
 
-    Sites open in a new window of the browser the user is in (so it can be placed), falling back to
-    Edge, which every Windows PC has."""
+    Sites open in a new window of the browser the user is in (so it can be placed); when the
+    window they are in is not a browser, in the browser they have open, else their default
+    one; and only then Edge, which every Windows PC has. (Live: asked from another app, YouTube
+    went to Edge beside a Firefox full of their tabs: "I want you to work on Mozilla Firefox".)"""
     before = _visible_windows()
     if is_url:
         exe = exe_of(like) if like else ""
         flag = BROWSER_FLAGS.get(Path(exe).name.lower()) if exe else None
+        if not flag:
+            exe = their_browser()
+            flag = BROWSER_FLAGS.get(Path(exe).name.lower()) if exe else None
         if flag:
             subprocess.Popen([exe, flag, target])
         else:

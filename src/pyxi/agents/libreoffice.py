@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
@@ -40,6 +41,10 @@ SIGNER = "The Document Foundation"
 APPROX_MB = 380
 
 Progress = Callable[["Status"], Awaitable[None]]
+
+# Held for each run of soffice. Two at once share Pyxi's one profile, the second hands its file
+# to the first and exits before the PDF exists, and that job reads as "couldn't convert".
+CONVERTING = threading.Lock()
 
 
 def home() -> Path:
@@ -88,12 +93,13 @@ def warm_up(soffice: str | Path) -> bool:
             doc = Document()
             doc.add_paragraph("Pyxi")
             doc.save(str(src))
-            subprocess.run(
-                command(soffice, "--convert-to", "pdf", "--outdir", tmp, str(src)),
-                capture_output=True,
-                timeout=180,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            with CONVERTING:
+                subprocess.run(
+                    command(soffice, "--convert-to", "pdf", "--outdir", tmp, str(src)),
+                    capture_output=True,
+                    timeout=180,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
             return (Path(tmp) / "warm-up.pdf").is_file()
     except (OSError, subprocess.SubprocessError, ImportError):
         return False
@@ -201,7 +207,11 @@ def unpack(msi: Path, target: Path) -> Path:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if result.returncode not in (0, 3010):
-        raise RuntimeError(f"Unpacking LibreOffice failed (msiexec {result.returncode}).")
+        log.warning("unpacking LibreOffice failed: msiexec %s", result.returncode)
+        raise RuntimeError(
+            "Windows couldn't unpack LibreOffice. If another installer or a Windows update "
+            "is running, let it finish, then try again from Settings, under Your files."
+        )
     found = find_soffice(target)
     if found is None:
         raise RuntimeError("LibreOffice unpacked, but soffice.exe wasn't in it.")
@@ -381,4 +391,8 @@ def _plain(exc: BaseException) -> str:
         return "I couldn't download LibreOffice. Is the internet connection up?"
     if "space" in low or "errno 28" in low:
         return "There isn't enough free disk space for LibreOffice (it needs about 1.5 GB)."
-    return text.splitlines()[0][:200] if text else type(exc).__name__
+    from pyxi.plainwords import plain_failure
+
+    return plain_failure(
+        exc, "LibreOffice didn't install. Try again from Settings, under Your files.", 240
+    )

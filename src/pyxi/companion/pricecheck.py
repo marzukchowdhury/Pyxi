@@ -276,6 +276,13 @@ async def run_check(
             "job_event", job_id=job.id, agent="Scout", event="status", data={"message": line}
         )
 
+    async def gave_up(why: str) -> None:
+        await brain.jobs.settle(job, ok=False, summary=why)
+        if not auto:
+            # They asked, and were told the tag by the price would give the answer. No tag
+            # is coming, so it is said: this used to end without a word.
+            brain._spawn(brain._say_when_free(why))
+
     own_reader = reader is None
     reader = reader or Reader(brain.settings)
     try:
@@ -286,7 +293,10 @@ async def run_check(
             parsed = shopping.parse_product_page(page, url) if page else None
             product = merge(parsed, hint_offer)
         if not product.title:
-            await brain.jobs.settle(job, ok=False, summary="I couldn't tell which product this is.")
+            await gave_up(
+                "I couldn't tell which product this is. Open the product's own page, then "
+                "ask me again."
+            )
             return None
         if auto and not (product.model or product.gtin or shopping.model_numbers(product.title)):
             # No model number or barcode: nothing could prove a match, so stay out of the way.
@@ -301,9 +311,10 @@ async def run_check(
         )
     except Exception as exc:
         log.exception("price check failed")
-        await brain.jobs.settle(
-            job, ok=False, summary=f"The price check hit a snag: {str(exc)[:120]}"
-        )
+        from pyxi import plainwords
+
+        why = plainwords.plain_failure(exc, "Ask me again in a minute.", 120)
+        await gave_up(f"I couldn't check other stores just now. {why}")
         return None
     finally:
         if own_reader:

@@ -24,19 +24,32 @@ from pathlib import Path
 
 from otto.config import load_dotenv
 from PIL import Image
+from specialist_scenarios import SCENARIOS as SPECIALIST_SCENARIOS
+from specialist_scenarios import install as specialist_fakes
+from specialist_scenarios import problems as specialist_problems
 
-from pyxi import files_access, tidy
+from pyxi import files_access, tidy, windows
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
 from pyxi.hub import Hub
 from pyxi.screen.context import ScreenContext, UIElement, WindowInfo
 from pyxi.screen.ocr import TextLine
-from specialist_scenarios import SCENARIOS as SPECIALIST_SCENARIOS
-from specialist_scenarios import install as specialist_fakes
-from specialist_scenarios import problems as specialist_problems
+
+# A scenario never opens a real browser tab: addresses go out as the app's own "action".
+windows.browser_for = lambda words, like=None: ""  # type: ignore[assignment]
+
+
+async def _every_site_exists(host):  # the suite does not ask the internet about made-up sites
+    return True
+
+
+import pyxi.companion.actions as _actions  # noqa: E402
+
+_actions._resolves = _every_site_exists  # type: ignore[assignment]
 
 DB = ".pyxi/pyxi.db"
 MAPS_SCREEN = "turn_7252307e"  # Google Maps showing coffee places open now
+AMAZON_SCREEN = "turn_2261e56c"  # Amazon.ca results for wired IEMs, price filter $15 to $30
 EL = re.compile(r'^\s*\[(\d+)\] (\w+)(?: "(.*)")? @\((-?\d+),(-?\d+),(\d+)x(\d+)\)')
 OCR = re.compile(r'^\[(\d+)\] "(.*)" @\((-?\d+),(-?\d+),(\d+)x(\d+)\)')
 
@@ -386,6 +399,16 @@ SIMPLE_SCENARIOS = [
     ("simple new doc", FIREFOX, "Open a new Google Doc and write a short welcome note for my team.", "do"),
     ("simple merge windows", FIREFOX, "Put all the tabs from both Firefox windows into one window.", "do"),
     ("simple zoom", FIREFOX, "Zoom in on this page a bit.", "do"),
+    # Live: done with the mouse, 63 seconds, and it gave up. The browser's own keys take a second.
+    # Live, with the extension just connected: "search techland.bd for earphones" went to a
+    # web search and an answer about other shops; "find it on this website" went to the mouse.
+    ("tab search a site", FIREFOX, "Search techlandbd.com for earphones.", "tab:use_tab"),
+    ("tab find here", SHOP_SCREEN, "Find wireless earbuds on this website.", "tab:use_tab"),
+    ("tab add to cart", SHOP_SCREEN, "Add the first one to my cart.", "tab:use_tab"),
+    ("tab read page", SHOP_SCREEN, "What does this page say about returns and refunds?", "tab:read_tab"),
+    ("simple close tabs", FIREFOX, "Close the last two tabs.", "tabs:close last 2"),
+    ("simple close tab", FIREFOX, "Close this tab.", "tabs:close"),
+    ("simple reopen tab", FIREFOX, "Oops, bring back the tab I just closed.", "tabs:reopen"),
     ("simple how pivot", BLANK_SHEET, "How do I make a pivot table here?", "teach"),
 ]
 SCENARIOS += SIMPLE_SCENARIOS
@@ -420,6 +443,89 @@ TRYOUT_SCENARIOS = [
     ),
 ]
 SCENARIOS += TRYOUT_SCENARIOS
+
+# The founder's trial of 10 November, 8 PM (the screens are his own, from that evening).
+HASHES, GEN_SHEET, SHEET_CHROME = "turn_b655c00c", "turn_11642df5", "turn_179b33af"
+NIGHT_SCENARIOS = [
+    # Live: "those mean the column is too narrow... click A2 and I'll drop six dates in", and
+    # the dates pasted into the same narrow column showed as hashes again.
+    ("night hashes", HASHES, "Can you give some random dates instead of hashtags?", "widen"),
+    # Live: "I can't build a true pivot table in GenOffice from here... click cell H1 first".
+    ("night app pivot", GEN_SHEET, "Create a pivot table for the information we have on the screen.", "hands_no_cant"),
+    # Live, four times running on three screens: the window in front made full-screen.
+    (
+        "night split",
+        SHEET_CHROME,
+        "Split the screen into two parts. The right side should have Google Chrome, the left side "
+        "should have my Mozilla Firefox window that's open in the background.",
+        "arrange",
+    ),
+    # Live: the site was opened and the search forgotten, until they asked again.
+    ("night two parts", FIREFOX, "Go to techlandbd.com and look for earphones there.", "two_parts"),
+    # Live: "10 AM Eastern is 7 AM in Vancouver", from the model's memory of the zones.
+    ("night time zone", FIREFOX, "An interview is at 10 AM Eastern tomorrow. What time is that for me here?", "zone"),
+]
+SCENARIOS += NIGHT_SCENARIOS
+
+# An idea with a known shape gets a typed diagram (Pyxi gives the content, the board lays it
+# out); how a physical thing works is still drawn freehand. SCEN_BOARDS=<folder> keeps what was
+# drawn as JSON, to look at it in the overlay.
+DIAGRAM_SCENARIOS = [
+    ("diagram refund", FIREFOX, "How does a refund get approved?", "diagram:steps|flowchart"),
+    ("diagram rent or buy", FIREFOX, "Compare renting and buying a home.", "diagram:comparison"),
+    ("diagram mortgage", FIREFOX, "How does a mortgage application get decided?", "diagram:steps|flowchart"),
+    ("diagram habit", FIREFOX, "How does a habit form? Draw it.", "diagram:loop|steps"),
+    ("diagram pump", FIREFOX, "How does a bicycle pump push air into the tyre? Draw it.", "sketch"),
+]
+SCENARIOS += DIAGRAM_SCENARIOS
+
+# The steps after the first one of a walk-through: the turns Pyxi starts by itself when they
+# click the mark. The question is the step they have just done: "step|action|label|goal".
+# (The screens are the founder's own, of 10 and 11 November: each is what was on screen
+# once that step was done.)
+BOOT = "Open UEFI firmware settings (BIOS) from Windows Recovery, without the Delete key"
+PASSWORD = "Change the Facebook password"
+SETTINGS_HOME, SYSTEM_PAGE, FB_MENU, FB_ACCOUNTS = "turn_9c08ecf4", "turn_e668c9fc", "turn_9f297a5e", "turn_db1a58ec"
+NEXT_STEP_SCENARIOS = [
+    # Live: Recovery was under the bottom edge of the list. A scroll for it, by its element.
+    ("guide next scroll", SYSTEM_PAGE, f"1|click|System|{BOOT}", "next_step:scroll"),
+    ("guide next menu", FB_MENU, f"1|click|Account menu|{PASSWORD}", "next_step"),
+    ("guide next accounts", FB_ACCOUNTS, f"4|click|Accounts Center|{PASSWORD}", "next_step"),
+    # They said "done" and had not done it (Settings is still on Home): the same step again.
+    ("guide next not done", SETTINGS_HOME, f"said|click|System|{BOOT}", "next_step:same"),
+]
+SCENARIOS += NEXT_STEP_SCENARIOS
+
+# The trial of 12 November: "Pyxi, stop, stop, don't talk. You're talking too much." The same
+# requests on the screens they were asked on (kept in the local history, not in the repo).
+# "brief": three sentences and 55 words at most for the whole turn.
+TALK_SCENARIOS = [
+    ("talk small", "turn_7a0f943b", "Pyxi, how are you?", "brief"),
+    ("talk pick", "turn_195ecc89", "Can you find me the best IEM earphones? My budget is $30.", "brief:shop"),
+    ("talk cheapest", "turn_bfa96ecc", "Can you see this earphone? Can you find me the cheapest place where I can get this?", "brief"),
+]
+SCENARIOS += TALK_SCENARIOS
+
+# 13 November, what Pyxi says and how it chooses: the card's first point said the opener
+# again; "tell me what it's about" was only put in the email; "opening a blank sheet" with
+# only windows moved; a workbook "in Microsoft Excel" turned down with "I can't launch Excel";
+# three keyboards read off a picture of the shop's page, one row filled, headed "US$".
+WORKBOOK_BRIEF = (
+    "Build me a financial workbook in Microsoft Excel with 15 sheets: Assumptions, Revenue, "
+    "Headcount, Payroll, Operating costs, Capex, Depreciation, Debt, Tax, Income statement, "
+    "Balance sheet, Cash flow, Scenarios, Charts and a Summary. Use sample numbers for a small "
+    "software company over three years, link the sheets with formulas, and send me a screenshot "
+    "of the finished file."
+)
+CHOSEN_SCENARIOS = [
+    ("chosen once post", POST, "What exactly is this post about?", "once"),
+    ("chosen once windows", FIREFOX, "Explain what this window is for and what I can do in it.", "once"),
+    ("chosen told", FIREFOX, "Find the latest email from Amazon, tell me what it's about, and email me a three-line summary.", "told"),
+    ("chosen left sheet", FIREFOX, "Can you open a blank spreadsheet on the left side of the screen?", "arrange_new"),
+    ("chosen workbook", GEN_SHEET, WORKBOOK_BRIEF, "build"),
+    ("chosen keyboards", FIREFOX, "Look up the three best rated wireless keyboards under $80, put them in a new Google Sheet with price and rating and make the cheapest one bold.", "shop_rows"),
+]
+SCENARIOS += CHOSEN_SCENARIOS
 
 # What Pyxi must never sound like, in any scenario.
 STOCK = re.compile(r"\b(roger that|copy that|aye aye|leave it with me|on the case|say no more)\b", re.I)
@@ -499,6 +605,20 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     hub.connect(record)
     brain = Brain(settings, hub, screen=Replay(screen_from(turn_id)))
     background: list[str] = []
+    if expect.startswith("tab:"):
+        # Their browser is connected (pretend): which route does the request take? Nothing is
+        # sent to a browser: the tab tools only record what they were asked.
+        from pyxi.companion import tabwork
+
+        brain.browser._conns["pretend"] = type("Conn", (), {"browser": "Chrome", "id": "pretend"})()
+
+        async def fake_tab(brain_, name, args):
+            if name not in ("read_tab", "use_tab"):
+                return await real_tab(brain_, name, args)
+            background.append(f"tab: {name} {json.dumps(args)[:200]}")
+            return "Tab: TechLand BD (https://www.techlandbd.com/)\nEarphones, headphones, laptops." if name == "read_tab" else None
+
+        real_tab, tabwork.handle = tabwork.handle, fake_tab
 
     async def fake_errand(task: str, user_text: str, **kw) -> None:
         background.append(f"errand: {task[:70]}")
@@ -565,8 +685,13 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     real_quick = brain._quick_action
 
     async def fake_quick(action, value):  # never pause their music, change volume or open apps
-        if action in ("media", "volume", "open_app", "insert"):
+        if action in ("media", "volume", "open_app", "insert", "tabs"):  # nor close their tabs
             background.append(f"{action}: {value}")
+            return None
+        if action == "open_url" and "amazon." in value and "/s?" in value:
+            # Their shop's own search: not opened for real, the screen becomes its results.
+            background.append(f"open_url: {value}")
+            brain.screen.ctx = screen_from(AMAZON_SCREEN)
             return None
         if action == "open_url" and "google.com/maps" in value:
             brain.screen.ctx = screen_from(MAPS_SCREEN)  # what Maps shows once it has loaded
@@ -603,6 +728,10 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
 
     async def fake_arrange(args):  # never move their real windows
         background.append("arrange: " + json.dumps(args)[:160])
+        for pane in [args.get("open"), *(args.get("panes") or [])]:
+            # As the real one would: a site, a new file or a new tab named as a pane is opened.
+            if pane and re.search(r"(?i)://|\.new\b|new tab|\.com\b", str(pane)):
+                brain._arranged_open(str(pane))
         return None
 
     brain._arrange_windows = fake_arrange  # type: ignore[method-assign]
@@ -649,6 +778,23 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     brain.connectors.tools = lambda: dummies  # type: ignore[method-assign]
     brain._build_from_brief = fake_build  # type: ignore[method-assign]
     brain.jobs.start = fake_start  # type: ignore[method-assign]
+    from pyxi.companion import filework
+
+    async def open_on_screen(brain_, ref):
+        # The sheet or doc in the scenario's screen is open in a browser, so it has a link, as
+        # a real one does (no real window is looked at, and no real file is reached).
+        if filework._GOOGLE_LINK.search(ref) or ref.lower().startswith("new "):
+            return ref
+        if filework._THIS.match(ref) or filework._UNTITLED.match(ref) or not ref.strip():
+            kind = "document" if "doc" in ref.lower() else "presentation" if any(w in ref.lower() for w in ("slide", "deck")) else "spreadsheets"
+            return f"https://docs.google.com/{kind}/d/scenarioFile/edit"
+        return ref
+
+    async def reachable(brain_, ref):
+        return True
+
+    filework._open_google_file = open_on_screen  # type: ignore[assignment]
+    filework._reachable = reachable  # type: ignore[assignment]
     # File search is allowed, only on the sample Desktop, and never through the real Search index
     # (so the founder's own files never come into it).
     files_access.save(settings.data_dir, files_access.FileAccess(True, [str(mess)], True))
@@ -670,7 +816,19 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     brain.connectors.google.connected = lambda: True  # type: ignore[method-assign]
     specialist_fakes(brain, background, name)
     started = time.monotonic()
-    await brain.turn(question)
+    before = None
+    if expect.startswith("next_step"):
+        from pyxi.companion.notes import Guide
+
+        n, action, label, goal = question.split("|", 3)
+        before = Guide(goal=goal, label=label, rect=(0, 0, 40, 40), step=1 if n == "said" else int(n), action=action, total=6)
+        brain._guide, brain._guide_view = before, None
+        if n == "said":
+            await brain.turn("Done.")
+        else:
+            await brain.guide_clicked("clicked")
+    else:
+        await brain.turn(question)
     await asyncio.sleep(0.3)
     took = time.monotonic() - started
     tools = [c["tool"] for c in brain._calls]
@@ -687,6 +845,14 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append(f"stock phrase ({STOCK.search(said).group(0)})")
     if rep := repeated_sentence(said):
         problems.append(f"said twice: {rep[:60]}")
+    if expect == "brief:shop" and not any("amazon.ca/s?" in b and "p_36" in b for b in background):
+        problems.append("a budget, and the price was not looked for at their shop")
+    if expect.startswith("brief"):
+        from pyxi.voice.tts import split_sentences
+
+        count, words = len(split_sentences(said, max_chars=10_000)), len(said.split())
+        if count > 3 or words > 55:
+            problems.append(f"too much said ({count} sentences, {words} words)")
     if expect == "weather" and ("weather" not in tools or took > 4):
         problems.append(f"weather slow or not from the forecast ({took:.1f}s, {tools})")
     if expect == "card":
@@ -707,8 +873,24 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("3D not asked for")
     if expect == "3d" and not any(b.startswith("3d") for b in background):
         problems.append("no 3D build")
-    if expect == "visual" and not ({"sketch_diagram", "explain_on_screen"} & set(tools)):
+    if expect == "visual" and not ({"sketch_diagram", "draw_diagram", "explain_on_screen"} & set(tools)):
         problems.append("no visual")
+    boards = [e["board"] for e in events if e["type"] == "sketch"]
+    if expect.startswith("diagram:"):
+        # An idea with a known shape: Pyxi names the type and gives the content, no positions.
+        typed = [b["diagram"] for b in boards if b.get("diagram")]
+        if "sketch_diagram" in tools:
+            problems.append("drew boxes by hand instead of a typed diagram")
+        elif not typed:
+            problems.append(f"no typed diagram ({tools})")
+        elif not re.fullmatch(expect.split(":", 1)[1], typed[-1]["type"]):
+            problems.append(f"a {typed[-1]['type']} diagram, wanted {expect.split(':', 1)[1]}")
+        elif sum(bool(i.get("focus")) for i in typed[-1]["items"]) > 2 or len(typed[-1]["items"]) > 9:
+            problems.append("too many items or accents")
+    if expect == "sketch" and ("sketch_diagram" not in tools or any(b.get("diagram") for b in boards)):
+        problems.append(f"a physical thing was not drawn freehand ({tools})")
+    if boards and (out := os.environ.get("SCEN_BOARDS")):  # keep what was drawn, to look at it
+        Path(out, name.replace(" ", "_") + ".json").write_text(json.dumps(boards[-1]), encoding="utf-8")
     if expect == "chat" and (len(said) > 260 or set(tools) - {"say"}):
         problems.append(f"chat not short ({len(said)} chars, {set(tools) - {'say'}})")
     if expect == "errand":
@@ -786,6 +968,23 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         not any(b.startswith("delegate ledger") for b in background) or "use_computer" in tools
     ):
         problems.append("didn't hand it to Ledger")
+    if expect.startswith("next_step"):
+        step = brain._guide
+        given = next((c.get("arguments") or {} for c in reversed(brain._calls) if c["tool"] == "guide"), {})
+        if step is None or step is before:
+            problems.append(f"no next step marked ({[c.get('note') for c in brain._calls if c.get('note')]})")
+        elif expect.endswith(":same") and step.label.lower() != before.label.lower():
+            problems.append(f"went on to '{step.label}' though the step was not done")
+        elif not expect.endswith(":same") and step.label.lower() == before.label.lower():
+            problems.append("gave the step they had just done again")
+        if expect.endswith(":scroll") and (given.get("action") != "scroll" or given.get("element_id") is None):
+            problems.append(f"no scroll by element for what is under the edge ({given})")
+        if len(re.findall(r"[.!?](\s|$)", said)) > 2 or len(said) > 170:
+            problems.append(f"more than the next step ({len(said)} chars)")
+        if re.match(r"\W*(good|great|nice|perfect|well done|awesome|excellent)\b", said, re.I):
+            problems.append("praise before the step")
+        if any(b.startswith("hands") for b in background):
+            problems.append("did it instead of teaching")
     if expect == "teach":
         if any(b.startswith("hands") for b in background):
             problems.append("did it instead of teaching")
@@ -801,6 +1000,33 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
             b.startswith("hands") for b in background
         ):
             problems.append("didn't look at the results")
+    hands_used = "use_computer" in tools or any(b.startswith("hands") for b in background)
+    if expect == "widen":
+        if not hands_used:
+            problems.append("didn't widen the column with the mouse")
+        if "paste_table" in tools:
+            problems.append("pasted the data again")
+    if expect == "hands_no_cant":
+        if not hands_used:
+            problems.append("didn't do it through the app's menus")
+        if re.search(r"(?i)\bcan't\b|\bcannot\b|click (cell|on) ", said):
+            problems.append("said it can't, or asked them to click")
+    if expect == "two_parts":
+        calls = [json.dumps(c["arguments"]).lower() for c in brain._calls if c["tool"] != "say"]
+        went = any("techlandbd" in c for c in calls)
+        looked = hands_used or "use_tab" in tools or any("earphone" in c for c in calls)
+        if not (went and looked):
+            problems.append(f"did only half: went={went} looked={looked}")
+    if expect == "zone":
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        there = (datetime.now(ZoneInfo("America/New_York")) + timedelta(days=1)).replace(hour=10, minute=0)
+        hour = there.astimezone().hour
+        names = ["twelve", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven"]
+        want = rf"(?i)\b({hour % 12 or 12}|{names[hour % 12]})(:00)?\s*(a\.?m\.?|p\.?m\.?|in the|o'clock)"
+        if not re.search(want, said):
+            problems.append(f"didn't say {hour}:00 their time")
     if expect == "open" and ("use_computer" in tools or "quick_action" not in tools):
         problems.append("didn't open it with quick_action")
     if expect in ("play", "play+volume"):
@@ -828,6 +1054,23 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("didn't point at it")
     if expect == "volume" and not any(b.startswith("volume") for b in background):
         problems.append("didn't set the volume")
+    if expect.startswith("tab:"):
+        from pyxi.companion import tabwork
+
+        tabwork.handle = real_tab
+        want = expect.split(":", 1)[1]
+        if not any(b.startswith(f"tab: {want}") for b in background):
+            problems.append(f"didn't use {want} in their tab")
+        for wrong in ("use_computer", "web_search") if want == "use_tab" else ("use_computer",):
+            if wrong in tools:
+                problems.append(f"used {wrong} though their browser is connected")
+    if expect.startswith("tabs:"):
+        want = expect.split(":", 1)[1]
+        got = [b.split(": ", 1)[1].lower().replace(" tabs", "").strip() for b in background if b.startswith("tabs: ")]
+        if got != [want]:
+            problems.append(f"tabs by key: wanted {want!r}, got {got}")
+        if "use_computer" in tools:
+            problems.append("used the mouse for tabs")
     if expect == "open_or_web" and not ({"quick_action", "web_search"} & set(tools)):
         problems.append("didn't open or search")
     if expect == "arrange" and (not any(b.startswith("arrange") for b in background) or "use_computer" in tools):
@@ -954,7 +1197,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
 
     # Background work is quiet: a short "On it", not a running commentary.
     busy = any(b.startswith(("book", "delegate", "errand", "hands", "play", "tidy", "arrange")) for b in background)
-    if busy and len(re.findall(r"[.!?](\s|$)", said)) > 2:
+    if busy and expect != "told" and len(re.findall(r"[.!?](\s|$)", said)) > 2:  # asked to be told: it tells
         problems.append(f"talks too much while working ({len(said)} chars)")
     # "I'll look for a slot" is a kept promise when a teammate or booking really is off doing it.
     working = bool(background)  # a teammate or job really is off doing it (Atlas, Penny, Scout...)
@@ -962,6 +1205,49 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         problems.append("ends promising a search")
     if re.search(r"M4|model is finished", said):
         problems.append("mentioned an old job")
+    if expect in ("once", "told", "arrange_new", "build", "shop_rows"):
+        from pyxi.companion.brain import drop_repeats, false_cant
+
+        lines = [e["text"] for e in events if e["type"] == "say"]
+        if expect == "once":
+            for i, line in enumerate(lines):
+                if drop_repeats(line, lines[:i]) != line:
+                    problems.append(f"said again: {line[:70]}")
+            if card is None:
+                problems.append("no cue card")
+        if expect == "told":
+            if not any(b.startswith("errand") for b in background):
+                problems.append("no email errand")
+            if not re.search(r"(?i)shipped|delivered|package|order", said):
+                problems.append("did not say what the email is about")
+        if expect == "arrange_new":
+            panes = " ".join(b for b in background if b.startswith(("arrange", "open_url")))
+            opened = [c for c in brain._calls if c["tool"] == "quick_action" and "sheets.new" in str(c["arguments"])]
+            if "sheets.new" not in panes and not opened:
+                problems.append("said it without anything that opens a blank sheet")
+            if "arrange_windows" not in tools:
+                problems.append("did not put it on the left")
+        if expect == "build":
+            if false_cant(said) or re.search(r"(?i)not Microsoft Excel|isn't (?:Microsoft )?Excel", said):
+                problems.append("turned it down with an untrue reason")
+            if not any(b.startswith("delegate ledger") for b in background):
+                problems.append("did not hand the build to Ledger")
+            if not re.search(r"(?i)screenshot", said):
+                problems.append("did not say the one part it can't do")
+        if expect == "shop_rows":
+            task = " ".join(str(c["arguments"].get("task", "")) for c in brain._calls if c["tool"] == "edit_document")
+            if "look_again" in tools:
+                problems.append("read the shop off the screen")
+            if len(re.findall(r"\d+\.\d\d\b", task)) < 3:
+                problems.append(f"fewer than three priced rows in the sheet's task ({task[:120]!r})")
+            if "US$" in task.split("(The user is in")[0] or "CA$" not in task:
+                problems.append("prices not in their own money")
+            print("      task:", task[:900])
+        print("      heard:", " | ".join(lines)[:900])
+        print("      wrote:", " | ".join(str(c["arguments"].get("text", "")) for c in brain._calls if c["tool"] == "say")[:600])
+        for c in brain._calls:
+            if c.get("outcome"):
+                print(f"      {c['tool']} {c['outcome']}: {json.dumps(c['arguments'])[:300]} -> {c.get('note', '')}")
     if "807" in said:
         problems.append("OCR misread repeated")
     return {
@@ -1043,6 +1329,7 @@ async def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "errands":  # python scripts/scenarios.py errands [filter]
         only = sys.argv[2] if len(sys.argv) > 2 else ""
         tmp = Path(tempfile.mkdtemp(prefix="pyxi_errands_"))
+        __import__("atexit").register(__import__("shutil").rmtree, tmp, ignore_errors=True)  # a GB a run was left in Temp
         results = []
         for name, said, expect in ERRANDS:
             if only and not re.search(only, name):
@@ -1058,6 +1345,7 @@ async def main() -> None:
     repeats = int(sys.argv[1]) if len(sys.argv) > 1 else 2
     only = sys.argv[2] if len(sys.argv) > 2 else ""  # run just the scenarios whose name matches this (a regex)
     tmp = Path(tempfile.mkdtemp(prefix="pyxi_scen_"))
+    __import__("atexit").register(__import__("shutil").rmtree, tmp, ignore_errors=True)  # a GB a run was left in Temp
     results = []
     for r in range(repeats):
         for name, turn_id, q, expect in SCENARIOS:

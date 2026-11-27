@@ -74,4 +74,5 @@ class Hub:
                 future.set_result(None)
 
 
-_BULKY = {"say", "job_frame", "scene_audio", "screen_preview"}
+# (Captions are words from whatever the PC plays: shown, and kept nowhere.)
+_BULKY = {"say", "job_frame", "scene_audio", "screen_preview", "caption"}

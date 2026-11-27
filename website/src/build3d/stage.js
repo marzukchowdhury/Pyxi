@@ -155,6 +155,7 @@ export function createStage(mount, { reduced = false, onBeat, onBuild, onEnd, on
   let userCut = null; // the visitor's own "show the inside", until the step changes
   let ended = false;
   let manual = false; // the visitor is turning it: the camera is theirs until the next step
+  let turning = null; // a turn asked for in code: { left, rate } in radians
   let first = true;
   let spring = null;
   const targetVel = [{ v: 0 }, { v: 0 }, { v: 0 }];
@@ -560,8 +561,18 @@ export function createStage(mount, { reduced = false, onBeat, onBuild, onEnd, on
       first = false;
       spring = null;
     }
-    if (manual) spring = null; // pick up from wherever they leave it
-    else {
+    if (manual) {
+      spring = null; // pick up from wherever they leave it
+      if (turning) {
+        // a turn asked for in code: round the vertical through what the camera looks at
+        const step = Math.sign(turning.left) * Math.min(Math.abs(turning.left), turning.rate * dt);
+        turning.left -= step;
+        const o = toOrbit(...camera.position.clone().sub(controls.target).toArray());
+        o.theta += step;
+        camera.position.copy(controls.target).add(tmp.set(...fromOrbit(o)));
+        if (Math.abs(turning.left) < 1e-4) turning = null;
+      }
+    } else {
       const step = Math.min(dt, 0.05);
       spring ??= orbitSpring(toOrbit(...camera.position.clone().sub(controls.target).toArray()));
       const tg = controls.target;
@@ -745,6 +756,7 @@ export function createStage(mount, { reduced = false, onBeat, onBuild, onEnd, on
     userCut = null;
     ended = false;
     manual = false;
+    turning = null;
     seen.makeEmpty();
     if (user && build) {
       build = null;
@@ -837,6 +849,12 @@ export function createStage(mount, { reduced = false, onBeat, onBuild, onEnd, on
       return userCut;
     },
     inside: () => (spec ? !!cutaway() : false),
+    /** Turn the model by `angle` radians over `seconds`, as a visitor's drag would (for the film). */
+    turn(angle, seconds = 2) {
+      manual = true;
+      turning = { left: angle, rate: Math.abs(angle) / Math.max(0.1, seconds) };
+      wake(seconds * 1000 + 600);
+    },
     hasCasing: () => !!spec?.parts.some((p) => p.casing),
     setStyle(next) {
       style = next;

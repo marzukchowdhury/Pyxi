@@ -39,6 +39,7 @@ from pyxi.config import PyxiSettings
 from pyxi.docs import SUMMARY_EXTS, SUPPORTED, document_mode, fix_document, summarize_document
 from pyxi.hub import Hub
 from pyxi.llm import otto_settings
+from pyxi.plainwords import own_tab_hint, plain_failure
 from pyxi.safety import RULE as UNTRUSTED_RULE
 
 log = logging.getLogger(__name__)
@@ -46,6 +47,17 @@ log = logging.getLogger(__name__)
 JobStatus = Literal["queued", "running", "done", "failed", "stopped"]
 LLMFactory = Callable[[AgentProfile], LLMProvider]
 SceneMaker = Callable[[str, str, AgentProfile], Awaitable[dict[str, Any]]]
+
+
+def _answers_at_once(llm: Any) -> Any:
+    """This chat model set to answer without thinking first, or None when it isn't one that
+    can be asked that way (a local model, a test's script) or already has a setting of its
+    own. The model and everything else about it stay the same."""
+    from pyxi.stream_llm import StreamingChat
+
+    if isinstance(llm, StreamingChat) and not llm.reasoning:
+        return StreamingChat(llm.model, reasoning={"enabled": False})
+    return None
 
 
 class Handoff(BaseModel):
@@ -114,34 +126,45 @@ def plain_markdown(text: str) -> str:
     return re.sub(r"(?m)^([ \t]*)[*+][ \t]+", r"\1- ", text).strip()
 
 
+def draft_title(text: str, task: str = "") -> str:
+    """A file name for a draft: its first heading or line, else the first words of the task."""
+    for line in [*text.splitlines(), task]:
+        name = re.sub(r"[^\w\s'&,()-]", " ", line.strip().lstrip("#").strip())
+        name = " ".join(name.split())[:60].strip(" .-,")
+        if len(name) >= 3:
+            return name
+    return "Draft"
+
+
+def named_draft(job: Any) -> Path | None:
+    """A writer's draft under a name a person would give it, for a teammate that works on
+    files. The draft itself is saved as "<job id>-quill.md" in Pyxi's own folder: turned
+    into a PDF as it stands, the PDF would carry that name and sit where nobody looks."""
+    made = [Path(o) for o in job.outputs if Path(o).is_file()]
+    if job.role != "writer" or job.files or len(made) != 1 or made[0].suffix.lower() != ".md":
+        return None
+    try:
+        text = made[0].read_text(encoding="utf-8")
+        folder = made[0].parent / "named" / job.id
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{draft_title(text, job.task)}.md"
+        path.write_text(text, encoding="utf-8")
+    except OSError:
+        return None
+    return path
+
+
 def describe_failure(exc: BaseException) -> str:
     """What went wrong, the way you'd tell a person (the notch shows this, never a stack)."""
     text = str(exc)
-    low = text.lower()
     if type(exc).__name__ in ("PixelError", "LedgerError"):
         # Already said plainly, and it may name a file ("Budget 2026.xlsx is locked"), which
-        # mustn't be mistaken for the spending limit below.
+        # mustn't be mistaken for the spending limit.
         return text.strip()[:300] or "That didn't work."
-    if "browsertype.launch" in low or "executable doesn't exist" in low:
-        return "I couldn't open a browser window on this PC. Restarting Pyxi usually fixes it."
-    if re.search(r"\b401\b|authentication|invalid (x-)?api.?key", low):
-        return "The AI model turned the key down. Check the model settings, then try again."
-    if re.search(r"\b429\b|rate.?limit|overloaded", low):
-        return "The AI model is busy right now. Try again in a minute."
-    if "net::err_name_not_resolved" in low or "net::err_internet" in low:
-        return "I couldn't reach that site. Is the internet connection up?"
-    if "net::err" in low:
-        return "That site wouldn't load."
-    if "timeout" in low:
-        return "The site took too long to respond."
-    if type(exc).__name__ == "BudgetExceededError" or re.search(
-        r"budget[ _](exceeded|exhausted|reached)|cost limit|max_cost", low
-    ):
-        return "I stopped before going over the spending limit for this job."
-    if "switched off in Pyxi's Google Cloud project" in text:
-        return text.strip()[:300]  # says what to turn on, with the link: keep it whole
-    first = text.strip().splitlines()[0] if text.strip() else type(exc).__name__
-    return first[:160]
+    # Every failure Pyxi knows is said one way everywhere, with its next step; anything else
+    # is shown only if it reads as a sentence, never as Python's own words (pyxi/plainwords.py).
+    # On 26 November a sheet job showed the raw "('invalid_grant: Token has been expired..." line.
+    return plain_failure(exc, job=True)
 
 
 # How Pyxi's browser teammates work. The user is waiting for a notification, so quick and
@@ -150,13 +173,52 @@ BROWSER_RULES = """How to work:
 - Be quick: most jobs take 3-10 steps, and the user is waiting.
 - One good search, open the best result, read or extract the answer, finish.
 - Never repeat a search with small rewordings. After two searches that don't turn up anything
-  better, finish with the best answer you have.
+  better, finish with what you have, and say plainly how sure it is.
 - A reputable source (the maker's own site, Wikipedia, a major newspaper or reference site)
   counts as reliable unless the user asked for something stricter. Name it in your summary.
-- Finish with success=true whenever you found the answer, adding a short caveat if it
-  matters. Use success=false only when you really could not find or do it.
+- Finish with success=true only when you found the answer or did the task. If you did not
+  find it, finish with success=false and say what you did find: a guess is never passed off
+  as the result.
+- If your answer is the best you could find but not certain (the page didn't say it outright,
+  sources disagree, it may be out of date), start the summary with "Best guess:" and say why
+  in a few words.
 - Start your summary with the result itself in one plain sentence (the pick and its price,
   the fact, what was done): it is read aloud. Then the details, a list one item per line."""
+
+# The first thing a result says is that the job could not be done, whatever flag came with
+# it. Only that: "No recalls were found for the 2019 Civic" and "I didn't find any unpaid
+# tickets" are answers, and a review caught the first version of this calling them failures.
+_NOT_FOUND = re.compile(
+    r"(?i)^\W*(?:i\s+|sorry,?\s+i\s+)?(?:couldn'?t|could not|wasn'?t able to|was not able to|"
+    r"was unable to|am unable to)\s+(?:reach|open|load|access|get (?:to|into|past)|complete|"
+    r"finish|do (?:that|this|it))\b|^\W*unable to (?:reach|open|load|access|complete|finish)\b"
+)
+# ...unless it goes on to give the next best thing.
+_NEXT_BEST = re.compile(r"(?i)\b(?:but|however|instead|closest|nearest|the best (?:i|match))\b")
+# Words that say the answer is not certain.
+_UNSURE = re.compile(
+    r"(?i)\b(?:not (?:sure|certain|confirmed|verified)|unsure|uncertain|unconfirmed|unverified|"
+    r"couldn'?t (?:confirm|verify)|could not (?:confirm|verify)|unable to (?:confirm|verify)|"
+    r"appears to be|seems to be|closest (?:match|i could)|i (?:assume|guess))\b"
+)
+
+
+def honest_result(summary: str, success: bool) -> tuple[str, bool]:
+    """A browser teammate's own word for how its job went, held to what its summary says.
+    "I couldn't find it" is not a success because the flag said so, and an answer it is not
+    sure of is called a best guess up front, where it is read aloud: the caveat used to sit
+    in a later sentence that nobody heard."""
+    text = (summary or "").strip()
+    if not success or not text:
+        return text, success
+    first = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0]
+    if _NOT_FOUND.search(first) and not _NEXT_BEST.search(text):
+        return text, False
+    # Only when the answer itself is hedged: a firm answer with an aside after it ("$298 at
+    # Amazon. I couldn't find it lower elsewhere.") is not a guess.
+    if _UNSURE.search(first) and not re.match(r"(?i)\W*best guess", text):
+        return f"Best guess: {text}", True
+    return text, True
 
 
 def plain_card(
@@ -372,7 +434,12 @@ class JobManager:
             from pyxi import made
 
             fixed = job.data.get("fixed", []) if isinstance(job.data, dict) else []
-            made.record(self.settings.data_dir, [*job.outputs, *fixed])
+            try:
+                made.record(self.settings.data_dir, [*job.outputs, *fixed])
+            except OSError:
+                # A full disk or a locked data folder: the job is still told as done. Raised
+                # from here, it stayed "running" in the tray for good and was never announced.
+                log.warning("job %s: its files could not be noted for the app", job.id, exc_info=True)
         await self._update(job)
         if job.status == "done" and job.then:
             context = f"Result from {job.agent_name}: {job.summary}\n\nData: {json.dumps(job.data, default=str)[:4000]}"
@@ -384,12 +451,58 @@ class JobManager:
             await self.hub.emit(
                 "handoff", source=job.agent_name, target=job.then.agent, task=job.then.task
             )
+            files, params = self._handed_on(job)
             try:
-                await self.start(job.then.agent, job.then.task, context=context, parent=job.id)
-            except Exception:
+                await self.start(
+                    job.then.agent,
+                    job.then.task,
+                    context=context,
+                    parent=job.id,
+                    files=files,
+                    params=params,
+                )
+            except Exception as exc:
+                # The second step never started. Said on this job's own notice: with ``then``
+                # still set, the brain would wait for a teammate that is not coming.
                 log.exception("hand-off from %s to %s failed", job.agent_name, job.then.agent)
+                job.summary = (
+                    f"{job.summary.rstrip()} But I couldn't hand it on to {job.then.agent}: "
+                    f"{describe_failure(exc)}"
+                ).strip()
+                job.then = None
+                await self._update(job)
         if self.on_done:
             await self.on_done(job)
+
+    def _handed_on(self, job: Job) -> tuple[list[str], dict[str, Any]]:
+        """The files a finished job passes to the teammate after it, and the Google files.
+
+        "Turn it into Word, then fix the grammar": Quill is handed the Word file Pixel made,
+        as a file. (The next job used to get only a description of the result, so a writer
+        had nothing to open and wrote a draft about the conversion instead.) Only document
+        work passes files on: what Scout found is still context for Quill to write from."""
+        nxt = self.registry.get(job.then.agent) if job.then else None
+        if nxt is not None and nxt.role == "files" and (draft := named_draft(job)):
+            # "Plan the trip and make it a PDF": Quill wrote the plan, Pixel was handed no
+            # file, and all the first tester heard was "Pixel couldn't finish that."
+            from pyxi.agents.pixel_common import pyxi_folder
+
+            return [str(draft)], {"save_in": str(pyxi_folder())}
+        document_work = job.role in ("files", "documents") or (job.role == "writer" and job.files)
+        if nxt is None or not document_work:
+            return [], {}
+        made = [o for o in job.outputs if Path(o).is_file()]
+        if nxt.role == "writer":
+            return [o for o in made if Path(o).suffix.lower() in SUMMARY_EXTS], {}
+        if nxt.role == "files":
+            return made, {}
+        if nxt.role == "documents":
+            from pyxi.agents.ledger import LOCAL_EXTS
+
+            links = job.data.get("links") if isinstance(job.data, dict) else None
+            params = {"google": [str(x) for x in links]} if links else {}
+            return [o for o in made if Path(o).suffix.lower() in LOCAL_EXTS], params
+        return [], {}
 
     async def _run_browser(self, job: Job, agent: AgentProfile) -> None:
         booking = job.kind == "booking"
@@ -479,19 +592,36 @@ class JobManager:
             )
         finally:
             self._controls.pop(job.id, None)
-        job.run_id, job.summary, job.data = result.run_id, result.summary, result.data
-        job.outputs, job.cost_usd, job.steps = result.outputs, result.usage.cost_usd, result.steps
-        job.status = (
-            "done"
-            if result.success
-            else ("stopped" if result.status.value == "stopped" else "failed")
+        # Bookings and check-ins answer for themselves (a confirmation, a card to approve).
+        summary, found = (
+            (result.summary, result.success)
+            if booking or checkin
+            else honest_result(result.summary, result.success)
         )
+        if not found and not (booking or checkin) and result.status.value != "stopped":
+            # A site that shut this browser out (its bot check, a sign-in only they can do)
+            # is not the end: the same work can be done in a tab of their own browser.
+            summary = (summary or "").rstrip() + own_tab_hint(summary)
+        job.run_id, job.summary, job.data = result.run_id, summary, result.data
+        job.outputs, job.cost_usd, job.steps = result.outputs, result.usage.cost_usd, result.steps
+        job.status = "done" if found else ("stopped" if result.status.value == "stopped" else "failed")
 
     async def _run_writer(self, job: Job, agent: AgentProfile) -> None:
         llm = self.llm_factory(agent)
         mode = document_mode(job.task)  # fix, translate, rewrite or summarize
         exts = SUMMARY_EXTS if mode == "summarize" else SUPPORTED
         docs = [Path(f) for f in job.files if Path(f).suffix.lower() in exts]
+        if job.files and not docs:
+            # Handed a file it can't open (an old .doc, a .rtf), Quill used to go on to write
+            # a draft from the task alone: "Your draft is ready", and the file never read.
+            names = ", ".join(Path(f).name for f in job.files[:3])
+            verb = "summarize" if mode == "summarize" else "work on"
+            raise ValueError(
+                f"I can {verb} {', '.join(sorted(exts))} files, not {names}. Save it as one of "
+                "those and ask again."
+            )
+        if gone := [d.name for d in docs if not d.is_file()]:
+            raise ValueError(f"I can't find {', '.join(gone[:3])}. Where is it?")
         if docs and mode == "summarize":
             await self._summarize_documents(job, docs, llm)
             return
@@ -545,30 +675,65 @@ class JobManager:
         """Fix, translate or rewrite each document and save a copy beside it; the originals are
         never touched."""
         lines, outputs, cost = [], [], 0.0
+        failed: list[str] = []
+        last: Exception | None = None
+        count = 0
+        from_pdf = False  # a PDF came back as a fixed Word copy
         all_changes: list[str] = []
         all_notes: list[str] = []
         for doc in docs:
-            await self.hub.emit(
-                "job_event",
-                job_id=job.id,
-                agent=job.agent_name,
-                event="status",
-                data={"message": f"{'Translating' if mode == 'translate' else 'Editing'} {doc.name}"},
-            )
-            result = await fix_document(doc, job.task, llm, mode=mode)
+            doing = "Translating" if mode == "translate" else "Editing"
+            if mode == "fix" and doc.suffix.lower() == ".pdf":
+                doing = "Turning it into Word, then editing"
+            await self._status(job, f"{doing} {doc.name}")
+            try:
+                result = await fix_document(doc, job.task, llm, mode=mode)
+            except Exception as exc:
+                # One document of several that can't be done doesn't hide the ones that were:
+                # the job used to end "failed" with the first document's saved copy unmentioned.
+                failed.append(f"{doc.name}: {describe_failure(exc)}")
+                last = exc
+                continue
             cost += result.cost_usd
+            count += result.changed
+            converted = bool(getattr(result, "converted", False))
+            from_pdf = from_pdf or converted
             outputs.append(str(result.path))
             all_changes += result.changes
             all_notes += result.notes
             notes = "; ".join(result.changes[:5])
             verb = {"translate": "translated", "rewrite": "rewrote"}.get(mode, "fixed")
+            if result.listed:
+                # Only a scan now: a typed PDF is fixed in a Word copy (see below).
+                lines.append(
+                    f"{doc.name} is a scan: a picture of each page, with no text in it to "
+                    f"change, so there is no corrected copy. {result.changed} correction"
+                    f"{'' if result.changed == 1 else 's'} to make, read off the pages, "
+                    f"listed in {result.path}" + (f": {notes}" if notes else ".")
+                )
+                continue
+            if converted:
+                lines.append(
+                    f"{doc.name}: made a Word copy of it and fixed {result.changed} of "
+                    f"{result.total} paragraphs there, saved as {result.path}. The PDF is untouched"
+                    + (f". Notable: {notes}" if notes else "")
+                )
+                continue
             lines.append(
                 f"{doc.name}: {verb} {result.changed} of {result.total} paragraphs, saved as {result.path}"
                 + (f". Notable: {notes}" if notes else "")
             )
-        job.summary = " ".join(lines)
+        if last is not None and not outputs:
+            raise last  # nothing was made: the job fails as it did before
+        job.summary = " ".join(lines) + (" But " + "; ".join(failed) if failed else "")
         key = "fixed" if mode == "fix" else "outputs"  # "fixed" makes it a "Your document is fixed" card
-        job.data = {key: outputs, "changes": all_changes[:12], "notes": all_notes[:5]}
+        job.data = {
+            key: outputs,
+            "changes": all_changes[:12],
+            "notes": [*failed, *all_notes][:5],
+            "count": count,  # every fix, where the list of them is cut at twelve
+            **({"from_pdf": True} if from_pdf else {}),
+        }
         job.outputs, job.cost_usd, job.status = outputs, cost, "done"
 
     async def _run_explainer(self, job: Job, agent: AgentProfile) -> None:
@@ -602,8 +767,11 @@ class JobManager:
         options = {
             k: v
             for k, v in (job.params.get("options") or {}).items()
-            if k not in ("password", "details", "out_dir")
+            if k not in ("password", "details", "out_dir", "placed", "labels")
         }
+        if job.params.get("save_in"):  # set by Pyxi itself, never by the model
+            Path(str(job.params["save_in"])).mkdir(parents=True, exist_ok=True)
+            options["out_dir"] = str(job.params["save_in"])
         if op in pixel.NEEDS_PASSWORD:
             password = await self._ask_password(job, agent, op, names)
             if not password:
@@ -614,6 +782,8 @@ class JobManager:
             from pyxi import booking
 
             options["details"] = booking.load(self.settings.data_dir)
+            if not await self._ask_form(job, agent, options):
+                return
         note = ""
         if op in ("to_pdf", "word_to_pdf") and any(
             Path(f).suffix.lower() in pixel.OFFICE for f in job.files
@@ -622,6 +792,15 @@ class JobManager:
             if got is None:
                 return  # an old Office file, and no converter: the job says why
             note = got
+        if op == "compress_pdf" and not any(k.startswith(("target", "max_", "reduce", "less")) for k in options):
+            # Handed over in words ("get it under 80 KB"): the size is still aimed at.
+            from pyxi.agents.pixel_shrink import aim_from_words
+
+            aim = aim_from_words(job.task)
+            if aim.get("target"):
+                options["target_size"] = f"{aim['target']} bytes"
+            elif aim.get("less"):
+                options["reduce_by"] = f"{aim['less']} bytes"
         await self._status(job, f"Working on {names}")
         if op in ("extract_text", "make_searchable", "pdf_to_word"):
             from pyxi.agents import pixel_ocr
@@ -641,6 +820,99 @@ class JobManager:
             job.summary += f" It's in {where}." if len(job.outputs) == 1 else f" They're in {where}."
         job.data = {"operation": op, "outputs": job.outputs, **result.details}
         job.status = "done"
+
+    async def _ask_form(self, job: Job, agent: AgentProfile, options: dict[str, Any]) -> bool:
+        """Before a PDF form is filled: read what it asks (once per form; the reading is kept on
+        this PC), show every question on one card with what is already known typed in, and
+        wait for their answers (agents/pixel_ask.py). What they type goes to the matching
+        fields with no model in between. False: they closed the card, so nothing is filled.
+
+        The model sees the form's printed words to make the list of questions, and nothing
+        else: not what is typed in the form, not their saved details, not their answers."""
+        from pyxi import booking
+        from pyxi.agents import pixel_ask, pixel_forms, pixel_pdf
+
+        files = [Path(f) for f in job.files if Path(f).suffix.lower() == ".pdf"]
+        if len(files) != 1 or len(job.files) != 1:
+            return True  # Pixel says what it needs
+        try:
+            form = await asyncio.to_thread(pixel_forms.read, files[0])
+        except Exception:
+            return True  # not a PDF that opens: Pixel says so
+        if not form.fields:
+            return True  # nothing to fill: Pixel says so
+        data_dir = self.settings.data_dir
+        key = pixel_ask.fingerprint(form)
+        questions = await asyncio.to_thread(pixel_ask.load_map, data_dir, key)
+        llm = None
+        if questions is None:
+            await self._status(job, "Reading the form (only the first time takes this long)")
+            questions = []
+            for attempt in range(2):
+                try:
+                    llm = llm or self.llm_factory(agent)
+                    response = await llm.complete(
+                        system=pixel_ask.SYSTEM + UNTRUSTED_RULE,
+                        messages=[Message.user(pixel_ask.prompt(form))],
+                        max_tokens=8000,
+                    )
+                    job.cost_usd += response.usage.cost_usd
+                    found, dropped = pixel_ask.read_map(response.text, form)
+                except Exception:
+                    log.warning("pixel: the form couldn't be read by the model", exc_info=True)
+                    break
+                log.info(
+                    "pixel: reading %d: %d questions for %d fields, %d lines dropped",
+                    attempt + 1, len(found), len(form.fields), dropped,
+                )
+                if pixel_ask.coverage(found, form) > pixel_ask.coverage(questions, form):
+                    questions = found
+                if pixel_ask.coverage(questions, form) >= pixel_ask.ENOUGH:
+                    break  # a reading that leaves most of the form out is made once more
+            if pixel_ask.coverage(questions, form) >= pixel_ask.ENOUGH:
+                await asyncio.to_thread(pixel_ask.save_map, data_dir, key, questions)
+            elif not questions:  # each box by the words beside it; tried again next time
+                questions = pixel_ask.plain_map(form)
+        details = {**booking.load(data_dir), **pixel_ask.remembered(data_dir)}
+        details.pop("preferences", None)
+        said = options.get("values") if isinstance(options.get("values"), dict) else {}
+        told: dict[str, Any] = {}
+        if said and questions:
+            try:  # what they said in chat is typed onto the card for them to check
+                llm = llm or self.llm_factory(agent)
+                response = await llm.complete(
+                    system=pixel_ask.SAID_SYSTEM + UNTRUSTED_RULE,
+                    messages=[Message.user(pixel_ask.said_prompt(questions, said))],
+                    max_tokens=2000,
+                )
+                job.cost_usd += response.usage.cost_usd
+                told = pixel_ask.read_said(response.text, questions)
+            except Exception:
+                log.warning("pixel: couldn't place what they said on the card", exc_info=True)
+        fields = pixel_ask.card(questions, form, details, told, pixel_pdf.SECRET)
+        if not fields:
+            return True  # nothing Pixel could read: the old way says why
+        await self._status(job, "Waiting for your answers on the card")
+        answer = await self.hub.request(
+            "ask",
+            timeout=1800,
+            job_id=job.id,
+            agent=agent.name,
+            question=f"What goes in {files[0].name}?",
+            fields=fields,
+        )
+        if not isinstance(answer, dict) or not isinstance(answer.get("answers"), dict):
+            job.status, job.summary = "stopped", "The card was closed, so nothing was filled in."
+            return False
+        answers = answer["answers"]
+        options["placed"] = pixel_ask.plan(questions, form, answers, pixel_pdf.SECRET)
+        options["labels"] = form.labels()
+        if answer.get("remember"):
+            new, _ = await asyncio.to_thread(pixel_ask.remember, data_dir, questions, answers, details)
+            if new:  # a detail Settings didn't have yet; one that is saved is never replaced
+                saved = booking.save(data_dir, {**booking.load(data_dir), **new})
+                await self.hub.emit("profile", profile=saved, saved=True)
+        return True
 
     async def _ask_password(self, job: Job, agent: AgentProfile, op: str, names: str) -> str:
         """The user types the password on a masked card; it goes straight to Pixel."""
@@ -731,31 +1003,76 @@ class JobManager:
 
     async def _run_documents(self, job: Job, agent: AgentProfile) -> None:
         """Ledger: edit Excel, Word and PowerPoint files (a copy beside each) or Google files."""
+        from pyxi.agents import ledger_live
         from pyxi.agents.ledger import run_ledger
 
         llm = self.llm_factory(agent)
 
         async def ask(system: str, prompt: str) -> tuple[str, float]:
             response = await llm.complete(
-                system=system + UNTRUSTED_RULE, messages=[Message.user(prompt)], max_tokens=4000
+                system=system + UNTRUSTED_RULE, messages=[Message.user(prompt)], max_tokens=8000
             )
             return response.text, response.usage.cost_usd
+
+        # The same model answering straight away, for the sheets of a big workbook only
+        # (ledger_build.py). Left to think first, each of those replies spent most of its
+        # time, and sometimes its whole length limit, before it wrote a cell.
+        quick = _answers_at_once(llm)
+
+        async def ask_quick(system: str, prompt: str) -> tuple[str, float]:
+            nonlocal quick
+            if quick is not None:
+                try:
+                    response = await quick.complete(
+                        system=system + UNTRUSTED_RULE, messages=[Message.user(prompt)], max_tokens=8000
+                    )
+                    return response.text, response.usage.cost_usd
+                except Exception as exc:
+                    if getattr(exc, "status_code", None) not in (400, 404, 422):
+                        raise
+                    # This model can't be asked that way: the usual way, from here on.
+                    log.warning("ledger: the model refused a no-thinking call; using the usual one")
+                    quick = None
+            return await ask(system, prompt)
 
         async def progress(line: str) -> None:
             await self._status(job, line[:1].upper() + line[1:])
 
+        async def confirm(action: str, reason: str) -> bool:
+            return bool(
+                await self.hub.request(
+                    "confirm", timeout=180, job_id=job.id, agent=agent.name, action=action, reason=reason
+                )
+            )
+
+        # A document open in Excel, Word or PowerPoint, edited where it is (ledger_live.py).
+        live = []
+        for ref in job.params.get("live") or []:
+            if isinstance(ref, dict) and ref.get("app") in ledger_live.APPS:
+                live.append(ledger_live.target(str(ref["app"]), ref.get("hwnd") or None, confirm=confirm))
         google_refs = [str(g) for g in job.params.get("google") or [] if str(g).strip()]
-        result = await run_ledger(
-            job.task,
-            files=job.files,
-            google=self._google() if google_refs else None,
-            google_refs=google_refs,
-            ask=ask,
-            name=agent.name,
-            persona=agent.persona,
-            context=job.context,
-            progress=progress,
-        )
+        try:
+            result = await run_ledger(
+                job.task,
+                files=job.files,
+                google=self._google() if google_refs else None,
+                google_refs=google_refs,
+                live=live,
+                ask=ask,
+                name=agent.name,
+                persona=agent.persona,
+                context=job.context,
+                progress=progress,
+                new=[n for n in job.params.get("new") or [] if isinstance(n, dict)],
+                ask_quick=ask_quick if quick is not None else None,
+            )
+        except ledger_live.Unreachable as exc:
+            # The app went away or got busy between the look and the job. Nothing was changed,
+            # so the brain does it the way it did before there was a direct route.
+            job.status = "failed"
+            job.summary = str(exc)
+            job.data = {"handover": str(exc), "live": job.params.get("live")}
+            return
         job.cost_usd = result.cost_usd
         job.outputs = result.outputs
         job.data = {
@@ -763,10 +1080,15 @@ class JobManager:
             "notes": result.problems[:3],
             "links": result.links,
             "outputs": result.outputs,
+            "edited": result.live,
         }
         if not result.changes:
             job.status = "failed"
             job.summary = result.summary or "I couldn't make that change."
+            if live and not result.sent and not result.declined:
+                # Nothing reached the app: the edits asked for are not ones the direct route
+                # has. The brain hands the job to the mouse and keyboard, as it always did.
+                job.data |= {"handover": job.summary, "live": job.params.get("live")}
             return
         # One sentence for the edits: the notification shows the first two sentences, so the
         # edits that failed and where the copy went are never cut off by a list of edits.
@@ -778,9 +1100,32 @@ class JobManager:
             n = len(result.problems)
             first += f", but {n} edit{'s' if n != 1 else ''} didn't work"
         parts = [first.rstrip(".") + "."]
-        if result.outputs:
+        if result.headline and result.kind == "deck":
+            # A deck built from a plan: what it is, and anything that was left out of it.
+            parts = [result.headline]
+            job.data["slides"] = result.built.get("done", [])
+            if result.problems:
+                n = len(result.problems)
+                parts.append(
+                    f"{n} thing{'s' if n != 1 else ''} to know: {result.problems[0]}"
+                    + (" The rest are on the card." if n > 1 else "")
+                )
+        elif result.headline:
+            # A workbook built sheet by sheet: which sheets are done and which are not, by
+            # name, in place of a tally of edits.
+            parts = [result.headline]
+            job.data["sheets"] = result.built
+            if result.problems and not result.built.get("not_done"):
+                n = len(result.problems)
+                parts.append(f"{n} edit{'s' if n != 1 else ''} in it didn't work.")
+        if result.made:  # a new file, not a copy of one: where it is, so it can be opened
+            made = Path(result.made[0])
+            parts.append(f"It's a new file, {made.name}, in {made.parent}.")
+        elif result.outputs:
             names = ", ".join(Path(o).name for o in result.outputs)
             parts.append(f"Saved as {names}, beside the original.")
+        if result.live:
+            parts.append(f"Changed in {' and '.join(result.live)}, where it's open. I haven't saved it.")
         made = any(str(g).lower().startswith("new ") for g in job.params.get("google") or [])
         if result.links and made:
             parts.append("It's a new file in your Google Drive: " + " ".join(result.links))

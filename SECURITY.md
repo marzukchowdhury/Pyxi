@@ -2,7 +2,7 @@
 
 Pyxi sees your screen, works in the accounts you connect and can use your mouse and keyboard, so we treat security problems as the most important bugs there are. This page says how to report one, what Pyxi stores and where, what never leaves your PC, and how Pyxi is protected. What Pyxi shares, and with whom, is in the [privacy policy](docs/PRIVACY.md).
 
-For builders: the [threat model](docs/THREAT_MODEL.md) and the [pre-release checklist](docs/RELEASE_CHECKLIST.md).
+For builders: the [threat model](docs/THREAT_MODEL.md) and the [pre-release checklist](docs/RELEASE_CHECKLIST.md). For the founder, in plain words: [the security overview](docs/SECURITY-OVERVIEW.md).
 
 ## Reporting a problem
 
@@ -44,6 +44,7 @@ Everything is on your PC. Pyxi has no server of its own except the beta server, 
 | Memory Palace history (if you turned it on) | `%APPDATA%\Pyxi\.pyxi\pyxi.db` and `palace\` | Your Windows account. Deleted after 72 hours |
 | Things you asked Pyxi to remember, routines, flashcard decks, budgets, Ditto's recordings | `%APPDATA%\Pyxi\.pyxi\` | Your Windows account |
 | Booking details you saved (name, email, phone, date of birth, city) | `%APPDATA%\Pyxi\.pyxi\profile.json` | Your Windows account. ID numbers are never saved |
+| What you told the welcome tour: name, email and date of birth (in the booking details above); what to call you, what you like and what the PC is for (three memories); and that the tour was shown | `profile.json`, `pyxi.db`, and `%APPDATA%\Pyxi\.pyxi\onboarding.json` | Your Windows account. Nothing is kept for anyone under 13. "Delete what I told the tour" in Settings removes it |
 | Google and LinkedIn sign-in tokens | `%APPDATA%\Pyxi\.pyxi\connectors\` | **Encrypted** with Windows DPAPI: useless on another PC or Windows account |
 | Your beta token | `%APPDATA%\Pyxi\.pyxi\cloud.json` | **Encrypted** with Windows DPAPI |
 | Your own API keys, if you added any | `%APPDATA%\Pyxi\.env` | Your Windows account (you put them there) |
@@ -59,7 +60,7 @@ Everything is on your PC. Pyxi has no server of its own except the beta server, 
 - **Secrets on screen.** Password fields, password managers, banking apps, and text that looks like a key or token are blacked out of screenshots and removed from screen text before anything is sent or saved.
 - **Your sign-in tokens.** Google's and LinkedIn's tokens only go to Google and LinkedIn. The beta token only goes to the beta server.
 - **Your history.** The Memory Palace, your conversations and Ditto's recordings stay on your PC. Only the request you're making right now, with its screenshot, goes to the AI model.
-- **Your voice, except Bengali.** Speech is turned into text on your PC. Bengali speech goes to a cloud model, because no local model understands it well enough.
+- **Your voice, if you choose.** By default what you say to Pyxi goes to a cloud model to be turned into text (Pyxi and the beta server don't keep the sound). With "Turn my speech into text on this PC only" switched on in the Voice panel, or offline, speech is turned into text on your PC and nothing you say is sent. Meeting recordings are always transcribed on your PC.
 - **Your files, except what a job needs.** Pixel works entirely on your PC. Sage, Patch, Ledger and Scribe send only the text the job needs (see the privacy policy's table).
 - **Everything, in local mode.** With Ollama, nothing goes to any AI provider.
 
@@ -96,6 +97,15 @@ Pyxi moves files but never deletes them, and every tidy can be undone.
 
 - Every request must carry a random key that the desktop app makes at each launch, so other programs on the PC can't send requests or answer an Allow card.
 - Requests from web pages are refused, so a site in your browser can't reach the brain.
+
+**Your own browser.** When you connect the browser extension (or let Pyxi work in a tab through Windows' accessibility layer), Pyxi can read and work in your signed-in tabs, so it's guarded closely:
+
+- The extension pairs once, with a code shown only in Pyxi's Settings. After that both sides prove who they are on every connection, and every message is signed, so a website, another extension or another program can't pose as either side.
+- Pyxi asks before it works on a site, and again before it moves to any other site or opens an address it wrote itself. "Always allow on this site" lasts 30 days, and never covers a task that came from something Pyxi read.
+- Sending, submitting, buying, deleting and posting in a tab always ask again.
+- Password, card, ID-number and file-upload fields are never read or filled, and private pages (banking, password managers, your own list) are skipped.
+
+**Links.** Pyxi opens only `http` and `https` links. After it has read an email, a document or a signed-in tab, a link to a site you didn't name asks first: the address could otherwise carry what it read to that site.
 
 **Hardened windows.** Pyxi's windows are hardened against a page taking them over:
 

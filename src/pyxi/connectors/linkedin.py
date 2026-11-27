@@ -44,6 +44,13 @@ class LinkedInConnector(Connector):
     def connected(self) -> bool:
         return self._saved() is not None
 
+    def available(self) -> bool:
+        """Only where the developer app is set up on this PC (its id and secret are in the
+        environment), or a sign-in made with one is still saved. A customer cannot make one."""
+        return bool(
+            os.environ.get("LINKEDIN_CLIENT_ID") and os.environ.get("LINKEDIN_CLIENT_SECRET")
+        ) or self.connected()
+
     def status(self) -> Status:
         saved = self._saved()
         if saved:

@@ -8,6 +8,7 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Axis, Material } from "../shared/protocol";
+import { type Surface, surfaceUVs } from "./surface";
 
 export const KITS = [
   "wheel", "missile", "propeller", "jet_engine", "ram_stick", "gpu", "chip", "pc_fan", "screen",
@@ -21,6 +22,8 @@ export interface KitLayer {
   /** Use the part's own colour (its main body); others keep the material's colour. */
   main?: boolean;
   color?: string;
+  /** Fine detail drawn on this layer (scene/surface.ts): traces on a board, cells on a die. */
+  surface?: Surface;
 }
 
 const TAU = Math.PI * 2;
@@ -57,7 +60,16 @@ function fit(layers: KitLayer[], size: [number, number, number]): KitLayer[] {
   const s = all.getSize(new THREE.Vector3());
   const c = all.getCenter(new THREE.Vector3());
   const k = [size[0] / Math.max(1e-6, s.x), size[1] / Math.max(1e-6, s.y), size[2] / Math.max(1e-6, s.z)];
-  for (const l of layers) l.geometry.translate(-c.x, -c.y, -c.z).scale(k[0], k[1], k[2]).computeVertexNormals();
+  for (const l of layers) {
+    l.geometry.translate(-c.x, -c.y, -c.z).scale(k[0], k[1], k[2]).computeVertexNormals();
+    if (!l.surface) continue;
+    // Detail is laid on at the layer's real size, about its own middle.
+    l.geometry.computeBoundingBox();
+    const own = l.geometry.boundingBox!.getSize(new THREE.Vector3());
+    const mapped = surfaceUVs(l.geometry, [1, 1, 1], [own.x, own.y, own.z], l.surface);
+    l.geometry.dispose();
+    l.geometry = mapped;
+  }
   return layers;
 }
 
@@ -151,7 +163,7 @@ function ramStick(): KitLayer[] {
   const pcb = new THREE.Shape([new THREE.Vector2(-0.5, -0.14), new THREE.Vector2(0.06, -0.14), new THREE.Vector2(0.06, -0.12), new THREE.Vector2(0.08, -0.12), new THREE.Vector2(0.08, -0.14), new THREE.Vector2(0.5, -0.14), new THREE.Vector2(0.5, 0.14), new THREE.Vector2(-0.5, 0.14)]);
   const board = new THREE.ExtrudeGeometry(pcb, { depth: 0.008, bevelEnabled: false }).translate(0, 0, -0.004);
   return [
-    { geometry: board, material: "plastic", main: true, color: "#1f6b3a" },
+    { geometry: board, material: "pcb", main: true, surface: "traces" },
     { geometry: merge(chips), material: "plastic", color: "#16181c" },
     { geometry: merge(pins), material: "gold" },
   ];
@@ -175,7 +187,7 @@ function gpu(): KitLayer[] {
     { geometry: shroud, material: "plastic", main: true, color: "#2a2d33" },
     { geometry: merge(fans), material: "plastic", color: "#111316" },
     { geometry: merge([...rings, ...heatpipes]), material: "brushed_metal", color: "#b0b6bf" },
-    { geometry: pcb, material: "plastic", color: "#1d2f22" },
+    { geometry: pcb, material: "pcb", color: "#1d2f22", surface: "traces" },
     { geometry: merge([...fingers]), material: "gold" },
     { geometry: bracket, material: "brushed_metal" },
   ];
@@ -190,10 +202,10 @@ function chip(): KitLayer[] {
   const caps: THREE.BufferGeometry[] = [];
   for (let i = 0; i < 10; i++) caps.push(box(0.04, 0.02, 0.02, -0.42 + i * 0.09, 0.04, 0.44), box(0.04, 0.02, 0.02, -0.42 + i * 0.09, 0.04, -0.44));
   return [
-    { geometry: substrate, material: "plastic", main: true, color: "#1e5a35" },
-    { geometry: lid, material: "brushed_metal", color: "#c3c8cf" },
-    { geometry: die, material: "dark_metal", color: "#2a2f3a" },
-    { geometry: merge(balls), material: "metal", color: "#d9d9d9" },
+    { geometry: substrate, material: "pcb", main: true, surface: "traces" },
+    { geometry: lid, material: "brushed_metal", color: "#c3c8cf", surface: "brushed" },
+    { geometry: die, material: "silicon", surface: "cells" },
+    { geometry: merge(balls), material: "solder" },
     { geometry: merge(caps), material: "ceramic", color: "#8a6a4a" },
   ];
 }

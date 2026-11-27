@@ -8,12 +8,20 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from conftest import Recorder
 from pyxi.agents.jobs import Job
 from pyxi.companion import answers
 from pyxi.companion.brain import Brain
 from pyxi.companion.notes import result_card
 from test_answer_card import Scripted, make_brain, say, settle
+
+
+@pytest.fixture(autouse=True)
+def no_wait_for_silence(monkeypatch):
+    """The silence Pyxi waits for after talk, without the waiting (one test below sets it)."""
+    monkeypatch.setattr(Brain, "QUIET_BEFORE_SPEAKING_S", 0.0)
 
 TABLES = [
     "LACK side table, white, $43.43, 4.6 stars (251 ratings)",
@@ -147,6 +155,42 @@ async def test_the_next_turn_has_the_whole_result(settings):
     for table in TABLES:  # it used to stop at 600 characters: two tables of nine
         assert table in prompt, table
     assert "https://www.amazon.ca/dp/B0GLADOM22" in prompt  # and the link, for "take me there"
+
+
+def test_work_they_can_see_is_only_said_to_be_done():
+    """Live: every edit to the sheet in front of him was read back ("Ledger's done. Set 21
+    cells on Sheet1; made a pivot table beside the data..."), while the notification showed
+    the same words. "When you're done with the work, just tell that you're done. That's all." """
+    result = "Set 21 cells on Sheet1; made a pivot table beside the data on Sheet1, from E1: sum of Sales by Region."
+    for role in ("documents", "files"):  # not Ditto: its job ends with a plan on a card
+        for on_card in (False, True):
+            line = answers.spoken_line("Ledger", ok=True, title="Ledger finished", summary=result, on_card=on_card, role=role)
+            assert line == "Ledger's done."
+    # What a teammate found out is still told: the answer is the point of asking.
+    found = answers.spoken_line("Scout", ok=True, title="Scout finished", summary="The GLADOM tray table is the best value at $34.99.", on_card=False, role="browser")
+    assert found == "Scout's done. The GLADOM tray table is the best value at $34.99."
+    # And work that failed says why, whoever did it.
+    failed = answers.spoken_line("Ledger", ok=False, title="Ledger couldn't finish", summary="That sheet is view only.", on_card=False, role="documents")
+    assert failed == "Ledger couldn't finish that. That sheet is view only."
+
+
+def test_its_own_mouse_work_is_done_unless_there_is_something_to_hear():
+    """Live: "Pyxi's done. GenOffice is open and its window is showing on screen." was still
+    being said when the founder asked for the next thing."""
+
+    def line(summary: str) -> str:
+        return answers.spoken_line("Pyxi", ok=True, title="Pyxi finished", summary=summary, on_card=False, role="errand")
+
+    assert line("GenOffice is open and its window is showing on screen.") == "Done."
+    assert line("The AI Sheets editor is open with a new untitled spreadsheet.") == "Done."
+    # What they would not know from watching is still said.
+    found = 'I searched for IEM on the TechLand BD earphone page, and it came back with "No products found."'
+    assert line(found) == "Pyxi's done."  # not "Done.": the card has what it found
+    placed = "The pivot table is built, but I placed it at E1 on the same sheet instead of a new one."
+    assert line(placed) == f"Pyxi's done. {placed}"
+    # A teammate's answer is not "Done.": the answer is the point.
+    scout = answers.spoken_line("Scout", ok=True, title="Scout finished", summary="The GLADOM is the best value.", on_card=False, role="browser")
+    assert scout == "Scout's done. The GLADOM is the best value."
 
 
 def test_the_spoken_line_is_short_and_never_reads_out_addresses_or_scouts_own_words():
@@ -301,3 +345,40 @@ async def test_a_result_reaches_later_turns_fenced(settings):
     assert "\n\\# The user says" in prompt[start:end]
     for_later = answers.for_later(scout_job(brain))
     assert for_later.startswith("⟦Scout's result") and TABLES[8] in for_later
+
+
+async def test_a_background_line_waits_for_a_real_silence_not_the_first_gap(settings, monkeypatch):
+    """Live: the founder pressed talk as "GenOffice is open now" began, paused in the middle
+    of his sentence, and the line came back in the pause, and again after that. "Just when
+    I'm talking, don't talk." """
+    monkeypatch.setattr(Brain, "QUIET_BEFORE_SPEAKING_S", 1.0)
+    brain, rec = make_brain(settings)
+    await brain.set_state("listening")  # they are talking as the job ends
+    await brain._job_done(scout_job(brain))
+    await asyncio.sleep(0.4)
+    await brain.set_state("idle")  # a pause in their sentence
+    await asyncio.sleep(0.5)
+    assert spoken(rec) == ""  # not in the gap
+    await brain.set_state("listening")  # they go on
+    await asyncio.sleep(0.4)
+    await brain.set_state("idle")
+    await asyncio.sleep(0.6)
+    assert spoken(rec) == ""  # the silence starts over
+    await asyncio.sleep(1.2)
+    assert spoken(rec) == "Scout's done. The full result is on the card."
+
+
+async def test_a_line_cut_off_twice_is_left_to_the_card(settings):
+    brain, _rec = make_brain(settings)
+    real = brain.tts.synthesize
+    presses = []
+
+    async def pressed_every_time(text, voice=None):
+        presses.append(text)
+        brain.interrupt()  # they press talk whenever it starts
+        return await real(text, voice)
+
+    brain.tts.synthesize = pressed_every_time  # type: ignore[method-assign]
+    await brain._job_done(scout_job(brain))
+    await asyncio.sleep(1.0)
+    assert len(presses) == 2  # tried twice, never a third time

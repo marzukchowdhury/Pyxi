@@ -31,6 +31,10 @@ class DiscordConnector(Connector):
     def connected(self) -> bool:
         return bool(self.token)
 
+    def available(self) -> bool:
+        """Only where a bot token is already set on this PC. A customer cannot make one."""
+        return self.connected()
+
     def status(self) -> Status:
         if self.connected():
             return Status(self.id, self.name, True, "Bot connected")

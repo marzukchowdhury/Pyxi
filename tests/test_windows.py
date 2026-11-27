@@ -203,9 +203,211 @@ async def test_put_a_window_on_another_screen(settings, monkeypatch):
     assert note and "they have: left, middle, right" in note
 
 
+async def test_a_split_on_a_named_screen_is_two_windows_side_by_side(settings, monkeypatch):
+    """Live, four times running: "split the screen, Chrome on the right, Firefox on the left"
+    with three screens made the window in front full-screen and called that a split."""
+    from test_brain_and_server import make_brain
+
+    placed: dict = {}
+    snapped: list = []
+    monkeypatch.setattr(windows, "available", lambda: True)
+    monkeypatch.setattr(windows, "screens", lambda: THREE)
+    monkeypatch.setattr(
+        windows,
+        "open_windows",
+        lambda minimized=False: [(7, "Untitled spreadsheet - Google Chrome", "chrome.exe"), (9, "Inbox - Mozilla Firefox", "firefox.exe")],
+    )
+    monkeypatch.setattr(windows, "place", lambda hwnd, *rect: placed.__setitem__(hwnd, rect))
+    monkeypatch.setattr(windows, "snap", lambda hwnd, where: snapped.append((hwnd, where)))
+    monkeypatch.setattr(windows, "focus", lambda hwnd: True)
+    brain, _ = make_brain(settings)
+    brain._ctx = type("C", (), {"window": type("W", (), {"hwnd": 7})()})()
+    note = await brain._arrange_windows({"layout": "split", "current_side": "right", "open": "firefox", "screen": "left"})
+    left, _top, width, height = THREE[0]["work"]
+    assert note is None and snapped == []  # nothing was made full-screen
+    assert placed[9][0] == left and placed[7][0] > left  # Firefox on the left, Chrome beside it
+    assert placed[9][2] + placed[7][2] == width and placed[9][3] == placed[7][3] == height
+
+
 def test_a_song_on_a_screen_is_not_a_song_search():
     from pyxi.companion.instant import play_request
 
     assert play_request("Can you play the song on my middle screen?") is None
     assert play_request("Just click play on the middle screen.") is None
     assert play_request("play Blinding Lights by The Weeknd") == ("Blinding Lights by The Weeknd", "youtube_music")
+
+
+# ---------------------------------------------------------------------- bringing a window forward
+class _User32:
+    """Windows, as far as focus() uses it."""
+
+    def __init__(self, front: int, iconic: bool = False) -> None:
+        self.front, self.iconic, self.keys, self.shown = front, iconic, [], []
+
+    def GetForegroundWindow(self) -> int:
+        return self.front
+
+    def IsIconic(self, hwnd: int) -> bool:
+        return self.iconic
+
+    def ShowWindow(self, hwnd: int, how: int) -> None:
+        self.shown.append(hwnd)
+        self.iconic = False
+
+    def keybd_event(self, key: int, scan: int, flags: int, extra: int) -> None:
+        self.keys.append((key, "up" if flags & 2 else "down"))
+
+    def SetForegroundWindow(self, hwnd: int) -> bool:
+        self.front = hwnd
+        return True
+
+
+def test_a_window_already_in_front_gets_no_key_at_all(monkeypatch):
+    """Live: a table was pasted three times into the spreadsheet in front of the founder and
+    never arrived. Before each paste the window was "brought to the front" with an Alt tap,
+    though it was in front already; a lone Alt moves the keyboard to the app's menu bar, and
+    the paste went there."""
+    u = _User32(front=7)
+    monkeypatch.setattr(windows, "_user32", lambda: u)
+    assert windows.focus(7) is True
+    assert u.keys == [] and u.shown == []
+
+
+def test_bringing_another_window_forward_never_sends_alt_alone(monkeypatch):
+    u = _User32(front=3)
+    monkeypatch.setattr(windows, "_user32", lambda: u)
+    assert windows.focus(7) is True and u.front == 7
+    # Alt is held around a key that means nothing, so the app in front opens no menu.
+    assert u.keys == [(0x12, "down"), (0xE8, "down"), (0xE8, "up"), (0x12, "up")]
+    # A minimized window is restored first, even when Windows still names it the front one.
+    u = _User32(front=7, iconic=True)
+    monkeypatch.setattr(windows, "_user32", lambda: u)
+    assert windows.focus(7) is True and u.shown == [7] and u.keys
+
+
+# ---------------------------------------------------------------------- browser tabs by key
+class _Keys:
+    """The keyboard, and the window each key went to."""
+
+    def __init__(self, front: list[int], closes_window_after: int | None = None) -> None:
+        self.front, self.sent, self.closes = front, [], closes_window_after
+
+    def press(self, combo: str) -> None:
+        self.sent.append((combo, self.front[0]))
+        if combo == "ctrl+w" and self.closes is not None:
+            self.closes -= 1
+            if self.closes == 0:
+                self.front[0] = 99  # its last tab: the window is gone, another is in front
+
+
+async def _tabs(settings, monkeypatch, value, *, exe="firefox.exe", closes_window_after=None):
+    from pyxi import hands
+    from test_brain_and_server import make_brain
+
+    front = [3]
+    keys = _Keys(front, closes_window_after)
+    monkeypatch.setattr(windows, "available", lambda: True)
+    monkeypatch.setattr(hands, "available", lambda: True)
+    monkeypatch.setattr(hands, "Hands", lambda: keys)
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(3, "Mail", ""), (7, "YouTube - Mozilla Firefox", "")])
+    monkeypatch.setattr(windows, "exe_of", lambda hwnd: rf"C:\Apps\{exe}" if hwnd == 7 else r"C:\Apps\notepad.exe")
+    monkeypatch.setattr(windows, "focus", lambda hwnd: front.__setitem__(0, hwnd) or True)
+    monkeypatch.setattr(windows, "foreground", lambda: front[0])
+    brain, _ = make_brain(settings)
+    return await brain._quick_action("tabs", value), keys.sent
+
+
+async def test_closing_the_last_four_tabs_is_five_keys_into_the_browser(settings, monkeypatch):
+    """Live: "close the last four tabs" was done with the mouse, took 63 seconds and gave up."""
+    note, sent = await _tabs(settings, monkeypatch, "close last 4")
+    assert note is None
+    assert sent == [("ctrl+9", 7), ("ctrl+w", 7), ("ctrl+w", 7), ("ctrl+w", 7), ("ctrl+w", 7)]
+    for value, keys in (("close", ["ctrl+w"]), ("new", ["ctrl+t"]), ("reopen", ["ctrl+shift+t"]), ("next", ["ctrl+tab"]), ("previous", ["ctrl+shift+tab"])):
+        note, sent = await _tabs(settings, monkeypatch, value)
+        assert note is None and [k for k, _ in sent] == keys
+
+
+async def test_tab_keys_only_ever_go_to_a_browser(settings, monkeypatch):
+    # No browser open: nothing is pressed (ctrl+w in another app closes something else).
+    note, sent = await _tabs(settings, monkeypatch, "close", exe="winword.exe")
+    assert note == "tabs: no browser window is open." and sent == []
+    # The window's last tab takes the window with it: the next ctrl+w is never sent.
+    note, sent = await _tabs(settings, monkeypatch, "close last 4", closes_window_after=2)
+    assert note.startswith("tabs: closed 2 of 4") and [w for _, w in sent] == [7, 7, 7]
+    # Never more than ten at once, and nothing it doesn't know.
+    note, sent = await _tabs(settings, monkeypatch, "close last 400")
+    assert note is None and sum(k == "ctrl+w" for k, _ in sent) == 10
+    note, sent = await _tabs(settings, monkeypatch, "close everything")
+    assert note.startswith("tabs: I can close") and sent == []
+
+
+# ---------------------------------------------------------------------- which browser a site opens in
+async def test_a_site_opens_in_the_browser_they_use_not_in_edge(monkeypatch):
+    """Live: "Gmail on the left, YouTube on the right", asked from another app. YouTube opened
+    in Edge beside a Firefox full of their tabs. "I think you opened Microsoft Edge, I want
+    you to work on Mozilla Firefox." """
+    started: list[list[str]] = []
+    exes = {3: r"C:\Apps\GenOffice.exe", 7: r"C:\Program Files\Mozilla Firefox\firefox.exe"}
+    monkeypatch.setattr(windows.subprocess, "Popen", lambda args, **kw: started.append(list(args)))
+    monkeypatch.setattr(windows, "_visible_windows", lambda: set())
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(3, "Untitled.xlsx", ""), (7, "Inbox - Mozilla Firefox", "")])
+    monkeypatch.setattr(windows, "exe_of", lambda hwnd: exes.get(hwnd, ""))
+    monkeypatch.setattr(windows.asyncio, "sleep", _no_sleep)
+    # Asked from GenOffice: the Firefox they have open, in a new window of its own.
+    await windows.open_new_window("https://www.youtube.com", like=3)
+    assert started[-1] == [exes[7], "-new-window", "https://www.youtube.com"]
+    # No browser open: their default one.
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(3, "Untitled.xlsx", "")])
+    monkeypatch.setattr(windows, "default_browser", lambda: r"C:\Apps\chrome.exe")
+    await windows.open_new_window("https://www.youtube.com", like=3)
+    assert started[-1] == [r"C:\Apps\chrome.exe", "--new-window", "https://www.youtube.com"]
+    # Neither, or one Pyxi can't place: Edge, as before.
+    monkeypatch.setattr(windows, "default_browser", lambda: "")
+    await windows.open_new_window("https://www.youtube.com", like=3)
+    assert started[-1][:5] == ["cmd", "/c", "start", "", "msedge"]
+
+
+async def _no_sleep(seconds: float) -> None:
+    return None
+
+
+def test_a_site_opens_in_the_browser_they_name_or_are_in(monkeypatch):
+    """Live: "open Google Sheets on Chrome", three times. Each opened in Edge, the default
+    browser, behind the Chrome window in front. "Still not done." """
+    real = windows.browser_for.real  # the test set-up turns it off: this is the real one
+    exes = {
+        3: r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        7: r"C:\Program Files\Mozilla Firefox\firefox.exe",
+        9: r"C:\Apps\GenOffice.exe",
+    }
+    monkeypatch.setattr(windows, "available", lambda: True)
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(9, "Sheet", ""), (7, "Inbox - Mozilla Firefox", ""), (3, "New Tab - Google Chrome", "")])
+    monkeypatch.setattr(windows, "exe_of", lambda hwnd: exes.get(hwnd, ""))
+    monkeypatch.setattr(windows, "default_browser", lambda: r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
+    monkeypatch.setattr(windows, "_program_path", lambda name: rf"C:\Found\{name}")
+    assert real("open Google Sheets on Chrome") == exes[3]  # the one they name
+    assert real("open it in Brave") == r"C:\Found\brave.exe"  # named, not open: where it is installed
+    assert real("open YouTube", like=3) == exes[3]  # the one they are in
+    assert real("open YouTube", like=9) == exes[7]  # not in a browser: the one they have open
+    # Their default browser is the one in front: nothing special, the link opens the usual way.
+    monkeypatch.setattr(windows, "default_browser", lambda: exes[7])
+    assert real("open YouTube", like=7) == ""
+
+
+def test_a_site_opens_in_the_window_they_are_in_not_that_browsers_other_one(monkeypatch):
+    """Live, three times running: "open techlandbd.com on a new tab", with Firefox in front of
+    them and a second Firefox window on another screen. The tab went to the other window each
+    time. The window they are in is brought to the front first, when it is that browser's."""
+    did: list = []
+    firefox = r"C:\Apps\firefox.exe"
+    monkeypatch.setattr(windows, "exe_of", lambda hwnd: {5: firefox, 6: r"C:\Apps\Code.exe"}.get(hwnd, ""))
+    monkeypatch.setattr(windows, "focus", lambda hwnd: did.append(("focus", hwnd)) or True)
+    monkeypatch.setattr(windows.subprocess, "Popen", lambda args: did.append(("open", args[1])))
+    monkeypatch.setattr(windows.time, "sleep", lambda s: None)
+    open_in = windows.open_in.real  # the test set-up turns it off: this is the real one
+    open_in(firefox, "https://techlandbd.com", 5)
+    assert did == [("focus", 5), ("open", "https://techlandbd.com")]
+    did.clear()
+    open_in(firefox, "https://techlandbd.com", 6)  # they are in another program: nothing is moved
+    open_in(firefox, "https://techlandbd.com")
+    assert did == [("open", "https://techlandbd.com"), ("open", "https://techlandbd.com")]

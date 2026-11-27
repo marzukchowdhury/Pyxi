@@ -11,7 +11,7 @@ The code side is in good shape for the beta. What's left needs your accounts, yo
    - Then run `npx vercel --prod` from `cloud/`.
 2. **Use a dedicated OpenRouter key for the beta**, with a credit limit a little above `MONTHLY_CAP_USD`, and auto top-up off. Then rotate it, as `cloud/README.md` describes. If the current key has ever been used anywhere else, rotate it now.
 3. **Turn on GitHub's private vulnerability reporting** for the Pyxi repository: Settings, then Security, then Private vulnerability reporting. `SECURITY.md` points reporters there. Fill in the `[security contact email]` placeholder too, for example `security@` on your domain.
-4. **Release the hardened app** (the next version after 0.1.6) with `scripts/release.py`. It now also runs `scripts/security_check.py`, which needs internet access for pip-audit and npm audit.
+4. **Make the next release a full build** (`python scripts/release.py <version> "..." --full`). The releases since 0.1.7 carry the hardened code, but they refreshed only Pyxi's own code in the bundled Python. A full build installs every package from the hash-pinned lock (`requirements/installer.txt`), which brings the newer pip and pypdfium2, and the Otto change that gives Scout its own browser profile.
 
 ## 1. Code-signing the installer
 
@@ -96,7 +96,8 @@ A focused test of this size is typically one to two weeks of a tester's time. As
 ## Known gaps worth fixing (smaller)
 
 - **Scout can open any page a website points it to.** A page could steer it to another site, with what it knows in the address. Scout is told to ignore page instructions, and Otto's own tests cover the classic version. A stricter fix: ask before Scout leaves the site it was sent to, unless the task names the new one.
-- **`quick_action` opens links without a card.** Opening a link isn't sending, but a page or document that talks the chat model into opening a phishing link would work. A fix: open only links the user said, or that came from Pyxi's own lookups, and put anything else on a card.
-- **"Always allow" for the mouse and keyboard** skips the first card for every later task, including one an injection talks the model into. Sends, payments, bookings, deletes and posts still ask. A fix: make "always" expire, for example after a day.
+- **Links after public pages.** Since 13 November, after Pyxi reads an email, a document or a signed-in tab, a link to a site the user didn't name asks on a card. After a web search or a public page it still opens without one: a phishing page could be opened, though nothing is typed or sent.
+- ~~"Always allow" for the mouse and keyboard~~: done. It expires after 30 days, Settings revokes it, and it never applies after Pyxi reads mail, a page or a document.
+- **The website has no Content-Security-Policy** (`website/vercel.json` sets nosniff, a referrer policy, a permissions policy and SAMEORIGIN framing). A strict CSP would limit the damage of any injected script on the download page. It's the website session's to add and test, since the site uses WebGL and embedded films.
 - **The build's own pip is old** (25.0.1 in `desktop/build/python-full`, with 5 moderate advisories and 1 low). It never ships, but it installs every package at build time. Upgrade it in `scripts/build_installer.py` (`python -m pip install --upgrade pip` after `ensurepip`), and run the next build with `--full`.
 - **electron-builder** has 6 moderate advisories (minimatch). It's a build tool and doesn't ship; update it when a fixed major version is out.

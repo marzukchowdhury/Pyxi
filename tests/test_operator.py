@@ -233,3 +233,26 @@ async def test_the_same_click_over_and_over_is_a_circle_too():
     assert not out.ok and "circles" in out.summary
     assert len(out.steps) <= 7  # a few repeats, not a minute of them
     assert any("same thing" in s.note for s in out.steps)
+
+
+async def test_it_does_not_undo_its_own_step_unless_asked():
+    """Live: the headings were made red, undone with ctrl+z, made red and undone again for a
+    minute, because the selection's own highlight hid the colour. An undo nobody asked for is
+    not pressed, and the model is told how to see whether its step worked."""
+    box = []
+    op = operator(
+        Scripted(
+            ("act", {"actions": [{"do": "click", "element_id": 3}]}),
+            ("act", {"actions": [{"do": "press", "text": "ctrl+z"}]}),
+            ("done", {"ok": True, "summary": "The headings are red."}),
+        ),
+        box,
+    )
+    out = await op.run("Make the header row red.")
+    assert ("press", "ctrl+z") not in box[0].did
+    assert any("not pressed: that would undo your own step" in (s.note or "") for s in out.steps)
+    # When they ask for an undo, it is pressed.
+    box = []
+    op = operator(Scripted(("act", {"actions": [{"do": "press", "text": "ctrl+z"}]})), box)
+    await op.run("Undo that last change.")
+    assert ("press", "ctrl+z") in box[0].did

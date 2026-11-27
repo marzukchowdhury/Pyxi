@@ -22,13 +22,13 @@ from pyxi import secretstore
 log = logging.getLogger(__name__)
 
 # Where the beta server lives (cloud/ in this repo, deployed on Vercel). Overridable for testing.
-DEFAULT_URL = "https://pyxi-beta.vercel.app"
+DEFAULT_URL = "https://api.heypyxi.com"
 BETA_MODEL = "anthropic/claude-haiku-5.5"
 # What the beta server lets through (cloud/lib/beta.ts DEFAULT_MODELS).
 BETA_MODELS = ("anthropic/claude-haiku-5.5", "anthropic/claude-sonnet-5.5")
 # Per-feature model overrides: in the beta, anything the server wouldn't allow falls back to the
 # chat model (empty), so nothing quietly bills a key of their own.
-MODEL_VARS = ("PYXI_JOB_MODEL", "PYXI_MODEL_3D", "PYXI_MODEL_HANDS", "PYXI_MODEL_HANDS_STRONG", "PYXI_MODEL_AIM")
+MODEL_VARS = ("PYXI_JOB_MODEL", "PYXI_MODEL_3D", "PYXI_MODEL_HANDS", "PYXI_MODEL_HANDS_STRONG", "PYXI_MODEL_AIM", "PYXI_MODEL_DICTATION", "PYXI_MODEL_LISTEN")
 FILE = "cloud.json"
 
 
@@ -68,6 +68,8 @@ def apply(data_dir: Path) -> bool:
         if os.environ.get(var) and os.environ[var] not in BETA_MODELS:
             os.environ[var] = ""
     os.environ["PYXI_BETA"] = "1"
+    # A token from signing in with Google (pyxi/account.py), not from an invite code.
+    os.environ["PYXI_ACCOUNT"] = "1" if beta.get("account") else "0"
     return True
 
 

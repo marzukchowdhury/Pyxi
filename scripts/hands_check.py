@@ -52,7 +52,7 @@ async def main() -> None:
 
     op = Operator(
         StreamingChat(model),
-        lambda: reader.capture(pixels=True, follow_mouse=False),
+        lambda: reader.capture(pixels=True, follow_mouse=False, hands=True),  # as the app looks
         confirm,
         report,
         image_width=settings.screen.model_image_width,

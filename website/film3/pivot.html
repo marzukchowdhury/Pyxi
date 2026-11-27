@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pyxi demo clip: "Sales by region. By five."</title>
+<!--
+  A built mock-up, not a recording. What it shows is a teammate at work: Pyxi hands the pivot to
+  Ledger, says so in one line, and a chip in the task tray (overlay/Team.tsx) shows it working
+  while you carry on. In a workbook that is open, Ledger puts the pivot beside the data on the
+  same sheet (agents/ledger_live.py); the notch then says "Ledger finished" with Ledger's own
+  summary. The numbers in the pivot are added up here from the rows on the sheet.
+  Made up: the spreadsheet app, the shop's orders, the people.
+-->
+<link rel="stylesheet" href="kit.css">
+<style>
+#win { background: #fff; }
+.title { height: 44px; background: #1f6f54; display: flex; align-items: center; padding: 0 18px; gap: 12px; color: #fff; font-size: 16px; font-weight: 600; }
+.title u { width: 18px; height: 18px; border-radius: 5px; background: #fff; opacity: .9; display: block; }
+.title .dots { margin-left: auto; display: flex; gap: 22px; }
+.title .dots s { width: 12px; height: 2px; background: #fff; opacity: .8; display: block; }
+.tools { height: 52px; background: #f3f5f8; border-bottom: 1px solid #dfe3ea; display: flex; align-items: center; gap: 26px; padding: 0 22px; font-size: 16px; font-weight: 550; color: #3a4252; }
+.tools b { color: #1f6f54; font-weight: 650; border-bottom: 3px solid #1f6f54; padding: 13px 0 11px; }
+.fx { height: 44px; border-bottom: 1px solid #dfe3ea; display: flex; align-items: center; font-size: 18px; color: #1d2330; }
+.fx b { width: 96px; text-align: center; font-weight: 600; color: #4b5364; border-right: 1px solid #dfe3ea; line-height: 44px; }
+.fx i { font-family: "Fraunces"; font-style: italic; color: #8a92a3; padding: 0 16px; }
+#grid { position: absolute; left: 0; top: 140px; right: 0; bottom: 34px; overflow: hidden; }
+#grid .r { display: flex; height: 44px; }
+#grid .r.h { height: 36px; }
+#grid .c { flex: none; border-right: 1px solid #e3e6ec; border-bottom: 1px solid #e3e6ec; padding: 0 12px; font-size: 19px; line-height: 43px; color: #1d2330; white-space: nowrap; overflow: hidden; }
+#grid .r.h .c, #grid .c.n { background: #f3f5f8; color: #5d6676; font-size: 15px; font-weight: 600; text-align: center; line-height: 35px; padding: 0; }
+#grid .c.n { line-height: 43px; }
+#grid .c.num { text-align: right; }
+#grid .c.hd { font-weight: 700; background: #e8f3ee; color: #17513e; }
+#grid .c.ttl { font-weight: 700; font-size: 21px; overflow: visible; }
+/* the pivot's cells: empty until Ledger fills them */
+#grid .c.pv { --on: 0; background: rgba(214, 233, 248, calc(var(--on) * .55)); }
+#grid .c.pv.ph { background: rgba(31, 111, 84, calc(var(--on) * .92)); color: #fff; font-weight: 700; }
+#grid .c.pv.pt { font-weight: 750; border-top: 2px solid rgba(23, 81, 62, var(--on)); }
+#grid .c.pv span { opacity: var(--on); }
+.sheets { position: absolute; left: 0; right: 0; bottom: 0; height: 34px; background: #f3f5f8; border-top: 1px solid #dfe3ea; display: flex; align-items: center; padding-left: 70px; font-size: 15px; font-weight: 650; color: #17513e; }
+.sheets span { background: #fff; padding: 7px 22px; border-radius: 0 0 8px 8px; box-shadow: 0 0 0 1px #dfe3ea; }
+#sel { position: absolute; border: 3px solid #1f6f54; border-radius: 2px; opacity: 0; }
+#pvbox { position: absolute; border: 2.5px solid #9ecbff; border-radius: 4px; box-shadow: 0 0 18px rgba(158, 203, 255, .55); opacity: 0; }
+#tray { left: 1273px; top: 139px; }
+#notch .nrow.result { width: 600px; }
+</style>
+</head>
+<body>
+<script src="story.js"></script>
+<script src="kit.js"></script>
+<script>
+// The orders on the sheet. The pivot is worked out from these rows, so it always adds up.
+const ORDERS = [
+  ["2 Jul 2026", "A-1042", "North", "Imani K.", 1840], ["9 Jul 2026", "A-1047", "East", "Priya S.", 2310],
+  ["14 Jul 2026", "A-1053", "South", "Owen B.", 960], ["21 Jul 2026", "A-1058", "West", "Tomas R.", 3120],
+  ["30 Jul 2026", "A-1064", "North", "Imani K.", 2450], ["4 Aug 2026", "A-1069", "East", "Priya S.", 1275],
+  ["11 Aug 2026", "A-1075", "West", "Tomas R.", 1990], ["19 Aug 2026", "A-1081", "South", "Owen B.", 2640],
+  ["27 Aug 2026", "A-1088", "North", "Imani K.", 1130], ["3 Sep 2026", "A-1093", "East", "Priya S.", 3405],
+  ["10 Sep 2026", "A-1099", "South", "Owen B.", 1720], ["16 Sep 2026", "A-1104", "North", "Imani K.", 2980],
+  ["23 Sep 2026", "A-1110", "West", "Tomas R.", 2260], ["29 Sep 2026", "A-1117", "East", "Priya S.", 1850],
+];
+const REGIONS = [...new Set(ORDERS.map((o) => o[2]))].sort();
+const SUMS = REGIONS.map((r) => ORDERS.filter((o) => o[2] === r).reduce((a, o) => a + o[4], 0));
+const GRAND = ORDERS.reduce((a, o) => a + o[4], 0);
+if (SUMS.reduce((a, b) => a + b, 0) !== GRAND) throw new Error("the pivot does not add up");
+const fmt = (n) => Math.round(n).toLocaleString("en-US");
+const WIDTHS = [170, 150, 170, 190, 160, 90, 230, 200, 204];
+const LETTERS = "ABCDEFGHI";
+const HEAD = 3; // the row the headings are on: the pivot starts beside it, two columns past the data
+const SUMMARY = `Made a pivot table beside the data on Orders, at G${HEAD}: sum of Sales by Region, ${REGIONS.length} groups.`;
+const TASK = "Make a pivot table of sales by region";
+const TYPED = "Q3 orders, for Friday's review";
+
+function gridHtml() {
+  const cell = (cls, w, html = "") => `<div class="c ${cls}" style="width:${w}px">${html}</div>`;
+  let out = `<div class="r h">${cell("n", 56)}${WIDTHS.map((w, i) => cell("", w, LETTERS[i])).join("")}</div>`;
+  for (let r = 1; r <= 17; r++) {
+    const o = ORDERS[r - HEAD - 1], p = r - HEAD; // p: which row of the pivot this is (0 is its heading)
+    let cells = "";
+    WIDTHS.forEach((w, i) => {
+      let cls = "", html = "";
+      if (r === 1 && i === 0) { cls = "ttl"; html = `<span id="typed"></span>`; }
+      else if (r === HEAD && i < 5) { cls = "hd" + (i === 4 ? " num" : ""); html = ["Date", "Order", "Region", "Rep", "Sales"][i]; }
+      else if (o && i < 5) { cls = i === 4 ? "num" : ""; html = i === 4 ? fmt(o[4]) : o[i]; }
+      else if ((i === 6 || i === 7) && p >= 0 && p <= REGIONS.length + 1) {
+        const total = p === REGIONS.length + 1;
+        cls = `pv ${p === 0 ? "ph" : total ? "pt" : ""} ${i === 7 ? "num" : ""}`;
+        const label = p === 0 ? "Region" : total ? "Grand Total" : REGIONS[p - 1];
+        html = i === 6 ? `<span>${label}</span>` : p === 0 ? `<span>Sum of Sales</span>` : `<span data-v="${total ? GRAND : SUMS[p - 1]}">0</span>`;
+        return (cells += `<div class="c ${cls}" data-p="${p}" style="width:${w}px">${html}</div>`);
+      }
+      cells += cell(cls, w, html);
+    });
+    out += `<div class="r">${cell("n", 56, r)}${cells}</div>`;
+  }
+  return out;
+}
+
+Film.scene({
+  id: "pivot",
+  screen: `
+    <div class="title"><u></u>Q3 orders.xlsx<div class="dots"><s></s><s></s><s></s></div></div>
+    <div class="tools"><b>Home</b><span>Insert</span><span>Formulas</span><span>Data</span><span>Review</span><span>View</span></div>
+    <div class="fx"><b id="cellname">C6</b><i>fx</i><span id="fxtext">East</span></div>
+    <div id="grid">${gridHtml()}</div>
+    <div class="sheets"><span>Orders</span></div>`,
+  overlay: `<div id="sel" class="ov"></div><div id="pvbox" class="ov"></div>
+    <div class="tray" id="tray"><div class="th"><span id="trayhead">Working in the background · 1</span><span>&ndash;</span></div>
+      <div class="chip"><i id="traydot"></i><span><b>Ledger</b> ${TASK}<small id="traysmall">Pivot</small></span></div></div>`,
+
+  // Pyxi says it has handed the job on, the chip shows Ledger at work, you carry on; then the
+  // pivot is there, the notch says so, and Pyxi does too.
+  plan(d, B) {
+    const v0 = B.act, tray = v0 + 0.25;
+    const click = onBeat(v0 + 0.6), type = [click + 0.25, click + 2.0];
+    const build = onBeat(v0 + d[0] + 0.6), done = build + 1.75;
+    const v1 = done + 0.25;
+    return {
+      tray, click, type, build, done, voice: [v0 + 0.05, v1], taps: [click],
+      c: onBeat(v1 + d[1] + 1.6), poster: v1 + d[1] + 0.8, show: [build - 0.5, build + 3.5],
+      sfx: [["listen", B.listen], ["pin", tray], ["click", click], ...Array.from({ length: 6 }, (_, k) => ["tick", build + 0.1 + k * 0.25]), ["done", done]],
+    };
+  },
+  notch(T, N) {
+    const says = window.STORY.pivot.says;
+    return [N.idle(0), N.listen(T.listen), N.look(T.look, "Looking at your screen"), N.say(T.voice[0] - 0.05, says[0]),
+      N.work(T.build - 0.3, "Ledger", "Pivot", "#9ecbff"), N.result(T.done, "Ledger finished", SUMMARY)];
+  },
+
+  init(T) {
+    const cells = $$("#grid .c.pv");
+    this.rows = [];
+    for (const c of cells) (this.rows[+c.dataset.p] = this.rows[+c.dataset.p] || []).push(c);
+    const first = boxOf(this.rows[0][0]), lastRow = this.rows[this.rows.length - 1], last = boxOf(lastRow[1]);
+    this.pv = { x: first.x, y: first.y, w: last.x + last.w - first.x, h: last.y + last.h - first.y };
+    Object.assign($("#pvbox").style, { left: this.pv.x - 2 + "px", top: this.pv.y - 2 + "px", width: this.pv.w + 3 + "px", height: this.pv.h + 3 + "px" });
+    const a1 = boxOf($("#typed").parentElement);
+    this.a1 = a1;
+    const c6 = boxOf($$("#grid .r")[6].children[3]);
+    this.c6 = c6;
+    this.stops = [{ at: 0, d: 0, x: c6.cx + 20, y: c6.cy + 6 }, { at: T.click - 0.6, d: 0.5, x: a1.x + 60, y: a1.cy + 4 }, { at: T.type[1] + 0.2, d: 0.8, x: a1.x + 420, y: a1.cy + 150 }];
+    const P = this.pv;
+    this.cam = [
+      { at: 0, v: [960, 539, 0.97, -8, 4] },
+      { at: T.listen - 0.2, d: 0.6, v: [960, 300, 1.55, -4, 2] },
+      { at: T.look - 0.2, d: 0.7, v: [960, 539, 0.97, -3, 1.4] },
+      { at: T.act, d: T.build - T.act, v: [1010, 500, 1.04, -2.5, 1.2] },                       // wide: you at work on the left, Ledger on the right
+      { at: T.build - 0.1, d: 1.2, v: [P.x + P.w / 2 - 60, 400, 1.36, -4, 1.5] }, // in on the pivot as it is drawn
+      { at: T.done + 0.2, d: T.c - T.done, v: [P.x + P.w / 2 - 150, 345, 1.3, -2, 1], ease: out3 },
+    ];
+  },
+
+  draw(t, T) {
+    // you, carrying on: a click in A1, and a title typed
+    const sel = $("#sel"), on = t >= T.click, box = on ? this.a1 : this.c6;
+    Object.assign(sel.style, { left: box.x - 1 + "px", top: box.y - 1 + "px", width: (on ? 500 : box.w) + 2 + "px", height: box.h + 2 + "px", opacity: seg(t, T.b + 0.3, T.b + 0.5) });
+    const typed = TYPED.slice(0, Math.round(TYPED.length * seg(t, T.type[0], T.type[1])));
+    const caret = t >= T.click && t < T.type[1] + 0.6 && Math.floor(t * 2.4) % 2 === 0 ? "|" : "";
+    $("#typed").textContent = typed + caret;
+    $("#cellname").textContent = on ? "A1" : "C6"; $("#fxtext").textContent = on ? typed : "East";
+
+    // Ledger's work: the heading, then a row on every half beat, each number counting up
+    this.rows.forEach((cells, p) => {
+      const at = T.build + 0.1 + p * 0.25, u = out3(seg(t, at, at + 0.3));
+      for (const c of cells) {
+        c.style.setProperty("--on", u);
+        const n = c.querySelector("[data-v]");
+        if (n) n.textContent = fmt(+n.dataset.v * out3(seg(t, at, at + 0.45)));
+      }
+    });
+    $("#pvbox").style.opacity = seg(t, T.build, T.build + 0.2) * (1 - seg(t, T.done + 0.3, T.done + 0.9));
+    const g = back(seg(t, T.build - 0.05, T.build + 0.35));
+    $("#pvbox").style.transform = `scale(${mix(1.06, 1, g)})`;
+
+    // the tray: one chip, breathing while Ledger works
+    const tray = $("#tray"), tu = back(seg(t, T.tray, T.tray + 0.36)), finished = t >= T.done;
+    tray.style.opacity = seg(t, T.tray, T.tray + 0.1); tray.style.transform = `translateY(${-14 * (1 - tu)}px) scale(${mix(0.94, 1, tu)})`;
+    $("#trayhead").textContent = finished ? "Background tasks" : "Working in the background · 1";
+    $("#traysmall").textContent = finished ? SUMMARY.slice(0, 42) + "…" : "Pivot";
+    $("#traydot").style.opacity = finished ? 1 : 0.5 + 0.5 * Math.cos(((t - T.tray) / 1.2) * 2 * Math.PI) ** 2;
+
+    const k = keyed(t, this.cam);
+    return { ptr: pointer(t, this.stops), cam: { x: k[0], y: k[1], s: k[2], ry: k[3], rx: k[4] } };
+  },
+});
+</script>
+</body>
+</html>

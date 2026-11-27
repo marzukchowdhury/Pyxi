@@ -55,7 +55,7 @@ from urllib.parse import urlsplit
 
 from otto.llm.base import Message, TextPart, ToolSpec
 
-from pyxi import safety
+from pyxi import safety, screenlink  # screenlink: the tab on screen, with no extension
 from pyxi.browserlink import BrowserError, BrowserLink, host_of, site_of
 from pyxi.companion import browsersetup  # getting the extension installed
 from pyxi.companion.actions import safe_url
@@ -361,6 +361,45 @@ def _plain(text: str) -> str:
     return " ".join(re.sub(r"[#\u27e6\u27e7\[\]]", " ", str(text)).split())[:200]
 
 
+NOT_CONNECTED = (
+    "Your browser isn't connected any more. Open the browser again, or connect it in "
+    "Settings under Connect your browser, then ask me again."
+)
+
+
+def _for_them(exc: BaseException) -> str:
+    """What the extension said went wrong, if it is a sentence a person can be read (its own
+    plain lines are; a page's script error passed through it is not)."""
+    from pyxi import plainwords
+
+    return plainwords.safe_line(_plain(str(exc)), "", 200)
+
+
+def _not_opened(note: str) -> str:
+    """Why a page could not be opened, said to the user. ``note`` is the step's note, which
+    is written for the model ("failed: the browser didn't answer, so it isn't known whether
+    that happened. Read the page before doing anything else."): live, that was read out."""
+    from pyxi import plainwords
+
+    if "isn't connected" in note:
+        return NOT_CONNECTED
+    if "didn't answer" in note:
+        return (
+            "Your browser didn't answer, so I can't tell if that page opened. Check the "
+            "browser is still open, then ask me again."
+        )
+    if m := re.search(r"hasn't let Pyxi into (.+?) yet", note):
+        return (
+            f"Your browser hasn't let me into {m.group(1)} yet. Click the Pyxi icon in the "
+            "browser's toolbar and press Allow on this site, then ask me again."
+        )
+    if "isn't a plain web address" in note:
+        return "That doesn't look like a web address I can open. Give me the site's name or its full address."
+    rest = note.split(":", 1)[-1].strip()
+    why = plainwords.safe_line(rest[:1].upper() + rest[1:], "", 200)
+    return f"I couldn't open that page. {why}".strip() + ("" if why else " Open it yourself, then ask me again.")
+
+
 def _quoted(text: str, limit: int = 80) -> str:
     """The same, for use between double quotes: the page can't close the quote."""
     return _plain(text).replace('"', "'")[:limit]
@@ -581,10 +620,11 @@ class TabOperator:
 
     def _same_site(self, site: str) -> bool:
         """Is the task still on the site it started on? A page that moved from http to https
-        on the same host is the same site, made safer."""
+        on the same host is the same site, made safer; and a site and its exact "www." form
+        (example.com, www.example.com) are one place, as a bare address is sent on to it."""
         if site == self.home:
             return True
-        if self.home == f"http://{site}":
+        if self.home == f"http://{site}" or screenlink.same_place(site) == screenlink.same_place(self.home):
             if self.home in self._allowed:
                 self._allowed.add(site)
             self.home = site
@@ -644,8 +684,13 @@ class TabOperator:
                         False, "That's one of the browser's own pages, which I can't work in."
                     )
                 if exc.code == "not_connected":
-                    return Outcome(False, "The browser extension isn't connected any more.")
-                return Outcome(False, f"I couldn't read that tab. {_plain(str(exc))}")
+                    return Outcome(False, NOT_CONNECTED)
+                why = _for_them(exc)
+                return Outcome(
+                    False,
+                    f"I couldn't read that tab. {why}".strip()
+                    + ("" if exc.code == "gone" else " Reload the page, then ask me again."),
+                )
 
     # ------------------------------------------------------------------ the loop
     async def run(self, task: str, tab: str = "", url: str = "") -> Outcome:
@@ -662,15 +707,20 @@ class TabOperator:
             line, note = await self._do({"do": "open_tab", "url": url}, {}, 0)
             steps.append(Step(0, line, note))
             if note.startswith(("declined", "skipped", "failed")):
-                return Outcome(False, "Okay, I left that for you." if note.startswith("declined") else note, steps)
+                return Outcome(False, "Okay, I left that for you." if note.startswith("declined") else _not_opened(note), steps)
         elif tab:
             try:
                 found = await self._call("peek", {"tab": tab})
             except BrowserError as exc:
-                return Outcome(False, f"I couldn't find a tab like that. {_plain(str(exc))}")
+                if exc.code == "not_connected":
+                    return Outcome(False, NOT_CONNECTED)
+                return Outcome(False, f"I couldn't find a tab like that. {_for_them(exc)}".strip())
             self.tab = int(found["id"])
         repeats: dict[str, int] = {}
         last, still = "", 0
+        acted = False  # the last thing done could have changed the page (a click, a key, an address)
+        doubted = False  # "done" was questioned once already
+        asked = False  # ...and the look now is the one right after that question
         for n in range(1, self.max_steps + 1):
             if self.cancelled:
                 raise _Stopped
@@ -679,13 +729,20 @@ class TabOperator:
                 page.steps = steps
                 return page
             seen = _fingerprint(page)
-            still = still + 1 if steps and seen == last else 0
+            if asked:
+                # The look after "(done?)". Nothing was done in between, so a page that reads
+                # the same is no second failure: counted as one, a right "done" ("pause the
+                # video") was answered with "your actions aren't working", the model clicked
+                # Pause again, and it could end in "I got stuck".
+                asked = False
+            else:
+                still = still + 1 if steps and seen == last else 0
+                if still >= 2 and steps:
+                    steps[-1].note = (
+                        f"{steps[-1].note} The page hasn't changed for {still} looks: your "
+                        "actions aren't working. Try a different way, or call done with ok=false."
+                    ).strip()
             last = seen
-            if still >= 2 and steps:
-                steps[-1].note = (
-                    f"{steps[-1].note} The page hasn't changed for {still} looks: your actions "
-                    "aren't working. Try a different way, or call done with ok=false."
-                ).strip()
             if still >= 5:
                 return Outcome(
                     False,
@@ -706,11 +763,30 @@ class TabOperator:
             if call is None:
                 return Outcome(False, "I lost my train of thought there. Want me to try again?", steps)
             if call.name == "done":
-                return Outcome(
-                    bool(call.arguments.get("ok", True)),
-                    str(call.arguments.get("summary") or "Done."),
-                    steps,
-                )
+                # Done is done only when it says so: true, or the word "true" (some models
+                # write it as a string). "ok": "false", or no "ok" at all, used to count as
+                # success and was said aloud as one.
+                said_ok = call.arguments.get("ok")
+                ok = said_ok is True or (isinstance(said_ok, str) and said_ok.strip().lower() == "true")
+                if ok and acted and still >= 1 and not doubted and n < self.max_steps:
+                    # It clicked (or pressed, or went somewhere) and the page reads exactly as
+                    # it did before: nothing on it shows the click did anything. Asked once;
+                    # if it says done again, that is its answer. (Not on the last step it is
+                    # allowed: there the done is taken, not turned into "that took more
+                    # steps than I expected".)
+                    doubted = asked = True
+                    steps.append(
+                        Step(
+                            n,
+                            "(done?)",
+                            "Not taken as done yet: the page reads exactly as it did before "
+                            "your last action, so nothing on it shows that it worked. Look for "
+                            "the result. If it is there, call done again and say what shows "
+                            "it; if not, try another way, or call done with ok=false.",
+                        )
+                    )
+                    continue
+                return Outcome(ok, str(call.arguments.get("summary") or "Done."), steps)
             if call.name == "ask_user":
                 return Outcome(
                     False, str(call.arguments.get("question") or "What should I do next?"), steps
@@ -728,6 +804,7 @@ class TabOperator:
                 )
                 continue
             did, notes = [], []
+            acted = False
             for i, a in enumerate(actions):
                 line, note = await self._do(a, page, n)
                 did.append(line)
@@ -735,6 +812,7 @@ class TabOperator:
                     notes.append(note)
                 if note.startswith(("skipped", "failed", "declined")):
                     break  # the rest of the batch assumed this worked
+                acted = acted or _changes_page(a)
                 if _changes_page(a) and i + 1 < len(actions):
                     # What comes after a click, a key or a new address was decided on a page
                     # that may no longer be the one in the tab: it waits for the next look.
@@ -763,7 +841,7 @@ class TabOperator:
         for _ in range(2):
             try:
                 res = await self.llm.complete(
-                    system=SYSTEM + safety.RULE,
+                    system=SYSTEM + getattr(self.link, "note", "") + safety.RULE,  # screenlink's limits
                     messages=[Message("user", parts)],
                     tools=[ACT, DONE, ASK],
                     max_tokens=2000,
@@ -996,10 +1074,15 @@ class TabOperator:
                 return line, f"failed: the browser hasn't let Pyxi into {exc.host or 'that site'} yet"
             return line, f"failed: {_plain(str(exc))}"
         self._last = result
+        unpressed = name == "type" and result.get("enter") is False  # the text is in, the key was refused
+        if unpressed:
+            line = line.removesuffix(" and pressed Enter") + ", but Enter could not be pressed"
         await self.report(line, "status" if quiet else "clicked")
         note = ""
         if name == "type" and "value" in result and _as_shown(result["value"]) != _as_shown(args.get("text")):
             note = f"the field now shows \"{_quoted(result['value'])}\", not what you typed"
+        if unpressed:
+            note = (note + " Enter was not pressed: click the page's own button instead.").strip()
         if name == "scroll" and result.get("moved") is False:
             note = "the page didn't scroll: that's the end"
         if result.get("covered"):
@@ -1098,20 +1181,36 @@ def setup(brain: Brain) -> None:
 
 
 def tools(brain: Brain) -> list[ToolSpec]:
-    """The tab tools while a browser is connected; while none is, the one tool that sets the
-    extension up when they ask for it."""
-    link = getattr(brain, "browser", None)
-    if link is None:
-        return []
-    return list(SPECS) if link.connected else [browsersetup.CONNECT]
+    """The tab tools while a browser is connected (or, with the fallback switched on, for
+    the tab on screen); and while no extension is connected, the one tool that sets it up
+    when they ask for it."""
+    extension = getattr(brain, "browser", None)
+    link = screenlink.choose(brain)  # the extension, else the tab on screen (pyxi/screenlink.py)
+    specs = screenlink.specs(link, SPECS) if link is not None else []
+    # Only in a turn whose own words are about the browser. Offered in every turn, one more
+    # tool was enough to change what the model did with requests that have nothing to do
+    # with it (live: "What's this about?" lost its cue card four times in five).
+    if (
+        extension is not None
+        and not extension.connected
+        and _ABOUT_BROWSER.search(getattr(brain, "_user_text", "") or "")
+    ):
+        specs.append(browsersetup.CONNECT)
+    return specs
+
+
+_ABOUT_BROWSER = re.compile(
+    r"(?i)\b(browsers?|extensions?|add-?ons?|plug-?ins?|chrome|edge|firefox|brave|vivaldi|opera)\b"
+    r"|ব্রাউজার|এক্সটেনশন"
+)
 
 
 def prompt(brain: Brain) -> str:
     """The routing lines for the system prompt, only while a browser is connected."""
     from pyxi.companion import prompts
 
-    link = getattr(brain, "browser", None)
-    return prompts.BROWSER_TAB if link is not None and link.connected else ""
+    link = screenlink.choose(brain)  # the extension, else the tab on screen
+    return screenlink.prompt(link, prompts.BROWSER_TAB) if link is not None else ""
 
 
 async def stop(brain: Brain) -> bool:
@@ -1124,6 +1223,7 @@ async def stop(brain: Brain) -> bool:
             brain._tab_operator = None  # its task is about to be cancelled before it starts
     if link is not None and link.connected:
         await link.stop()
+    await screenlink.stop(brain)  # and whatever is being done in the tab on screen
     return op is not None
 
 
@@ -1160,10 +1260,10 @@ def _prefer(brain: Brain) -> str:
 
 
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
-    link: BrowserLink | None = getattr(brain, "browser", None)
-    if name == "connect_browser" and link is not None:
+    if name == "connect_browser" and getattr(brain, "browser", None) is not None:
         return await browsersetup.connect(brain, args)
-    if link is None or not link.connected:
+    link: Any = screenlink.choose(brain)  # the extension, else the tab on screen, else None
+    if link is None:
         return (
             f"{name}: Pyxi's browser extension isn't connected, so this can't be done in their "
             "tab. Tell them in one short line (Settings has 'Connect your browser'), or use "
@@ -1260,7 +1360,7 @@ async def _read_tab(brain: Brain, link: BrowserLink, which: str) -> str:
                 )
             if exc.code == "browser_page":
                 return "read_tab: that's one of the browser's own pages, which can't be read."
-            return f"read_tab: couldn't read the tab. {exc}"
+            return f"read_tab: couldn't read the tab. {_for_them(exc)} Tell them so in one short line, and to reload the page and ask again."
     others: list[str] = []
     try:
         listing = await link.call("tabs", {}, browser=browser)
@@ -1362,7 +1462,7 @@ async def _work(
             "Pyxi works inside that tab, signed in as you, without your mouse. Press Esc in "
             "the tab to stop it. Anything that sends, submits, buys, deletes or posts asks "
             "you again."
-            + (' "Always allow on this site" lasts 30 days.' if keep else ""),
+            + (f' "Always allow on this site" {getattr(link, "always_lasts", "lasts 30 days")}.' if keep else ""),
             **({"always": "Always allow on this site"} if keep else {}),
         )
         if ok == "always" and keep:

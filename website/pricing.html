@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!--include:head-->
+    <title>Pyxi pricing: Starter, Pro and Max</title>
+    <meta name="description" content="Pyxi's plans: Starter at $9 a month, Pro at $19 and Max at $39, in US dollars, each with a monthly usage allowance. Two months free on a yearly plan, and a 3-day free trial of Pro with no card needed." />
+    <link rel="canonical" href="{{siteUrl}}/pricing" />
+    <meta property="og:url" content="{{siteUrl}}/pricing" />
+    <meta property="og:title" content="Pyxi pricing" />
+    <meta property="og:description" content="Starter, Pro and Max. A 3-day free trial of Pro, no card needed." />
+    <meta name="twitter:title" content="Pyxi pricing" />
+    <meta name="twitter:description" content="Starter, Pro and Max. A 3-day free trial of Pro, no card needed." />
+    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/pages/pricing.js"></script>
+  </head>
+  <body class="page-pricing">
+    <!--include:nav-->
+    <!--include:firefly-->
+
+    <main id="main">
+      <section class="page-hero price-hero" data-say="Pick how many fireflies you need.">
+        <div class="wrap">
+          <p class="kicker reveal">Pricing</p>
+          <h1 class="display-sm reveal">Pick your light. <span class="dim">Start free.</span></h1>
+          <p class="lead reveal">Every plan starts with 3 days of Pro, free. No card needed. The trial starts when you sign in with Google inside Pyxi, and you choose a plan inside the app. Change or cancel any time from Pyxi's Settings.</p>
+          <div class="bill reveal" role="group" aria-label="Billing">
+            <button type="button" data-bill="month" aria-pressed="true">Monthly</button>
+            <button type="button" data-bill="year" aria-pressed="false">Yearly <i>two months free</i></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="plans-wrap" aria-label="Plans">
+        <div class="wrap">
+          <div class="plans" id="plans">
+            <article class="plan reveal" data-plan="starter" data-month="9" data-year="90" data-permonth="7.50" data-flies="6">
+              <div class="jar" aria-hidden="true"><canvas></canvas></div>
+              <h2>Starter</h2>
+              <p class="plan-for">For the odd question and a few errands.</p>
+              <p class="price"><b class="amount">$9</b><span class="per">a month</span></p>
+              <p class="price-note">or $90 a year ($7.50 a month)</p>
+              <ul>
+                <li>The <b>smallest</b> monthly allowance</li>
+                <li>Suits asking now and then, with an errand here and there</li>
+                <li>Everything Pyxi does is included: answers, pointing, 3D, the teammates</li>
+                <li>Docs, sheets, PDFs and email help included</li>
+              </ul>
+              <a class="btn btn-ghost btn-lg" href="/download#trial" data-track="pricing-starter">Start the free trial</a>
+              <p class="plan-start">Your trial starts when you sign in to Pyxi. Pyxi keeps this plan ready for when it ends, and you can change your mind there.</p>
+            </article>
+
+            <article class="plan pro reveal" data-plan="pro" data-month="19" data-year="180" data-permonth="15" data-flies="18">
+              <p class="badge">Most popular</p>
+              <div class="jar" aria-hidden="true"><canvas></canvas></div>
+              <h2>Pro</h2>
+              <p class="plan-for">For using Pyxi through the working day.</p>
+              <p class="price"><b class="amount">$19</b><span class="per">a month</span></p>
+              <p class="price-note">or $180 a year ($15 a month)</p>
+              <ul>
+                <li>A monthly allowance <b>a little over twice</b> Starter's</li>
+                <li>Suits using Pyxi every day while you work</li>
+                <li>Everything Pyxi does is included: answers, pointing, 3D, the teammates</li>
+                <li>Docs, sheets, PDFs and email help included</li>
+              </ul>
+              <a class="btn btn-fly btn-lg" href="/download#trial" data-track="pricing-pro">Start the free trial</a>
+              <p class="plan-start">Your trial starts when you sign in to Pyxi. Pyxi keeps this plan ready for when it ends, and you can change your mind there.</p>
+            </article>
+
+            <article class="plan reveal" data-plan="max" data-month="39" data-year="372" data-permonth="31" data-flies="40">
+              <div class="jar" aria-hidden="true"><canvas></canvas></div>
+              <h2>Max</h2>
+              <p class="plan-for">For handing Pyxi real work, all day.</p>
+              <p class="price"><b class="amount">$39</b><span class="per">a month</span></p>
+              <p class="price-note">or $372 a year ($31 a month)</p>
+              <ul>
+                <li>The <b>biggest</b> monthly allowance, about five times Starter's</li>
+                <li>Suits handing Pyxi long jobs and using it all day</li>
+                <li>Everything Pyxi does is included: answers, pointing, 3D, the teammates</li>
+                <li>Docs, sheets, PDFs and email help included</li>
+              </ul>
+              <a class="btn btn-ghost btn-lg" href="/download#trial" data-track="pricing-max">Start the free trial</a>
+              <p class="plan-start">Your trial starts when you sign in to Pyxi. Pyxi keeps this plan ready for when it ends, and you can change your mind there.</p>
+            </article>
+          </div>
+          <p class="plans-usd reveal">Prices in US dollars.</p>
+
+          <div class="gets reveal" id="gets" aria-live="polite">
+            <p class="gets-head">How much you get on <b id="gets-name">Pro</b></p>
+            <div class="get get-wide"><span>Monthly allowance</span><i><u data-k="a"></u></i><b data-k="a">A little over twice Starter</b></div>
+          </div>
+
+          <p class="counts reveal"><b>How the allowance works.</b> Each plan comes with a monthly usage allowance, and the plans differ only in how big it is. Whatever Pyxi's AI does for you uses some of it: a quick answer uses a little, and a 3D model or a long job by a teammate uses more. Settings in Pyxi shows how much you have used, and the allowance fills up again at the start of each month.</p>
+          <p class="counts reveal"><b>The trial.</b> There is no free plan: every plan starts with the 3-day trial of Pro, and the trial asks for no card. The trial comes with a small allowance of its own. When it ends, you choose a plan in Pyxi's Settings to keep going.</p>
+        </div>
+      </section>
+
+      <section class="price-faq" data-say="Ask me anything about the plans.">
+        <div class="wrap pq-grid">
+          <div class="pq-side">
+            <p class="kicker reveal">Before you pick</p>
+            <h2 class="h2 reveal">Fair questions.<br /><span class="dim">Straight answers.</span></h2>
+            <p class="lead reveal">Nothing here is hidden in small print. If your question is not on the list, the FAQ has more.</p>
+            <div class="cta-row reveal">
+              <a class="btn btn-fly btn-lg" href="/download" data-track="pricing-download">Download for Windows</a>
+              <a class="btn btn-ghost btn-lg" href="/faq">All questions</a>
+            </div>
+          </div>
+          <div class="pq-list">
+            <details class="pq reveal" open><summary><i>1</i>What happens when I run out?</summary><p>Pyxi tells you, with the date your allowance fills up again. You can wait for that date, or move up a plan from Settings in Pyxi.</p></details>
+            <details class="pq reveal"><summary><i>2</i>Can I change or cancel my plan?</summary><p>Yes, at any time, from Settings in Pyxi. Change plan and Manage subscription open your subscription page in your browser, where you can move to another plan, update your card, see your receipts or cancel.</p></details>
+            <details class="pq reveal"><summary><i>3</i>Does my data leave my PC?</summary><p>Some of it has to, so Pyxi can answer. The <a href="/privacy">privacy page</a> says exactly what is sent, what is kept and how to delete it.</p></details>
+            <details class="pq reveal"><summary><i>4</i>Is there a free version?</summary><p>There is a 3-day free trial of Pro, with no card needed. There is no free plan after it.</p></details>
+            <details class="pq reveal"><summary><i>5</i>How do I start, and how do I pay?</summary><p>Download Pyxi and sign in with Google. Your 3-day trial starts then. To keep going, open Settings in Pyxi and choose a plan: you pay in US dollars on a secure checkout page in your browser, and Pyxi unlocks a few seconds later. There is no sign-in on this website.</p></details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!--include:footer-->
+  </body>
+</html>

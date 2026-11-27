@@ -14,10 +14,73 @@ import ctypes
 import ctypes.wintypes
 import logging
 import sys
+import threading
 import time
 from dataclasses import dataclass
+from typing import Any
 
 log = logging.getLogger(__name__)
+
+_WRAPPERS = threading.Lock()
+_wrappers_checked = False
+
+
+def _auto() -> Any:
+    """uiautomation, once its wrappers are known to load (ImportError when it isn't there).
+
+    comtypes writes a Python module for each Windows component, and makes it again when it
+    will not import. First tester, 13 November: several threads did that at the same
+    moment, one read a module another was half way through writing, and every look at the
+    screen from then on failed with "cannot import name 'OLE_YSIZE_HIMETRIC'". So the
+    first use is one thread at a time, and wrappers that will not load are made afresh."""
+    global _wrappers_checked
+    import uiautomation as auto
+
+    if not _wrappers_checked:
+        with _WRAPPERS:
+            if not _wrappers_checked:
+                mend_wrappers()
+                _wrappers_checked = True
+    return auto
+
+
+def mend_wrappers() -> bool:
+    """Load the automation wrappers; if they will not load, clear comtypes' own generated
+    modules (nothing of the user's) and make them again. True when they load."""
+    import importlib
+    from pathlib import Path
+
+    import comtypes.client
+
+    try:
+        comtypes.client.GetModule("UIAutomationCore.dll")
+        return True
+    except Exception as exc:
+        log.warning("the automation wrappers would not load (%s): making them again", exc)
+    import comtypes.gen
+
+    folder = Path(getattr(comtypes.client, "gen_dir", None) or Path(comtypes.gen.__file__).parent)
+    for made in folder.glob("*.py*"):
+        if made.name != "__init__.py":
+            try:
+                made.unlink()
+            except OSError:
+                pass
+    for cached in (folder / "__pycache__").glob("*.pyc") if (folder / "__pycache__").is_dir() else []:
+        try:
+            cached.unlink()
+        except OSError:
+            pass
+    for name in [m for m in sys.modules if m.startswith("comtypes.gen.")]:
+        del sys.modules[name]
+        vars(comtypes.gen).pop(name.rsplit(".", 1)[1], None)
+    importlib.invalidate_caches()
+    try:
+        comtypes.client.GetModule("UIAutomationCore.dll")
+        return True
+    except Exception:
+        log.warning("the automation wrappers could not be made", exc_info=True)
+        return False
 
 # Control types worth showing the model: things you can act on, plus structure and labels.
 INTERACTIVE = {
@@ -62,6 +125,14 @@ class RawElement:
     parent: int | None  # index into the returned list
     is_password: bool
     automation_id: str
+    # What the control says about itself, when the whole window came in one call (the
+    # hands show these to the model, so it need not look again to check a field).
+    value: str = ""  # a field's text, a dropdown's choice (never a password's)
+    on: bool | None = None  # a tick or a switch: on or off
+    chosen: bool = False  # the row, tab or option that is the selected one
+    open: bool | None = None  # a dropdown, a tree row: open or closed
+    enabled: bool = True
+    more: int = 0  # rows of it that are out of view (a list's, a tree's)
 
 
 @dataclass
@@ -70,6 +141,9 @@ class RawWindow:
     process: str
     rect: tuple[int, int, int, int]
     hwnd: int
+    # "partial": the walk stopped early (an app threw part-way), "failed": none of the tree
+    # could be read. Either way the window itself is known, and Pyxi says so to the model.
+    tree: str = "ok"
 
 
 def available() -> bool:
@@ -99,16 +173,16 @@ def window_title(hwnd: int) -> str | None:
     return buf.value
 
 
-def window_at(x: int, y: int) -> int | None:
-    """The top-level window the user sees at a point: the first visible, real window in
-    z-order whose frame contains it. Pyxi's own (click-through) windows don't count."""
+def _real_windows() -> list[tuple[int, tuple[int, int, int, int]]]:
+    """Every visible, real top-level window, topmost first: (hwnd, (left, top, right, bottom)).
+    Pyxi's own (click-through) windows don't count."""
     if sys.platform != "win32":
-        return None
+        return []
     import ctypes.wintypes as wt
 
     user32 = ctypes.windll.user32
     dwm = ctypes.windll.dwmapi
-    found: list[int] = []
+    found: list[tuple[int, tuple[int, int, int, int]]] = []
 
     @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
     def visit(hwnd, _):
@@ -126,16 +200,250 @@ def window_at(x: int, y: int) -> int | None:
         r = wt.RECT()
         if not user32.GetWindowRect(hwnd, ctypes.byref(r)):
             return True
-        if not (r.left <= x < r.right and r.top <= y < r.bottom):
-            return True
         title = window_title(hwnd) or ""
         if not title.strip() or title.startswith("Pyxi"):
             return True
-        found.append(hwnd)
-        return False  # the topmost match is the one they see
+        found.append((int(hwnd), (r.left, r.top, r.right, r.bottom)))
+        return True
 
     user32.EnumWindows(visit, 0)
-    return found[0] if found else None
+    return found
+
+
+def window_at(x: int, y: int) -> int | None:
+    """The top-level window the user sees at a point: the first visible, real window in
+    z-order whose frame contains it. Pyxi's own (click-through) windows don't count."""
+    for hwnd, (left, top, right, bottom) in _real_windows():
+        if left <= x < right and top <= y < bottom:
+            return hwnd  # the topmost match is the one they see
+    return None
+
+
+def screen_at(x: int, y: int) -> tuple[int, int, int, int] | None:
+    """The monitor a point is on, as x, y, w, h in physical px."""
+    if sys.platform != "win32":
+        return None
+    import ctypes.wintypes as wt
+
+    class Info(ctypes.Structure):
+        _fields_ = [("cbSize", wt.DWORD), ("rcMonitor", wt.RECT), ("rcWork", wt.RECT), ("dwFlags", wt.DWORD)]
+
+    user32 = ctypes.WinDLL("user32")  # its own handle: the types set here are nobody else's
+    user32.MonitorFromPoint.restype = ctypes.c_void_p
+    user32.MonitorFromPoint.argtypes = [wt.POINT, wt.DWORD]
+    user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    mon = user32.MonitorFromPoint(wt.POINT(x, y), 2)  # MONITOR_DEFAULTTONEAREST
+    info = Info()
+    info.cbSize = ctypes.sizeof(Info)
+    if not mon or not user32.GetMonitorInfoW(mon, ctypes.byref(info)):
+        return None
+    m = info.rcMonitor
+    return m.left, m.top, m.right - m.left, m.bottom - m.top
+
+
+def top_window_on(screen: tuple[int, int, int, int]) -> int | None:
+    """The topmost real window that sits on a screen (its middle is on it)."""
+    sx, sy, sw, sh = screen
+    for hwnd, (left, top, right, bottom) in _real_windows():
+        cx, cy = (left + right) // 2, (top + bottom) // 2
+        if right - left > 80 and bottom - top > 80 and sx <= cx < sx + sw and sy <= cy < sy + sh:
+            return hwnd
+    return None
+
+
+Box = tuple[int, int, int, int]  # x, y, w, h
+
+
+def _clip(r: Box, to: Box) -> Box | None:
+    x0, y0 = max(r[0], to[0]), max(r[1], to[1])
+    x1, y1 = min(r[0] + r[2], to[0] + to[2]), min(r[1] + r[3], to[1] + to[3])
+    return (x0, y0, x1 - x0, y1 - y0) if x1 > x0 and y1 > y0 else None
+
+
+def _share_in_view(part: Box, above: list[Box], grid: int = 12) -> float:
+    """How much of this part of a window nothing above it covers (0..1), by sampling."""
+    seen = 0
+    for i in range(grid):
+        for j in range(grid):
+            px = part[0] + (i + 0.5) * part[2] / grid
+            py = part[1] + (j + 0.5) * part[3] / grid
+            if not any(a[0] <= px < a[0] + a[2] and a[1] <= py < a[1] + a[3] for a in above):
+                seen += 1
+    return seen / (grid * grid)
+
+
+def windows_in_view(
+    stack: list[tuple[int, tuple[int, int, int, int]]],
+    screen: Box,
+    main: int = 0,
+    limit: int = 3,
+) -> list[tuple[int, Box, list[Box]]]:
+    """The other windows a picture of ``screen`` shows, besides ``main`` (the one under the
+    mouse): (hwnd, the part of it on this screen, the windows above it), most in view first.
+
+    Two windows side by side are both in the picture, and live the model was given the
+    controls of one of them only, so nothing could be drawn on the other. ``stack`` is
+    `_real_windows()`: topmost first, (hwnd, (left, top, right, bottom)). A window counts
+    when a good part of the screen is its own and most of that is not behind another window:
+    one that only peeks out from behind the window in front is not what anyone is reading."""
+    area = max(1, screen[2] * screen[3])
+    found: list[tuple[float, int, Box, list[Box]]] = []
+    above: list[Box] = []
+    for hwnd, (left, top, right, bottom) in stack:
+        rect = (left, top, right - left, bottom - top)
+        part = _clip(rect, screen)
+        if hwnd != main and part and part[2] >= 200 and part[3] >= 150:
+            showing = _share_in_view(part, above) * part[2] * part[3]
+            if showing >= 0.08 * area and showing >= 0.5 * part[2] * part[3]:
+                found.append((showing, hwnd, part, list(above)))
+        above.append(rect)
+    found.sort(key=lambda f: -f[0])
+    return [(hwnd, part, over) for _, hwnd, part, over in found[: max(0, limit)]]
+
+
+def other_windows(screen: Box, main: int = 0, limit: int = 3) -> list[tuple[int, Box, list[Box]]]:
+    """`windows_in_view` of the windows that are open now (the desktop itself is not one)."""
+    shell = desktop_window()
+    stack = [(hwnd, r) for hwnd, r in _real_windows() if hwnd != shell]
+    return windows_in_view(stack, screen, main, limit)
+
+
+def read_window(
+    hwnd: int, *, budget_s: float, max_elements: int = 400, max_depth: int = 25
+) -> tuple[RawWindow, list[RawElement]]:
+    """One more window of the screen, read in one call or not at all: its controls when they
+    came back within ``budget_s``, else the window alone, marked as not read. It is never
+    walked the slow way: the look as a whole has to stay quick. Never raises."""
+    window = named_window(hwnd)
+    if not available() or budget_s <= 0:
+        window.tree = "failed"
+        return window, []
+    try:
+        auto = _auto()
+
+        got = read_in_one_call(auto, hwnd, budget_s, max_elements, max_depth)
+    except Exception as exc:
+        log.debug("couldn't read another window of the screen: %s", exc)
+        got = None
+    if got is None:
+        window.tree = "failed"
+    return window, got or []
+
+
+def named_window(hwnd: int) -> RawWindow:
+    """A window's title, program and place, asked of Windows directly (nothing of what is in
+    it): enough to tell whether it is a private one before any of it is read."""
+    try:
+        return RawWindow(
+            title=window_title(hwnd) or "",
+            process=process_name(_pid_of(hwnd)),
+            rect=_rect_of(hwnd),
+            hwnd=hwnd,
+        )
+    except Exception:
+        return RawWindow("", "", (0, 0, 0, 0), hwnd)
+
+
+def desktop_window() -> int:
+    """The desktop itself (its icons), which is what's there when no window is."""
+    if sys.platform != "win32":
+        return 0
+    return int(ctypes.windll.user32.GetShellWindow() or 0)
+
+
+def window_to_read(
+    follow_mouse: bool, named: int | None
+) -> tuple[int, tuple[int, int, int, int] | None]:
+    """Which window a look at the screen reads, and (when it is the bare desktop) the screen
+    it is read on. The request's own window; else the one under the mouse; else, with the
+    mouse over no window (the desktop, the taskbar), the window in front when it is on the
+    mouse's screen, else the top window on that screen, or its desktop. Never the window in
+    front when it is on another screen: live, with three screens, the model was given the
+    buttons of a window on the second screen under a picture of the first. 0 when the window
+    in front is the one to read."""
+    if named:
+        return named, None
+    pos = cursor_pos() if follow_mouse else None
+    if not pos:
+        return 0, None
+    hwnd = window_at(*pos)
+    if hwnd:
+        return hwnd, None
+    screen = screen_at(*pos)
+    if screen is None:
+        return 0, None
+    # The one they are working in comes before whatever floats on top of it: a small
+    # always-on-top window (a video in a corner, a sticky note) is first in the pile, and
+    # with the mouse on the taskbar the model got its title and buttons under a picture of Word.
+    front = _front_window()
+    sx, sy, sw, sh = screen
+    for real, (left, top, right, bottom) in _real_windows():
+        cx, cy = (left + right) // 2, (top + bottom) // 2
+        if real == front and sx <= cx < sx + sw and sy <= cy < sy + sh:
+            return front, None
+    hwnd = top_window_on(screen)
+    if hwnd:
+        return hwnd, None
+    return desktop_window(), screen
+
+
+def input_idle_s() -> float | None:
+    """Seconds since the user last touched the mouse or keyboard (Windows' own clock: when,
+    never what)."""
+    if sys.platform != "win32":
+        return None
+
+    class LastInput(ctypes.Structure):
+        _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+
+    info = LastInput()
+    info.cbSize = ctypes.sizeof(LastInput)
+    if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+        return None
+    now = ctypes.windll.kernel32.GetTickCount()
+    return ((now - info.dwTime) & 0xFFFFFFFF) / 1000.0
+
+
+def _rect_of(hwnd: int) -> tuple[int, int, int, int]:
+    r = ctypes.wintypes.RECT()
+    if not ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(r)):
+        return 0, 0, 0, 0
+    return r.left, r.top, r.right - r.left, r.bottom - r.top
+
+
+def _pid_of(hwnd: int) -> int:
+    pid = ctypes.wintypes.DWORD()
+    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return int(pid.value)
+
+
+def _front_window() -> int:
+    user32 = ctypes.windll.user32
+    fg = int(user32.GetForegroundWindow() or 0)
+    return int(user32.GetAncestor(fg, 2) or 0) or fg if fg else 0  # GA_ROOT
+
+
+def unread_window(follow_mouse: bool = True, named: int | None = None) -> RawWindow | None:
+    """The window a look was for, when its tree could not be read: its title, program and
+    place, asked of Windows directly. Without it the model was told "window: ''" and took
+    that for an empty desktop, and nothing drawn could be tied to a window. Never raises."""
+    if sys.platform != "win32":
+        return None
+    try:
+        hwnd, screen = window_to_read(follow_mouse, named)
+        hwnd = hwnd or _front_window()
+        if not hwnd:
+            return None
+        return RawWindow(
+            title=window_title(hwnd) or "",
+            process=process_name(_pid_of(hwnd)),
+            rect=screen or _rect_of(hwnd),
+            hwnd=hwnd,
+            tree="failed",
+        )
+    except Exception as exc:
+        log.debug("couldn't name the window either: %s", exc)
+        return None
 
 
 def process_name(pid: int) -> str:
@@ -168,16 +476,179 @@ def read_foreground(
     if not available():
         return None, []
     try:
-        import uiautomation as auto
+        auto = _auto()
     except ImportError:
         return None, []
 
-    try:
-        with auto.UIAutomationInitializerInThread(debug=False):
-            return _walk(auto, budget_s, max_elements, max_depth, follow_mouse, hwnd)
-    except Exception as exc:  # UIA is best-effort: some apps throw COM errors mid-walk
-        log.warning("UI Automation failed: %s", exc)
-        return None, []
+    failure: Exception | None = None
+    for attempt in range(2):
+        try:
+            with auto.UIAutomationInitializerInThread(debug=False):
+                return _walk(auto, budget_s, max_elements, max_depth, follow_mouse, hwnd)
+        except Exception as exc:  # UIA is best-effort: some apps throw COM errors
+            failure = exc
+            if attempt == 0:
+                time.sleep(0.15)  # often an app that is just opening: a moment later it answers
+    log.warning("UI Automation failed: %s", failure)
+    return unread_window(follow_mouse, hwnd), []
+
+
+# UI Automation property ids (UIAutomationClient.h), and "this control and everything under it".
+_P_RECT, _P_TYPE, _P_NAME, _P_AUTOMATION_ID, _P_PASSWORD, _P_OFFSCREEN = 30001, 30003, 30005, 30011, 30019, 30022
+_WHOLE_TREE = 1 | 2 | 4  # TreeScope_Element | Children | Descendants
+# What a control says about itself: enabled, its value, open or closed, chosen, ticked.
+_P_ENABLED, _P_VALUE, _P_EXPANDED, _P_SELECTED, _P_TOGGLE = 30010, 30045, 30070, 30079, 30086
+_P_HAS_EXPAND, _P_HAS_SELECTION, _P_HAS_TOGGLE, _P_HAS_VALUE = 30028, 30036, 30041, 30043
+_STATES = (_P_ENABLED, _P_VALUE, _P_EXPANDED, _P_SELECTED, _P_TOGGLE, _P_HAS_EXPAND, _P_HAS_SELECTION, _P_HAS_TOGGLE, _P_HAS_VALUE)
+_ROWS = {"ListItem", "TreeItem", "DataItem"}
+VALUE_CHARS = 80  # how much of a field's text a look keeps
+# A window whose one-call read did not come back in time is walked the old way for a while.
+_ONE_CALL_OFF_S = 60.0
+_one_call_off: dict[int, float] = {}
+
+
+def _keep(role: str, offscreen: bool, w: int, h: int, name: str) -> bool:
+    """Is this control worth showing the model? The same rule for both ways of reading."""
+    if role not in INTERACTIVE and role not in STRUCTURAL and role not in LABELS:
+        return False
+    if offscreen or w < 3 or h < 3:
+        return False
+    if role in LABELS and not name:
+        return False
+    return not (role in STRUCTURAL and not name and w * h < 2_000)
+
+
+def _cached_elements(auto, hwnd: int, max_elements: int, max_depth: int) -> list[RawElement]:
+    """Every control of a window from ONE call across to its program.
+
+    The walk below asks the program a separate question for each property of each control
+    (its kind, its place, its name, ...) and for each step to the next control: thousands of
+    round trips for a web page. Measured on a browser window: 8 s, where the app's budget is
+    1.5 s, so Pyxi saw the top of the page and nothing else. Asked once for the whole tree
+    with those properties attached, the same window came back in 0.3 s. Reading the answer
+    costs nothing: it is all on this side already.
+    """
+    ui = auto.uiautomation._AutomationClient.instance().IUIAutomation
+    request = ui.CreateCacheRequest()
+    for prop in (_P_RECT, _P_TYPE, _P_NAME, _P_AUTOMATION_ID, _P_PASSWORD, _P_OFFSCREEN, *_STATES):
+        request.AddProperty(prop)
+    request.TreeScope = _WHOLE_TREE
+    # The raw view, as the walk below uses: a browser page marks many of its groups and texts
+    # as "not controls", and the control view drops them (and shifts every depth).
+    request.TreeFilter = ui.RawViewCondition
+    root = ui.ElementFromHandle(hwnd).BuildUpdatedCache(request)
+    names = auto.ControlTypeNames
+    out: list[RawElement] = []
+    kept_above: list[tuple[int, int | None]] = []  # depth -> index of the last kept ancestor
+
+    def children(node, depth: int) -> list[tuple[Any, int]]:
+        try:
+            kids = node.GetCachedChildren()
+        except Exception:
+            return []
+        return [(kids.GetElement(i), depth) for i in reversed(range(kids.Length if kids else 0))]
+
+    todo = children(root, 1)
+    while todo and len(out) < max_elements:
+        node, depth = todo.pop()
+        if depth < max_depth:
+            todo += children(node, depth + 1)
+        try:
+            role = names.get(node.CachedControlType, "")
+            rect = node.CachedBoundingRectangle
+            w, h = rect.right - rect.left, rect.bottom - rect.top
+            name = (node.CachedName or "").strip()
+            if not _keep(role, bool(node.CachedIsOffscreen), w, h, name):
+                if role.removesuffix("Control") in _ROWS and name:
+                    # A row out of view: not listed, but its list is told it has it.
+                    while kept_above and kept_above[-1][0] >= depth:
+                        kept_above.pop()
+                    if kept_above and kept_above[-1][1] is not None:
+                        out[kept_above[-1][1]].more += 1
+                continue
+        except Exception:
+            continue
+        while kept_above and kept_above[-1][0] >= depth:
+            kept_above.pop()
+        is_password, automation_id = False, ""
+        try:
+            is_password = bool(node.GetCachedPropertyValue(_P_PASSWORD))
+        except Exception:
+            pass
+        try:
+            automation_id = (node.CachedAutomationId or "")[:80]
+        except Exception:
+            pass
+        out.append(
+            RawElement(
+                name=name[:160],
+                role=role.removesuffix("Control"),
+                rect=(rect.left, rect.top, w, h),
+                depth=depth,
+                parent=kept_above[-1][1] if kept_above else None,
+                is_password=is_password,
+                automation_id=automation_id,
+                **_states(node, is_password),
+            )
+        )
+        kept_above.append((depth, len(out) - 1))
+    return out
+
+
+def _states(node: Any, is_password: bool) -> dict[str, Any]:
+    """What a control says about itself, from what the one call brought back: nothing
+    more is asked of the program. Whatever can't be read is left unsaid."""
+
+    def get(prop: int) -> Any:
+        try:
+            return node.GetCachedPropertyValue(prop)
+        except Exception:
+            return None
+
+    said: dict[str, Any] = {}
+    if get(_P_ENABLED) is False:
+        said["enabled"] = False
+    if get(_P_HAS_VALUE) and not is_password:
+        value = get(_P_VALUE)
+        if isinstance(value, str) and value.strip():
+            said["value"] = " ".join(value.split())[:VALUE_CHARS]
+    if get(_P_HAS_TOGGLE) and (state := get(_P_TOGGLE)) is not None:
+        said["on"] = state == 1
+    if get(_P_HAS_SELECTION) and get(_P_SELECTED):
+        said["chosen"] = True
+    if get(_P_HAS_EXPAND) and (state := get(_P_EXPANDED)) in (0, 1, 2):
+        said["open"] = state != 0
+    return said
+
+
+def read_in_one_call(auto, hwnd: int, budget_s: float, max_elements: int, max_depth: int) -> list[RawElement] | None:
+    """The window's controls from one call, or None to walk it the old way: the call failed,
+    found nothing, or did not come back within the budget (it cannot be stopped part-way, so
+    it runs on a thread of its own and that window is left to the walk for a minute)."""
+    if not hwnd or _one_call_off.get(hwnd, 0.0) > time.monotonic():
+        return None
+    got: dict[str, Any] = {}
+
+    def work() -> None:
+        try:
+            with auto.UIAutomationInitializerInThread(debug=False):
+                got["out"] = _cached_elements(auto, hwnd, max_elements, max_depth)
+        except Exception as exc:  # a program that will not answer this way still gets the walk
+            got["failed"] = exc
+
+    worker = threading.Thread(target=work, daemon=True, name="pyxi-uia-read")
+    started = time.monotonic()
+    worker.start()
+    worker.join(budget_s)
+    if got.get("out"):
+        log.debug("read %d controls in one call, %.2f s", len(got["out"]), time.monotonic() - started)
+        return got["out"]
+    if worker.is_alive():
+        _one_call_off[hwnd] = time.monotonic() + _ONE_CALL_OFF_S
+        log.info("reading a window in one call took over %.1f s: walking it instead", budget_s)
+    elif "failed" in got:
+        log.info("reading a window in one call failed (%s): walking it instead", got["failed"])
+    return None
 
 
 def _walk(
@@ -191,14 +662,14 @@ def _walk(
     # The window the user is looking at: the one under the mouse (on a second monitor the
     # foreground window is often somewhere else entirely), else the foreground window.
     top = None
-    pos = cursor_pos() if follow_mouse and not named else None
-    hwnd = named or (window_at(*pos) if pos else None)
+    hwnd, screen = window_to_read(follow_mouse, named)
     if hwnd:
         try:
             top = auto.ControlFromHandle(hwnd)
         except Exception:
             top = None
     if top is None:
+        screen = None
         # The foreground window's top-level ancestor, asked of Windows directly: uiautomation's
         # own GetTopLevelControl passes a c_long where an int belongs and throws ("argument 2:
         # TypeError"), which left Pyxi blind in the Start menu and in popups.
@@ -217,14 +688,30 @@ def _walk(
     window = RawWindow(
         title=top.Name or "",
         process=process_name(top.ProcessId),
-        rect=(r.left, r.top, r.width(), r.height()),
+        # The bare desktop is one window across every screen: here it is the mouse's screen.
+        rect=screen or (r.left, r.top, r.width(), r.height()),
         hwnd=top.NativeWindowHandle,
     )
 
+    whole = read_in_one_call(auto, int(window.hwnd or hwnd or 0), budget_s, max_elements, max_depth)
+    if whole is not None:
+        return window, whole
     deadline = time.monotonic() + budget_s
     out: list[RawElement] = []
     stack: list[tuple[int, int | None]] = []  # depth -> index of last kept ancestor
-    for control, depth in auto.WalkControl(top, includeTop=False, maxDepth=max_depth):
+    walker = iter(auto.WalkControl(top, includeTop=False, maxDepth=max_depth))
+    while True:
+        try:
+            control, depth = next(walker)
+        except StopIteration:
+            break
+        except Exception as exc:
+            # The tree itself gave out part-way (live: "An event was unable to invoke any of
+            # the subscribers"). What was read so far is kept, and the window is still known:
+            # throwing it all away left the model with "window: ''" and nothing to point at.
+            log.warning("UI Automation stopped part-way through %r: %s", window.title, exc)
+            window.tree = "partial" if out else "failed"
+            break
         if time.monotonic() > deadline or len(out) >= max_elements:
             break
         try:
@@ -238,9 +725,7 @@ def _walk(
             if w < 3 or h < 3:
                 continue
             name = (control.Name or "").strip()
-            if role in LABELS and not name:
-                continue
-            if role in STRUCTURAL and not name and w * h < 2_000:
+            if not _keep(role, False, w, h, name):
                 continue
         except Exception:
             continue
@@ -252,6 +737,14 @@ def _walk(
             is_password = bool(control.GetPropertyValue(auto.PropertyId.IsPasswordProperty))
         except Exception:
             pass
+        # Guarded like every other property: read bare, one control that threw here took the
+        # whole walk with it, and the second try (read_foreground) walked it all again for
+        # the same end, twice as slow with nothing kept.
+        automation_id = ""
+        try:
+            automation_id = (control.AutomationId or "")[:80]
+        except Exception:
+            pass
         out.append(
             RawElement(
                 name=name[:160],
@@ -260,7 +753,7 @@ def _walk(
                 depth=depth,
                 parent=parent,
                 is_password=is_password,
-                automation_id=(control.AutomationId or "")[:80],
+                automation_id=automation_id,
             )
         )
         stack.append((depth, len(out) - 1))
@@ -273,7 +766,7 @@ def read_taskbar(budget_s: float = 0.4) -> list[RawElement]:
     if not available():
         return []
     try:
-        import uiautomation as auto
+        auto = _auto()
 
         out: list[RawElement] = []
         deadline = time.monotonic() + budget_s
@@ -326,7 +819,7 @@ def read_focus() -> RawFocus | None:
     if not available():
         return None
     try:
-        import uiautomation as auto
+        auto = _auto()
 
         with auto.UIAutomationInitializerInThread(debug=False):
             c = auto.GetFocusedControl()
@@ -360,7 +853,7 @@ def browser_url(hwnd: int, budget_s: float = 0.5) -> str | None:
     if not available():
         return None
     try:
-        import uiautomation as auto
+        auto = _auto()
 
         deadline = time.monotonic() + budget_s
         with auto.UIAutomationInitializerInThread(debug=False):

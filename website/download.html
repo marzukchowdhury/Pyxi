@@ -2,14 +2,14 @@
 <html lang="en">
   <head>
     <!--include:head-->
-    <title>Download Pyxi for Windows and join the beta</title>
-    <meta name="description" content="Download Pyxi for Windows 10 and 11, get past the unsigned-installer warning, and join the beta with your invite code. No API key or payment needed." />
+    <title>Download Pyxi for Windows and start your free trial</title>
+    <meta name="description" content="Download Pyxi for Windows 10 and 11, get past the unsigned-installer warning, and sign in with Google to start a 3-day trial of Pro. No card needed." />
     <link rel="canonical" href="{{siteUrl}}/download" />
     <meta property="og:url" content="{{siteUrl}}/download" />
-    <meta property="og:title" content="Install Pyxi and join the beta" />
-    <meta property="og:description" content="Download for Windows, choose More info and Run anyway, then join the beta in Settings with your invite code." />
-    <meta name="twitter:title" content="Install Pyxi and join the beta" />
-    <meta name="twitter:description" content="Download for Windows, choose More info and Run anyway, then join the beta in Settings with your invite code." />
+    <meta property="og:title" content="Install Pyxi and start your free trial" />
+    <meta property="og:description" content="Download for Windows, choose More info and Run anyway, then sign in with Google inside Pyxi. Your 3-day trial starts then, with no card." />
+    <meta name="twitter:title" content="Install Pyxi and start your free trial" />
+    <meta name="twitter:description" content="Download for Windows, choose More info and Run anyway, then sign in with Google inside Pyxi. Your 3-day trial starts then, with no card." />
     <script type="module" src="/src/main.js"></script>
   </head>
   <body class="page-download">
@@ -21,14 +21,14 @@
         <div class="wrap dl-grid">
           <div>
             <p class="kicker reveal">Download</p>
-            <h1 class="display-sm reveal">Install Pyxi and join the beta.</h1>
-            <p class="lead reveal">Download, install, type your invite code. No API key, no payment, no admin rights. If Windows hesitates along the way, this page shows you exactly where to click.</p>
+            <h1 class="display-sm reveal">Install Pyxi and start your trial.</h1>
+            <p class="lead reveal">Download, install, sign in with Google. Your 3-day trial starts then: no card, no admin rights. If Windows hesitates along the way, this page shows you exactly where to click.</p>
           </div>
           <aside class="dl-card reveal" aria-label="Download">
             <img class="dl-icon" src="/icon-192.png" width="72" height="72" alt="" />
             <div class="dl-meta">
               <b>Pyxi for Windows</b>
-              <span>Version <span data-version>{{version}}</span> beta &middot; <span data-size>{{downloadSize}}</span></span>
+              <span>Version <span data-version>{{version}}</span> &middot; <span data-size>{{downloadSize}}</span></span>
               <span>Windows 10 and 11</span>
             </div>
             <a class="btn btn-fly btn-lg dl-btn" href="{{downloadUrl}}" data-download data-track="download-page">
@@ -45,6 +45,8 @@
 <!--end--><!--if:macNotYet-->
             <p class="dl-mac">On a Mac? A Mac version is next on the roadmap.</p>
 <!--end-->
+            <p class="dl-legal dl-pick" id="pick-note" hidden></p>
+            <p class="dl-legal" id="trial">Your 3-day trial of Pro starts when you sign in to Pyxi with Google. No card needed. After it, you choose a plan inside Pyxi, in Settings. <a href="/pricing">See the plans</a>.</p>
             <p class="dl-legal">By installing Pyxi you agree to the <a href="/terms">terms of use</a>. See how it handles your data in the <a href="/privacy">privacy policy</a>.</p>
           </aside>
         </div>
@@ -65,7 +67,7 @@
               <div class="step-copy">
                 <span class="step-n" aria-hidden="true">2</span>
                 <h2>Open it, and tell Windows it's OK</h2>
-                <p>The beta installer isn't code-signed yet, so Windows SmartScreen doesn't recognise the publisher and may show a blue <b>Windows protected your PC</b> box.</p>
+                <p>The installer isn't code-signed yet, so Windows SmartScreen doesn't recognise the publisher and may show a blue <b>Windows protected your PC</b> box.</p>
                 <p>Click <b>More info</b>, check that the app is <code>{{downloadFile}}</code>, then click <b>Run anyway</b>.</p>
               </div>
               <div class="step-media">
@@ -116,22 +118,21 @@
               </div>
             </li>
 
-            <li class="step reveal" id="join" data-say="Your invite code goes here. No key, no card.">
+            <li class="step reveal" id="join" data-say="Sign in here. Three days of Pro, no card.">
               <div class="step-copy">
                 <span class="step-n" aria-hidden="true">5</span>
-                <h2>Join the Pyxi beta</h2>
-                <p>At the top of Settings, under <b>Join the Pyxi beta</b>, type the invite code you were given and click <b>Join</b>. That's all. Pyxi now runs on the beta server, with a free daily allowance that resets at midnight UTC.</p>
-                <p class="muted"><!--if:contactEmail-->No code yet? Email <a href="mailto:{{contactEmail}}">{{contactEmail}}</a>.<!--else-->Invite codes come from the Pyxi team during the beta.<!--end--></p>
+                <h2>Sign in with Google</h2>
+                <p>At the top of Settings, under <b>Account</b>, click <b>Continue with Google</b>. Your browser opens Google's own sign-in page: pick your account, then come back to Pyxi. Your 3-day trial of Pro starts at that moment. No card is asked for. Pyxi's first-run tour offers the same button, so you may be signed in already.</p>
+                <p class="muted">When the trial ends, choose a plan in the same place to keep going. You can change or cancel it any time from Settings. <a href="/pricing">See the plans</a>.</p>
               </div>
               <div class="step-media">
-                <form class="beta-card" onsubmit="return false" aria-label="Illustration of the beta card in Pyxi's Settings">
-                  <b>Join the Pyxi beta</b>
-                  <p>Type the invite code you were given. No API key or payment needed.</p>
+                <div class="beta-card" role="img" aria-label="Illustration of the Account card in Pyxi's Settings, with a Continue with Google button">
+                  <b>Account</b>
+                  <p>Sign in to start your 3-day trial of Pro. No card needed.</p>
                   <div class="beta-row">
-                    <input value="" placeholder="Invite code" aria-label="Invite code (illustration only)" tabindex="-1" readonly />
-                    <span class="beta-join">Join<span class="pt" style="--x: 50%; --y: 50%" data-label="Join"></span></span>
+                    <span class="beta-join">Continue with Google<span class="pt" style="--x: 50%; --y: 50%" data-label="Continue with Google"></span></span>
                   </div>
-                </form>
+                </div>
               </div>
             </li>
 
@@ -157,9 +158,9 @@
               <p>The Mac version is a newer beta, so expect a few rough edges and tell us what you find.</p>
               <ol>
                 <li>Open the <code>.dmg</code> and drag Pyxi into <b>Applications</b>.</li>
-                <li>The beta isn't notarized by Apple yet, so the first time, Control-click Pyxi in Applications, choose <b>Open</b>, then <b>Open</b> again. If there's no Open button, go to <b>System Settings</b>, <b>Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>.</li>
+                <li>It isn't notarized by Apple yet, so the first time, Control-click Pyxi in Applications, choose <b>Open</b>, then <b>Open</b> again. If there's no Open button, go to <b>System Settings</b>, <b>Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>.</li>
                 <li>A card asks for three permissions, and each button opens the right page in System Settings: <b>Screen Recording</b> so Pyxi can see what you ask about, <b>Accessibility</b> so it can point and click when you let it, and <b>Microphone</b> so it can hear you.</li>
-                <li>Join the beta with your invite code in Settings, the same as on Windows.</li>
+                <li>Sign in with Google in Settings to start your trial, the same as on Windows.</li>
                 <li>Hold <kbd>Control</kbd> <kbd>Option</kbd> and ask about anything on your screen.</li>
               </ol>
             </div>
@@ -180,8 +181,8 @@
               <p>Hold-to-talk uses the left <kbd>Alt</kbd> key, so AltGr typing never triggers it. You can also press <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>Space</kbd> to start and stop. If the microphone is blocked, the notch says so: allow Pyxi in Windows Settings, Privacy and security, Microphone.</p>
             </details>
             <details>
-              <summary>I don't see "Join the Pyxi beta"</summary>
-              <p>Make sure you're on the Settings tab of the full panel (the expand button in the notch). If you've already joined, the card says "You're in the beta" and shows today's allowance instead.</p>
+              <summary>I don't see "Continue with Google"</summary>
+              <p>Make sure you're on the Settings tab of the full panel (the expand button in the notch). If you're already signed in, the Account card shows your email, your plan or the days left in your trial, and how much of your allowance is used.</p>
             </details>
             <details>
               <summary>How do I stop Pyxi seeing my screen for a while?</summary>

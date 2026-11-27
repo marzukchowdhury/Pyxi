@@ -21,6 +21,7 @@ from pyxi.agents.ledger_common import (
     col_letter,
     col_number,
     rgb_json,
+    split_tab,
     table_cells,
 )
 
@@ -152,11 +153,8 @@ class SheetExtras:
     def _grid(self, op: dict[str, Any], key: str = "range", *, whole: bool = False):
         """(tab title, tab id, GridRange, the tab's rows) for an edit's range. The range may
         name its tab ('Summary'!A1:B4); with ``whole``, no range means the whole tab."""
-        raw = str(op.get(key) or "").strip()
-        sheet = op.get("sheet")
-        if "!" in raw:
-            tab, raw = raw.rsplit("!", 1)
-            sheet = tab.strip().strip("'")
+        tab, raw = split_tab(op.get(key))
+        sheet = tab if tab is not None else op.get("sheet")
         title, sid, rows = self._tab(sheet)
         if not raw:
             if not whole:
@@ -171,6 +169,7 @@ class SheetExtras:
         if op.get("range"):
             _, _, grid, _ = self._grid(op)
             return title, sid, grid, rows, self._header(rows)
+        self._whole(title)  # "the table" ends where its data ends, and that has to be seen
         head = self._header(rows)
         last = len(rows)
         while last > head + 1 and str((rows[last - 1] or [""])[0]).strip().lower() in (
@@ -278,11 +277,8 @@ class SheetExtras:
         fields = []
         said = []
         if op.get("to"):
-            raw = str(op["to"])
-            sheet = op.get("sheet") or chart["tab"]
-            if "!" in raw:
-                tab, raw = raw.rsplit("!", 1)
-                sheet = tab.strip().strip("'")
+            tab, raw = split_tab(op["to"])
+            sheet = tab if tab is not None else (op.get("sheet") or chart["tab"])
             title, sid, _ = self._tab(sheet)
             r, c = cell_rc(raw)
             pos["anchorCell"] = {"sheetId": sid, "rowIndex": r - 1, "columnIndex": c - 1}
@@ -376,19 +372,24 @@ class SheetExtras:
 
     async def x_freeze(self, op: dict[str, Any]) -> str:
         title, sid, _ = self._tab(op.get("sheet"))
-        cols = int(op.get("columns") or 0)
-        rows = int(op["rows"]) if op.get("rows") is not None else (0 if cols else 1)
+        # Only what was asked for is sent: "freeze the first column" used to send rows: 0
+        # along with it, which unfroze a header row that was already frozen.
+        grid: dict[str, int] = {}
+        if op.get("rows") is not None:
+            grid["frozenRowCount"] = int(op["rows"])
+        if op.get("columns") is not None:
+            grid["frozenColumnCount"] = int(op["columns"])
+        if not grid:
+            grid["frozenRowCount"] = 1
         await self._batch(
             {
                 "updateSheetProperties": {
-                    "properties": {
-                        "sheetId": sid,
-                        "gridProperties": {"frozenRowCount": rows, "frozenColumnCount": cols},
-                    },
-                    "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount",
+                    "properties": {"sheetId": sid, "gridProperties": grid},
+                    "fields": ",".join(f"gridProperties.{k}" for k in grid),
                 }
             }
         )
+        rows, cols = grid.get("frozenRowCount", 0), grid.get("frozenColumnCount", 0)
         if not rows and not cols:
             return f"Unfroze {title}"
         parts = ([f"top {_plural(rows, 'row')}"] if rows else []) + (
@@ -646,6 +647,14 @@ class SheetExtras:
         _, _, source, _ = self._grid(op, "from")
         _, dest_id, dest, _ = self._grid(op, "to")
         paste = "PASTE_VALUES" if op.get("values_only") else "PASTE_NORMAL"
+        if op.get("format_only"):
+            # "Make B2 to D2 the same background as A2": how the cell looks, onto each cell of
+            # the range, and nothing of what is in it. Live, Ledger answered that it couldn't
+            # read A2's colour and asked for a hex code; it never needs to know the colour.
+            await self._batch(
+                {"copyPaste": {"source": source, "destination": dest, "pasteType": "PASTE_FORMAT"}}
+            )
+            return f"Made {op.get('to')} look like {op.get('from')}"
         if op.get("cut"):
             cell = {
                 "sheetId": dest_id,
@@ -710,6 +719,19 @@ class SheetExtras:
                 }
             }
         )
+        # What Ledger knows about the tab goes under its new name at once. The next edit
+        # used to be sent to the old one ("Unable to parse range: 'Sheet1'!D1").
+        for s in self.meta.get("sheets", []):
+            if s["properties"].get("sheetId") == sid:
+                s["properties"]["title"] = new
+        for kept in (self.grids, self.shown):
+            if title in kept:
+                kept[new] = kept.pop(title)
+        for names in (self.whole, self.dirty, self.reshown, self.cut, self.wanted):
+            if title in names:
+                names.discard(title)
+                names.add(new)
+        self.aliases = {k: (new if v == title else v) for k, v in self.aliases.items()}
         return f"Renamed the tab {title} to {new}"
 
     async def x_delete_sheet(self, op: dict[str, Any]) -> str:
@@ -719,7 +741,11 @@ class SheetExtras:
         if len(self.meta.get("sheets", [])) < 2:
             raise LedgerError(f"{title} is the only tab, and a spreadsheet needs one.")
         await self._batch({"deleteSheet": {"sheetId": sid}})
+        self.meta["sheets"] = [
+            s for s in self.meta.get("sheets", []) if s["properties"].get("sheetId") != sid
+        ]
         self.grids.pop(title, None)
+        self.shown.pop(title, None)
         return f"Deleted the tab {title}"
 
     async def x_duplicate_sheet(self, op: dict[str, Any]) -> str:
@@ -934,8 +960,10 @@ class DocExtras:
         return {"startIndex": int(first["startIndex"]), "endIndex": int(last["endIndex"])}
 
     async def _send(self, *requests: dict[str, Any]) -> Any:
+        if getattr(self, "stale", False):  # the last change was never read back: stop here
+            raise RuntimeError("the doc couldn't be read again after the last change")
         r = await self.google.docs_batch(self.id, list(requests))
-        await self.load()  # indexes moved
+        await self._reread()  # indexes moved
         return r
 
     def table_lines(self, n: int, table: dict[str, Any]) -> list[str]:
@@ -1415,7 +1443,7 @@ class DocExtras:
         if not new:
             raise LedgerError("rename needs the new title.")
         await self.google.drive_rename(self.id, new)
-        await self.load()
+        await self._reread()
         return f"Renamed the doc to {new!r}"
 
     async def x_raw(self, op: dict[str, Any]) -> str:
@@ -1509,9 +1537,20 @@ class GoogleSlides:
         self.google = google
         self.id = deck_id
         self.deck: dict[str, Any] = {}
+        self.stale = False  # a change went through and the read after it failed
 
     async def load(self) -> None:
         self.deck = await self.google.slides_get(self.id)
+        self.stale = False
+
+    async def _reread(self) -> None:
+        """Read the deck again after a change. If the read fails the change still happened:
+        the edit is not reported as failed (and so not done twice), and the next edit reads
+        first."""
+        try:
+            await self.load()
+        except Exception:
+            self.stale = True
 
     @property
     def title(self) -> str:
@@ -1671,8 +1710,10 @@ class GoogleSlides:
         return "pyxi_" + uuid.uuid4().hex[:14]
 
     async def _send(self, *requests: dict[str, Any]) -> Any:
+        if self.stale:  # the last change was never read back: stop before writing blind
+            raise RuntimeError("the deck couldn't be read again after the last change")
         r = await self.google.slides_batch(self.id, list(requests))
-        await self.load()
+        await self._reread()
         return r
 
     @staticmethod
@@ -1695,6 +1736,8 @@ class GoogleSlides:
         fn = getattr(self, f"x_{op.get('op')}", None)
         if fn is None:
             raise LedgerError(f"Google Slides doesn't have an edit called {op.get('op')!r} here.")
+        if self.stale:
+            await self.load()
         return await fn(op)
 
     async def x_add_slide(self, op: dict[str, Any]) -> str:
@@ -2168,7 +2211,7 @@ class GoogleSlides:
         if not new:
             raise LedgerError("rename needs the new title.")
         await self.google.drive_rename(self.id, new)
-        await self.load()
+        await self._reread()
         return f"Renamed the deck to {new!r}"
 
     async def x_raw(self, op: dict[str, Any]) -> str:

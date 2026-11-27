@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import difflib
 import io
+import logging
 import re
 from collections.abc import Callable
 from itertools import pairwise
@@ -20,13 +21,14 @@ from pyxi.agents.pixel_common import (
     IMAGE_EXTS,
     PixelError,
     PixelResult,
+    image_pages,
     need,
-    open_image,
     out_dir_for,
     parse_ranges,
     unique_path,
 )
 
+log = logging.getLogger(__name__)
 
 # ============================================================================ helpers
 def _reader(src: Path, password: str | None = None):
@@ -35,7 +37,11 @@ def _reader(src: Path, password: str | None = None):
     try:
         reader = PdfReader(str(src))
     except Exception as exc:
-        raise PixelError(f"{src.name} doesn't open as a PDF ({type(exc).__name__}).") from None
+        log.info("pdf: %s would not open (%s)", src.suffix, type(exc).__name__)
+        raise PixelError(
+            f"{src.name} doesn't open as a PDF. It may be damaged, or not really a PDF. Open "
+            "it yourself to check, save a fresh copy, then ask again."
+        ) from None
     if reader.is_encrypted:
         if password is None:
             # Many "protected" PDFs only restrict printing and open with an empty password.
@@ -75,6 +81,13 @@ def _label(pages: list[int]) -> str:
         if p is not None:
             start = prev = p
     return "pages " + ", ".join(runs)
+
+
+def _short_label(pages: list[int]) -> str:
+    """The same, for a file's name and a notification: a long list ("every other page" of a
+    300-page scan) is said as a count. Spelt out, the name was too long for Windows to save."""
+    label = _label(pages)
+    return label if len(label) <= 48 else f"{len(pages)} pages"
 
 
 # ============================================================================ pages
@@ -157,14 +170,13 @@ def delete_pages(files: list[Path], pages: str, out: Path | None = None) -> Pixe
     for i, page in enumerate(reader.pages, 1):
         if i not in gone:
             writer.add_page(page)
-    target = unique_path(
-        out or out_dir_for(src), f"{src.stem} (without {_label(sorted(gone))}).pdf"
-    )
+    which = _short_label(sorted(gone))
+    target = unique_path(out or out_dir_for(src), f"{src.stem} (without {which}).pdf")
     _write(writer, target)
     left = len(reader.pages) - len(gone)
     return PixelResult(
         [target],
-        f"Removed {_label(sorted(gone))}; {target.name} has {left} page{'s' if left != 1 else ''}.",
+        f"Removed {which}; {target.name} has {left} page{'s' if left != 1 else ''}.",
     )
 
 
@@ -177,9 +189,10 @@ def extract_pages(files: list[Path], pages: str, out: Path | None = None) -> Pix
     writer = PdfWriter()
     for p in keep:
         writer.add_page(reader.pages[p - 1])
-    target = unique_path(out or out_dir_for(src), f"{src.stem} ({_label(keep)}).pdf")
+    which = _short_label(keep)
+    target = unique_path(out or out_dir_for(src), f"{src.stem} ({which}).pdf")
     _write(writer, target)
-    return PixelResult([target], f"Saved {_label(keep)} as {target.name}.")
+    return PixelResult([target], f"Saved {which} as {target.name}.")
 
 
 # ============================================================================ stamps
@@ -205,7 +218,9 @@ def _stamp(
     total = len(writer.pages)
     for i, page in enumerate(writer.pages, 1):
         page.transfer_rotation_to_content()  # so "bottom" is the bottom as you read it
-        box = page.mediabox
+        # The part of the page that is shown and printed. A cropped PDF's full sheet (its
+        # media box) is bigger, and a number placed by that landed outside what anyone sees.
+        box = page.cropbox
         w, h = float(box.width), float(box.height)
         stamp = _overlay(w, h, lambda c, w_, h_, i=i: draw(c, w_, h_, i, total))
         # The stamp is drawn from (0, 0); shift it when the page's box doesn't start there.
@@ -332,6 +347,22 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
+def detail_key(name: str) -> str:
+    """Which saved detail a field's name asks for ('first_name', 'email'...), or ''."""
+    key = _norm(name)
+    if not key or SECRET.search(name):
+        return ""
+    if key in ("name", "fullname", "yourname", "applicantname", "nameofapplicant", "legalname"):
+        return "full_name"
+    for detail, words in FIELD_WORDS:
+        for w in words:
+            if key == w or (len(w) > 4 and w in key):
+                return detail
+            if w in ("first", "last") and key.startswith(w) and "name" in key:
+                return detail
+    return ""
+
+
 def match_field(name: str, details: dict[str, str]) -> str | None:
     """The saved detail a form field wants, or None."""
     key = _norm(name)
@@ -354,16 +385,79 @@ def match_field(name: str, details: dict[str, str]) -> str | None:
     return None
 
 
+def _write_filled(src: Path, reader: Any, filled: dict[str, str], out: Path | None) -> Path:
+    from pypdf import PdfWriter
+    from pypdf.generic import BooleanObject, NameObject
+
+    writer = PdfWriter(clone_from=reader)
+    for page in writer.pages:
+        writer.update_page_form_field_values(page, filled, auto_regenerate=False)
+    writer._root_object["/AcroForm"][NameObject("/NeedAppearances")] = BooleanObject(True)
+    target = unique_path(out or out_dir_for(src), f"{src.stem} (filled).pdf")
+    _write(writer, target)
+    return target
+
+
+def _fill_placed(
+    src: Path,
+    reader: Any,
+    fields: dict[str, Any],
+    placed: dict[str, str],
+    labels: dict[str, str],
+    out: Path | None,
+) -> PixelResult:
+    """Write what was typed on the form card. Only a field the form has, never one that asks
+    for an ID number, and only if something would change."""
+
+    def now(name: str) -> str:
+        f = fields[name]
+        value = f.get("/V")
+        if f.get("/FT") == "/Btn":
+            return str(value) if value not in (None, "") else "/Off"
+        return "" if value is None else str(value)
+
+    filled = {
+        name: str(value)
+        for name, value in placed.items()
+        if name in fields
+        and fields[name].get("/FT") in ("/Tx", "/Ch", "/Btn")
+        and not SECRET.search(name)
+        and not SECRET.search(labels.get(name, ""))
+    }
+    changed = sorted(name for name, value in filled.items() if value != now(name))
+    if not changed:
+        raise PixelError("Nothing was changed on the card, so I left the form as it is.")
+    filled = {name: filled[name] for name in changed}  # a field they left alone is not touched
+    target = _write_filled(src, reader, filled, out)
+    empty = sum(
+        1
+        for name, f in fields.items()
+        if f.get("/FT") in ("/Tx", "/Ch") and filled.get(name, now(name)) == ""
+    )
+    n = len(changed)
+    tail = f" {empty} place{'s' if empty != 1 else ''} to write {'are' if empty != 1 else 'is'} still empty." if empty else ""
+    return PixelResult(
+        [target],
+        f"Filled in {n} answer{'s' if n != 1 else ''} in {target.name}.{tail} Check it before you send it.",
+        {"filled": changed, "empty": empty},
+    )
+
+
 def fill_form(
     files: list[Path],
     details: dict[str, str] | None = None,
     values: dict[str, Any] | None = None,
     out: Path | None = None,
+    placed: dict[str, str] | None = None,
+    labels: dict[str, str] | None = None,
 ) -> PixelResult:
     """Fill a PDF's form fields: values they gave first, then saved details by field name.
-    ID numbers, card numbers and passwords are never filled."""
-    from pypdf import PdfWriter
-    from pypdf.generic import NameObject
+    ID numbers, card numbers and passwords are never filled.
+
+    ``placed`` is what they typed on Pixel's form card, already matched to the form's fields
+    (pixel_ask.py): {field name: what to write}. When it is given it is the whole of what is
+    written, and nothing is matched by name. ``labels`` are the words printed for each field,
+    so a box that asks for an ID number is known by them too."""
 
     (src,) = need(files, {".pdf"}, "PDF")
     reader = _reader(src)
@@ -372,6 +466,8 @@ def fill_form(
         raise PixelError(
             f"{src.name} has no fillable fields. Scout can fill a form on a website instead."
         )
+    if placed is not None:
+        return _fill_placed(src, reader, fields, placed, labels or {}, out)
     given = {_norm(k): v for k, v in (values or {}).items()}
     filled: dict[str, str] = {}
     left: list[str] = []
@@ -399,14 +495,7 @@ def fill_form(
         raise PixelError(
             "None of the form's fields matched your saved details. Tell me what to put in which field."
         )
-    writer = PdfWriter(clone_from=reader)
-    for page in writer.pages:
-        writer.update_page_form_field_values(page, filled, auto_regenerate=False)
-    writer._root_object["/AcroForm"][NameObject("/NeedAppearances")] = __import__(
-        "pypdf"
-    ).generic.BooleanObject(True)
-    target = unique_path(out or out_dir_for(src), f"{src.stem} (filled).pdf")
-    _write(writer, target)
+    target = _write_filled(src, reader, filled, out)
     tail = f" Still empty: {', '.join(left[:8])}." if left else ""
     return PixelResult(
         [target],
@@ -439,18 +528,59 @@ def _render_page(pdf_path: Path, index: int, dpi: int = 200, password: str | Non
         doc.close()
 
 
+def read_layout(src: Path, *, ocr: bool = True, max_chars: int | None = None):
+    """A PDF read in reading order with its tables kept (agents/pdf_layout.py), or None when
+    that reader can't make anything of this file: the plain reader is used then. A locked or
+    broken PDF says so in a sentence."""
+    reader = _reader(src)
+    try:
+        from pyxi.agents import pdf_layout
+
+        return pdf_layout.read(
+            src,
+            ocr=ocr,
+            password="" if reader.is_encrypted else None,
+            max_chars=max_chars,
+            ocr_image=lambda img: _ocr_image(img),  # looked up when called: tests replace it
+        )
+    except Exception:
+        log.warning("pixel: the layout reader couldn't read %s; reading it plainly", src.name, exc_info=True)
+        return None
+
+
 def page_texts(src: Path, *, ocr: bool = True) -> tuple[list[str], list[int]]:
-    """Text of each page, and which pages were read with OCR (scans)."""
+    """Text of each page, and which pages were read with OCR (scans). Columns come in reading
+    order, a table as a table (rows of cells between | marks), and the running header and
+    footer are left out."""
+    layout = read_layout(src, ocr=ocr)
+    if layout is not None:
+        if not layout.words and layout.no_reader:
+            raise PixelError(layout.no_reader)
+        return layout.page_texts(), list(layout.scanned)
+    return _page_texts_plain(src, ocr=ocr)
+
+
+def _page_texts_plain(src: Path, *, ocr: bool = True) -> tuple[list[str], list[int]]:
+    """The text as the file holds it, in the file's own order: what is left when the layout
+    reader fails."""
     reader = _reader(src)
     texts, scanned = [], []
+    no_reader: PixelError | None = None
     for i, page in enumerate(reader.pages):
         text = (page.extract_text() or "").strip()
-        if len(re.sub(r"\s", "", text)) < 25 and ocr:
-            lines = _ocr_image(_render_page(src, i))
+        if len(re.sub(r"\s", "", text)) < 25 and ocr and no_reader is None:
+            try:
+                lines = _ocr_image(_render_page(src, i))
+            except PixelError as exc:  # no text reader on this PC
+                no_reader, lines = exc, []
             if lines:
                 text = "\n".join(ln.text for ln in lines)
                 scanned.append(i + 1)
         texts.append(text)
+    # A typed PDF with one near-empty page (a cover, a blank back) is still read without a
+    # text reader. Only a PDF with no words at all needs one.
+    if no_reader is not None and not any(texts):
+        raise no_reader
     return texts, scanned
 
 
@@ -459,19 +589,20 @@ def extract_text(files: list[Path], out: Path | None = None) -> PixelResult:
     (src,) = need(files, {".pdf", *IMAGE_EXTS}, "PDF or image")
     if src.suffix.lower() == ".pdf":
         texts, scanned = page_texts(src)
-        body = "\n\n".join(
-            f"--- Page {i} ---\n{t}" if len(texts) > 1 else t for i, t in enumerate(texts, 1)
-        )
-        how = f" (read {_label(scanned)} with OCR)" if scanned else ""
-    else:
-        lines = _ocr_image(open_image(src))
-        body = "\n".join(ln.text for ln in lines)
+        how = f" (read {_short_label(scanned)} with OCR)" if scanned else ""
+    else:  # a fax or a scanner's TIFF is several pages in one file
+        texts = ["\n".join(ln.text for ln in _ocr_image(img)) for img in image_pages(src)]
         how = " with OCR"
-    if not body.strip():
+    # Counted and checked before the "--- Page n ---" lines go in: with them, three pages
+    # nothing could be read from were "12 words" saved to a file.
+    words = sum(len(t.split()) for t in texts)
+    if not words:
         raise PixelError(f"I couldn't find any text in {src.name}.")
+    body = "\n\n".join(
+        f"--- Page {i} ---\n{t}" if len(texts) > 1 else t for i, t in enumerate(texts, 1)
+    )
     target = unique_path(out or out_dir_for(src), f"{src.stem} (text).txt")
     target.write_text(body, encoding="utf-8")
-    words = len(body.split())
     return PixelResult(
         [target],
         f"Pulled {words:,} words out of {src.name}{how}; saved as {target.name}.",
@@ -537,9 +668,12 @@ def make_searchable(files: list[Path], dpi: int = 200, out: Path | None = None) 
                 else:
                     writer.add_page(scanned_page(_render_page(src, i, dpi)))
         else:
-            writer.add_page(scanned_page(open_image(src)))
+            for img in image_pages(src):
+                writer.add_page(scanned_page(img))
     if not ocr_pages:
         raise PixelError(f"{files[0].name} already has text you can search; nothing to do.")
+    if not words_found:  # "now searchable" with no words in it would not be true
+        raise PixelError(f"I couldn't read any text in {files[0].name}, so it can't be searched.")
     target = unique_path(out or out_dir_for(files[0]), f"{files[0].stem} (searchable).pdf")
     _write(writer, target)
     return PixelResult(
@@ -561,17 +695,38 @@ def pdf_to_word(files: list[Path], out: Path | None = None) -> PixelResult:
     doc = Document()
     doc.styles["Normal"].font.size = Pt(11)
     scanned = []
+    made = 0  # paragraphs and pictures that went in
+    no_reader: PixelError | None = None
+    layout = read_layout(src)
+    if layout is not None and layout.words:
+        # Read in reading order, with its tables as real Word tables.
+        tables = _word_from_layout(doc, layout, reader)
+        target = unique_path(out or out_dir_for(src), f"{src.stem}.docx")
+        doc.save(str(target))
+        n = len(reader.pages)
+        how = f" Read {_label(layout.scanned)} with OCR." if layout.scanned else ""
+        if tables:
+            how += f" {tables} table{'s' if tables != 1 else ''} came through as real tables."
+        return PixelResult(
+            [target],
+            f"Made {target.name} from {n} page{'s' if n != 1 else ''}.{how}",
+            {"tables": tables},
+        )
     for i, page in enumerate(reader.pages):
         if i:
             doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
         lines = _page_lines(page)
-        if sum(len(ln[0]) for ln in lines) < 25:
-            ocr_lines = _ocr_image(_render_page(src, i))
-            lines = [(ln.text, 11.0, False, -float(ln.rect[1])) for ln in ocr_lines]
-            if lines:
+        if sum(len(ln[0]) for ln in lines) < 25 and no_reader is None:
+            try:
+                ocr_lines = _ocr_image(_render_page(src, i))
+            except PixelError as exc:  # no text reader on this PC: keep what was typed
+                no_reader, ocr_lines = exc, []
+            if ocr_lines:  # a short typed page the reader made nothing of keeps its own words
+                lines = [(ln.text, 11.0, False, -float(ln.rect[1])) for ln in ocr_lines]
                 scanned.append(i + 1)
         body = _body_size(lines)
         for text, size, bold, kind in _paragraphs(lines, body):
+            made += 1
             if kind == "h":
                 level = 1 if size >= body * 1.5 else 2
                 doc.add_heading(text, level=level)
@@ -584,14 +739,130 @@ def pdf_to_word(files: list[Path], out: Path | None = None) -> PixelResult:
         for img in _page_images(page):
             try:
                 doc.add_picture(io.BytesIO(img), width=Inches(min(6.0, 6.0)))
+                made += 1
             except Exception:
                 continue
+    if not made:
+        # An empty Word file is not "Made X.docx from 3 pages".
+        if no_reader is not None:
+            raise no_reader
+        raise PixelError(f"I couldn't find any text or pictures in {src.name}.")
     target = unique_path(out or out_dir_for(src), f"{src.stem}.docx")
     doc.save(str(target))
     how = f" Read {_label(scanned)} with OCR." if scanned else ""
     return PixelResult(
         [target],
         f"Made {target.name} from {len(reader.pages)} page{'s' if len(reader.pages) != 1 else ''}.{how}",
+    )
+
+
+def _word_from_layout(doc, layout, reader) -> int:
+    """The blocks of a PDF into a Word document: headings, paragraphs, lists, real tables, a
+    page break where the PDF had one, and each page's pictures. Returns how many tables."""
+    from docx.enum.text import WD_BREAK
+    from docx.shared import Inches
+
+    tables = 0
+    by_page: dict[int, list] = {}
+    for b in layout.blocks:
+        by_page.setdefault(b.page, []).append(b)
+    for number in range(1, layout.pages + 1):
+        if number > 1:
+            doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+        for b in by_page.get(number, []):
+            if hasattr(b, "rows"):
+                rows = [r for r in b.rows if r]
+                if not rows:
+                    continue
+                cols = max(len(r) for r in rows)
+                table = doc.add_table(rows=len(rows), cols=cols)
+                table.style = "Table Grid"
+                for r, row in enumerate(rows):
+                    for c, text in enumerate(row):
+                        cell = table.cell(r, c)
+                        cell.text = text
+                        if r == 0:
+                            for run in cell.paragraphs[0].runs:
+                                run.bold = True
+                doc.add_paragraph()
+                tables += 1
+            elif b.kind in ("h1", "h2"):
+                doc.add_heading(b.text, level=1 if b.kind == "h1" else 2)
+            elif b.kind == "bullet":
+                doc.add_paragraph(b.text, style="List Bullet")
+            elif b.kind == "number":
+                doc.add_paragraph(NUMBER_MARK.sub("", b.text, count=1), style="List Number")
+            else:
+                doc.add_paragraph().add_run(b.text).bold = b.bold or None
+        if number <= len(reader.pages):
+            for img in _page_images(reader.pages[number - 1]):
+                try:
+                    doc.add_picture(io.BytesIO(img), width=Inches(6.0))
+                except Exception:
+                    continue
+    return tables
+
+
+def pdf_to_excel(files: list[Path], out: Path | None = None) -> PixelResult:
+    """A PDF's tables as the sheets of a real workbook, one table to a sheet: rows and columns
+    kept, figures as numbers, the heading row bold and frozen. A table that runs over several
+    pages is one sheet."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    from pyxi.agents.pdf_layout import cell_value
+
+    (src,) = need(files, {".pdf"}, "PDF")
+    layout = read_layout(src)
+    if layout is None:
+        raise PixelError(
+            f"I couldn't read the layout of {src.name}, so I can't pull its tables out. Open it "
+            "yourself and save a fresh copy, then ask again, or ask me for its text instead."
+        )
+    if not layout.words and layout.no_reader:
+        raise PixelError(layout.no_reader)
+    tables = [t for t in layout.tables if len(t.rows) >= 2 and t.cols >= 2]
+    if not tables:
+        raise PixelError(
+            f"I couldn't find a table in {src.name}. For its words, ask for the text or a Word copy."
+        )
+    wb = Workbook()
+    wb.remove(wb.active)
+    cells = 0
+    for n, t in enumerate(tables, 1):
+        pages = t.pages or [t.page]
+        where = f"p{pages[0]}" if len(pages) == 1 else f"p{pages[0]}-{pages[-1]}"
+        ws = wb.create_sheet(f"Table {n} ({where})"[:31])
+        widths = [8] * t.cols
+        for r, row in enumerate(t.rows, 1):
+            for c, text in enumerate(row, 1):
+                value = text if r == 1 else cell_value(text)
+                if value == "":
+                    continue
+                cell = ws.cell(r, c, value)
+                cells += 1
+                if r == 1:
+                    cell.font = Font(bold=True)
+                elif isinstance(value, float) and text.strip().endswith("%"):
+                    cell.number_format = "0.0%"
+                elif isinstance(value, float):
+                    cell.number_format = "#,##0.00"
+                elif isinstance(value, int) and "," in text:
+                    cell.number_format = "#,##0"
+                widths[c - 1] = max(widths[c - 1], min(60, len(text) + 2))
+        ws.freeze_panes = "A2"
+        for c, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(c)].width = w
+    target = unique_path(out or out_dir_for(src), f"{src.stem} (tables).xlsx")
+    wb.save(str(target))
+    how = f" Read {_short_label(layout.scanned)} with OCR, so check the figures." if layout.scanned else ""
+    n = len(tables)
+    return PixelResult(
+        [target],
+        f"Made {target.name}: {n} table{'s' if n != 1 else ''} from {src.name}, one to a sheet "
+        f"({cells:,} cells).{how}",
+        {"tables": n, "cells": cells, "sheets": wb.sheetnames},
     )
 
 
@@ -733,7 +1004,18 @@ def document_lines(path: Path) -> list[str]:
     """A document as comparable lines: paragraphs, table rows, cells, slide text."""
     ext = path.suffix.lower()
     if ext == ".pdf":
-        texts, _ = page_texts(path, ocr=False)
+        layout = read_layout(path, ocr=False)
+        if layout is not None and layout.blocks:
+            # Paragraphs as paragraphs and a table a row to a line, the way a Word file's are
+            # read below: the PDF of a document compares cleanly with the document.
+            out = []
+            for b in layout.blocks:
+                if hasattr(b, "rows"):
+                    out += [" | ".join(c.strip() for c in row) for row in b.rows]
+                elif b.text.strip():
+                    out.append(re.sub(r"\s+", " ", b.text).strip())
+            return out
+        texts, _ = _page_texts_plain(path, ocr=False)
         raw = "\n".join(texts)
         # Re-join lines a PDF wrapped mid-sentence, so a reflow isn't a "change".
         paras = re.split(r"\n\s*\n|(?<=[.!?:])\n", raw)
@@ -754,6 +1036,7 @@ def document_lines(path: Path) -> list[str]:
         try:
             out = []
             for ws in wb.worksheets:
+                ws.reset_dimensions()  # the file's own word for its size can be wrong ("A1")
                 for r, row in enumerate(ws.iter_rows(values_only=True), 1):
                     if any(v is not None for v in row):
                         out.append(

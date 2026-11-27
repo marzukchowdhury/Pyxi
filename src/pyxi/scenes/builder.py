@@ -16,12 +16,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from otto.llm.base import LLMProvider, Message, ToolSpec
+from otto.llm.base import ImagePart, LLMProvider, Message, ToolSpec
 from pydantic import ValidationError
 
 from pyxi.partial_json import complete_items, partial_string
+from pyxi.scenes.check import apart_on_purpose, describe, floating, tidy
 from pyxi.scenes.library import few_labels
-from pyxi.scenes.model_examples import EXAMPLES
+from pyxi.scenes.model_examples import ELECTRONIC_EXAMPLES, EXAMPLES, LIVING_EXAMPLES
 from pyxi.scenes.objects import (
     Beat,
     ObjectEdit,
@@ -44,7 +45,30 @@ piston, nose cone, lens barrel, vase, bullet) is ONE lathe: `profile` is [[along
 from one end to the other along `axis` (6-12 points, a smooth outline). Any flat outline (wing \
 or fin from above, hull side, blade, circuit board, phone body, key, gun frame) is ONE extrude \
 with its true outline as `profile` (8-16 points, traced like a technical drawing). Never \
-capsules or boxes for bodies or wings.
+capsules or boxes for bodies or wings. A vessel that is open (mug, cup, bowl, glass, pot, \
+bucket, lampshade) is a lathe with `wall` set: the profile is its outside, from the closed end \
+to the rim, and it comes out hollow. A body that is neither round nor a flat outline (a car \
+body, a shoe, a computer mouse, a hull, a controller's grip, a helmet) is ONE `loft`: \
+`sections` [[along, width, height, lift, round], ...] from one end to the other along `axis`, \
+5-9 of them, wide and low where the real thing is, tall where it is tall; never a box with \
+smaller boxes on it. An outline with soft edges gets `bevel` (0.2-0.5). A handle, pipe, cable \
+or bent rod is a `tube` along its real curve. Several of the same thing in a ring (stool \
+legs, petals, a plant's leaves, spokes, columns) are modelled once with `around` set to how \
+many. A building's walls get surface `windows`.
+- Living things (animals, people, organs, plants, anything grown, not made): decide this \
+first and set organic=true on every such part. They have no flat faces and no hard edges, so \
+never box, rounded_box or cylinder. A mass (torso, head, heart, fruit, a tree's crown) is ONE \
+`blob`: 2-10 overlapping `lumps` [x, y, z, rx, ry, rz] that melt into one skin, with a \
+`path` + `radii` on the same part for what grows out of it (a neck). Anything long (leg, arm, \
+tail, neck, trunk, branch, root, artery, horn, a whole fish or snake) is ONE `limb`: a `path` \
+of 3-6 spine points with `radii` at each, thick where the muscle is and thin at the joint or \
+tip; `squash` under 1 for a flat body. Thin flat things (fin, ear, leaf, wing, petal, \
+feather) are an `extrude` of their true outline, a few hundredths thick, set into the body \
+edge-on the way they grow (a tail fin stands upright in line with the body). Lump and limb \
+numbers are radii, half the width: check each against the whole (a shoulder is no wider \
+than the chest it sits on). Whatever comes in pairs (legs, ears, eyes, \
+wings, lungs) is modelled once on the +x side with mirror=true. Limbs start inside the body \
+they grow from. Label a spot on a blob with a `marker`.
 - Scale and proportion: the whole thing 8-12 units across, centred near the origin, y up. Think \
 of the real dimensions first (an F-16 is 15 m long with a 10 m span; a piston is about as tall \
 as it is wide) and keep every part in that ratio; a heart is taller than wide.
@@ -59,11 +83,35 @@ chips (CPUs, AI chips), PC fans, screens, seats, people, bolts and houses are `k
 (shape kit, kit=<name>, sized and placed like any part): detailed and real-looking, never \
 rebuild them from boxes. A computer is boards, chips and fans from the kit; a vehicle is a body \
 extrude or lathe plus kit wheels (a wheel's size is [diameter, diameter, width] with its thin \
-side across the vehicle); a fighter is its outline plus kit missiles and a seat.
-- Materials: real ones, in contrast (painted body, dark_metal workings, brushed_metal moving \
-parts, rubber seals, glass); give painted and plastic parts a real colour, not default grey.
+side across the vehicle); a fighter is its outline plus kit missiles and a seat. But when one \
+of these IS the subject (an AI chip, a graphics card), build it from its own parts with real \
+materials and `surface` detail, so its inside can be shown.
+- Made things look made, not like toys: real materials in real colours. A chip die is dark \
+`silicon`; a circuit board is `pcb` (green, or black "#16181c"); contacts, pins and connector \
+fingers are `gold`; solder balls are `solder`; heat pipes and coils are `copper`; lids, heat \
+sinks and frames are `brushed_metal` or dark `anodized`; housings are black or dark grey \
+`plastic` or `painted` in the product's real colour; `rubber`, `glass`. Pastel and bright \
+colours are ONLY for arrows and flows, never for a part of the thing.
+- Surface detail is free: set `surface` on a part and the fine detail is drawn on it, so never \
+leave a big face blank and never model these from little boxes. pins (pin grid, solder balls, \
+gold contacts under a chip or on a connector), traces (any circuit board), cells (a chip die: \
+its grid of blocks), fins (heat sink, radiator, cooling fins, condenser), brushed (bare \
+aluminium or steel), vents (cooling slots in a housing), grille (speaker, intake, mesh), knurl \
+(grips, knobs), panel_lines (the casing of an appliance, vehicle, aircraft or machine: seams \
+and access panels). `density` 2 is finer, 0.5 coarser.
 - Inside and outside: outer shells get casing=true and the model gets cutaway=true when the \
-inside is the point, so the shell becomes a see-through ghost and the workings show.
+inside is the point, so the shell becomes a see-through ghost and the workings show. Better \
+still for a product: leave the model's cutaway off and set cutaway=true on the second beat, so \
+it is first seen whole and real, then opens.
+- The thing itself is always there. Explaining how an appliance, vehicle or device works (a \
+refrigerator, a washing machine, a car, a phone), build its recognisable outside first, in its \
+real proportions (the fridge cabinet with its door, the car body, the phone body), as \
+casing=true parts with cutaway=true, and put the working parts inside it where they really \
+sit. A compressor, a coil and some pipes hanging in the air are not a refrigerator.
+- Taken apart (exploded view, disassembled, in pieces): spread the parts out along ONE axis in \
+the order they come off, each clear of the next with even gaps, and keep the casing (cabinet, \
+body, housing) as one of the parts, drawn solid (casing=false, cutaway=false) so the thing is \
+still recognisable.
 - 16-36 parts: enough to be convincing, each one meaningful. Group assemblies with `parent`.
 - Alive: fans, rotors, turbines, wheels and gears spin; beating or pumping parts oscillate on \
 scale; latches, pistons, triggers and slides move with keyframes; whatever travels (air, \
@@ -74,14 +122,62 @@ opacity 1, hidden, casing false, plastic material, axis y, style studio, auto_pl
 model is drawn while the user waits, so every extra field is time they wait.
 - Beats: 3-5, rising `at` times (2-3 s apart), each focusing the parts it is about, with the \
 camera that shows them best (side for vehicles, iso for depth, front for faces, close for a \
-detail). Narration: one vivid spoken sentence each, a concrete fact or analogy, never a \
+detail). A flat thing (a chip, a board, a phone lying down) opens on iso, never top or front. \
+Narration: one vivid spoken sentence each, a concrete fact or analogy, never a \
 description of the picture; the last one lands the "so that's why", adds one related fun \
 fact, and offers one specific thing to show next (inside a part, how it's assembled, a diagram).
 
-Two complete examples of the quality expected (different subjects; follow the rules, not the \
+Complete examples of the quality expected (different subjects; follow the rules, not the \
 shapes):
 {examples}
 """
+
+
+_LIVING = re.compile(
+    r"(?i)\b(?:animal|creature|cat|dog|horse|cow|bird|fish|shark|whale|dolphin|snake|frog|"
+    r"insect|bee|ant|spider|butterfly|dinosaur|lion|tiger|bear|elephant|monkey|rabbit|mouse|"
+    r"human|person|body|anatomy|organ|heart|brain|lungs?|liver|kidneys?|stomach|intestines?|"
+    r"eye|ear|skull|skeleton|bones?|spine|muscles?|arm|leg|hand|foot|tooth|teeth|skin|"
+    r"cell|neuron|bacteri\w+|virus|plant|tree|flower|leaf|root|seed|fruit|mushroom|coral)s?\b"
+)
+
+
+def is_living(text: str) -> bool:
+    """Is this about something grown and not made? Then the builder is shown living examples."""
+    return bool(_LIVING.search(text))
+
+
+_ELECTRONIC = re.compile(
+    r"(?i)\b(?:(?:micro)?chip|cpu|gpu|npu|processor|microprocessor|microcontroller|semiconductor|"
+    r"transistor|wafer|silicon|circuit(?: board)?|pcb|motherboard|mainboard|logic board|"
+    r"graphics card|video card|ram|dimm|memory (?:stick|module|chip)|ssd|solid.state drive|"
+    r"hard (?:drive|disk)|hdd|flash drive|usb|(?:smart|i|cell ?|mobile )?phone|laptop|"
+    r"computer|pc|tablet|ipad|games? console|console|controller|router|modem|server|data ?centre|"
+    r"data ?center|sensor|camera|oled|lcd|display|monitor|television|tv|speaker|earbud|"
+    r"headphone|headset|smart ?watch|drone|electronic|charger|power supply|inverter|"
+    r"arduino|raspberry pi|antenna|radio|remote control)s?\b"
+)
+# A made thing called by a living thing's name.
+_NOT_ALIVE = re.compile(r"(?i)\bcell ?phones?\b|\b(?:solar|fuel|battery|memory|load) cells?\b")
+
+
+def is_electronic(text: str) -> bool:
+    """Is this about electronics? Then the builder is shown a machine and a chip, so it reaches
+    for silicon, boards, gold contacts and surface detail and not coloured blocks. What the ask
+    names first decides it: "a hard drive, the head on its arm" is a hard drive, and "the eye,
+    like a camera" is an eye."""
+    made = _ELECTRONIC.search(text)
+    if not made:
+        return False
+    alive = _LIVING.search(_NOT_ALIVE.sub(lambda m: " " * len(m.group()), text))
+    return alive is None or made.start() <= alive.start()
+
+
+def examples_for(text: str) -> tuple[dict[str, Any], ...]:
+    """The two worked examples the builder is shown for this ask."""
+    if is_electronic(text):
+        return ELECTRONIC_EXAMPLES
+    return LIVING_EXAMPLES if is_living(text) else EXAMPLES
 
 
 @dataclass
@@ -91,6 +187,8 @@ class BuildResult:
     seconds: float = 0.0
     attempts: int = 0
     errors: list[str] = field(default_factory=list)
+    # What the look before showing found and did, in words (scenes/check.py).
+    checks: list[str] = field(default_factory=list)
 
 
 def builder_tool() -> ToolSpec:
@@ -99,6 +197,92 @@ def builder_tool() -> ToolSpec:
         "Build the 3D model: parts, motions and narrated beats.",
         build_tool_schema(),
     )
+
+
+MOVE_SYSTEM = (
+    "You built a 3D model and some small parts ended up hanging in the air, apart from the "
+    "rest. For each one listed, decide: if it belongs on the model (a headlight, a wheel, a "
+    "bolt, an ear, a leaf), give it a new `position` so it touches or sits slightly into what "
+    "it belongs to; if it is meant to be apart (a moon, a bird in the sky, a drop falling), "
+    "leave it out. Positions use the same space as the model; a child's position is relative "
+    "to its parent. Call move_parts once."
+)
+
+
+def move_tool() -> ToolSpec:
+    return ToolSpec(
+        "move_parts",
+        "Put parts that hang in the air back on the model.",
+        {
+            "type": "object",
+            "properties": {
+                "moves": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "position": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                        },
+                        "required": ["id", "position"],
+                    },
+                }
+            },
+            "required": ["moves"],
+        },
+    )
+
+
+async def look_over(
+    llm: LLMProvider, model: ObjectScene, result: BuildResult, brief: str = ""
+) -> ObjectScene:
+    """The look before showing: mend what has one right answer, and ask the builder once about
+    small parts left hanging in the air. Never makes a model worse: a move is kept only if
+    fewer parts float after it. A model that was asked for taken apart is never put back
+    together: its parts being apart is the point (``brief`` is what was asked for)."""
+    model, done = tidy(model)
+    result.checks += done
+    if why := apart_on_purpose(model, brief):
+        result.checks.append(f"{why}: parts left where they are")
+        return model
+    floaters = floating(model)
+    if not floaters:
+        return model
+    loose = {pid for f in floaters for pid in f.ids}
+    result.checks.append(f"hanging apart: {', '.join(sorted(loose))}")
+    try:
+        response = await llm.complete(
+            system=MOVE_SYSTEM,
+            messages=[Message.user(f"Model: {model.title}\n\nHanging apart:\n{describe(model, floaters)}")],
+            tools=[move_tool()],
+            max_tokens=1200,
+        )
+    except Exception as exc:  # the model as built is still good to show
+        result.checks.append(f"could not ask about them: {type(exc).__name__}")
+        return model
+    result.cost_usd += response.usage.cost_usd
+    call = next((c for c in response.tool_calls if c.name == "move_parts"), None)
+    moves = (call.arguments or {}).get("moves") if call else None
+    if not isinstance(moves, list):
+        return model
+    patches = [
+        {"id": m["id"], "position": m["position"]}
+        for m in moves
+        if isinstance(m, dict) and m.get("id") in loose and isinstance(m.get("position"), list)
+    ]
+    if not patches:
+        result.checks.append("left as they are: meant to be apart")
+        return model
+    try:
+        moved = apply_edit(model, ObjectEdit.model_validate({"update": patches}))
+    except ValidationError:
+        return model
+    after = {pid for f in floating(moved) for pid in f.ids}
+    if len(after) >= len(loose):
+        result.checks.append("the move did not help: kept as built")
+        return model
+    result.checks.append(f"put back on the model: {', '.join(sorted(loose - after))}")
+    return moved
 
 
 OnParts = Callable[[ObjectScene], Awaitable[None]]
@@ -157,21 +341,39 @@ class PartialModel:
 
 
 async def build_model(
-    llm: LLMProvider, brief: str, context: str = "", on_parts: OnParts | None = None
+    llm: LLMProvider,
+    brief: str,
+    context: str = "",
+    on_parts: OnParts | None = None,
+    *,
+    images: list[bytes] | None = None,
+    examples: tuple[dict[str, Any], ...] | None = None,
+    check: bool = True,
 ) -> BuildResult:
     """Build a model from a brief; one repair attempt if the first try doesn't validate.
 
     ``on_parts``: called with the model so far as its parts stream in (only for a streaming
-    model). The finished model keeps the same id, so the view carries straight on from it."""
+    model). The finished model keeps the same id, so the view carries straight on from it.
+
+    A model built from a photo (scenes/photo.py) passes the photo in ``images`` (JPEGs the
+    builder looks at while it models), names its own worked ``examples`` (a long brief full
+    of measurements must not be searched for the word "leg" to choose them), and does its
+    own look before showing (``check`` False)."""
+    # The ask decides; what happens to be on screen only when the ask says nothing either way.
+    if examples is None:
+        examples = examples_for(brief)
+        if examples is EXAMPLES:
+            examples = examples_for(f"{brief} {context[:300]}")
     system = SYSTEM.format(
-        examples="\n".join(json.dumps(e, separators=(",", ":")) for e in EXAMPLES)
+        examples="\n".join(json.dumps(e, separators=(",", ":")) for e in examples)
     )
     ask = f"Build this:\n{brief}"
     if context:
         ask += f"\n\nWhat the user is looking at (use it so the model is about their exact thing):\n{context[:1500]}"
     result = BuildResult(model=None)
     started = time.monotonic()
-    messages = [Message.user(ask)]
+    pictures = [ImagePart(data, "image/jpeg") for data in images or []]
+    messages = [Message.user(ask, *pictures)]
     scene_id = ObjectScene(title="x", parts=[Part(id="x")]).id
     params = inspect.signature(llm.complete).parameters
     streams = on_parts is not None and "on_partial" in params
@@ -193,7 +395,7 @@ async def build_model(
         call = next((c for c in response.tool_calls if c.name == "build_3d_model"), None)
         if call is None:
             result.errors.append("no tool call")
-            messages = [Message.user(ask + "\n\nCall build_3d_model now.")]
+            messages = [Message.user(ask + "\n\nCall build_3d_model now.", *pictures)]
             continue
         try:
             result.model = ObjectScene.model_validate({**dict(call.arguments), "id": scene_id})
@@ -204,9 +406,12 @@ async def build_model(
             messages = [
                 Message.user(
                     f"{ask}\n\nYour last attempt was rejected: {errors}. Fix those and call "
-                    "build_3d_model again with the complete model."
+                    "build_3d_model again with the complete model.",
+                    *pictures,
                 )
             ]
+    if result.model is not None and check:
+        result.model = await look_over(llm, result.model, result, brief)
     result.seconds = time.monotonic() - started
     return result
 

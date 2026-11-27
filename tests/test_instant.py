@@ -156,3 +156,137 @@ def test_a_plain_command_after_a_reason():
     assert instant.match("I need to check my email, open Gmail.").value == "https://mail.google.com"
     assert instant.match("I want to watch something. Go to YouTube.").value == "https://www.youtube.com"
     assert instant.match("Open Gmail and summarize my latest email") is None  # more to it: the model
+
+
+# ---------------------------------------------------------------------- any program on the PC
+def test_a_program_is_found_by_the_name_they_say(monkeypatch):
+    """Live: "open Gen Office" got "GenOffice, coming up" and nothing opened: the opener only
+    knew a short list. Anything in the Start menu or on the desktop opens now."""
+    from pyxi.companion import actions
+
+    start = [
+        ("GenOffice", "shell:AppsFolder/com.genoffice.app"),
+        ("Visual Studio Code", "shell:AppsFolder/Microsoft.VisualStudioCode"),
+        ("Google Chrome", "shell:AppsFolder/Chrome"),
+        ("Office Language Preferences", "shell:AppsFolder/SETLANG"),
+        ("Steam", "shell:AppsFolder/Steam"),
+        ("Steam Support Center", "shell:AppsFolder/SteamSupport"),
+        ("Uninstall GenOffice", "shell:AppsFolder/uninstall"),
+    ]
+    monkeypatch.setattr(actions, "_start_apps", lambda: start)
+    monkeypatch.setattr(actions, "_desktop_shortcuts", lambda: [("OBS Studio", "C:/Users/x/Desktop/OBS Studio.lnk")])
+    monkeypatch.setattr(actions, "_INSTALLED", (0.0, {}))
+    found = actions.installed_app
+    assert found("Gen Office") == ("GenOffice", "shell:AppsFolder/com.genoffice.app")
+    assert found("the gen office app")[0] == "GenOffice"
+    assert found("vs code")[0] == "Visual Studio Code"  # how people say it
+    assert found("chrome")[0] == "Google Chrome"  # most of its name
+    assert found("obs studio")[0] == "OBS Studio"  # only on the desktop
+    assert found("steam")[0] == "Steam"  # its exact name, though another starts with it
+    assert found("office")[0] == "GenOffice"  # most of that name, and a word of the long one is not it
+    assert found("language") is None and found("support") is None
+    assert found("uninstall genoffice") is None and found("zzz") is None and found("") is None
+    # Live: "open Jen Office" (misheard) was answered "I don't see anything called Jen Office".
+    assert found("Jen Office")[0] == "GenOffice"
+    assert found("visual studio cod")[0] == "Visual Studio Code"
+    assert found("stream") is None or found("stream")[0] == "Steam"  # near enough to one name only
+    assert found("blorbo") is None
+
+
+async def test_opening_a_program_pyxi_has_no_word_for(monkeypatch):
+    from pyxi.companion import actions
+
+    started = []
+    monkeypatch.setattr(actions, "installed_app", lambda name: ("GenOffice", "shell:AppsFolder/com.genoffice.app") if "gen" in name.lower() else None)
+    monkeypatch.setattr(actions.os, "startfile", started.append, raising=False)
+    assert await actions.open_app("Gen Office") == "Opened GenOffice."
+    assert started == ["shell:AppsFolder/com.genoffice.app"]
+    note = await actions.open_app("Blorbo")
+    assert note.startswith("open_app: there's no program called 'Blorbo'") and len(started) == 1
+
+
+async def test_an_address_that_does_not_exist_is_not_opened(settings, monkeypatch):
+    """Live: "on techlandbd.com, find earphones" was written down as "ontechlandbd.com", and
+    Pyxi opened it: "Server Not Found". The word stuck to the front is taken off when that
+    makes a real site; a name with no site at all is not opened, and the tool says so."""
+    from pyxi.companion import actions
+    from test_brain_and_server import make_brain
+
+    real = {"techlandbd.com", "www.google.com", "online.com"}
+
+    async def resolves(host):
+        return host in real
+
+    monkeypatch.setattr(actions, "_resolves", resolves)
+    assert await actions.real_site("https://ontechlandbd.com") == "https://techlandbd.com"
+    assert await actions.real_site("https://online.com/x") == "https://online.com/x"  # a real name is left alone
+    assert await actions.real_site("https://nosuchshopatall.com") is None
+    assert await actions.real_site("http://localhost:3000") == "http://localhost:3000"
+    assert await actions.real_site("http://192.168.0.1/") == "http://192.168.0.1/"
+    # Offline every name fails, which says nothing about this one: opened as it is.
+    real.clear()
+    assert await actions.real_site("https://ontechlandbd.com") == "https://ontechlandbd.com"
+
+    # And through the brain: the right site is opened, a missing one is refused.
+    real.update({"techlandbd.com", "www.google.com"})
+    brain, rec = make_brain(settings)
+    brain._user_text = "on techlandbd.com find earphones"
+    assert await brain._quick_action("open_url", "ontechlandbd.com") is None
+    assert rec.of("action")[-1]["value"] == "https://techlandbd.com"
+    note = await brain._quick_action("open_url", "nosuchshopatall.com")
+    assert note and note.startswith("open_url: there is no site at nosuchshopatall.com")
+
+
+async def test_a_misheard_site_is_answered_with_the_real_one_near_it(settings, monkeypatch):
+    """Live: "Amazon.ca" was written down as "amaazon.ka". Nothing is opened at a name that
+    does not exist; the real address one mishearing away is offered to the model, which opens
+    it when it is plainly the site they named."""
+    from pyxi.companion import actions
+    from test_brain_and_server import make_brain
+
+    # (amaazon.ca is there too, as it really is: someone has registered the look-alike.)
+    real = {"amazon.ca", "amaazon.ca", "www.google.com", "google.com"}
+
+    async def resolves(host):
+        return host in real
+
+    monkeypatch.setattr(actions, "_resolves", resolves)
+    assert await actions.near_site("https://amaazon.ka") == "https://amazon.ca"
+    # And a look-alike that exists is never opened in place of the site everyone knows.
+    assert await actions.real_site("https://amaazon.ca") == "https://amazon.ca"
+    assert await actions.real_site("https://www.gooogle.com/maps") == "https://www.google.com/maps"
+    assert await actions.real_site("https://amazon.ca") == "https://amazon.ca"
+    assert await actions.near_site("https://www.amazon.ka/deals") == "https://amazon.ca/deals"
+    assert await actions.near_site("https://gooogle.kom") == "https://google.com"  # one "o" too many, not two
+    assert await actions.near_site("https://nosuchshopatall.com") is None
+    brain, rec = make_brain(settings)
+    brain._user_text = "open amaazon.ka"
+    note = await brain._quick_action("open_url", "amaazon.ka")
+    assert note and "there is no site at amaazon.ka" in note and "https://amazon.ca" in note
+    assert rec.of("action") == []  # and nothing was opened
+
+
+def test_a_program_said_with_its_makers_name(monkeypatch):
+    # Live, 12 November: "open Mozilla Firefox" was answered "I can't find anything called
+    # Mozilla Firefox on this PC", with Firefox installed.
+    from pyxi.companion import actions
+
+    assert actions.app_target("Mozilla Firefox") == "firefox.exe"
+    assert actions.app_target("MS Paint") == "mspaint.exe"
+    assert actions.app_target("Microsoft Edge") == "msedge.exe"
+    assert actions.app_target("Apple Music") is None  # not their Music folder
+    assert actions.app_target("Google Photos") is None  # not the Photos app
+    start = [
+        ("Firefox", "shell:AppsFolder/firefox"),
+        ("Slack", "shell:AppsFolder/slack"),
+        ("Uninstall Firefox", "shell:AppsFolder/uninstall"),
+    ]
+    monkeypatch.setattr(actions, "_start_apps", lambda: start)
+    monkeypatch.setattr(actions, "_desktop_shortcuts", lambda: [])
+    monkeypatch.setattr(actions, "_INSTALLED", (0.0, {}))
+    found = actions.installed_app
+    assert found("Mozilla Firefox") == ("Firefox", "shell:AppsFolder/firefox")
+    assert found("the Mozilla Firefox app")[0] == "Firefox"
+    assert found("Firefox browser")[0] == "Firefox"  # its whole name is most of what was said
+    assert found("uninstall firefox") is None
+    assert found("a very long sentence about firefox") is None

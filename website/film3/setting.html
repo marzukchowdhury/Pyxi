@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pyxi demo clip: "Where is that setting?"</title>
+<!--
+  A built mock-up, not a recording. What it shows is the app's guide: Pyxi marks the one thing to
+  click, with the step's number, says one short sentence, and waits for YOUR click before it
+  marks the next. The mark, the blue arrow in from the pointer, the pill ("1/3 Click ...") and
+  the "You did it yourself" at the end are the app's own (overlay/Annotations.tsx).
+  Made up: the site (Lumen) and the person.
+-->
+<link rel="stylesheet" href="kit.css">
+<style>
+.sitebar { position: absolute; left: 0; right: 0; top: 0; height: 68px; background: #fff; border-bottom: 1px solid #e3e6ee; display: flex; align-items: center; padding: 0 28px; gap: 22px; }
+.sitebar .logo { font-family: "Fraunces"; font-weight: 700; font-size: 30px; color: #6d5df6; width: 230px; }
+.sitebar .find { width: 520px; height: 42px; border-radius: 21px; background: #eef0f5; display: flex; align-items: center; padding: 0 20px; font-size: 17px; color: #8a92a3; }
+.sitebar .sp { flex: 1; }
+.sitebar .bell { width: 26px; height: 26px; border-radius: 50%; border: 3px solid #a6adbb; }
+.face { border-radius: 50%; background: radial-gradient(circle at 50% 36%, #f6d2b8 0 21%, transparent 22%), radial-gradient(ellipse at 50% 108%, #f6d2b8 0 42%, transparent 43%), linear-gradient(160deg, #3b8f8a, #1f5d6b); }
+#avatar { width: 48px; height: 48px; }
+.view { position: absolute; left: 0; right: 0; top: 68px; bottom: 0; }
+/* the profile */
+#profile .cover { position: absolute; left: 270px; right: 270px; top: 26px; height: 210px; border-radius: 18px; background: radial-gradient(circle at 78% 30%, #ffd9a1 0 7%, transparent 8%), linear-gradient(170deg, #f7b98b 0%, #e98a7b 45%, #6a5aa8 100%); overflow: hidden; }
+#profile .cover::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 80px; background: #2b2a55; clip-path: polygon(0 100%, 0 55%, 14% 30%, 27% 62%, 41% 18%, 55% 58%, 68% 34%, 83% 66%, 100% 40%, 100% 100%); opacity: .8; }
+#profile .who { position: absolute; left: 310px; top: 180px; display: flex; align-items: flex-end; gap: 24px; }
+#profile .who .face { width: 132px; height: 132px; border: 6px solid #f1f3f7; }
+#profile .who h1 { font-size: 34px; font-weight: 750; color: #141926; letter-spacing: -.02em; }
+#profile .who p { font-size: 19px; color: #5d6676; margin-top: 4px; padding-bottom: 6px; }
+#profile .stats { position: absolute; left: 310px; top: 338px; display: flex; gap: 36px; font-size: 19px; color: #5d6676; }
+#profile .stats b { color: #141926; font-weight: 700; }
+#profile .post { position: absolute; left: 270px; width: 700px; top: 392px; background: #fff; border-radius: 16px; padding: 22px 26px; box-shadow: 0 1px 3px rgba(20, 30, 60, .10); }
+#profile .post p { font-size: 20px; line-height: 1.5; color: #1d2330; }
+#profile .post small { display: block; font-size: 16px; color: #7a8394; margin-bottom: 8px; }
+#profile .post + .post { top: 560px; }
+#profile .side { position: absolute; left: 1000px; right: 270px; top: 392px; background: #fff; border-radius: 16px; padding: 22px 26px; box-shadow: 0 1px 3px rgba(20, 30, 60, .10); }
+#profile .side h3 { font-size: 19px; color: #141926; margin-bottom: 14px; }
+#profile .side .bar { margin-bottom: 16px; }
+/* the menu under the photo */
+#menu { position: absolute; right: 20px; top: 62px; width: 300px; background: #fff; border-radius: 16px; box-shadow: 0 24px 60px rgba(20, 30, 60, .28), 0 0 0 1px rgba(20, 30, 60, .06); padding: 10px; transform-origin: 85% 0; opacity: 0; }
+#menu div { height: 52px; border-radius: 10px; display: flex; align-items: center; gap: 14px; padding: 0 16px; font-size: 20px; font-weight: 550; color: #1d2330; }
+#menu div i { width: 20px; height: 20px; border-radius: 6px; border: 2.5px solid #8b93a6; display: block; }
+#menu hr { border: 0; height: 1px; background: #e8ebf1; margin: 6px 4px; }
+/* settings */
+#settings { opacity: 0; }
+#settings .nav { position: absolute; left: 270px; top: 40px; width: 250px; }
+#settings .nav h2 { font-size: 34px; font-weight: 750; letter-spacing: -.02em; color: #141926; margin-bottom: 24px; }
+#settings .nav div { height: 50px; border-radius: 12px; display: flex; align-items: center; padding: 0 16px; font-size: 20px; font-weight: 550; color: #4b5364; }
+#settings .nav div.on { background: #e6e3ff; color: #4a3bd6; }
+#settings .card { position: absolute; left: 560px; right: 270px; top: 40px; background: #fff; border-radius: 18px; box-shadow: 0 1px 3px rgba(20, 30, 60, .10); padding: 10px 30px 14px; }
+#settings .card h3 { font-size: 24px; font-weight: 700; color: #141926; padding: 18px 0 8px; }
+#settings .rowx { display: flex; align-items: center; gap: 24px; padding: 20px 0; border-top: 1px solid #edf0f5; }
+#settings .rowx div { flex: 1; }
+#settings .rowx strong { display: block; font-size: 21px; font-weight: 650; color: #141926; }
+#settings .rowx span { display: block; font-size: 18px; color: #6a7384; margin-top: 3px; }
+.sw { flex: none; position: relative; width: 66px; height: 38px; border-radius: 19px; background: #c9cedb; }
+.sw i { position: absolute; left: 4px; top: 4px; width: 30px; height: 30px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgba(0, 0, 0, .25); }
+.sw.on { background: #6d5df6; }
+.sw.on i { left: 32px; }
+#lock { font-size: 18px; font-weight: 650; color: #4a3bd6; opacity: 0; }
+</style>
+</head>
+<body>
+<script src="story.js"></script>
+<script src="kit.js"></script>
+<script>
+const STEPS = [
+  { sel: "#avatar", label: "Click your photo" },
+  { sel: "#m-settings", label: "Click Settings" },
+  { sel: "#sw-private", label: "Click Private profile" },
+];
+Film.scene({
+  id: "setting",
+  screen: `
+    <div class="tabs"><div class="tab"><u></u><span id="tabname">Nora Whitfield on Lumen</span></div><div class="dots"><s></s><s></s><s></s></div></div>
+    <div class="addr"><b></b><b></b><div id="url">lumen.example/nora.whitfield</div></div>
+    <div class="page">
+      <div class="view" id="profile">
+        <div class="cover"></div>
+        <div class="who"><div class="face"></div><div><h1>Nora Whitfield</h1><p>Ceramics, long walks, bad puns. Leeds.</p></div></div>
+        <div class="stats"><span><b>214</b> posts</span><span><b>1,902</b> followers</span><span><b>388</b> following</span></div>
+        <div class="post"><small>Yesterday</small><p>Opened the kiln this morning and nothing had exploded. Calling that a win. New mugs in the shop on Sunday.</p></div>
+        <div class="post"><small>Monday</small><p>If anyone in Leeds has a spare wheel they are not using, my studio mate would love to borrow it for a month.</p></div>
+        <div class="side"><h3>Photos</h3><p class="bar" style="width:92%"></p><p class="bar" style="width:70%"></p><p class="bar" style="width:84%"></p><p class="bar" style="width:55%"></p></div>
+      </div>
+      <div class="view" id="settings">
+        <div class="nav"><h2>Settings</h2><div>Account</div><div class="on">Privacy</div><div>Notifications</div><div>Appearance</div><div>Help</div></div>
+        <div class="card">
+          <h3>Privacy</h3>
+          <div class="rowx"><div><strong>Private profile</strong><span>Only people you approve can see your posts.</span></div><b id="lock">Private</b><u class="sw" id="sw-private"><i></i></u></div>
+          <div class="rowx"><div><strong>Show when I am online</strong><span>A green dot beside your name.</span></div><u class="sw on"><i></i></u></div>
+          <div class="rowx"><div><strong>Let search engines find me</strong><span>Your profile can appear in web searches.</span></div><u class="sw on"><i></i></u></div>
+          <div class="rowx"><div><strong>Who can message me</strong><span>Everyone</span></div></div>
+        </div>
+      </div>
+      <div class="sitebar"><div class="logo">lumen</div><div class="find">Search Lumen</div><div class="sp"></div><div class="bell"></div><div class="face" id="avatar"></div></div>
+      <div id="menu"><div><i></i>Your profile</div><div><i></i>Saved posts</div><div id="m-settings"><i></i>Settings</div><hr><div><i></i>Help</div><div><i></i>Sign out</div></div>
+    </div>`,
+  overlay: `<svg id="guide" class="ov"></svg>${STEPS.map((s, k) => `<div class="g-label" id="gl${k}"><span class="step">${k + 1}/${STEPS.length}</span><span>${s.label}</span></div>`).join("")}
+    <div class="cheer" id="cheer"><i class="ring"></i><i class="ring late"></i>${"<i class='spark'></i>".repeat(10)}<div class="pill">You did it yourself</div></div>`,
+
+  // Each step: the mark lands and Pyxi says one short sentence; the click comes when it is said.
+  plan(d, B) {
+    const half = (t) => Math.ceil(t / 0.25 - 1e-6) * 0.25;
+    const s1 = B.act, click1 = half(s1 + d[0] + 0.1);
+    const s2 = click1 + 0.25, click2 = half(s2 + d[1] + 0.15);
+    const s3 = click2 + 0.5, click3 = half(s3 + d[2] + 0.15);
+    const done = click3 + 0.25;
+    return {
+      steps: [s1, s2, s3], clicks: [click1, click2, click3], taps: [click1, click2, click3], show: [s1, click2 + 0.5], poster: done + 0.9,
+      voice: [s1 + 0.05, s2 + 0.05, s3 + 0.05, done],
+      c: onBeat(done + d[3] + 0.5),
+      sfx: [["listen", B.listen], ["mark", s1], ["click", click1], ["mark", s2], ["click", click2], ["mark", s3], ["click", click3], ["cheer", click3 + 0.05]],
+    };
+  },
+  notch(T, N) {
+    const says = window.STORY.setting.says;
+    return [N.idle(0), N.listen(T.listen), N.look(T.look, "Looking at your screen"), ...says.map((s, i) => N.say(T.voice[i] - 0.05, s)), N.idle(T.c - 0.9)];
+  },
+
+  init(T) {
+    const G = $("#guide");
+    G.innerHTML = "";
+    this.marks = STEPS.map((s, k) => {
+      const b = boxOf(s.sel), pad = 8;
+      const m = { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2, cx: b.cx, cy: b.cy };
+      const g = svg("g");
+      m.frame = svg("rect", { x: m.x, y: m.y, width: m.w, height: m.h, rx: 15, class: "g-frame" });
+      m.pulse = svg("rect", { x: m.x, y: m.y, width: m.w, height: m.h, rx: 15, class: "g-pulse" });
+      m.arrow = svg("path", { class: "g-arrow", pathLength: 1, "stroke-dasharray": "1 1" });
+      m.head = svg("path", { class: "g-head" });
+      g.append(m.frame, m.pulse, m.arrow, m.head); G.append(g); m.g = g;
+      for (const e of [m.frame, m.pulse]) { e.style.transformBox = "fill-box"; e.style.transformOrigin = "center"; }
+      // the pill sits under the mark, and stays on the screen
+      const L = $("#gl" + k), lw = L.getBoundingClientRect().width;
+      m.label = L; m.lx = Math.max(164, Math.min(1756 - lw, m.cx - lw / 2)); m.ly = m.y + m.h + 26;
+      return m;
+    });
+    // where the pointer rests: it starts mid-page, and goes to each mark as the step is said
+    const M = this.marks;
+    this.stops = [{ at: 0, d: 0, x: 1180, y: 640 }];
+    M.forEach((m, k) => this.stops.push({ at: T.clicks[k] - 0.62, d: 0.5, x: m.cx - 4, y: m.cy - 2 }));
+    this.stops.push({ at: T.clicks[2] + 0.5, d: 0.7, x: M[2].cx - 250, y: M[2].cy + 170 });
+    // each arrow starts where the pointer was when its step appeared, and stops at the mark's edge
+    M.forEach((m, k) => {
+      const [fx, fy] = pointer(T.steps[k], this.stops);
+      const dx = fx - m.cx, dy = fy - m.cy;
+      const e = Math.min(Math.abs((m.w / 2 + 12) / (dx || 1e-6)), Math.abs((m.h / 2 + 12) / (dy || 1e-6)));
+      const x2 = m.cx + dx * e, y2 = m.cy + dy * e;
+      const mx = (fx + x2) / 2 + (y2 - fy) * 0.18, my = (fy + y2) / 2 - (x2 - fx) * 0.18;
+      const ang = Math.atan2(y2 - my, x2 - mx), tip = (a) => `${x2 - 20 * Math.cos(ang + a)} ${y2 - 20 * Math.sin(ang + a)}`;
+      m.arrow.setAttribute("d", `M ${fx + 6} ${fy + 6} Q ${mx} ${my} ${x2} ${y2}`);
+      m.head.setAttribute("d", `M ${tip(0.5)} L ${x2} ${y2} L ${tip(-0.5)}`);
+    });
+    // the camera goes to each step, close enough to read the pill
+    const full = [960, 539, 0.97, -2.5, 1.2];
+    this.cam = [
+      { at: 0, v: [960, 539, 0.97, -8, 4] },
+      { at: T.listen - 0.2, d: 0.6, v: [960, 300, 1.55, -4, 2] },           // in on the notch as it listens
+      { at: T.look - 0.2, d: 0.7, v: [1250, 420, 1.12, -3, 1.4] },          // back out while it looks
+      { at: T.steps[0] - 0.05, d: 0.6, v: [M[0].cx - 330, M[0].cy + 150, 1.55, -5, 2] },
+      { at: T.clicks[0] + 0.05, d: 0.55, v: [M[1].cx - 150, M[1].cy + 40, 1.7, -4, 1.5] },
+      { at: T.clicks[1] + 0.05, d: 0.6, v: [M[2].cx - 330, M[2].cy + 60, 1.5, -3, 1.2] },
+      { at: T.clicks[2] + 0.35, d: 1.6, v: [M[2].cx - 420, M[2].cy + 130, 1.26, -2, 1] },
+    ];
+    this.full = full;
+  },
+
+  draw(t, T) {
+    const M = this.marks;
+    // what the site does when you click
+    const open = back(seg(t, T.clicks[0], T.clicks[0] + 0.28)) * (1 - seg(t, T.clicks[1] + 0.05, T.clicks[1] + 0.2));
+    $("#menu").style.opacity = clamp(open * 1.4); $("#menu").style.transform = `scale(${mix(0.86, 1, open)})`;
+    $("#m-settings").style.background = t > T.clicks[1] - 0.25 ? "#f0eeff" : "none";
+    const turn = out3(seg(t, T.clicks[1] + 0.08, T.clicks[1] + 0.42));
+    $("#profile").style.opacity = 1 - turn; $("#settings").style.opacity = turn;
+    $("#settings").style.transform = `translateY(${18 * (1 - turn)}px)`;
+    const there = t > T.clicks[1] + 0.2;
+    $("#url").textContent = there ? "lumen.example/settings/privacy" : "lumen.example/nora.whitfield";
+    $("#tabname").textContent = there ? "Settings on Lumen" : "Nora Whitfield on Lumen";
+    const flip = back(seg(t, T.clicks[2], T.clicks[2] + 0.3));
+    const sw = $("#sw-private");
+    sw.style.background = `rgb(${mix(201, 109, clamp(flip))}, ${mix(206, 93, clamp(flip))}, ${mix(219, 246, clamp(flip))})`;
+    sw.firstElementChild.style.left = mix(4, 32, flip) + "px";
+    $("#lock").style.opacity = seg(t, T.clicks[2] + 0.15, T.clicks[2] + 0.4);
+
+    // Pyxi's marks, one at a time
+    M.forEach((m, k) => {
+      const a = T.steps[k], z = T.clicks[k];
+      const on = seg(t, a, a + 0.12) * (1 - seg(t, z + 0.02, z + 0.22));
+      const land = back(seg(t, a, a + 0.4));
+      m.g.style.opacity = on; m.label.style.opacity = seg(t, a + 0.12, a + 0.3) * (1 - seg(t, z, z + 0.15));
+      m.frame.style.transform = `scale(${mix(0.8, 1, land) + 0.12 * seg(t, z, z + 0.2)})`;
+      const p = ((t - a) % 1.6) / 1.6, e = out3(clamp(p));
+      m.pulse.style.transform = `scale(${1 + 0.35 * e})`; m.pulse.style.opacity = t > a ? 0.85 * (1 - e) : 0;
+      const drawOn = io3(seg(t, a + 0.02, a + 0.5));
+      m.arrow.setAttribute("stroke-dashoffset", 1 - drawOn);
+      const settle = 1 - 0.55 * seg(t, a + 1.2, a + 2.4);
+      m.arrow.style.opacity = settle; m.head.style.opacity = seg(t, a + 0.42, a + 0.52) * settle;
+      const ly = m.ly + 10 * (1 - out3(seg(t, a + 0.12, a + 0.4)));
+      m.label.style.transform = `translate(${m.lx}px, ${ly}px)`;
+    });
+    // "You did it yourself": rings and sparks at the last mark, then the pill
+    const ch = t - (T.clicks[2] + 0.05), C3 = M[2];
+    const cheer = $("#cheer");
+    cheer.style.transform = `translate(${C3.cx}px, ${C3.cy}px)`;
+    $$(".ring", cheer).forEach((r, i) => { const u = out3(seg(ch, i * 0.18, i * 0.18 + 0.9)); r.style.opacity = ch > i * 0.18 ? 1 - u : 0; r.style.transform = `scale(${mix(0.4, 5.5, u)})`; });
+    $$(".spark", cheer).forEach((s, i) => { const u = out3(seg(ch, 0.05, 0.85)); s.style.opacity = ch > 0.05 ? 1 - u : 0; s.style.transform = `rotate(${i * 36}deg) translateX(${87 * u}px)`; });
+    const pill = $(".pill", cheer), pu = out3(seg(ch, 0.1, 0.42));
+    pill.style.opacity = pu * (1 - seg(ch, 2.3, 2.6)); pill.style.transform = `translate(-50%, ${9 * (1 - pu)}px)`;
+
+    const c = keyed(t, this.cam);
+    return { ptr: pointer(t, this.stops), cam: { x: c[0], y: c[1], s: c[2], ry: c[3], rx: c[4] } };
+  },
+});
+</script>
+</body>
+</html>

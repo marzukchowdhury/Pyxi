@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gc
 import json
 import logging
 import os
 import re
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -17,7 +19,16 @@ from typing import Any, get_args
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
-from pyxi import __version__, booking, brainkey, cloud, files_access
+from pyxi import (
+    __version__,
+    account,
+    booking,
+    brainkey,
+    cloud,
+    files_access,
+    onboarding,
+    plainwords,
+)
 from pyxi.companion import browsersetup, pricecheck
 from pyxi.companion.brain import Brain
 from pyxi.config import PyxiSettings
@@ -66,6 +77,7 @@ VOICE_KEYS = {
     "voice_speed": "speed",
     "voice_language": "language",
     "captions": "captions",
+    "listen_here": "listen_here",
 }
 
 
@@ -108,6 +120,25 @@ def create_app(
             llm, otto_llm = DemoLLM(demo_site.url + "/apply"), demo_provider()
         brain = Brain(settings, hub, llm=llm, otto_llm=otto_llm)
     ambient: asyncio.Task[None] | None = None
+    # The first-run tour (pyxi/onboarding.py). Its "say hello" step answers their first words
+    # itself, so the brain hands them over instead of asking the model.
+    # It asks for an invite code first only when this PC needs one: not joined, no key of its own.
+    tour = onboarding.Tour(
+        settings.data_dir,
+        brain.memory,
+        needs_code=lambda: not cloud.in_beta() and not cloud.had_own_key(),
+    )
+
+    async def _tour_heard(text: str) -> bool:
+        return await onboarding.heard(tour, hub, text)
+
+    brain.heard_hook = _tour_heard
+    # Signing in or out changes where every model call goes: the app starts the brain again.
+    brain.account.restart = lambda: asyncio.get_running_loop().call_later(0.8, os._exit, RESTART)
+    # Google asks a desktop client for its secret with the sign-in code: the one Pyxi ships.
+    brain.account.secret_for = lambda client_id: account.desktop_client_secret(
+        brain.connectors.google, client_id
+    )
 
     async def _routine_clock() -> None:
         while True:
@@ -156,24 +187,118 @@ def create_app(
     async def _fetch_voice() -> None:
         """A fresh install has no voice model yet (about 350 MB): fetch it in the background on
         first run, so nobody has to run `pyxi setup-voice`. Until it's there, the OS voice talks."""
-        from pyxi.voice.tts import download_kokoro
-
         models = settings.models_dir
         if (models / "kokoro-v1.0.onnx").exists() and (models / "voices-v1.0.bin").exists():
             return
         if os.environ.get("PYXI_AUTO_VOICE", "1") == "0":
             return
+        await _voice_pack(started_by_them=False)
+
+    voice_pack: dict[str, Any] = {"busy": False}
+
+    async def _voice_pack(*, repair: bool = False, started_by_them: bool = True) -> None:
+        """Download Pyxi's own voice (about 350 MB), or fetch it afresh (``repair``), saying
+        how far along it is. The Voice tab's button starts it; so does a first start. One at
+        a time: a second press while it runs changes nothing."""
+        from pyxi.voice import tts as voice_tts
+
+        if voice_pack["busy"]:
+            return
+        voice_pack["busy"] = True
+        models = settings.models_dir
+        now = {"percent": 0}
+
+        async def tell(state: str, percent: int = 0, message: str = "") -> None:
+            await hub.emit("voice_pack", state=state, percent=percent, message=message)
+
+        def progress(done: int, total: int) -> None:
+            now["percent"] = min(99, int(done * 100 / total))
+
+        async def say_how_far() -> None:
+            # In order, and a few times a second at most: never a late "downloading" that
+            # lands after "ready" and leaves the button stuck.
+            sent = -1
+            while True:
+                if now["percent"] != sent:
+                    sent = now["percent"]
+                    await tell("downloading", sent)
+                await asyncio.sleep(0.2)
+
+        telling = asyncio.create_task(say_how_far())
         try:
             log.info("downloading the voice model to %s", models)
-            await download_kokoro(models)
+            studio = brain.studio
+            if repair and studio is not None:
+                # Windows won't replace a file that is open: let the loaded voice go first.
+                studio.kokoro._engine = None
+                gc.collect()
+            try:
+                await voice_tts.download_kokoro(models, force=repair, progress=progress)
+            finally:
+                telling.cancel()
+                await asyncio.gather(telling, return_exceptions=True)
             log.info("voice model ready")
+            # A line spoken while it was still downloading switched Pyxi to the Windows voice
+            # "for good" (tts.FallbackTTS.failed): with the voice here, that is undone, or
+            # "the voice is ready" was not true until the next start.
+            voice = getattr(brain, "tts", None)
+            if getattr(voice, "failed", None) is not None:
+                voice.failed = None
+            await tell("ready", 100, "Pyxi's voice is ready.")
             await hub.emit("notice", message="Pyxi's voice is ready.")
-        except Exception as exc:  # offline, or the download host is down: try again next start
-            log.warning("voice model download failed: %s", exc)
+            if studio is not None:
+                await hub.emit(
+                    "voice_catalog", catalog=await studio.catalog(), voice=studio.public()
+                )
+        except Exception as exc:  # offline, the disk is full, or the download host is down
+            log.warning("voice model download failed: %s", type(exc).__name__)
+            await tell("failed", 0, plainwords.voice_pack_failure(exc))
+            if not started_by_them:
+                # Nobody is looking at the Voice tab: a card, with the way to try again.
+                await brain._notify(
+                    "voice-pack",
+                    ok=False,
+                    title="Pyxi's voice isn't downloaded yet",
+                    body=plainwords.VOICE_PACK_LATER,
+                )
+        finally:
+            voice_pack["busy"] = False
+
+    async def _voice_key(msg: dict[str, Any]) -> None:
+        """A cloud voice's key from the Voice tab: kept in the protected store, or removed.
+        What comes back says how it went and never carries the key."""
+        studio = brain.studio
+        engine = str(msg.get("engine") or "")
+        if studio is None:
+            return
+        if msg.get("forget"):
+            ok, message = True, studio.forget_key(engine)
+        else:
+            ok, message = await studio.save_key(engine, str(msg.get("key") or ""))
+        await hub.emit("voice_key", engine=engine, ok=ok, message=message)
+        await hub.emit("voice_catalog", catalog=await studio.catalog(), voice=studio.public())
 
     async def _on_window(app: str) -> None:
         await brain.emit_pins(app)
         await pricecheck.on_window(brain, app)  # tags go with their page; auto price checks
+
+    def _prepare_eyes() -> None:
+        """Load the parts a look at the screen is made of (Windows' UI Automation and its text
+        reader), without looking at anything: no window is read and nothing is captured."""
+        if sys.platform != "win32":
+            return
+        try:
+            import comtypes.client
+
+            # Windows' UI Automation, as uiautomation loads it on its first use (the slow part).
+            comtypes.client.GetModule("UIAutomationCore.dll")
+
+            from pyxi.screen import ocr
+
+            if settings.screen.ocr:
+                ocr.available()
+        except Exception as exc:  # never in the way of starting
+            log.debug("couldn't prepare screen reading: %s", exc)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -195,7 +320,11 @@ def create_app(
         warm = asyncio.create_task(_prepare_ears()) if settings.voice.tts != "client" else None
         idle = asyncio.create_task(_let_go_when_idle())
         voice = asyncio.create_task(_fetch_voice()) if settings.voice.tts == "kokoro" else None
+        # Load what a look at the screen needs now, so the first question doesn't wait for it.
+        eyes = asyncio.create_task(asyncio.to_thread(_prepare_eyes)) if not demo else None
         yield
+        if eyes:
+            eyes.cancel()
         if warm:
             warm.cancel()
         if voice:
@@ -203,6 +332,10 @@ def create_app(
         ambient.cancel()
         routines.cancel()
         idle.cancel()
+        try:  # the brain is closing: no capture outlives it
+            await brain.listening.ears.close()
+        except Exception:
+            log.exception("closing the listening failed")
         hub.cancel_all()
         if demo_site:
             demo_site.stop()
@@ -242,6 +375,9 @@ def create_app(
                 "can_join": not cloud.in_beta(),
                 "own_key": cloud.had_own_key(),
             },
+            # The Pyxi account (pyxi/account.py): signed in or not, the plan, the allowance.
+            "account": brain.account.public(),
+            "onboarding": tour.public(),  # is the first-run tour due at this start?
             "version": __version__,
             "demo": demo,
             "gallery": {**TITLES, **OBJECT_TITLES},
@@ -263,6 +399,15 @@ def create_app(
     async def stop_everything() -> dict[str, Any]:
         """The desktop app's "Stop everything" hotkey and tray item (needs the launch key)."""
         return {"ok": True, "message": await brain.stop_everything()}
+
+    @app.post("/api/listen/{what}")
+    async def listen(what: str) -> dict[str, Any]:
+        """The tray menu's "Take meeting notes" and "Live captions": each press turns it on,
+        or off when it is on (needs the launch key, like every request)."""
+        if what not in ("meeting", "captions"):
+            raise HTTPException(404)
+        await brain.listening.on_message({"type": "listen", "what": what, "action": "toggle"})
+        return {"ok": True, **brain.listening.public()}
 
     @app.get("/api/state")
     async def state() -> dict[str, Any]:
@@ -322,6 +467,11 @@ def create_app(
             raise HTTPException(404)
         return FileResponse(target)
 
+    def _can_sign_in() -> set[str]:
+        """The accounts with a sign-in page that are on offer on this PC (LinkedIn only where
+        its developer set-up is present: nobody is sent to a page that cannot work)."""
+        return {c.id for c in brain.connectors.shown()} & {"google", "linkedin"}
+
     async def _connect(service: str) -> None:
         """Run the service's browser sign-in (it opens on this PC) and report back."""
         connector = getattr(brain.connectors, service)
@@ -329,8 +479,14 @@ def create_app(
             who = await asyncio.to_thread(connector.sign_in)
             message = f"Connected {connector.name} as {who}."
         except Exception as exc:
-            message = f"Couldn't connect {connector.name}: {exc}"
+            # Why, and what to press: never the sign-in library's own error (a cancelled
+            # Google sign-in read "(access_denied) ..." and LinkedIn's printed its whole reply).
+            log.warning("connecting %s failed: %s", connector.name, type(exc).__name__)
+            message = plainwords.connect_failure(connector.name.split(" (")[0], exc)
         await hub.emit("connectors", connectors=brain.connectors.statuses(), message=message)
+        # Also by the notch: the sign-in may have been started from a card, with Settings shut.
+        again = " Ask me again now." if message.startswith("Connected") else ""
+        await hub.emit("notice", message=message + again)
 
     async def _preview(msg: dict[str, Any]) -> None:
         """Speak a sample line in a voice without changing the setting (the voice picker)."""
@@ -361,6 +517,10 @@ def create_app(
         await socket.accept()
         cid = hub.connect(socket.send_text)
         await socket.send_text(json.dumps({"type": "hello", **hello()}, default=str))
+        if brain.listening.active():  # a window that opens while Pyxi listens shows the sign
+            await socket.send_text(
+                json.dumps({"type": "listening", **brain.listening.public()}, default=str)
+            )
         try:
             while True:
                 msg = json.loads(await socket.receive_text())
@@ -395,8 +555,26 @@ def create_app(
         kind = msg.get("type")
         if kind == "e2e_card" and demo and os.environ.get("PYXI_E2E") == "1":
             brain._spawn(_e2e_card())
+        elif kind == "onboarding":
+            try:
+                await onboarding.handle(tour, brain, hub, msg)
+            except Exception:  # the tour never gets in the way of the app: end it, try next start
+                log.exception("the first-run tour failed")
+                tour.finish("failed")
+                await hub.emit("onboarding", event="ended", how="failed")
+        elif kind == "text" and msg.get("text", "").strip() and await _tour_heard(msg["text"]):
+            pass  # typed instead of spoken, in the tour's "say hello" step
         elif kind == "text" and msg.get("text", "").strip():
-            brain._spawn(brain.turn(msg["text"].strip()))
+            # A picture dropped or pasted into the chat box comes with the words.
+            from pyxi.companion import photomodel
+
+            picture, problem = await photomodel.from_chat(msg.get("picture"))
+            brain._spawn(
+                brain.turn(msg["text"].strip(), picture=picture, picture_problem=problem)
+            )
+        elif kind == "retry" and msg.get("job_id"):
+            # Try again on a failure card: the brain runs what that card stands for, once.
+            brain._spawn(brain.retry(str(msg["job_id"])))
         elif kind == "ptt_start":
             brain.begin_listening()
         elif kind == "look_ahead":
@@ -486,20 +664,38 @@ def create_app(
             brain._spawn(_beta_join(str(msg["code"])))
         elif kind == "beta_leave" and cloud.in_beta():
             brain._spawn(_beta_leave())
+        elif kind == "account":  # sign in or out, plans, "how much is left?" (pyxi/account.py)
+            brain._spawn(brain.account.on_message(msg))
         elif kind == "audio" and msg.get("data"):
             brain._spawn(brain.hear(base64.b64decode(msg["data"])))
         elif kind == "dictating" or (kind == "dictate" and not msg.get("data")):
             # The dictation keys went down, or came up with nothing to type.
-            brain.dictating(kind == "dictating" and bool(msg.get("on")))
+            brain.dictating(kind == "dictating" and bool(msg.get("on")), here=bool(msg.get("here")))
         elif kind == "dictate" and msg.get("data"):
-            brain._spawn(brain.dictate(base64.b64decode(msg["data"])))
+            # Their Settings switches. "polish": one quick model call on a long dictation.
+            # "here": written down on this PC (the quickest), not by the cloud listener.
+            brain._spawn(
+                brain.dictate(
+                    base64.b64decode(msg["data"]),
+                    polish=bool(msg.get("polish")),
+                    here=bool(msg.get("here")),
+                )
+            )
+        elif kind == "dictate_cancel":  # Esc, or Cancel on the sign, while it was written down
+            brain.cancel_dictation()
         elif kind == "ptt_cancel":
             brain._prefetch = None
+            brain._release_hands()  # they let go without a word: the mouse work carries on
             await brain.set_state("idle")
         elif kind == "interrupt":
             brain.interrupt()
+        elif kind == "object_closed":
+            brain.object_closed(by_them=bool(msg.get("by_them", True)))
         elif kind == "stop_everything":
             await brain.stop_everything()
+        elif kind == "listen":
+            # The sign's Stop, the caption bar's own buttons, the tray menu: their own press.
+            brain._spawn(brain.listening.on_message(msg))
         elif kind == "answer":
             from pyxi import hands
 
@@ -556,15 +752,17 @@ def create_app(
                 )
         elif kind == "connectors":
             await hub.emit("connectors", connectors=brain.connectors.statuses())
-        elif kind == "connect" and msg.get("id") in ("google", "linkedin"):
+        elif kind == "connect" and msg.get("id") in _can_sign_in():
             brain._spawn(_connect(str(msg["id"])))
-        elif kind == "disconnect" and msg.get("id") in ("google", "linkedin"):
+        elif kind == "disconnect" and msg.get("id") in _can_sign_in():
             getattr(brain.connectors, str(msg["id"])).disconnect()
             await hub.emit("connectors", connectors=brain.connectors.statuses())
         elif kind == "guide_clicked":
             how = str(msg.get("how") or "clicked")
             brain._spawn(
-                brain.guide_clicked(how if how in ("clicked", "done", "elsewhere") else "clicked")
+                brain.guide_clicked(
+                    how if how in ("clicked", "done", "elsewhere", "within") else "clicked"
+                )
             )
         elif kind == "guide_cancel":
             brain._guide = None
@@ -574,6 +772,10 @@ def create_app(
             )
         elif kind == "voice_preview" and brain.studio:
             brain._spawn(_preview(msg))
+        elif kind == "voice_pack":  # the Voice tab's Download (or Download again) button
+            brain._spawn(_voice_pack(repair=bool(msg.get("repair"))))
+        elif kind == "voice_key" and brain.studio:
+            brain._spawn(_voice_key(msg))
         elif kind == "palace_seek" and msg.get("snapshot_id"):
             brain._spawn(brain.time_travel("", snapshot_id=int(msg["snapshot_id"])))
         elif kind == "time_travel":

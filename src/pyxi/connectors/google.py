@@ -19,6 +19,7 @@ import mimetypes
 import os
 import re
 import sys
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
@@ -40,6 +41,20 @@ def _clock(t: datetime) -> str:
 
 
 log = logging.getLogger(__name__)
+
+# Google ends a sign-in after a while (a week, for an app still in testing). Said the same
+# way everywhere; the card beside it carries the button (brain.google_expired_card).
+GOOGLE_EXPIRED = (
+    "Your Google sign-in has run out. Press Sign in to Google, pick your account, then ask "
+    "me once more. The same button is in Settings under Connected accounts."
+)
+
+
+_SIGN_IN = threading.Lock()  # one sign-in at a time (the closing page is swapped in meanwhile)
+
+
+class GoogleExpired(RuntimeError):
+    """Google turned the saved sign-in down: only signing in again mends it."""
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
@@ -65,10 +80,17 @@ SLIDES_SCOPE = "https://www.googleapis.com/auth/presentations"
 DOCS_SCOPE = "https://www.googleapis.com/auth/documents"
 
 
-def google_error(status: int, body: str) -> str:
+# A Google API that is switched off in the Google Cloud project behind the Google client the
+# installer ships. Someone using Pyxi cannot turn it on: it is ours to mend.
+GOOGLE_OUR_SIDE = "That's a problem on our side with Google, not something you did. Try again later."
+
+
+def google_error(status: int, body: str, *, own_client: bool = False) -> str:
     """Google's refusal in words someone can act on. An API switched off in the Google Cloud
-    project (Sheets was added after the first setup guide) says which one and where to turn it
-    on, instead of 'Google said 403: {'."""
+    project (Sheets was added after the first setup guide): with their own Google client
+    (``own_client``, a developer) it says which one and where to turn it on, instead of
+    'Google said 403: {'. On the client Pyxi ships nobody but us can do that, so they are
+    told it is on our side, and which API and where goes to the log only."""
     try:
         err = json.loads(body).get("error") or {}
     except (ValueError, AttributeError):
@@ -86,6 +108,9 @@ def google_error(status: int, body: str) -> str:
             if service
             else "https://console.cloud.google.com/apis/library"
         )
+        if not own_client:
+            log.error("the %s is switched off in Pyxi's Google Cloud project: %s", name, link)
+            return GOOGLE_OUR_SIDE
         return (
             f"The {name} is switched off in Pyxi's Google Cloud project. Turn it on at {link} "
             "(press Enable), wait a minute, then ask again."
@@ -393,6 +418,7 @@ class GoogleConnector(Connector):
         self.downloads = downloads
         self._creds = None
         self.email: str | None = None
+        self.expired = False  # Google refused the saved sign-in this session
         self._tz: str | None = None
         self._names: dict[str, str] = {}  # address -> display name, from mail seen this session
 
@@ -419,6 +445,14 @@ class GoogleConnector(Connector):
             return json.loads(shipped.read_text(encoding="utf-8"))
         return None
 
+    def own_client(self) -> bool:
+        """Is the Google client their own (a file in the data folder, or the two values in the
+        environment)? That is a developer, who can open the Google Cloud console. Otherwise
+        it is the one the installer ships, which only we can change."""
+        return self.client_path.exists() or bool(
+            os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET")
+        )
+
     def _saved(self) -> dict[str, Any] | None:
         """The saved token (encrypted with DPAPI; an old plain file migrates on first read).
         None when there's none, or it was unreadable: then they simply connect again."""
@@ -430,6 +464,10 @@ class GoogleConnector(Connector):
     def status(self) -> Status:
         if self.connected():
             detail = self._saved_email() or "Connected"
+            if self.expired:
+                return Status(
+                    self.id, self.name, True, detail + ". The sign-in has run out", needs="Sign in again"
+                )
             if label := self.needs_ok():
                 apps = label.removeprefix("Allow ")
                 detail += f". Press {label} so Pyxi can work in your Google {apps} too"
@@ -493,12 +531,27 @@ class GoogleConnector(Connector):
         if config is None:
             raise RuntimeError("No Google OAuth client yet: save it as .pyxi/google_client.json.")
         flow = InstalledAppFlow.from_client_config(config, SCOPES)
-        creds = flow.run_local_server(
-            port=0,
-            open_browser=True,
-            prompt="consent",
-            success_message="Pyxi is connected to Google. You can close this tab.",
-        )
+        # The library ends the sign-in on a line of plain text; Pyxi's own page goes there
+        # instead (connectors/signin_page.py). If a later version of the library has no such
+        # part to swap, its plain line is what shows: the sign-in itself is untouched.
+        import google_auth_oauthlib.flow as oauth_flow
+
+        from pyxi.connectors.signin_page import ClosingPage
+
+        theirs = getattr(oauth_flow, "_RedirectWSGIApp", None)
+        with _SIGN_IN:
+            if theirs is not None:
+                oauth_flow._RedirectWSGIApp = ClosingPage
+            try:
+                creds = flow.run_local_server(
+                    port=0,
+                    open_browser=True,
+                    prompt="consent",
+                    success_message="Pyxi is connected to Google. You can close this tab.",
+                )
+            finally:
+                if theirs is not None:
+                    oauth_flow._RedirectWSGIApp = theirs
         email = None
         try:
             r = httpx.get(
@@ -518,6 +571,7 @@ class GoogleConnector(Connector):
             data["scopes"] = sorted(granted.split() if isinstance(granted, str) else granted)
         secretstore.write_json(self.token_path, data)
         self._creds = None
+        self.expired = False
         if SHEETS_SCOPE in self.missing_scopes():
             raise RuntimeError(
                 "Google didn't give the Sheets permission. Press Allow Sheets and tick the "
@@ -528,6 +582,7 @@ class GoogleConnector(Connector):
     def disconnect(self) -> None:
         self.token_path.unlink(missing_ok=True)
         self._creds = None
+        self.expired = False
 
     async def _token(self) -> str:
         from google.auth.transport.requests import Request
@@ -543,7 +598,14 @@ class GoogleConnector(Connector):
                 saved, sorted(self.granted_scopes()) or SCOPES
             )
         if not self._creds.valid:
-            await asyncio.to_thread(self._creds.refresh, Request())
+            try:
+                await asyncio.to_thread(self._creds.refresh, Request())
+            except Exception as exc:
+                if "invalid_grant" in str(exc):
+                    self.expired = True
+                    raise GoogleExpired(GOOGLE_EXPIRED) from exc
+                raise
+            self.expired = False
             data = json.loads(self._creds.to_json())
             data["pyxi_email"] = self._saved_email()
             secretstore.write_json(self.token_path, data)
@@ -564,7 +626,7 @@ class GoogleConnector(Connector):
         headers = {"Authorization": f"Bearer {await self._token()}"}
         r = await self._client().request(method, url, headers=headers, **kw)
         if r.status_code >= 400:
-            raise RuntimeError(google_error(r.status_code, r.text))
+            raise RuntimeError(google_error(r.status_code, r.text, own_client=self.own_client()))
         return r.json() if r.content else {}
 
     # ------------------------------------------------------------------ gmail
@@ -572,8 +634,31 @@ class GoogleConnector(Connector):
         return datetime.now(zone(await self.time_zone()))
 
     async def _list(self, q: str, n: int) -> list[str]:
-        listing = await self._api("GET", f"{GMAIL}/messages", params={"q": q, "maxResults": n})
-        return [m["id"] for m in listing.get("messages", [])]
+        """The newest ``n`` messages that match, page after page (Gmail gives at most 500 at
+        a time). The list's ``cut`` says Gmail had more than ``n``: a scan that stopped there
+        says how far back it read instead of passing for the whole mailbox."""
+        from pyxi.mailwatch import Fetched
+
+        ids = Fetched()
+        token = None
+        while len(ids) < n:
+            params: dict[str, Any] = {"q": q, "maxResults": min(n - len(ids), 500)}
+            if token:
+                params["pageToken"] = token
+            try:
+                listing = await self._api("GET", f"{GMAIL}/messages", params=params)
+            except Exception:
+                if not ids:
+                    raise  # nothing was listed at all: the scan fails, as it always did
+                break  # a later page failed: go on with the pages read, as a list cut short
+            page = [m["id"] for m in listing.get("messages", [])]
+            ids += page
+            token = listing.get("nextPageToken")
+            if not token or not page:
+                break
+        del ids[n:]
+        ids.cut = bool(token)
+        return ids
 
     async def gmail_search(self, args: dict[str, Any]) -> Result:
         """Search with plain fields (from, when, has_attachment...) or raw Gmail syntax. When
@@ -598,7 +683,17 @@ class GoogleConnector(Connector):
                 if ids:
                     note += f" (nothing matched {q!r} exactly; these are {why}: {wider!r})"
         if not ids:
-            return f"gmail_search: nothing matched {q!r}{note}."
+            # An address said aloud after a name is often one address heard in pieces (live:
+            # "tareknoorxyz@example.com" written down as "Tarek Noor xyz@example.com", searched as
+            # xyz@example.com, and nothing found).
+            spoken = (
+                " If they said that address aloud, the words just before it may be part of it "
+                "(\"Tarek Noor xyz@example.com\" may be tareknoorxyz@example.com): try it joined "
+                "up, or find the person by name with gmail_people."
+                if EMAIL.search(q)
+                else ""
+            )
+            return f"gmail_search: nothing matched {q!r}{note}.{spoken}"
         metas = await asyncio.gather(
             *(self._api("GET", f"{GMAIL}/messages/{i}", params={"format": "full"}) for i in ids)
         )
@@ -660,6 +755,18 @@ class GoogleConnector(Connector):
                 if when and (p["last"] is None or when > p["last"]):
                     p["last"] = when
         if not people:
+            # Nobody by that name. It may have been misheard ("AreknoorXYZ" for tareknoorxyz):
+            # the people they write to whose name or address is nearly it are offered back,
+            # to be confirmed, never used as they are.
+            near = await self._near_people(words, me) if named else []
+            if near:
+                return (
+                    f"gmail_people: no one called exactly {asked!r} in their mail, and the name "
+                    "may have been misheard. The nearest people they write to:\n"
+                    + "\n".join(f"- {_who(name, addr)}" for addr, name in near)
+                    + "\nAsk the user in one short question whether they mean the first one "
+                    "(say the name and the address). Don't use any of these until they say yes."
+                )
             return (
                 f"gmail_people: no one like {asked!r} in their recent mail. Ask the user for "
                 "the address (one short question)."
@@ -686,6 +793,42 @@ class GoogleConnector(Connector):
             "naming the top two or three:\n" + "\n".join(lines)
         )
 
+    async def _near_people(self, words: list[str], me: set[str]) -> list[tuple[str, str]]:
+        """People they have written to lately whose name or address is nearly what was said:
+        (address, name), nearest first, three at most."""
+        import difflib
+
+        said = re.sub(r"[^a-z0-9]", "", " ".join(w.split("@")[0] for w in words))
+        if len(said) < 4:
+            return []
+        try:
+            ids = await self._list("in:sent", 40)
+            metas = await asyncio.gather(
+                *(
+                    self._api(
+                        "GET",
+                        f"{GMAIL}/messages/{i}",
+                        params={"format": "metadata", "metadataHeaders": ["To", "Cc"]},
+                    )
+                    for i in ids
+                )
+            )
+        except Exception:  # a look that fails: the plain "ask for the address" stands
+            return []
+        scored: dict[str, tuple[float, str]] = {}
+        for meta in metas:
+            h = self._headers(meta)
+            for name, addr in getaddresses([h.get("to", ""), h.get("cc", "")]):
+                addr = addr.lower()
+                if "@" not in addr or addr in me or NOREPLY.search(addr):
+                    continue
+                forms = [re.sub(r"[^a-z0-9]", "", addr.split("@")[0]), re.sub(r"[^a-z0-9]", "", name.lower())]
+                best = max(difflib.SequenceMatcher(None, said, f).ratio() for f in forms if f)
+                if best >= 0.72 and best > scored.get(addr, (0.0, ""))[0]:
+                    scored[addr] = (best, name.strip().strip('"'))
+        ranked = sorted(scored.items(), key=lambda item: item[1][0], reverse=True)
+        return [(addr, name) for addr, (_, name) in ranked[:3]]
+
     def _headers(self, msg: dict[str, Any]) -> dict[str, str]:
         return {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
 
@@ -703,12 +846,22 @@ class GoogleConnector(Connector):
             self._attachments(p, out)
         return out
 
+    def _sent(self, msg: dict[str, Any], h: dict[str, str]) -> str:
+        """When a mail was sent, in their own time zone and in words, so the model never has
+        to convert an offset itself. Live: a mail's header said "+0000" and Pyxi told them
+        5:35, then 6:35, for a mail that came at neither."""
+        when = _when(msg, h)
+        if when is None:
+            return h.get("date", "")
+        when = when.astimezone(zone(self._tz or None))
+        return f"{when:%a %d %b %Y}, {_clock(when)} (their own time)"
+
     def _summary(self, msg: dict[str, Any]) -> str:
         h = self._headers(msg)
         self._remember(h.get("from", ""), h.get("to", ""))
         atts = self._attachments(msg.get("payload", {}), [])
         files = f" | attachments: {', '.join(a['filename'] for a in atts)}" if atts else ""
-        return f"- id={msg['id']} from {h.get('from', '?')} | {h.get('subject', '(no subject)')} | {h.get('date', '')}{files}\n  {msg.get('snippet', '')[:160]}"
+        return f"- id={msg['id']} from {h.get('from', '?')} | {h.get('subject', '(no subject)')} | {self._sent(msg, h)}{files}\n  {msg.get('snippet', '')[:160]}"
 
     def _body(self, part: dict[str, Any]) -> str:
         mime = part.get("mimeType", "")
@@ -732,17 +885,31 @@ class GoogleConnector(Connector):
     async def gmail_fetch(self, query: str, n: int = 40) -> list[dict[str, Any]]:
         """Whole emails for Pyxi's own background checks (receipts, orders): sender, subject,
         date, plain text and every link with its words. Fetched 25 at a time, so a big scan
-        stays under Gmail's rate limit."""
-        ids = await self._list(query, min(n, 100))
-        msgs: list[dict[str, Any]] = []
+        stays under Gmail's rate limit. The list's ``cut`` is True when Gmail had more
+        matching mail than ``n`` (see ``pyxi.mailwatch.read_back_to``).
+
+        A mail that can't be fetched (one "busy" answer among 300) is left out and counted
+        in the list's ``failed`` (``pyxi.mailwatch.not_read`` says it in the result); the
+        scan fails only when not one mail could be read. One failure used to lose them all."""
+        from pyxi.mailwatch import Fetched
+
+        ids = await self._list(query, min(n, 500))
+        got: list[Any] = []
         for i in range(0, len(ids), 25):  # 25 at a time: well inside Gmail's per-second quota
-            msgs += await asyncio.gather(
+            got += await asyncio.gather(
                 *(
                     self._api("GET", f"{GMAIL}/messages/{m}", params={"format": "full"})
                     for m in ids[i : i + 25]
-                )
+                ),
+                return_exceptions=True,
             )
-        out = []
+        errors = [m for m in got if isinstance(m, BaseException)]
+        msgs: list[dict[str, Any]] = [m for m in got if not isinstance(m, BaseException)]
+        if errors and not msgs:
+            raise errors[0]
+        out = Fetched()
+        out.cut = bool(getattr(ids, "cut", False))
+        out.failed = len(errors)
         for msg in msgs:
             h = self._headers(msg)
             payload = msg.get("payload", {})
@@ -774,7 +941,7 @@ class GoogleConnector(Connector):
         files = "\n".join(f"- {a['filename']} ({a['size'] // 1024} KB)" for a in atts) or "none"
         return (
             f"Email id={msg['id']} thread={msg.get('threadId')}\nFrom: {h.get('from')}\nTo: {h.get('to')}\n"
-            f"Subject: {h.get('subject')}\nDate: {h.get('date')}\nAttachments:\n{files}\n\n{body}"
+            f"Subject: {h.get('subject')}\nDate: {self._sent(msg, h)}\nAttachments:\n{files}\n\n{body}"
         )
 
     async def gmail_download(self, args: dict[str, Any]) -> Result:
@@ -906,6 +1073,11 @@ class GoogleConnector(Connector):
             except Exception as exc:
                 from pyxi.localzone import local_zone
 
+                if isinstance(exc, GoogleExpired):
+                    # Said to the user when they ask for something of Google's; not a
+                    # warning on every turn until they sign in again.
+                    log.info("calendar time zone: the Google sign-in has run out")
+                    return local_zone() or None
                 if re.search(r"\b403\b|insufficient", str(exc)):
                     # The calendar settings scope isn't granted: that won't change this session,
                     # so use this PC's own zone from now on (and stop asking every turn).
@@ -1065,16 +1237,44 @@ class GoogleConnector(Connector):
         data = await self._api("GET", f"{SHEETS}/{sheet_id}", params={"fields": "sheets.charts"})
         return [c for s in data.get("sheets", []) for c in s.get("charts") or []]
 
+    @staticmethod
+    def _render(formulas: bool) -> dict[str, str]:
+        """How cells come back. With formulas, a date still comes as it shows ("10/3/2026"),
+        not as its serial number: 46298 under "Order date" read as a number, and was totalled."""
+        if not formulas:
+            return {"valueRenderOption": "FORMATTED_VALUE"}
+        return {"valueRenderOption": "FORMULA", "dateTimeRenderOption": "FORMATTED_STRING"}
+
     async def sheets_values(
         self, sheet_id: str, a1: str, *, formulas: bool = False
     ) -> list[list[Any]]:
+        from urllib.parse import quote
+
         self._need_sheets()
+        # The range is part of the address, so every character of it is encoded: a tab called
+        # "Sheet #2" or "Income/Expenses" used to cut the address short at the # or the /.
         data = await self._api(
             "GET",
-            f"{SHEETS}/{sheet_id}/values/{a1}",
-            params={"valueRenderOption": "FORMULA" if formulas else "FORMATTED_VALUE"},
+            f"{SHEETS}/{sheet_id}/values/{quote(a1, safe='')}",
+            params=self._render(formulas),
         )
         return data.get("values", [])
+
+    async def sheets_values_batch(
+        self, sheet_id: str, ranges: list[str], *, formulas: bool = False
+    ) -> list[list[list[Any]]]:
+        """Several ranges in one round trip, in the order asked (every tab of a spreadsheet,
+        where reading them one at a time took a round trip each)."""
+        self._need_sheets()
+        if not ranges:
+            return []
+        data = await self._api(
+            "GET",
+            f"{SHEETS}/{sheet_id}/values:batchGet",
+            params={"ranges": list(ranges), **self._render(formulas)},
+        )
+        got = data.get("valueRanges", [])
+        return [got[i].get("values", []) if i < len(got) else [] for i in range(len(ranges))]
 
     async def sheets_write(self, sheet_id: str, data: list[dict[str, Any]]) -> Any:
         self._need_sheets()
@@ -1085,10 +1285,12 @@ class GoogleConnector(Connector):
         )
 
     async def sheets_append(self, sheet_id: str, a1: str, rows: list[list[Any]]) -> Any:
+        from urllib.parse import quote
+
         self._need_sheets()
         return await self._api(
             "POST",
-            f"{SHEETS}/{sheet_id}/values/{a1}:append",
+            f"{SHEETS}/{sheet_id}/values/{quote(a1, safe='')}:append",
             params={"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"},
             json={"values": rows},
         )
@@ -1177,7 +1379,10 @@ class GoogleConnector(Connector):
         ref = ref.strip()
         made_of = {"sheet": GoogleSheet, "doc": GoogleDoc, "slides": GoogleSlides}
         if m := re.search(r"/spreadsheets/d/([\w-]+)", ref):
-            return GoogleSheet(self, m.group(1))
+            # The link also says which tab they are looking at (gid): an edit that names no
+            # tab goes there, not to the first tab of the file.
+            tabs = re.findall(r"[#?&]gid=(\d+)", ref)
+            return GoogleSheet(self, m.group(1), gid=int(tabs[-1]) if tabs else None)
         if m := re.search(r"/document/d/([\w-]+)", ref):
             return GoogleDoc(self, m.group(1))
         if m := re.search(r"/presentation/d/([\w-]+)", ref):

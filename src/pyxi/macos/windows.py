@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import subprocess
 import sys
 import time
@@ -26,10 +27,12 @@ log = logging.getLogger(__name__)
 __all__ = [
     "_visible_windows",
     "available",
+    "browser_for",
     "exe_of",
     "focus",
     "foreground",
     "is_minimized",
+    "open_in",
     "open_new_window",
     "open_windows",
     "place",
@@ -227,6 +230,45 @@ def focus(hwnd: int) -> bool:
             return True
         time.sleep(0.03)
     return _ax.frontmost_pid() == pid
+
+
+# The browsers their words can name, and the app each one is on a Mac.
+_NAMED_BROWSER = re.compile(r"(?i)\b(chrome|firefox|edge|brave|safari)\b")
+_BROWSER_APP = {
+    "chrome": "Google Chrome",
+    "firefox": "Firefox",
+    "edge": "Microsoft Edge",
+    "brave": "Brave Browser",
+    "safari": "Safari",
+}
+_APP_FOLDERS = (
+    "/Applications",
+    "~/Applications",
+    "/System/Applications",
+    "/System/Volumes/Preboot/Cryptexes/App/System/Applications",  # where Safari really is
+)
+
+
+def browser_for(words: str, like: int | None = None) -> str:
+    """The browser a site should open in when their words name one ("on Chrome"): that app,
+    if it is installed. '' otherwise: the link is then opened the ordinary way, in their
+    default browser. (On Windows the browser they are in also counts; here only a named one,
+    until this has been tried on a real Mac.)"""
+    named = _NAMED_BROWSER.search(words or "")
+    if not named:
+        return ""
+    app = _BROWSER_APP[named.group(1).lower()]
+    for folder in _APP_FOLDERS:
+        bundle = Path(folder).expanduser() / f"{app}.app"
+        if bundle.exists():
+            return str(bundle)
+    return ""
+
+
+def open_in(exe: str, url: str, window: int | None = None) -> None:
+    """Open an address in that browser (an app bundle from ``browser_for``): a new tab in the
+    window of it that was used last."""
+    subprocess.Popen(["open", "-a", exe, url])
 
 
 def _new_window_command(target: str, like: int | None) -> list[str]:

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pyxi film: the opening, where Pyxi says what it is</title>
+<!--
+  A built opening, not a recording. Pyxi says, in its own voice, the three things a newcomer
+  has to know before the scenes make sense: it lives on the screen, it sees what you see, it
+  hears you; and the one thing to do: hold Ctrl Alt and ask (the app's own keys).
+  The words are in story.js (intro). Drawn as a pure function of time, like the scenes.
+-->
+<link rel="stylesheet" href="kit.css">
+<style>
+.block { position: absolute; left: 0; right: 0; top: 520px; display: flex; flex-direction: column; align-items: center; }
+.block .slam { font-size: 150px; }
+#art { position: absolute; inset: 0; overflow: visible; }
+#mon { fill: rgba(158, 203, 255, .05); stroke: #eaf3ff; stroke-width: 4.5; stroke-linecap: round; filter: drop-shadow(0 0 14px rgba(158, 203, 255, .6)); }
+#stand { stroke: #eaf3ff; stroke-width: 4.5; stroke-linecap: round; filter: drop-shadow(0 0 14px rgba(158, 203, 255, .6)); }
+.ui { fill: #fff; }
+#hit { fill: rgba(158, 203, 255, .12); stroke: #eaf3ff; stroke-width: 3; filter: drop-shadow(0 0 10px rgba(158, 203, 255, .8)); }
+#beam { fill: url(#beamfill); }
+.wv { fill: #eaf3ff; filter: drop-shadow(0 0 9px rgba(158, 203, 255, .75)); }
+#keys { position: absolute; left: 0; right: 0; top: 212px; display: flex; justify-content: center; align-items: center; gap: 30px; opacity: 0; }
+.key { width: 230px; height: 150px; border-radius: 26px; display: grid; place-items: center; font-size: 60px; font-weight: 700; letter-spacing: -.02em; color: #fff;
+  background: linear-gradient(180deg, rgba(40, 46, 62, .96), rgba(20, 24, 34, .98)); border: 2px solid rgba(255, 255, 255, .26); }
+#keys b { font-size: 64px; font-weight: 500; color: #7f8aa0; }
+#fly svg { left: -150px; top: -150px; width: 300px; height: 300px; }
+</style>
+</head>
+<body>
+<script src="story.js"></script>
+<script src="kit.js"></script>
+<script>
+const I = window.STORY.intro;
+const M = { x: 700, y: 110, w: 520, h: 330 }; // the little screen Pyxi lives on
+document.body.innerHTML = `<div id="stage">
+  <div class="glow" id="g1"></div><div class="glow" id="g2"></div><div id="vig"></div>
+  <svg id="art" viewBox="0 0 1920 1080">
+    <defs><linearGradient id="beamfill" x1="0" x2="1"><stop offset="0" stop-color="#ffd27a" stop-opacity="0"/><stop offset=".8" stop-color="#ffd27a" stop-opacity=".5"/><stop offset="1" stop-color="#fff3cf" stop-opacity=".95"/></linearGradient>
+      <clipPath id="inmon"><rect x="${M.x + 6}" y="${M.y + 6}" width="${M.w - 12}" height="${M.h - 12}" rx="18"/></clipPath></defs>
+    <g id="screen">
+      <rect id="mon" x="${M.x}" y="${M.y}" width="${M.w}" height="${M.h}" rx="24" pathLength="1" stroke-dasharray="1"/>
+      <path id="stand" d="M${M.x + M.w / 2 - 70} ${M.y + M.h + 34} H${M.x + M.w / 2 + 70}" pathLength="1" stroke-dasharray="1"/>
+      <g id="uis" clip-path="url(#inmon)">
+        <rect class="ui" x="${M.x + 44}" y="${M.y + 46}" width="210" height="26" rx="13"/>
+        <rect class="ui" x="${M.x + 44}" y="${M.y + 98}" width="330" height="16" rx="8"/>
+        <rect class="ui" x="${M.x + 44}" y="${M.y + 132}" width="290" height="16" rx="8"/>
+        <rect class="ui" x="${M.x + 44}" y="${M.y + 166}" width="310" height="16" rx="8"/>
+        <rect class="ui" x="${M.x + 44}" y="${M.y + 232}" width="150" height="50" rx="14"/>
+        <rect id="hit" x="${M.x + 36}" y="${M.y + 224}" width="166" height="66" rx="18"/>
+        <rect id="beam" x="0" y="${M.y}" width="150" height="${M.h}"/>
+      </g>
+    </g>
+    <g id="waves"></g>
+  </svg>
+  <div id="keys">${I.keys.map((k) => `<div class="key">${k}</div>`).join("<b>+</b>")}</div>
+  ${I.lines.map((l, i) => `<div class="block" id="blk${i}">${l.type.map((x) => `<div class="slam">${x}</div>`).join("")}</div>`).join("")}
+  <div id="fly">${FLY}</div>
+</div>`;
+// the sound coming in: bars either side of the screen
+const waves = $("#waves");
+const BARS = [];
+for (let side = -1; side <= 1; side += 2) for (let k = 0; k < 7; k++) {
+  const x = side < 0 ? M.x - 46 - k * 26 : M.x + M.w + 34 + k * 26;
+  const r = svg("rect", { class: "wv", x, y: M.y + M.h / 2 - 60, width: 12, height: 120, rx: 6 });
+  r.style.transformBox = "fill-box"; r.style.transformOrigin = "center";
+  waves.appendChild(r); BARS.push({ el: r, k, side });
+}
+
+let T = null, ENV = [];
+const which = (name) => I.lines.findIndex((l) => l.show === name);
+
+function setup(cfg = {}) {
+  const says = I.lines.map((l) => l.say);
+  const d = cfg.durs || says.map((s) => 0.4 + s.length * 0.062);
+  const voice = [1.0];
+  for (let i = 1; i < says.length; i++) voice.push(onBeat(voice[i - 1] + d[i - 1] + 0.3));
+  const last = says.length - 1;
+  const press = voice[which("keys")] + 0.5;
+  const total = onBeat(voice[last] + d[last] + 0.7);
+  T = { voice, durs: d, press, total, slams: voice.map((v) => v - 0.02),
+    sfx: [["whoosh", 0.25], ["pin", voice[1] + 0.1], ...Array.from({ length: 5 }, (_, k) => ["tick", voice[which("see")] + 0.2 + k * 0.16]), ["mark", voice[which("see")] + 1.0], ["click", press], ["listen", press + 0.18]] };
+  Film.C = { env: cfg.env || [] };
+  draw(0);
+  return { T, total, says, ask: "", fonts: ['800 176px "Inter"', '600 33px "Fraunces"', 'italic 500 84px "Fraunces"'].map((f) => document.fonts.check(f)) };
+}
+
+function draw(t) {
+  const v = T.voice, n = v.length, P = T.total;
+  const env = Film.C.env || [], loud = clamp(env[Math.floor(t * 60)] || 0);
+  const w = (2 * Math.PI) / P;
+  $("#g1").style.transform = `translate(${-520 + 160 * Math.sin(t * w)}px, ${260 + 120 * Math.cos(t * w)}px)`;
+  $("#g2").style.transform = `translate(${980 + 170 * Math.cos(t * w + 1)}px, ${-640 + 130 * Math.sin(t * w * 2)}px)`;
+  const leave = Math.pow(seg(t, P - 0.34, P), 3), gone = 1 - seg(t, P - 0.14, P); // the way out, into the dark
+
+  // the words: each line lands as Pyxi says it, and makes way for the next
+  I.lines.forEach((l, i) => {
+    const blk = $("#blk" + i), next = i < n - 1 ? v[i + 1] : P + 9;
+    const on = t >= v[i] - 0.05 && t < next;
+    blk.style.visibility = on ? "visible" : "hidden";
+    if (!on) return;
+    $$(".slam", blk).forEach((el, j) => slam(el, t, v[i] + j * 0.3));
+    const out = Math.pow(seg(t, next - 0.2, next), 2);
+    blk.style.opacity = (1 - out) * gone;
+    blk.style.transform = `scale(${1 + 0.02 * seg(t, v[i], next) + 0.5 * out + 5 * leave})`;
+    blk.style.filter = leave > 0 ? `blur(${leave * 16}px)` : "none";
+  });
+
+  // the screen it lives on draws itself; then it is looked across; then it hears
+  const s1 = v[1], see = v[which("see")], hear = v[which("hear")], keys = v[which("keys")];
+  const drawn = out3(seg(t, s1, s1 + 0.7)), off = 1 - seg(t, keys - 0.25, keys);
+  $("#mon").style.strokeDashoffset = 1 - drawn; $("#stand").style.strokeDashoffset = 1 - out3(seg(t, s1 + 0.5, s1 + 0.9));
+  $("#screen").style.opacity = seg(t, s1, s1 + 0.05) * off;
+  const sweep = io3(seg(t, see + 0.15, see + 1.0)), bx = M.x - 150 + (M.w + 150) * sweep;
+  $("#beam").setAttribute("x", bx); $("#beam").style.opacity = seg(t, see + 0.15, see + 0.25) * (1 - seg(t, see + 0.95, see + 1.1));
+  $$("#uis .ui").forEach((r) => {
+    const x = +r.getAttribute("x"), lit = seg(bx + 150, x, x + 120);
+    r.style.opacity = 0.12 * seg(t, s1 + 0.4, s1 + 0.8) + 0.5 * (t >= see ? lit : 0);
+  });
+  const found = back(seg(t, see + 1.0, see + 1.35));
+  $("#hit").style.opacity = seg(t, see + 1.0, see + 1.1); $("#hit").style.transformBox = "fill-box"; $("#hit").style.transformOrigin = "center"; $("#hit").style.transform = `scale(${mix(1.3, 1, found)})`;
+  const hearing = seg(t, hear, hear + 0.2) * (1 - seg(t, keys - 0.25, keys));
+  for (const b of BARS) {
+    const amp = 0.25 + 0.75 * Math.abs(Math.sin(t * (8 + b.k * 1.6) + b.k * 2 + b.side)) * (1 - b.k / 9);
+    b.el.style.opacity = hearing * (1 - b.k / 8);
+    b.el.style.transform = `scaleY(${Math.max(0.12, amp * hearing)})`;
+  }
+
+  // the two keys, and the press
+  const kin = back(seg(t, keys, keys + 0.4)), down = seg(t, T.press, T.press + 0.07);
+  $("#keys").style.opacity = seg(t, keys, keys + 0.1) * gone;
+  $("#keys").style.transform = `translateY(${30 * (1 - kin)}px) scale(${1 + 5 * leave})`;
+  $$(".key").forEach((k, i) => {
+    const d = seg(t, T.press + i * 0.06, T.press + i * 0.06 + 0.07);
+    k.style.transform = `translateY(${12 * d}px)`;
+    k.style.boxShadow = `0 ${14 - 12 * d}px 0 rgba(255,255,255,.14), 0 0 ${70 * d}px rgba(255, 190, 80, ${0.55 * d})`;
+    k.style.borderColor = d > 0 ? `rgba(255, 214, 140, ${0.3 + 0.6 * d})` : "rgba(255,255,255,.26)";
+  });
+
+  // the firefly: flies in, lives in the screen, perches in its corner to look, then sits over the keys
+  const inn = out3(seg(t, 0.15, 1.0));
+  let fx = mix(-180, 960, inn), fy = mix(900, 275, inn) - 260 * Math.sin(Math.PI * inn) * (1 - inn);
+  const toCorner = io3(seg(t, see - 0.1, see + 0.35));
+  fx = mix(fx, M.x + M.w - 86, toCorner); fy = mix(fy, M.y + 84, toCorner);
+  const toKeys = io3(seg(t, keys - 0.2, keys + 0.3));
+  fx = mix(fx, 960, toKeys); fy = mix(fy, 118, toKeys);
+  const size = mix(1, 0.62, Math.max(toCorner * (1 - toKeys), 0)) * mix(1, 0.6, toKeys);
+  $("#fly").style.transform = `translate(${fx + 5 * Math.sin(t * 1.7 + 1)}px, ${fy + 7 * Math.sin(t * 2.6)}px) scale(${size * (1 + 4 * leave)})`;
+  $("#fly").style.opacity = gone;
+  $("#fly .ff-halo").style.transform = `scale(${1 + 0.07 * Math.sin(t * 5) + 0.9 * loud + 0.4 * down})`;
+  const flap = 0.62 + 0.38 * Math.sin(t * 46);
+  for (const wg of $$("#fly .ff-wing")) wg.style.transform = `scaleY(${flap})`;
+}
+</script>
+</body>
+</html>

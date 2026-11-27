@@ -12,12 +12,14 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chordLabel, chordsFrom, pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
+import { dictationPrefs, type DictationPrefs } from "./dictationPrefs";
+import { chordLabel, chordsFrom, dictationChord, dictationState, pasteText, startHoldToTalk, stopHoldToTalk } from "./holdToTalk";
 import { MAC_HOTKEYS, MAC_RUNNABLE, macKeyName, needsPermissions, permissionRows, settingsUrl, trayTemplatePng } from "./mac";
 import { tableClip } from "./tableClip";
 import { TRAY_PNG_16, TRAY_PNG_32, TRAY_PNG_64 } from "./trayImage";
 import { trayTemplate } from "./trayMenu";
 import { checkNow, startUpdates } from "./updates";
+import { windowsPageUrl } from "./windowsSettings";
 import {
   app,
   BrowserWindow,
@@ -116,6 +118,26 @@ function loadShareVisible(): boolean {
 }
 let shareVisible = loadShareVisible();
 
+// Dictation's settings live in the same file (see dictationPrefs.ts).
+function loadDictation(): DictationPrefs {
+  try {
+    return dictationPrefs(JSON.parse(readFileSync(UI_PREFS, "utf-8")).dictation);
+  } catch {
+    return dictationPrefs(null);
+  }
+}
+let dictation = loadDictation();
+
+/** Both settings in ui.json, written together so neither wipes the other. */
+function saveUiPrefs(): void {
+  try {
+    mkdirSync(join(HOME, ".pyxi"), { recursive: true });
+    writeFileSync(UI_PREFS, JSON.stringify({ shareVisible, dictation }));
+  } catch (err) {
+    console.warn("[pyxi] couldn't save the interface settings:", err);
+  }
+}
+
 // Hold-to-talk and dictation chords: PYXI_TALK_CHORD / PYXI_DICTATE_CHORD, else .pyxi/hotkeys.json
 // ({"talk": "ctrl+option", "dictate": "ctrl+cmd"}), else Ctrl+Alt and Ctrl+Win (on a Mac,
 // Control+Option and Control+Command: the same keys by position).
@@ -207,6 +229,16 @@ function openExternalSafe(url: unknown): void {
   } catch {
     /* not a URL */
   }
+}
+
+/** Opens one of the few Windows settings pages on Pyxi's list (windowsSettings.ts), asked for
+ * by name from one of Pyxi's own pages. It shows the page and changes nothing. A name that
+ * is not on the list, or a request from any other page, does nothing. On a Mac the same
+ * name opens the Mac's page for it in System Settings (mac.ts), and only names on that list. */
+function openWindowsPage(sender: string, page: unknown): void {
+  if (!ownPage(sender)) return;
+  const url = IS_MAC ? (windowsPageUrl(page, "win32") ? settingsUrl(page) : null) : windowsPageUrl(page);
+  if (url) void shell.openExternal(url);
 }
 
 // Every window runs Pyxi's own pages with no Node in the page, isolated from the preload, in
@@ -432,6 +464,16 @@ async function stopEverything(): Promise<void> {
   }
 }
 
+/** The tray's "Meeting notes" and "Live captions": on, or off when it is on. The brain shows
+ * the sign with its Stop button; a problem (no speakers to listen to) comes back as a notice. */
+async function toggleListening(what: "meeting" | "captions"): Promise<void> {
+  try {
+    await fetch(`${BACKEND}/api/listen/${what}`, keyed({ method: "POST" }));
+  } catch (err) {
+    console.warn("[pyxi] listening: the brain didn't answer", err);
+  }
+}
+
 /** Everything lives in the notch now; Ctrl+Alt+W and the tray icon unfold it. */
 function toggleNotch(): void {
   const win = overlays.get(primaryId);
@@ -469,6 +511,7 @@ function buildTrayMenu(): void {
           broadcast("mute", muted);
         },
         stopEverything: () => void stopEverything(),
+        listen: (what) => void toggleListening(what),
         openUrl: (url) => void shell.openExternal(url),
         checkForUpdates: async () => {
           const said = await checkNow();
@@ -699,8 +742,9 @@ app.whenReady().then(async () => {
     down: () => broadcast("ptt-down"),
     up: () => broadcast("ptt-up"),
     cancel: () => broadcast("ptt-cancel"),
-    // Hold Ctrl + left Windows: dictation, typed into whatever app has focus.
-    dictateDown: () => broadcast("dictate-down"),
+    // Hold Ctrl + left Windows: dictation, typed into whatever app has focus. The overlay is
+    // told how it was started (hold, or a press) and whether a long one may be tidied by a model.
+    dictateDown: () => broadcast("dictate-down", { mode: dictation.mode, polish: dictation.polish, here: !dictation.cloud, keys: chordLabel(dictateKeys()) }),
     dictateUp: () => broadcast("dictate-up"),
     dictateCancel: () => broadcast("dictate-cancel"),
     doubleTap: () => {
@@ -711,14 +755,11 @@ app.whenReady().then(async () => {
       win.focus();
       win.webContents.send("quick-type");
     },
-    click: (x, y) => {
-      const win = overlays.get(primaryId);
-      if (win && !win.isDestroyed()) win.webContents.send("global-click", { x, y });
-    },
+    // To every screen's overlay: each one holds only the marks on its own screen, so a guide
+    // step drawn on a second screen never heard its click when only the main one was told.
+    click: (x, y) => broadcast("global-click", { x, y }),
     move: () => wakeCursorFeed(),
-    },
-    { talk: chords.talk, dictate: chords.dictate },
-  );
+  }, () => dictation, { talk: chords.talk, dictate: chords.dictateChosen ? chords.dictate : undefined });
   registerHotkeys({
     talk: () => broadcast("ptt"),
     panel: toggleNotch,
@@ -777,13 +818,98 @@ ipcMain.on("release-focus", (e) => {
 });
 ipcMain.on("ptt", () => broadcast("ptt"));
 ipcMain.on("open-external", (_e, url: unknown) => openExternalSafe(url));
+ipcMain.on("open-windows-page", (e, page: unknown) => openWindowsPage(e.senderFrame?.url ?? "", page));
 ipcMain.handle("displays", () => screen.getAllDisplays().map(displayInfo));
+/** Everything on the clipboard that can be read back (text, formatted text, a picture), copied
+ * out of it so it can be put back after a paste. Empty when the clipboard is empty. */
+async function keepClipboard(): Promise<ClipboardItem[]> {
+  const kept: ClipboardItem[] = [];
+  for (const item of await clipboard.read()) {
+    const parts: Record<string, Blob> = {};
+    for (const type of item.types) {
+      try {
+        const data: unknown = await item.getType(type);
+        if (data instanceof Blob && data.size <= 20_000_000) parts[type] = data;
+      } catch {
+        /* a format that can't be read: left out */
+      }
+    }
+    if (Object.keys(parts).length) kept.push(new ClipboardItem(parts));
+  }
+  return kept;
+}
+
+/** What the clipboard held before a dictation was pasted, until it has been put back. */
+interface Held {
+  text: string;
+  items: ClipboardItem[] | null; // null: it couldn't be read
+  timer: NodeJS.Timeout;
+}
+let held: Held | null = null;
+let dictationPastes: Promise<void> = Promise.resolve();
+
+/**
+ * Dictated words: pasted into the box that has the keyboard, wherever it is (Pyxi's own text box
+ * too, so no window is blurred first). Then what was on the clipboard comes back: text,
+ * formatted text or a picture. `keep` leaves the words on it instead, for an app that didn't say
+ * whether it takes text. (What can't be read back, such as copied files, is not put back: the
+ * clipboard is then left holding the words.) A second dictation that comes before the first
+ * one's clipboard is back puts back what was there before the first.
+ */
+async function pasteDictation(value: string, keep: boolean): Promise<void> {
+  let text = "";
+  let items: ClipboardItem[] | null = null;
+  if (held) {
+    clearTimeout(held.timer);
+    ({ text, items } = held);
+    held = null;
+  } else {
+    try {
+      text = await Promise.resolve(clipboard.readText());
+      items = await keepClipboard();
+    } catch (err) {
+      console.warn("[pyxi] dictation: the clipboard couldn't be read first:", err);
+    }
+  }
+  await clipboard.writeText(value);
+  await new Promise((r) => setTimeout(r, 60));
+  pasteText();
+  if (keep) return;
+  const mine: Held = {
+    text,
+    items,
+    timer: setTimeout(async () => {
+      if (held === mine) held = null;
+      try {
+        if ((await Promise.resolve(clipboard.readText())) !== value) return; // they copied something else meanwhile
+        if (items?.length) {
+          try {
+            return await clipboard.write(items);
+          } catch (err) {
+            console.warn("[pyxi] dictation: putting the clipboard back whole failed; its text goes back:", err);
+          }
+        }
+        if (text) await clipboard.writeText(text);
+        else if (items !== null && items.length === 0) clipboard.clear(); // it was empty before
+      } catch (err) {
+        console.warn("[pyxi] dictation: the clipboard couldn't be put back:", err);
+      }
+    }, 900),
+  };
+  held = mine;
+}
+
 // Quick actions. Inserting pastes into whatever field has focus, then puts your clipboard back.
 ipcMain.on("action", async (_e, kind: string, value: string) => {
   if (typeof value !== "string" || !value) return;
   if (kind === "open_url") openExternalSafe(value);
   else if (kind === "copy") clipboard.writeText(value);
-  else if (kind === "insert" || kind === "insert_table") {
+  else if (kind === "dictate" || kind === "dictate_keep") {
+    // One at a time, in the order they came: two dictations in a row never share the clipboard.
+    dictationPastes = dictationPastes
+      .then(() => pasteDictation(value, kind === "dictate_keep"))
+      .catch((err) => console.warn("[pyxi] dictation: couldn't paste:", err));
+  } else if (kind === "insert" || kind === "insert_table") {
     // A table goes on the clipboard twice (cells as text, and as an HTML table), so a
     // spreadsheet takes a grid and a document a real table.
     const clip = kind === "insert_table" ? tableClip(value) : { text: value, html: "" };
@@ -883,13 +1009,27 @@ ipcMain.on("set-share-visible", (_e, value: boolean) => {
   shareVisible = !!value;
   for (const win of liveOverlays()) win.setContentProtection(!shareVisible);
   liveFirefly()?.setContentProtection(!shareVisible);
-  try {
-    mkdirSync(join(HOME, ".pyxi"), { recursive: true });
-    writeFileSync(UI_PREFS, JSON.stringify({ shareVisible }));
-  } catch (err) {
-    console.warn("[pyxi] couldn't save the screen-share setting:", err);
-  }
+  saveUiPrefs();
   broadcast("share-visible", shareVisible);
+});
+// Dictation: Settings reads and changes it; the keyboard hook reads it at every key press.
+ipcMain.handle("dictation-prefs", () => dictation);
+ipcMain.on("set-dictation-prefs", (e, change: unknown) => {
+  if (!ownPage(e.senderFrame?.url ?? "")) return;
+  const before = dictation;
+  dictation = dictationPrefs(change, dictation);
+  saveUiPrefs();
+  // Changed in the middle of one (the keys, the mode, or switched off): that one is dropped.
+  if (before.enabled !== dictation.enabled || before.keys !== dictation.keys || before.mode !== dictation.mode) {
+    dictationState("idle");
+    broadcast("dictate-cancel");
+  }
+  broadcast("dictation-prefs", dictation);
+});
+// The main screen's overlay says where a dictation is, so Esc can cancel it (holdToTalk.ts).
+ipcMain.on("dictation-state", (e, state: unknown) => {
+  if (!liveOverlays().some((w) => w.webContents === e.sender)) return;
+  if (state === "idle" || state === "recording" || state === "working") dictationState(state);
 });
 // The firefly moves its own window (it runs the spring); only the firefly page may.
 ipcMain.on("firefly-move", (e, x: unknown, y: unknown) => {
@@ -904,19 +1044,13 @@ ipcMain.on("firefly-state", (e, s: unknown) => {
   if (!liveOverlays().some((w) => w.webContents === e.sender) || typeof s !== "object" || s === null) return;
   liveFirefly()?.webContents.send("firefly-state", s);
 });
-ipcMain.handle("hotkeys", () =>
-  IS_MAC
-    ? {
-        ...Object.fromEntries(Object.entries(activeHotkeys).map(([k, v]) => [k, macKeyName(v)])),
-        hold: holdToTalk ? chordLabel(chords.talk) : null,
-        dictate: holdToTalk ? chordLabel(chords.dictate) : null,
-      }
-    : {
-        ...activeHotkeys,
-        hold: holdToTalk ? chordLabel(chords.talk) : null,
-        dictate: holdToTalk ? chordLabel(chords.dictate) : null,
-      },
-);
+/** The dictation keys in force: hotkeys.json's if it names any, else the ones chosen in Settings. */
+const dictateKeys = () => (chords.dictateChosen ? chords.dictate : dictationChord(dictation.keys));
+ipcMain.handle("hotkeys", () => ({
+  ...(IS_MAC ? Object.fromEntries(Object.entries(activeHotkeys).map(([k, v]) => [k, macKeyName(v)])) : activeHotkeys),
+  hold: holdToTalk ? chordLabel(chords.talk) : null,
+  dictate: holdToTalk && dictation.enabled ? chordLabel(dictateKeys()) : null,
+}));
 // The Mac's permissions card (permissions.html): what's allowed, and links to System Settings.
 ipcMain.handle("mac-permissions", (e) => (IS_MAC && fromPermissions(e) ? macPermissionRows() : []));
 ipcMain.on("mac-open-settings", (e, key: unknown) => {

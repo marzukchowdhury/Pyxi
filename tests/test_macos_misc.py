@@ -399,3 +399,129 @@ def test_pricecheck_reads_the_address_through_the_mac_reader(monkeypatch):
     monkeypatch.setattr(windows, "foreground", lambda: 7)
     monkeypatch.setattr(uia, "browser_url", lambda hwnd, budget_s=0.5: f"https://shop.example/{hwnd}")
     assert pricecheck.browser_url() == "https://shop.example/7"
+
+
+def test_on_a_mac_the_tab_on_screen_stays_off_even_when_switched_on(monkeypatch):
+    """screenlink reads the tab through Windows UI Automation: on a Mac it is never made, so
+    the tab tools use the extension or nothing."""
+    from types import SimpleNamespace
+
+    from pyxi import screenlink
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    brain = SimpleNamespace(settings=SimpleNamespace(screen=SimpleNamespace(tab_fallback=True, tab_keys=True)))
+    assert screenlink.available() is False
+    assert screenlink.fallback(brain) is None and not hasattr(brain, "_screen_tab")
+
+
+# ---------------------------------------------------------------------- what main gained after 0.1.11
+def test_on_a_mac_meeting_notes_and_captions_say_they_are_not_there_yet(monkeypatch):
+    """Hearing what the computer plays is Windows' loopback capture. On a Mac nothing is tried:
+    the model (or the button's sign) is given one plain sentence."""
+    from pyxi.companion import listening
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    ls = listening.Listening.__new__(listening.Listening)  # nothing of it is reached
+    notes = asyncio.run(ls.start_meeting("the weekly call"))
+    captions = asyncio.run(ls.start_captions("spanish"))
+    assert notes == f"live_notes: {listening.MAC_NOTE} Tell them so."
+    assert captions == f"captions: {listening.MAC_NOTE} Tell them so."
+    assert "Mac" in listening.MAC_NOTE and "Windows" in listening.MAC_NOTE
+
+
+def test_on_windows_listening_is_not_turned_away(monkeypatch):
+    from pyxi.companion import listening
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert listening._not_here("captions") == ""
+
+
+def test_dictation_on_a_mac_never_types_into_a_password_box(monkeypatch):
+    """Which control has the keyboard comes from Accessibility on a Mac. A password box is
+    never typed into; a text box is; anything else is typed and kept on the clipboard too."""
+    from pyxi import dictation, hands
+    from pyxi.screen import uia
+
+    where = getattr(dictation.where_to_type, "real", dictation.where_to_type)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(uia, "available", lambda: True)
+    monkeypatch.setattr(hands, "foreground_window", lambda: 7)
+    monkeypatch.setattr(hands, "is_own", lambda hwnd: False)
+    field = {"role": "Edit", "password": True}
+    monkeypatch.setattr(uia, "focused_field", lambda: field, raising=False)
+    assert where() == dictation.Target("password", 7)
+    assert dictation.decide(where()) == ("password", "password")
+    field["password"] = False
+    assert where() == dictation.Target("field", 7)
+    field["role"] = "Button"
+    assert where() == dictation.Target("unknown", 7)
+    assert dictation.decide(where()) == ("typed", "kept")
+    monkeypatch.setattr(uia, "focused_field", lambda: None, raising=False)
+    assert where() == dictation.Target("unknown", 7)
+
+    def broken():
+        raise RuntimeError("no Accessibility")
+
+    monkeypatch.setattr(uia, "focused_field", broken, raising=False)
+    assert where() == dictation.Target("unknown", 7)
+    # Pyxi's own window: its text box, or nothing to type in.
+    monkeypatch.setattr(hands, "is_own", lambda hwnd: True)
+    assert where() == dictation.Target("none", 7)
+    monkeypatch.setattr(uia, "focused_field", lambda: {"role": "Edit", "password": False}, raising=False)
+    assert where() == dictation.Target("own", 7)
+
+
+def test_dictation_says_command_v_on_a_mac(monkeypatch):
+    mod = _load_as_mac(monkeypatch, "dictation.py")
+    assert "Command+V" in mod.NOTES["no_field"] and "Ctrl" not in " ".join(mod.NOTES.values())
+    from pyxi import dictation
+
+    assert "Ctrl+V" in dictation.NOTES["no_field"]  # Windows is as it was
+
+
+def test_a_new_workbook_opens_with_open_on_a_mac(tmp_path, monkeypatch):
+    import subprocess
+
+    from pyxi.companion import filework
+
+    opened = []
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd: opened.append(cmd))
+    filework.open_path(tmp_path / "budget.xlsx")
+    assert opened == [["open", str(tmp_path / "budget.xlsx")]]
+
+
+def test_a_named_browser_is_used_on_a_mac_when_it_is_installed(tmp_path, monkeypatch):
+    import subprocess
+
+    from pyxi.macos import windows as mac_windows
+
+    (tmp_path / "Google Chrome.app").mkdir()
+    monkeypatch.setattr(mac_windows, "_APP_FOLDERS", (str(tmp_path),))
+    chrome = str(tmp_path / "Google Chrome.app")
+    assert mac_windows.browser_for("open the timetable on Chrome") == chrome
+    assert mac_windows.browser_for("open it in firefox please") == ""  # not installed: the usual way
+    assert mac_windows.browser_for("open the timetable") == ""  # none named: their default browser
+    opened = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd: opened.append(cmd))
+    mac_windows.open_in(chrome, "https://timetable.example/today")
+    assert opened == [["open", "-a", chrome, "https://timetable.example/today"]]
+    assert {"browser_for", "open_in"} <= set(mac_windows.__all__)  # so they replace the Windows ones
+
+
+def test_what_windows_alone_can_do_is_quietly_left_out_on_a_mac(monkeypatch):
+    """Pressing a control with no mouse, the idle clock and a window that could not be read
+    all answer "nothing" off Windows, and their callers go on the ordinary way."""
+    from pyxi.agents import ledger_live
+    from pyxi.listen import capture, wincaptions
+    from pyxi.screen import control, press, uia
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert uia.input_idle_s() is None
+    assert uia.unread_window() is None
+    assert control._family(7, None) == []
+    assert press.usable(7) is False
+    assert capture.available() is False
+    assert wincaptions.installed() is False and wincaptions.window() == 0
+    with pytest.raises(ledger_live.Unreachable, match="only be edited directly on Windows"):
+        ledger_live.connect("excel")

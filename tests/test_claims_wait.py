@@ -170,7 +170,9 @@ async def test_a_streamed_claim_waits_for_a_tool_that_can_refuse(settings):
     assert said(rec) == ["Okay."]  # the next round's line, not the claim
 
 
-async def test_a_streamed_claim_is_still_said_early_when_nothing_can_refuse(settings):
+async def test_a_claim_about_a_quick_action_waits_until_it_is_done(settings):
+    """Live: "GenOffice, coming up", three times, while the opener had answered that it only
+    knows a short list of apps. A quick action can say no like any other."""
     llm = Streamed(
         [
             ("say", {"text": "Notepad, coming up."}),
@@ -186,8 +188,23 @@ async def test_a_streamed_claim_is_still_said_early_when_nothing_can_refuse(sett
     order = watch(brain)
     await brain.turn("get me notepad please")
     await asyncio.sleep(0.05)
-    assert order == ["say", "quick_action"]  # said while the rest of the reply was arriving
+    assert order == ["quick_action", "say"]  # it opened, and then the line is true
     assert said(rec) == ["Notepad, coming up."]
+
+
+async def test_a_quick_action_that_did_nothing_is_never_said_to_be_coming_up(settings):
+    llm = Streamed([("say", {"text": "GenOffice, coming up."}), ("quick_action", {"action": "open_app", "value": "GenOffice"})])
+    brain, rec = make_brain(settings, llm=llm)
+
+    async def fake_quick(action: str, value: str) -> str:
+        return "open_app: there's no program called 'GenOffice' in the Start menu or on the desktop of this PC, so nothing was opened."
+
+    brain._quick_action = fake_quick  # type: ignore[method-assign]
+    await brain.turn("open GenOffice for me")
+    await asyncio.sleep(0.05)
+    assert said(rec) == ["Okay."]  # the next round's line, never the claim
+    opened = next(c for c in brain._calls if c["tool"] == "quick_action")
+    assert opened["outcome"] == "refused" and "nothing was opened" in opened["note"]
 
 
 def test_the_prompt_says_a_claim_waits_for_the_tool() -> None:

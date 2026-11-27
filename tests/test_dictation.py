@@ -55,7 +55,10 @@ async def test_dictating_types_into_the_app_and_never_asks_the_model(settings) -
     typed = await brain.dictate(b"fake audio")
     assert typed == "The meeting moved to Thursday,\nBring the slides "
     inserts = [{k: v for k, v in e.items() if k != "ts"} for e in events if e["type"] == "action"]
-    assert inserts == [{"type": "action", "kind": "insert", "value": typed}]
+    assert inserts == [{"type": "action", "kind": "dictate", "value": typed}]
+    said = [e for e in events if e["type"] == "dictated"]
+    assert len(said) == 1 and said[0]["how"] == "typed" and said[0]["text"] == typed
+    assert not [e for e in events if e["type"] in ("state", "say")]  # Pyxi's own state is left alone
     assert not [e for e in events if e["type"] == "user"]  # not a question for Pyxi
 
 

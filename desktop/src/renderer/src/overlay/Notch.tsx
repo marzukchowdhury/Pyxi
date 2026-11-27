@@ -4,7 +4,9 @@
  *
  *   hold Ctrl + Alt   it opens into "Listening" with a live waveform of your voice
  *   let go            "Thinking" (or "Looking at your screen"), then Pyxi's words stream in
- *   hover it          it unfolds into a small chat: recent lines, a text box, the mic
+ *   hover it          a small tab drops down that says "Open Pyxi": nothing else. Hovering
+ *                     used to unfold the chat, which got in the way of the browser tabs
+ *                     that sit right under it; now only a click opens anything
  *   click it          it unfolds into everything: chat, team, memory, 3D, voice, settings
  *                     (also Ctrl+Alt+W or the tray icon); Escape or the close button folds it
  *   double-tap Ctrl   it opens with the text box ready to type
@@ -19,16 +21,24 @@ import { Routines } from "../panel/Connections";
 import { Chat, Gallery, Palace, Settings, type Tab, TABS, Team } from "../panel/Panel";
 import { Activity } from "../panel/Activity";
 import { VoiceStudio } from "../panel/VoiceStudio";
+import { usePanel } from "../panel/store";
+import { cardButton, showPlans } from "../shared/account";
+import { type CardButtonKind, cardButtons, retryLine, settingsTarget } from "./cardButtons";
 import { Close, Expand, Mic, Send } from "../shared/icons";
+import { PICTURE_ALONE, useChatPicture } from "../shared/pictureInput";
 import { brain } from "../shared/socket";
 import { FileReady } from "./FileReady";
 import { Interactive } from "./Interactive";
 import { useOverlay, voice } from "./store";
 
-type Mode = "idle" | "hint" | "working" | "paused" | "offline" | "notice" | "speaking" | "thinking" | "listening" | "open" | "full" | "result";
+type Mode = "idle" | "peek" | "hint" | "working" | "paused" | "offline" | "notice" | "speaking" | "thinking" | "listening" | "open" | "full" | "result";
+// Resting states: the pointer on the notch turns these (and only these) into the small tab.
+const RESTING = new Set<Mode>(["idle", "hint", "working", "paused", "offline"]);
+const DWELL_MS = 160; // how long the pointer must rest on the top edge: a pass on the way to a tab does nothing
 
 const WIDTH: Record<Mode, number> = {
   idle: 136,
+  peek: 184,
   hint: 292,
   working: 320,
   paused: 228,
@@ -76,9 +86,12 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const jobStatus = useOverlay((s) => s.jobStatus);
   const toasts = useOverlay((s) => s.toasts);
   const dismissToast = useOverlay((s) => s.dismissToast);
+  const touring = useOverlay((s) => s.touring);
+  const notchGlow = useOverlay((s) => s.notchGlow);
   const result = toasts[0];
   // A new file gets its own card: the file itself, Open file, Open file location, drag it out.
   const fileResult = !!result && result.ok && result.files.length > 0 && !result.link && !result.actions.includes("update");
+  const accountButton = result ? cardButton(result.actions) : null;
   const [left, setLeft] = useState(1); // share of the result's 10 seconds still to go
   const hold = useHoldKeys();
 
@@ -88,10 +101,12 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const [pinned, setPinned] = useState(false);
   const [focused, setFocused] = useState(false);
   const [text, setText] = useState("");
+  const chatPicture = useChatPicture(); // a picture pasted or dropped into the chat box
   const [now, setNow] = useState(() => performance.now());
   const [hintUntil, setHintUntil] = useState(0);
   const bornAt = useRef(performance.now());
   const leaveTimer = useRef<number>(0);
+  const dwellTimer = useRef<number>(0);
   // After you close it, the pointer is still on it: don't reopen until it has left once.
   const suppress = useRef(false);
   const input = useRef<HTMLInputElement>(null);
@@ -115,10 +130,11 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   }, []);
 
   const running = Object.values(jobs).filter((j) => j.status === "running" || j.status === "queued");
-  // Open only while the pointer is on it, or while you're typing in it. Status states
-  // (Listening, Thinking, captions, notices) never catch the mouse.
-  const open = hover || pinned || (focused && text.trim() !== "");
-  const mode: Mode = full ? "full"
+  // The small chat is open only when asked for (double-tap Ctrl) or while you're typing in
+  // it, never because the pointer wandered over the top edge. Status states (Listening,
+  // Thinking, captions, notices) never catch the mouse.
+  const open = pinned || (focused && text.trim() !== "");
+  const resting: Mode = full ? "full"
     : result ? "result"
     : open ? "open"
     : state === "listening" ? "listening"
@@ -126,10 +142,12 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     : state === "speaking" && caption ? "speaking"
     : notice && now - notice.at < NOTICE_MS ? "notice"
     : !connected ? "offline"
-    : now < hintUntil ? "hint"
+    : now < hintUntil && !touring ? "hint" // the first-run tour teaches the gesture itself
     : running.length ? "working"
     : paused ? "paused"
     : "idle";
+  // The pointer resting on it: a small tab to click, and nothing more.
+  const mode: Mode = hover && RESTING.has(resting) ? "peek" : resting;
 
   // Height follows the content (CSS can't animate to `auto`).
   useLayoutEffect(() => {
@@ -180,6 +198,9 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [full]);
 
+  // "Replay the tour" (Settings): fold away, so the tour has the screen.
+  useEffect(() => brain.on((e) => e.type === "onboarding" && e.event === "start" && close()), []);
+
   // Double-tap Ctrl: open with the text box ready.
   useEffect(
     () =>
@@ -198,14 +219,16 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
     over.current[where] = true;
     window.clearTimeout(leaveTimer.current);
     if (suppress.current) return;
-    setHover(true);
+    window.clearTimeout(dwellTimer.current);
+    dwellTimer.current = window.setTimeout(() => setHover(true), DWELL_MS);
   };
   const leave = (where: "handle" | "body") => {
     over.current[where] = false;
     if (over.current.handle || over.current.body) return;
     suppress.current = false;
+    window.clearTimeout(dwellTimer.current);
     window.clearTimeout(leaveTimer.current);
-    leaveTimer.current = window.setTimeout(() => setHover(false), 450);
+    leaveTimer.current = window.setTimeout(() => setHover(false), 220);
   };
   const close = () => {
     setPinned(false);
@@ -218,14 +241,59 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
   const send = (e: FormEvent) => {
     e.preventDefault();
     const t = text.trim();
-    if (!t) return;
+    if (!t && !chatPicture.picture) return;
     voice.stop();
     brain.send({ type: "interrupt" });
-    brain.send({ type: "text", text: t });
+    // A picture in the box goes with the words; with no words it is a picture to model.
+    if (chatPicture.picture) brain.send({ type: "text", text: t || PICTURE_ALONE, picture: { data: chatPicture.picture.data } });
+    else brain.send({ type: "text", text: t });
+    chatPicture.clear();
     setText("");
     setPinned(false);
     input.current?.blur(); // fold away and let the answer play in the notch
     bridge.releaseFocus();
+  };
+
+  // The result card's buttons: what each one does. Those that hand the job on take the card down.
+  const buttons = result && !fileResult ? cardButtons({ ...result, account: accountButton?.label }) : [];
+  const press = (kind: CardButtonKind) => {
+    if (!result) return;
+    const done = () => dismissToast(result.job_id);
+    if (kind === "link") bridge.openExternal(result.link!);
+    else if (kind === "file") bridge.openFile(result.files[0]);
+    else if (kind === "folder") bridge.showInFolder(result.files[0]);
+    else if (kind === "update") bridge.installUpdate();
+    else if (kind === "google") {
+      brain.send({ type: "connect", id: "google" });
+      done();
+    } else if (kind === "account" && accountButton) {
+      // The trial, the plan, the allowance, the sign-in: the one button that fixes it.
+      if (accountButton.does === "plans") {
+        showPlans();
+        openFull("settings");
+      } else brain.send({ type: "account", action: accountButton.does });
+      done();
+    } else if (kind === "settings") {
+      // Pyxi's own Settings, at the part that mends it (Your files, Connected accounts, Voice).
+      const target = settingsTarget(result.actions);
+      usePanel.setState({ settingsSection: target?.section ?? null });
+      openFull(target?.tab ?? "settings");
+      done();
+    } else if (kind === "mic") {
+      // Windows' own microphone privacy page, by name: the app opens that page and no other.
+      bridge.openWindowsPage("microphone");
+      done();
+    } else if (kind === "retry") {
+      // The brain runs what this card stands for, once (it only offers this when nothing was done).
+      brain.send({ type: "retry", job_id: result.job_id });
+      done();
+    } else if (kind === "calendar") {
+      brain.send({ type: "text", text: result.calendar! });
+      done();
+    } else if (kind === "send_back") {
+      brain.send({ type: "text", text: "Send the fixed file back to the person who emailed me the original, as a reply." });
+      done();
+    }
   };
 
   const level = mode === "listening" ? micLevel : () => voice.level();
@@ -239,7 +307,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
       <Interactive className="notch-handle" onEnter={() => enter("handle")} onLeave={() => leave("handle")} />
       <Interactive
         className="notch-hit"
-        active={mode === "open" || mode === "full" || mode === "result"}
+        active={mode === "open" || mode === "full" || mode === "result" || mode === "peek"}
         // Where the notch is growing to, plus a forgiving margin: while it animates wider, a
         // pointer heading for its far corner must not count as having left.
         hitRect={() => {
@@ -250,7 +318,8 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
         onLeave={() => leave("body")}
       >
       <div
-        className={`notch mode-${mode}`}
+        // The tour's firefly lands here at its end: the notch glows once.
+        className={`notch mode-${mode} ${notchGlow && now - notchGlow < 2600 ? "tour-glow" : ""}`}
         style={{ width: mode === "speaking" && !captions ? 210 : mode === "result" && fileResult ? FILE_WIDTH : WIDTH[mode], height }}
         onClick={() => mode !== "open" && mode !== "full" && openFull()}
       >
@@ -262,6 +331,14 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
         {watching && <i className="notch-watching" title="Memory Palace is on: Pyxi notes which windows you use. Ctrl+Alt+P pauses it." aria-label="Memory Palace is on" />}
         <div ref={inner} className="notch-inner" key={mode}>
           {mode === "idle" && running.length > 0 && <Marks jobs={running.map((j) => j.agent_name)} />}
+
+          {mode === "peek" && (
+            <div className="notch-row peek">
+              <Firefly />
+              <span className="notch-text strong">Open Pyxi</span>
+              <span className="notch-peek-key">click</span>
+            </div>
+          )}
 
           {mode === "hint" && (
             <div className="notch-row">
@@ -357,24 +434,18 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
               {result.changes.length > 0 && (
                 <ul className="result-changes">{result.changes.slice(0, 3).map((c) => <li key={c}>{c}</li>)}</ul>
               )}
+              {buttons.some((b) => b.kind === "retry") && result.retry && (
+                // What Try again will run, in words, before it is pressed.
+                <p className="result-retry">{retryLine(result.retry)}</p>
+              )}
               <div className="result-actions">
-                {result.link && (
-                  <button className="primary" onClick={() => bridge.openExternal(result.link!)}>
-                    {result.link.includes("meet.google.com") ? "Join Google Meet" : "Open"}
+                {/* Two buttons at most (cardButtons.ts): what mends a failure, then what opens the result. */}
+                {buttons.map((b) => (
+                  <button key={b.kind} className={b.primary ? "primary" : undefined} title={b.hint} onClick={(e) => { e.stopPropagation(); press(b.kind); }}>
+                    {b.label}
                   </button>
-                )}
-                {result.link?.includes("meet.google.com") && <span className="result-link">{result.link.replace("https://", "")}</span>}
-                {result.files[0] && <button className="primary" onClick={() => bridge.openFile(result.files[0])}>Open file</button>}
-                {result.actions.includes("folder") && result.files[0] && <button onClick={() => bridge.showInFolder(result.files[0])}>Show in folder</button>}
-                {result.actions.includes("update") && (
-                  <button className="primary" onClick={() => bridge.installUpdate()}>Restart to update</button>
-                )}
-                {result.actions.includes("calendar") && result.calendar && (
-                  <button className="primary" onClick={() => { brain.send({ type: "text", text: result.calendar! }); dismissToast(result.job_id); }}>Add to calendar</button>
-                )}
-                {result.actions.includes("send_back") && (
-                  <button onClick={() => { brain.send({ type: "text", text: "Send the fixed file back to the person who emailed me the original, as a reply." }); dismissToast(result.job_id); }}>Send it back</button>
-                )}
+                ))}
+                {result.link?.includes("meet.google.com") && buttons.some((b) => b.kind === "link") && <span className="result-link">{result.link.replace("https://", "")}</span>}
               </div>
               <i className="result-timer" style={{ transform: `scaleX(${left})` }} />
             </div>
@@ -438,11 +509,18 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                   </div>
                 ))}
               </div>
-              <form className="notch-input" onSubmit={send}>
+              {(chatPicture.picture || chatPicture.problem) && (
+                <div className="chat-picture">
+                  {chatPicture.picture && <img src={chatPicture.picture.data} alt="" draggable={false} />}
+                  <span>{chatPicture.picture ? "Picture added. Say what to do with it, or press Enter for a 3D model." : chatPicture.problem}</span>
+                  <button type="button" className="notch-btn" aria-label="Remove the picture" title="Remove the picture" onClick={chatPicture.clear}><Close /></button>
+                </div>
+              )}
+              <form className={`notch-input ${chatPicture.over ? "dropping" : ""}`} onSubmit={send} {...chatPicture.handlers}>
                 <input
                   ref={input}
                   value={text}
-                  placeholder="Ask Pyxi anything"
+                  placeholder={chatPicture.picture ? "What should I do with it?" : "Ask Pyxi anything, or paste a picture"}
                   onChange={(e) => {
                     // The first key of a new message: Pyxi starts looking at the screen now, not after Enter.
                     if (!text && e.target.value) brain.send({ type: "look_ahead" });
@@ -456,7 +534,7 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
                   }}
                   onKeyDown={(e) => e.key === "Escape" && close()}
                 />
-                {text.trim() ? (
+                {text.trim() || chatPicture.picture ? (
                   <button type="submit" className="notch-btn primary" aria-label="Send"><Send /></button>
                 ) : (
                   <button type="button" className={`notch-btn ${state === "listening" ? "live" : ""}`} title="Talk" onClick={() => bridge.ptt()}><Mic /></button>

@@ -15,19 +15,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from pyxi.agents.ledger_common import LedgerError, cell_rc
+from pyxi.agents.ledger_common import LedgerError, a1_tab, cell_rc, col_letter, split_tab
 from pyxi.agents.ledger_common import rgb as _rgb
 from pyxi.agents.ledger_google import DocExtras, GoogleSlides, SheetExtras
+from pyxi.agents.ledger_live import Unreachable
+from pyxi.agents.ledger_live import menus as _live_menus
 from pyxi.agents.ledger_office import DeckExtras, WordExtras, WorkbookExtras
 from pyxi.agents.pixel import out_dir_for, unique_path
 
 __all__ = ["GoogleDoc", "GoogleSheet", "GoogleSlides", "LedgerError", "run_ledger"]
+
+log = logging.getLogger(__name__)
 
 LOCAL_EXTS = {".xlsx", ".xlsm", ".docx", ".pptx"}
 
@@ -113,6 +119,70 @@ def _dated(ws, cell) -> None:
         cell.number_format = fmt or "yyyy-mm-dd"
 
 
+class Unsolved(LedgerError):
+    """A formula whose result is needed and isn't known: Excel hasn't calculated it (or its rows
+    have moved since), and LibreOffice isn't there to work it out."""
+
+
+def _worked_out(wb: Any, suffix: str) -> Any:
+    """This workbook as it stands, with every formula calculated by LibreOffice: a values-only
+    copy, or None when LibreOffice isn't installed or couldn't do it."""
+    import shutil
+    import tempfile
+
+    from openpyxl import load_workbook
+
+    soffice = _soffice()
+    if soffice is None:
+        return None
+    tmp = Path(tempfile.mkdtemp(prefix="pyxi_calc_"))
+    pictures = [(ws, ws._images) for ws in wb.worksheets]
+    try:
+        src = tmp / f"book{suffix if suffix.lower() in ('.xlsx', '.xlsm') else '.xlsx'}"
+        # Saved without its pictures: openpyxl can write a picture it loaded only once, so
+        # this save used to leave the real one, at the end of the job, with "I/O operation on
+        # closed file" and nothing saved at all. The sums don't need the logo.
+        try:
+            for ws, _ in pictures:
+                ws._images = []
+            wb.save(src)
+        finally:
+            for ws, images in pictures:
+                ws._images = images
+        _convert(soffice, src, tmp / "out")
+        return load_workbook(tmp / "out" / "book.xlsx", data_only=True)
+    except Exception:  # never the command line; the edit that needed it says what to do
+        log.info("ledger: LibreOffice couldn't work the formulas out", exc_info=True)
+        return None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _soffice() -> str | None:
+    """Where LibreOffice is, or None when it isn't installed."""
+    from pyxi.agents.pixel import libreoffice
+
+    return libreoffice()
+
+
+def _convert(soffice: str, src: Path, out: Path, to: str = "xlsx") -> None:
+    """One run of LibreOffice, turning ``src`` into ``to`` in the folder ``out``. Never on
+    the event loop (it takes seconds), and one at a time: two runs share Pyxi's one
+    LibreOffice profile, and the second would hand its file to the first and exit."""
+    import subprocess
+
+    from pyxi.agents.libreoffice import CONVERTING, command
+
+    with CONVERTING:
+        subprocess.run(
+            command(soffice, "--convert-to", to, "--outdir", str(out), str(src)),
+            check=True,
+            capture_output=True,
+            timeout=180,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+
 class Workbook(WorkbookExtras):
     """An .xlsx opened twice: once for formulas (what we edit) and once for the values Excel last
     calculated (what the outline and summaries quote)."""
@@ -129,6 +199,26 @@ class Workbook(WorkbookExtras):
             self.values = load_workbook(path, data_only=True)
         except Exception:
             self.values = None
+        # Which of Excel's stored results still hold: only a formula that is the same text in
+        # the same cell, on a sheet whose rows haven't moved since the file was opened.
+        self._origin = {id(ws): ws.title for ws in self.wb.worksheets}
+        self._was = {
+            ws.title: {at: c.value for at, c in ws._cells.items() if c.data_type == "f"}
+            for ws in self.wb.worksheets
+        }
+        # Has Excel ever calculated this file? Then a formula with nothing stored came to
+        # nothing (=IF(A2="","",..)); in a file nobody calculated, nothing stored means unknown.
+        self._calculated = self.values is not None and any(
+            self.values[title].cell(*at).value is not None
+            for title, cells in self._was.items()
+            for at in cells
+        )
+        self._moved: set[int] = set()  # sheets (by id) where rows or columns were moved
+        # After a sort: the results that moved with their rows, as {cell: (formula, result)}.
+        self._carried: dict[int, dict[tuple[int, int], tuple[str, Any]]] = {}
+        self._edits = 0  # how many edits have run: a LibreOffice calculation is good for one
+        self._solved: Any = None
+        self._solved_at = -1
 
     def sheet(self, name: str | None):
         if not name:
@@ -140,12 +230,59 @@ class Workbook(WorkbookExtras):
             f"There's no sheet called {name!r}; it has {', '.join(self.wb.sheetnames)}."
         )
 
+    def _stored(self, ws, r: int, c: int) -> Any:
+        """What Excel last worked out for a formula cell, or None when that isn't known or no
+        longer holds (a formula written in this job, a row that has been sorted elsewhere)."""
+        origin = self._origin.get(id(ws))
+        if id(ws) in self._moved:  # only what a sort took along with its rows still holds
+            text, kept = self._carried.get(id(ws), {}).get((r, c), (None, None))
+            return kept if text is not None and text == ws.cell(r, c).value else None
+        if self.values is None or origin is None:
+            return None
+        if self._was.get(origin, {}).get((r, c)) != ws.cell(r, c).value:
+            return None
+        try:
+            stored = self.values[origin].cell(r, c).value
+        except KeyError:
+            return None
+        return "" if stored is None and self._calculated else stored
+
     def value(self, ws, r: int, c: int) -> Any:
+        """A cell for a summary: a formula's stored result when there is one, else the formula."""
         v = ws.cell(r, c).value
-        if isinstance(v, str) and v.startswith("=") and self.values is not None:
-            cached = self.values[ws.title].cell(r, c).value
+        if isinstance(v, str) and v.startswith("="):
+            cached = self._stored(ws, r, c)
             return cached if cached is not None else v
         return v
+
+    def result(self, ws, r: int, c: int, *, work_out: bool = True) -> Any:
+        """A cell where its value decides something: the order of a sort, which rows are
+        duplicates, what a "values only" copy pastes, a pivot's groups.
+
+        A formula with no stored result (every file saved by Ledger itself, and any column
+        added in the same job) used to stand in as its own text: a sort by Total ordered the
+        rows by "=C2*D2", and a pivot's summary said every group came to 0. Now LibreOffice
+        works the workbook out when it's installed, and otherwise the edit says it can't."""
+        v = ws.cell(r, c).value
+        if not (isinstance(v, str) and v.startswith("=")):
+            return v
+        got = self._stored(ws, r, c)
+        if got is None and (work_out or self._solved_at == self._edits):
+            if self._solved_at != self._edits:
+                self._solved_at, self._solved = self._edits, _worked_out(self.wb, self.path.suffix)
+            if self._solved is not None and ws.title in self._solved.sheetnames:
+                got = self._solved[ws.title].cell(r, c).value
+                got = "" if got is None else got  # worked out, and it came to nothing
+        if got is None:
+            from openpyxl.utils import get_column_letter
+
+            raise Unsolved(
+                f"{get_column_letter(c)}{r} on {ws.title} is a formula that hasn't been worked "
+                "out yet (Excel does that when it opens the file), and this edit needs its "
+                "result. Open the file in Excel and save it, or turn on the free LibreOffice "
+                "converter in Settings (under Your files), then ask again."
+            )
+        return got
 
     def describe(self, max_rows: int = 40) -> str:
         from openpyxl.utils import get_column_letter
@@ -183,7 +320,10 @@ class Workbook(WorkbookExtras):
         fn = getattr(self, f"op_{name}", None)
         if fn is None:
             raise LedgerError(f"Excel files don't have an edit called {name!r}.")
-        return fn(op)
+        try:
+            return fn(op)
+        finally:
+            self._edits += 1  # what LibreOffice worked out was for the workbook before this
 
     def op_set_cells(self, op: dict[str, Any]) -> str:
         ws = self.sheet(op.get("sheet"))
@@ -246,11 +386,16 @@ class Workbook(WorkbookExtras):
             cell = ws.cell(r, c, f"={fn}({L}{head + 1}:{L}{last})")
             cell.font = Font(bold=True)
             cell.number_format = ws.cell(last, c).number_format
-            nums = [
-                v
-                for v in (self.value(ws, x, c) for x in range(head + 1, last + 1))
-                if _is_number(v)
-            ]
+            try:  # a figure only when every cell of it is known: never part of a sum
+                nums = [
+                    v
+                    for v in (
+                        self.result(ws, x, c, work_out=False) for x in range(head + 1, last + 1)
+                    )
+                    if _is_number(v)
+                ]
+            except Unsolved:
+                nums = []
             if nums:
                 result = {
                     "SUM": sum(nums),
@@ -298,24 +443,40 @@ class Workbook(WorkbookExtras):
         g = _col_index(src, op.get("group_by") or op.get("rows"), head)
         if g is None:
             raise LedgerError("pivot needs group_by: the column to group by.")
-        v = _col_index(src, op.get("value"), head)
-        agg = str(op.get("agg") or ("sum" if v else "count")).lower()
+        # One value column or several (a list), the same as in Google Sheets: the menu offers
+        # both, and a list used to end "There's no column called ['Units', 'Sales']".
+        wanted = op.get("values") if isinstance(op.get("values"), list) else op.get("value")
+        wanted = wanted if isinstance(wanted, list) else [wanted]
+        vs = [c for c in (_col_index(src, w, head) for w in wanted if w not in (None, "")) if c]
+        agg = str(op.get("agg") or ("sum" if vs else "count")).lower()
         if agg not in ("sum", "count", "average"):
             raise LedgerError("pivot agg should be sum, count or average.")
-        if agg != "count" and v is None:
+        if agg != "count" and not vs:
             raise LedgerError(f"pivot with {agg} needs value: the column to {agg}.")
-        keys: list[Any] = []
-        groups: dict[Any, list[float]] = {}
+        # Groups the way SUMIFS matches them, without regard to capitals: "West" and "west"
+        # as two rows each showed the sum of both, and the total counted them twice.
+        keys: list[Any] = []  # each group as it's first spelled
+        groups: dict[Any, list[list[float]]] = {}
+        counts: dict[Any, int] = {}
+        known = True  # every value needed for the "top" figures is known
         for r in range(head + 1, last + 1):
-            k = self.value(src, r, g)
+            k = self.result(src, r, g)
             if k in (None, ""):
                 continue
-            if k not in groups:
+            fold = k.casefold() if isinstance(k, str) else k
+            if fold not in groups:
                 keys.append(k)
-                groups[k] = []
-            x = self.value(src, r, v) if v else None
-            if _is_number(x):
-                groups[k].append(float(x))
+                groups[fold] = [[] for _ in vs]
+                counts[fold] = 0
+            counts[fold] += 1
+            for i, vc in enumerate(vs):
+                try:
+                    x = self.result(src, r, vc, work_out=False)
+                except Unsolved:
+                    known = False
+                    continue
+                if _is_number(x):
+                    groups[fold][i].append(float(x))
         if not keys:
             raise LedgerError(f"There's nothing to group in that column on {src.title}.")
         keys.sort(key=lambda k: (not isinstance(k, str), str(k).lower()))
@@ -325,50 +486,52 @@ class Workbook(WorkbookExtras):
             name, n = f"{title} {n}"[:31], n + 1
         ws = self.wb.create_sheet(name)
         g_name = src.cell(head, g).value or get_column_letter(g)
-        v_name = (src.cell(head, v).value or get_column_letter(v)) if v else "rows"
-        ws.append([g_name, f"{agg.title()} of {v_name}"])
+        v_names = [src.cell(head, vc).value or get_column_letter(vc) for vc in vs] or ["rows"]
+        ws.append([g_name, *(f"{agg.title()} of {v}" for v in v_names)])
         for c in ws[1]:
             c.font = Font(bold=True)
         sheet = quote_sheetname(src.title)
         GL = get_column_letter(g)
         crit = f"{sheet}!${GL}${head + 1}:${GL}${last}"
-        rng = (
-            f"{sheet}!${get_column_letter(v)}${head + 1}:${get_column_letter(v)}${last}"
-            if v
-            else ""
-        )
-        for i, k in enumerate(keys, start=2):
-            ws.cell(i, 1, k)
-            if agg == "count":
-                ws.cell(i, 2, f"=COUNTIFS({crit},A{i})")
-            elif agg == "sum":
-                ws.cell(i, 2, f"=SUMIFS({rng},{crit},A{i})")
-            else:
-                ws.cell(i, 2, f"=AVERAGEIFS({rng},{crit},A{i})")
         end = len(keys) + 1
+        for j, vc in enumerate(vs or [None], start=2):
+            L = get_column_letter(vc) if vc else ""
+            rng = f"{sheet}!${L}${head + 1}:${L}${last}" if vc else ""
+            for i, k in enumerate(keys, start=2):
+                ws.cell(i, 1, k)
+                if agg == "count":
+                    ws.cell(i, j, f"=COUNTIFS({crit},A{i})")
+                elif agg == "sum":
+                    ws.cell(i, j, f"=SUMIFS({rng},{crit},A{i})")
+                else:
+                    ws.cell(i, j, f"=AVERAGEIFS({rng},{crit},A{i})")
+            J = get_column_letter(j)
+            if agg != "average":
+                ws.cell(end + 1, j, f"=SUM({J}2:{J}{end})").font = Font(bold=True)
+            ws.column_dimensions[J].width = 18
+            if vc:
+                for i in range(2, end + 2):
+                    ws.cell(i, j).number_format = src.cell(head + 1, vc).number_format
         if agg != "average":
             ws.cell(end + 1, 1, "Total").font = Font(bold=True)
-            ws.cell(end + 1, 2, f"=SUM(B2:B{end})").font = Font(bold=True)
         ws.column_dimensions["A"].width = max(12, min(40, max(len(str(k)) for k in keys) + 2))
-        ws.column_dimensions["B"].width = 18
-        if v:
-            ws.cell(2, 2).number_format = src.cell(head + 1, v).number_format
-            for i in range(3, end + 2):
-                ws.cell(i, 2).number_format = src.cell(head + 1, v).number_format
 
         def result(k: Any) -> float:
-            xs = groups[k]
+            fold = k.casefold() if isinstance(k, str) else k
+            xs = groups[fold][0] if vs else []
             if agg == "count":
-                return float(
-                    sum(1 for r in range(head + 1, last + 1) if self.value(src, r, g) == k)
-                )
+                return float(counts[fold])
             if agg == "sum":
                 return sum(xs)
             return sum(xs) / len(xs) if xs else 0.0
 
-        top = sorted(keys, key=result, reverse=True)[:3]
-        best = ", ".join(f"{k} {_shown(result(k))}" for k in top)
-        return f"Made a pivot on sheet {name}: {agg} of {v_name} by {g_name}, {len(keys)} groups (top: {best})"
+        said = f"Made a pivot on sheet {name}: {agg} of {' and '.join(str(v) for v in v_names)} by {g_name}, {len(keys)} groups"
+        if len(v_names) == 1 and (known or agg == "count"):
+            # The biggest groups, when they're known. Formulas nobody has calculated yet used
+            # to count as nothing, and the summary read "top: Gadget 0, Widget 0".
+            top = sorted(keys, key=result, reverse=True)[:3]
+            said += f" (top: {', '.join(f'{k} {_shown(result(k))}' for k in top)})"
+        return said
 
     def op_make_table(self, op: dict[str, Any]) -> str:
         from openpyxl.utils import get_column_letter
@@ -425,11 +588,37 @@ class Workbook(WorkbookExtras):
         return f"Added sheet {ws.title}"
 
     def save(self) -> Path:
-        out = unique_path(
-            out_dir_for(self.path), f"{self.path.stem} (edited by Pyxi){self.path.suffix}"
-        )
+        if getattr(self, "fresh", False):  # built from nothing: saved under its own name
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            out = unique_path(self.path.parent, self.path.name)
+        else:
+            out = unique_path(
+                out_dir_for(self.path), f"{self.path.stem} (edited by Pyxi){self.path.suffix}"
+            )
         self.wb.save(out)
         return out
+
+
+def new_workbook(title: str, folder: Path) -> Workbook:
+    """An empty workbook that isn't on the disk yet: Ledger fills it from a brief, and it is
+    saved as "<title>.xlsx" in ``folder`` (never over a file that is already there)."""
+    import shutil
+    import tempfile
+
+    import openpyxl
+
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", title).strip(" .")[:80] or "Workbook"
+    if name.lower().endswith(".xlsx"):
+        name = name[:-5].rstrip(" .") or "Workbook"
+    tmp = Path(tempfile.mkdtemp(prefix="pyxi_new_"))
+    try:  # read into memory like any other workbook; nothing is left behind in Temp
+        openpyxl.Workbook().save(tmp / "new.xlsx")
+        book = Workbook(tmp / "new.xlsx")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    book.path = folder / f"{name}.xlsx"
+    book.fresh = True
+    return book
 
 
 _ALIGN = {
@@ -474,6 +663,9 @@ def _move_after(new_el, anchor_el) -> None:
     anchor_el.addnext(new_el)
 
 
+_TOP = object()  # "after": "start": before the first thing in the document
+
+
 class WordDoc(WordExtras):
     kind = "docx"
 
@@ -507,16 +699,24 @@ class WordDoc(WordExtras):
         after = op.get("after")
         if after is None or after == "" or after == "end":
             return None
+        if str(after).strip().lower() in ("start", "top", "-1", "before"):
+            return _TOP  # the menu offers "start" for Word and Docs alike; Word refused it
         try:
             return self.paras[int(after)]
         except (ValueError, IndexError):
             raise LedgerError(f"There's no paragraph {after}.") from None
 
     def _place(self, new_el, anchor, chain: list) -> None:
-        """Put a new block after the anchor (or after the last block placed in this op)."""
-        target = chain[-1] if chain else (anchor._p if anchor is not None else None)
-        if target is not None:
-            _move_after(new_el, target)
+        """Put a new block after the anchor (or after the last block placed in this op), or,
+        for the top of the document, before everything that's there."""
+        if chain:
+            _move_after(new_el, chain[-1])
+        elif anchor is _TOP:
+            first = next((el for el in self.doc.element.body if el is not new_el), None)
+            if first is not None:
+                first.addprevious(new_el)
+        elif anchor is not None:
+            _move_after(new_el, anchor._p)
         chain.append(new_el)
 
     def _style(self, *names: str) -> str | None:
@@ -911,10 +1111,7 @@ def _open_old(path: Path) -> Workbook | WordDoc | Deck:
     import subprocess
     import tempfile
 
-    from pyxi.agents.libreoffice import command
-    from pyxi.agents.pixel import libreoffice
-
-    soffice = libreoffice()
+    soffice = _soffice()
     new_ext = path.suffix.lower() + "x"
     if soffice is None:
         raise LedgerError(
@@ -923,13 +1120,7 @@ def _open_old(path: Path) -> Workbook | WordDoc | Deck:
         )
     tmp = Path(tempfile.mkdtemp(prefix="pyxi_old_"))
     try:
-        subprocess.run(
-            command(soffice, "--convert-to", new_ext[1:], "--outdir", str(tmp), str(path)),
-            check=True,
-            capture_output=True,
-            timeout=180,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        _convert(soffice, path, tmp, new_ext[1:])
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):  # never the command line
         raise LedgerError(
             f"LibreOffice couldn't open {path.name}. If it's open in another app, close it and "
@@ -947,25 +1138,208 @@ def _open_old(path: Path) -> Workbook | WordDoc | Deck:
 
 
 # ============================================================================ Google
+class NoSuchTab(LedgerError):
+    """An edit named a tab the spreadsheet doesn't have (as far as the last read knows)."""
+
+
+# The most of one tab that is ever read. A tab with more in it than this is still edited by
+# range, but nothing is added "at the end" of it: Ledger can't see where the end is.
+_READ_ROWS, _READ_COLS = 20000, 200
+# The most of a tab the first read takes. The outline shows 40 rows of it; an edit that works
+# from the cells reads its own tab whole, then. (Reading every tab whole, again before each
+# such edit, was 4.8 million cells for one job on a 20,000-row tab.)
+_OUTLINE_ROWS = 2000
+# Edits that work from what's in the cells: their tab is read whole first, and read again
+# only if an earlier edit in the job changed it.
+_READS = frozenset(
+    {"totals_row", "pivot", "chart", "add_sheet", "sort", "filter", "banding", "remove_duplicates"}
+)
+# Edits that work from the list of tabs and charts.
+_NEEDS_TABS = frozenset({"move_chart", "delete_chart", "edit_chart", "delete_sheet", "add_sheet"})
+# After one of these the tabs are read again before the next edit, whatever it is: the tab an
+# edit means when it names none may have a new name, or be gone.
+_RESHAPES = frozenset({"rename_sheet", "delete_sheet", "duplicate_sheet", "raw"})
+# Edits that change the list of charts (or a tab's look), and none of the cells.
+_NO_CELLS = frozenset(
+    {
+        "chart",
+        "move_chart",
+        "delete_chart",
+        "edit_chart",
+        "freeze",
+        "resize",
+        "note",
+        "filter",
+        "banding",
+        "conditional_format",
+        "dropdown",
+        "checkbox",
+        "hide_sheet",
+        "rename",
+    }
+)
+_GROWS = frozenset({"insert_rows", "insert_columns", "delete_rows", "delete_columns", "append_row"})
+_DATEISH = re.compile(
+    r"\d\s*[/:]\s*\d|\d{1,4}-\d{1,2}-\d{1,4}|"
+    r"(?i:\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)"
+)
+_DURATION = re.compile(r"\d+:\d\d(:\d\d)?")  # hours worked, as 7:30 or 7:30:00: a number
+
+
+def _seconds(text: Any) -> int | None:
+    """"7:30" or "7:30:00" as seconds, or None for anything else."""
+    s = str(text).strip()
+    if not _DURATION.fullmatch(s):
+        return None
+    h, m, *rest = (int(x) for x in s.split(":"))
+    return h * 3600 + m * 60 + (rest[0] if rest else 0)
+
+
+def _same_heading(top: list[Any], heading: list[str], values: list[str]) -> bool:
+    """Is this run of cells (a pivot's top row, as shown) the heading of the pivot being made:
+    the grouping column, then one cell per value? In English that is "SUM of Sales" exactly.
+    A spreadsheet in another language words it its own way ("SUMME von Sales"), so there the
+    value's name at the end of the cell is enough."""
+    run = [str(x).strip().lower() for x in top]
+    if len(run) != len(heading):
+        return False
+    if run == heading:
+        return True
+    if run[0] != heading[0] or any(" of " in cell for cell in run[1:]):
+        return False
+    return all(cell.endswith(" " + v) for cell, v in zip(run[1:], values, strict=True))
+
+
 class GoogleSheet(SheetExtras):
     """A Google Sheet, edited through the Sheets API (values with USER_ENTERED, so formulas work)."""
 
     kind = "gsheet"
 
-    def __init__(self, google: Any, sheet_id: str) -> None:
+    def __init__(self, google: Any, sheet_id: str, gid: int | None = None) -> None:
         self.google = google
         self.id = sheet_id
+        self.gid = gid  # the tab open on their screen (from the link): unnamed edits go there
         self.aliases: dict[str, str] = {}  # a tab they asked for that went on the blank sheet
         self.meta: dict[str, Any] = {}
-        self.grids: dict[str, list[list[Any]]] = {}
+        self.grids: dict[str, list[list[Any]]] = {}  # what was typed: values and formulas
+        self.shown: dict[str, list[list[Any]]] = {}  # what shows: a pivot's cells are only here
+        self.cut: set[str] = set()  # tabs with more in them than is ever read
+        self.wanted: set[str] = set()  # tabs past the first six that an edit named
+        self.whole: set[str] = set()  # tabs read to the end of their data, not just for the outline
+        self.dirty: set[str] = set()  # tabs an edit has changed since they were read
+        self.reshown: set[str] = set()  # tabs where only what shows changed (a pivot went in)
+        self.tabs_stale = False  # the list of tabs or charts changed since it was read
+        self.sizes_stale = False  # a tab may have more or fewer rows than the list of tabs says
+        self.reread = False  # read the tabs again before the next edit (one was renamed, deleted..)
+        self.stale = False  # an edit has run since the last full read
+        # The pivots this job has written, by the tab they are on: where, and of which columns.
+        self.placed: dict[str, list[dict[str, Any]]] = {}
 
     async def load(self) -> None:
+        """The tabs, their charts, and the top of the first six tabs (plus the open one and any
+        an edit named), twice over: as typed and as shown. Live, a tab holding only a pivot
+        table read as empty (its cells are worked out, not typed), so Ledger was sure the
+        pivot wasn't there and made it again, twice."""
         self.meta = await self.google.sheets_meta(self.id)
-        for s in self.meta.get("sheets", [])[:6]:
-            title = s["properties"]["title"]
-            self.grids[title] = await self.google.sheets_values(
-                self.id, f"'{title}'!A1:Z500", formulas=True
+        props = [s["properties"] for s in self.meta.get("sheets", [])]
+        titles = [p["title"] for p in props[:6]]
+        titles += [
+            p["title"]
+            for p in props[6:]
+            if p["title"] in self.wanted or (self.gid is not None and p.get("sheetId") == self.gid)
+        ]
+        self.grids, self.shown, self.cut, self.whole, self.dirty = {}, {}, set(), set(), set()
+        self.reshown = set()
+        await self._read(titles, _OUTLINE_ROWS)
+        self.tabs_stale = self.sizes_stale = self.reread = self.stale = False
+
+    async def _tabs(self) -> None:
+        """The list of tabs and charts again (not the cells): what a tab is called, how big it
+        is, which charts there are."""
+        self.meta = await self.google.sheets_meta(self.id)
+        have = {s["properties"]["title"] for s in self.meta.get("sheets", [])}
+        for kept in (self.grids, self.shown):
+            for title in [t for t in kept if t not in have]:
+                del kept[title]
+        self.whole &= have
+        self.dirty &= have
+        self.reshown &= have
+        self.cut &= have
+        self.tabs_stale = self.sizes_stale = self.reread = False
+
+    def _size(self, title: str) -> dict[str, Any]:
+        for s in self.meta.get("sheets", []):
+            if s["properties"]["title"] == title:
+                return s["properties"].setdefault("gridProperties", {})
+        return {}
+
+    async def _read(self, titles: list[str], most: int, typed_too: bool = True) -> None:
+        """These tabs' cells, down to row ``most`` at the latest, in one round trip for all of
+        them where the connector can. Without ``typed_too``, only what shows is read again
+        (after a pivot went in beside the data, nothing that was typed has changed)."""
+        if not titles:
+            return
+        ranges, asked = [], []
+        for title in titles:
+            size = self._size(title)
+            rows = min(int(size.get("rowCount") or most), most)
+            cols = min(int(size.get("columnCount") or 26), _READ_COLS + 1)
+            ranges.append(f"{a1_tab(title)}!A1:{col_letter(cols)}{rows}")
+            asked.append((rows, int(size.get("rowCount") or 0)))
+        batch = getattr(self.google, "sheets_values_batch", None)
+        if not typed_too:
+            shown = (
+                await batch(self.id, ranges)
+                if batch is not None
+                else [await self.google.sheets_values(self.id, r) for r in ranges]
             )
+            for title, b in zip(titles, shown, strict=True):
+                self.shown[title] = b
+                self.reshown.discard(title)
+            return
+        if batch is not None:
+            typed, shown = await asyncio.gather(
+                batch(self.id, ranges, formulas=True), batch(self.id, ranges)
+            )
+        else:  # a connector with no batch read: one tab at a time
+            typed = [await self.google.sheets_values(self.id, r, formulas=True) for r in ranges]
+            shown = [await self.google.sheets_values(self.id, r) for r in ranges]
+        for title, a, b, (rows, all_rows) in zip(titles, typed, shown, asked, strict=True):
+            self.grids[title], self.shown[title] = a, b
+            self.dirty.discard(title)
+            self.reshown.discard(title)
+            deep = max(len(a), len(b))
+            # Everything there is, when the read wasn't stopped by its own limit.
+            if deep < rows or (all_rows and all_rows <= rows):
+                self.whole.add(title)
+            else:
+                self.whole.discard(title)
+            wide = max((len(r) for r in [*a, *b]), default=0)
+            if deep > _READ_ROWS or wide > _READ_COLS:
+                self.cut.add(title)
+            else:
+                self.cut.discard(title)
+
+    async def _fresh(self, titles: list[str]) -> None:
+        """Before an edit that works from the cells: its tabs read to the end of their data,
+        unless that was done already and nothing has changed them since."""
+        if self.sizes_stale or (self.tabs_stale and any(self._title(t) is None for t in titles)):
+            await self._tabs()
+        need, light = [], []
+        for name in titles:
+            title = self._title(name)
+            if not title or title in need or title in light:
+                continue
+            if title not in self.whole or title in self.dirty:
+                need.append(title)
+            elif title in self.reshown:
+                light.append(title)
+        if need:
+            await self._read(need, _READ_ROWS + 1)
+            self.whole.update(need)
+            self.wanted.update(need)
+        if light:
+            await self._read(light, _READ_ROWS + 1, typed_too=False)
 
     @property
     def title(self) -> str:
@@ -975,24 +1349,105 @@ class GoogleSheet(SheetExtras):
     def url(self) -> str:
         return f"https://docs.google.com/spreadsheets/d/{self.id}/edit"
 
+    def _open_tab(self) -> dict[str, Any] | None:
+        """The tab open on their screen, when the link said which."""
+        if self.gid is None:
+            return None
+        for s in self.meta.get("sheets", []):
+            if s["properties"].get("sheetId") == self.gid:
+                return s["properties"]
+        return None
+
+    def _default(self) -> str | None:
+        """The tab an edit means when it names none."""
+        sheets = self.meta.get("sheets", [])
+        if not sheets:
+            return None
+        return (self._open_tab() or sheets[0]["properties"])["title"]
+
+    def _title(self, name: Any) -> str | None:
+        """A tab's real title from the name an edit used (any capitals), or None."""
+        want = str(name).lower()
+        want = self.aliases.get(want, want).lower()
+        for s in self.meta.get("sheets", []):
+            if s["properties"]["title"].lower() == want:
+                return s["properties"]["title"]
+        return None
+
     def _tab(self, name: str | None) -> tuple[str, int, list[list[Any]]]:
         sheets = self.meta.get("sheets", [])
-        if name and str(name).lower() in getattr(self, "aliases", {}):
-            name = self.aliases[str(name).lower()]
         if not sheets:
             raise LedgerError("That spreadsheet has no sheets.")
+        title = self._title(name) if name else self._default()
         for s in sheets:
             p = s["properties"]
-            if not name or p["title"].lower() == str(name).lower():
+            if p["title"] == title:
                 return p["title"], p["sheetId"], self.grids.get(p["title"], [])
-        raise LedgerError(f"There's no sheet called {name!r}.")
+        raise NoSuchTab(f"There's no sheet called {name!r}.")
+
+    def _seen(self, title: str) -> list[list[Any]]:
+        """A tab as a person sees it: what was typed, and where nothing was typed, what shows
+        (a pivot table's cells, which no read of formulas returns)."""
+        typed, shown = self.grids.get(title, []), self.shown.get(title, [])
+        out = []
+        for r in range(max(len(typed), len(shown))):
+            a = typed[r] if r < len(typed) else []
+            b = shown[r] if r < len(shown) else []
+            out.append(
+                [
+                    a[c] if c < len(a) and a[c] not in (None, "") else (b[c] if c < len(b) else "")
+                    for c in range(max(len(a), len(b)))
+                ]
+            )
+        return out
+
+    def _typed(self, title: str, r: int, c: int) -> bool:
+        """Did someone type this cell (or is it worked out, like a pivot's)?"""
+        rows = self.grids.get(title, [])
+        return r < len(rows) and c < len(rows[r]) and rows[r][c] not in (None, "")
+
+    def _whole(self, title: str) -> None:
+        """Refuse an edit that needs the end of the data on a tab too big to read whole. Live
+        risk: the read stopped at row 500, and a total went into row 501, over a real row."""
+        if title in self.cut:
+            raise LedgerError(
+                f"{title} is bigger than I can read in one go ({_READ_ROWS:,} rows by "
+                f"{_READ_COLS} columns), so I can't see where its data ends and won't write "
+                "there. Give me the exact range, or a smaller tab."
+            )
 
     def describe(self, max_rows: int = 40) -> str:
         from openpyxl.utils import get_column_letter
 
-        out = [f"Google Sheet '{self.title}'. Tabs: {', '.join(self.grids)}."]
-        for title, rows in self.grids.items():
-            out.append(f"\nTab {title!r}: {len(rows)} rows.")
+        names = [s["properties"]["title"] for s in self.meta.get("sheets", [])] or list(self.grids)
+        first = f"Google Sheet '{self.title}'. Tabs: {', '.join(names)}."
+        if (open_tab := self._open_tab()) and len(names) > 1:
+            first += (
+                f" The tab open on their screen is {open_tab['title']!r}: an edit that names "
+                "no sheet goes there."
+            )
+        out = [first]
+        for title in self.grids:
+            rows = self._seen(title)
+            if title in self.cut:
+                out.append(
+                    f"\nTab {title!r}: more than {_READ_ROWS:,} rows or {_READ_COLS} columns. "
+                    "Too big to total, pivot, chart or sort; an edit that gives its range works."
+                )
+            elif title not in self.whole:
+                out.append(f"\nTab {title!r}: its first {len(rows):,} rows (it has more).")
+            else:
+                out.append(f"\nTab {title!r}: {len(rows)} rows.")
+            worked_out = any(
+                v not in (None, "") and not self._typed(title, r, c)
+                for r, row in enumerate(rows)
+                for c, v in enumerate(row)
+            )
+            if worked_out:
+                out.append(
+                    "  (some cells here were not typed: they are worked out, like a pivot "
+                    "table's. They are listed as they show; chart them, don't retype them)"
+                )
             out.extend(self.chart_lines(title))
             idx = list(range(len(rows)))
             if len(idx) > max_rows:
@@ -1008,6 +1463,12 @@ class GoogleSheet(SheetExtras):
                 ]
                 if cells:
                     out.append("  " + " | ".join(cells))
+        unread = [n for n in names if n not in self.grids]
+        if unread:
+            out.append(
+                f"\nNot read yet: {', '.join(unread)}. An edit that names one of these in "
+                '"sheet" reads it first.'
+            )
         return "\n".join(out)
 
     @staticmethod
@@ -1030,15 +1491,81 @@ class GoogleSheet(SheetExtras):
             return column_index_from_string(s.upper()) - 1
         raise LedgerError(f"There's no column called {s!r}.")
 
+    def _named(self, op: dict[str, Any]) -> list[str]:
+        """The tabs an edit names: in "sheet", "target", or in front of a range ('Q2'!A1:B4)."""
+        found = [op.get("sheet"), op.get("target") if op.get("op") == "pivot" else None]
+        for key in ("range", "from", "to", "cell"):
+            if isinstance(op.get(key), str):
+                found.append(split_tab(op[key])[0])
+        return [str(n) for n in found if n not in (None, "")]
+
+    def _works_on(self, op: dict[str, Any]) -> list[str]:
+        """The tabs an edit reads or writes: the ones it names, or the one meant by none."""
+        if op.get("op") == "add_sheet":  # it only looks at a lone tab, to see if it's blank
+            return [self._default()] if len(self.meta.get("sheets", [])) == 1 else []
+        named = self._named(op)
+        if not op.get("sheet") and (not named or op.get("op") == "pivot") and self._default():
+            named.append(self._default())
+        return [n for n in named if n]
+
     async def apply(self, op: dict[str, Any]) -> str:
         """One edit. The wider set lives in ledger_google.SheetExtras (``x_<name>``); what
-        Ledger started with is below. The outline is read again after each, so the next edit
-        in the same batch (a chart, then moving it) sees what's there now."""
+        Ledger started with is below.
+
+        Nothing is read again that doesn't have to be. An edit that works from the cells
+        (a total, a pivot, a chart, a sort) reads its own tab first, whole, and only if it
+        wasn't read whole already or an earlier edit changed it. It used to be every tab
+        after every edit: 17 of one job's 22 round trips. And a read that failed just after
+        an edit had landed made that edit look failed, so it was done a second time."""
+        name = str(op.get("op") or "")
+        if self.reread or (self.tabs_stale and name in _NEEDS_TABS):
+            await self._tabs()
+        try:
+            return await self._run(op)
+        except NoSuchTab:
+            if not self.tabs_stale:
+                raise
+            await self._tabs()  # the tab may have been made by an earlier edit in this batch
+            return await self._run(op)
+        finally:
+            self._mark(op)
+
+    async def _run(self, op: dict[str, Any]) -> str:
+        if op.get("op") in _READS:
+            await self._fresh(self._works_on(op))
         fn = getattr(self, f"x_{op.get('op')}", None)
-        out = await fn(op) if fn else await self._first_edits(op)
-        if fn or op.get("op") == "chart":
-            await self.load()
-        return out
+        return await fn(op) if fn else await self._first_edits(op)
+
+    def _mark(self, op: dict[str, Any]) -> None:
+        """What an edit that just ran (or died part-way) leaves to be read again."""
+        name = str(op.get("op") or "")
+        self.stale = True
+        if name in _RESHAPES:
+            self.reread = self.tabs_stale = True
+            if name != "rename_sheet":  # anything may have changed
+                self.dirty.update(self.grids)
+            return
+        if name in ("chart", "move_chart", "delete_chart", "edit_chart", "hide_sheet", "rename"):
+            self.tabs_stale = True
+        if name in _GROWS:
+            self.sizes_stale = True
+        if name in _NO_CELLS or name in ("pivot", "add_sheet"):
+            return  # no cells changed, or the edit said which itself
+        if name == "find_replace" and not op.get("sheet"):
+            self.dirty.update(self.grids)
+            return
+        for n in self._works_on(op):
+            if title := self._title(n):
+                self.dirty.add(title)
+
+    def _know_tab(self, title: str, sheet_id: int, grid: dict[str, Any] | None = None) -> None:
+        """A tab this job just made, added to the list of tabs without reading it again."""
+        size = {"rowCount": 1000, "columnCount": 26, **(grid or {})}
+        self.meta.setdefault("sheets", []).append(
+            {"properties": {"title": title, "sheetId": sheet_id, "gridProperties": size}}
+        )
+        self.grids[title], self.shown[title] = [], []
+        self.whole.add(title)
 
     async def _first_edits(self, op: dict[str, Any]) -> str:
         from openpyxl.utils import get_column_letter
@@ -1047,19 +1574,18 @@ class GoogleSheet(SheetExtras):
         if name == "set_cells":
             title, _, _ = self._tab(op.get("sheet"))
             cells = op.get("cells") or {}
-            data = [{"range": f"'{title}'!{ref}", "values": [[v]]} for ref, v in cells.items()]
+            data = [{"range": f"{a1_tab(title)}!{ref}", "values": [[v]]} for ref, v in cells.items()]
             await self.google.sheets_write(self.id, data)
-            await self.load()  # a pivot or totals row in the same batch reads what's there now
             return f"Set {len(data)} cells on {title}"
         if name == "append_row":
             title, _, _ = self._tab(op.get("sheet"))
             await self.google.sheets_append(
-                self.id, f"'{title}'!A1", [list(op.get("values") or [])]
+                self.id, f"{a1_tab(title)}!A1", [list(op.get("values") or [])]
             )
-            await self.load()
             return f"Added a row on {title}"
         if name == "totals_row":
-            title, _, rows = self._tab(op.get("sheet"))
+            title, sheet_id, rows = self._tab(op.get("sheet"))
+            self._whole(title)
             head = self._header(rows)
             last = len(rows)
             if last <= head + 1:
@@ -1067,6 +1593,11 @@ class GoogleSheet(SheetExtras):
             if _is_total_label((rows[-1] or [""])[0]):
                 return f"{title} already ends with a total row"
             width = max(len(r) for r in rows)
+            shown = self.shown.get(title, [])
+
+            def show(i: int, c: int) -> str:
+                return str(shown[i][c]).strip() if i < len(shown) and c < len(shown[i]) else ""
+
             if op.get("columns"):
                 cols = [
                     c for c in (self._col(rows, x, head) for x in op["columns"]) if c is not None
@@ -1074,86 +1605,194 @@ class GoogleSheet(SheetExtras):
             else:
                 cols = []
                 for c in range(1, width):
-                    vals = [r[c] for r in rows[head + 1 :] if c < len(r) and r[c] not in (None, "")]
-                    if vals and sum(
-                        1 for v in vals if _num(v) is not None or str(v).startswith("=")
-                    ) >= 0.8 * len(vals):
+                    at = [i for i in range(head + 1, last) if c < len(rows[i]) and rows[i][c] not in (None, "")]
+                    # Hours worked (7:30) add up like any number, though they read as text.
+                    hours = {i for i in at if _seconds(rows[i][c]) is not None or _seconds(show(i, c)) is not None}
+                    numbers = sum(
+                        1
+                        for i in at
+                        if i in hours or _num(rows[i][c]) is not None or str(rows[i][c]).startswith("=")
+                    )
+                    # A date is a number underneath (46298), and a column of them was totalled:
+                    # what a cell shows ("10/3/2026") says whether it's one.
+                    dates = sum(1 for i in at if i not in hours and _DATEISH.search(show(i, c)))
+                    if at and numbers >= 0.8 * len(at) and dates < 0.5 * len(at):
                         cols.append(c)
             row = ["Total"] + [""] * (width - 1)
             for c in cols:
                 L = get_column_letter(c + 1)
                 row[c] = f"=SUM({L}{head + 2}:{L}{last})"
+            size = self._size(title)
+            if size.get("rowCount") and last + 1 > int(size["rowCount"]):
+                # The data fills the tab to its last row: Google refuses a write below it.
+                await self.google.sheets_batch(
+                    self.id,
+                    [{"appendDimension": {"sheetId": sheet_id, "dimension": "ROWS", "length": 1}}],
+                )
+                size["rowCount"] = int(size["rowCount"]) + 1
             await self.google.sheets_write(
-                self.id, [{"range": f"'{title}'!A{last + 1}", "values": [row]}]
+                self.id, [{"range": f"{a1_tab(title)}!A{last + 1}", "values": [row]}]
             )
             sums = []
             for c in cols:
-                nums = [n for r in rows[head + 1 :] if c < len(r) and (n := _num(r[c])) is not None]
+                heading = rows[head][c] if c < len(rows[head]) else get_column_letter(c + 1)
+                cells = [r[c] for r in rows[head + 1 :] if c < len(r) and r[c] not in (None, "")]
+                nums = [n for v in cells if (n := _num(v)) is not None]
+                spans = [s for i in range(head + 1, last) if (s := _seconds(show(i, c))) is not None]
                 if nums:
-                    sums.append(
-                        f"{rows[head][c] if c < len(rows[head]) else get_column_letter(c + 1)} {_shown(sum(nums))}"
-                    )
+                    sums.append(f"{heading} {_shown(sum(nums))}")
+                elif spans:
+                    t = sum(spans)
+                    sums.append(f"{heading} {t // 3600}:{t % 3600 // 60:02d}" + (f":{t % 60:02d}" if t % 60 else ""))
             return f"Added a Total row (row {last + 1}) on {title}" + (
                 f": {', '.join(sums)}" if sums else ""
             )
         if name == "pivot":
             title, sheet_id, rows = self._tab(op.get("sheet"))
+            self._whole(title)
+            if not rows:
+                raise LedgerError(f"{title} is empty, so there's nothing to pivot yet.")
             head = self._header(rows)
             g = self._col(rows, op.get("group_by") or op.get("rows"), head)
             if g is None:
                 raise LedgerError("pivot needs group_by.")
-            v = self._col(rows, op.get("value"), head)
+            # One value column, or several ("sum of Units and sum of Sales"): live, two of
+            # them had no named edit, the model wrote the request out by hand, the reply ran
+            # past its limit and the pivot was never made.
+            wanted = op.get("values") if isinstance(op.get("values"), list) else op.get("value")
+            wanted = wanted if isinstance(wanted, list) else [wanted]
+            cols = [c for c in (self._col(rows, w, head) for w in wanted if w not in (None, "")) if c is not None]
+            v = cols[0] if cols else None
             agg = str(op.get("agg") or ("sum" if v is not None else "count")).lower()
             fn = {"sum": "SUM", "count": "COUNTA", "average": "AVERAGE"}.get(agg)
             if fn is None:
                 raise LedgerError("pivot agg should be sum, count or average.")
             width = max(len(r) for r in rows)
-            if op.get("target"):  # they asked for it on its own tab
+            last = len(rows)  # a Total row under the data is not one of the groups
+            while last > head + 1 and _is_total_label((rows[last - 1] or [""])[0]):
+                last -= 1
+
+            def header(c: int) -> str:
+                return str(rows[head][c]) if c < len(rows[head]) else get_column_letter(c + 1)
+
+            g_name = header(g)
+            v_name = " and ".join(header(c) for c in cols) or "rows"
+            # What the pivot's own top row will say ("Region", "SUM of Sales"): how one that is
+            # already there is told from anything else.
+            names = [header(c).strip().lower() for c in (cols or [g])]
+            heading = [g_name.strip().lower()] + [f"{fn} of {n}".lower() for n in names]
+            what = f"{agg} of {v_name} by {g_name}"
+            verb = "Made a pivot table"
+
+            def holds_it(tab: str) -> bool:
+                on_it = self._seen(tab)
+                top = on_it[0] if on_it else []
+                while top and top[-1] in (None, ""):
+                    top = top[:-1]
+                return _same_heading(top, heading, names)
+
+            def anything_on(tab: str) -> bool:
+                return any(x not in (None, "") for r in self._seen(tab) for x in r)
+
+            # On its own tab, if they asked for one (the data's own tab is "beside the data").
+            if op.get("target") and self._title(str(op["target"])[:90]) != title:
+                # Live: "chart the pivot on the Pivot tab" made the pivot again on "Pivot 2",
+                # then "Pivot 3". Now a tab of that name is used if it's empty. If it holds
+                # this very pivot, the pivot is written again in its place, with the rows
+                # the data has now (so a row added a moment ago is in it, and Q2's pivot is
+                # not mistaken for Q1's). A different pivot on it is left alone: the new one
+                # gets a tab named for what it is.
                 target = str(op["target"])[:90]
-                existing = {s["properties"]["title"] for s in self.meta.get("sheets", [])}
-                name_, n = target, 2
-                while name_ in existing:
-                    name_, n = f"{target} {n}", n + 1
-                added = await self.google.sheets_batch(
-                    self.id, [{"addSheet": {"properties": {"title": name_}}}]
-                )
-                new_id = added["replies"][0]["addSheet"]["properties"]["sheetId"]
-                at_row, at_col, where = 0, 0, f"on tab {name_}"
+                there = self._title(target)
+                if there is not None and anything_on(there) and not holds_it(there):
+                    if any(x not in (None, "") for r in self.grids.get(there, []) for x in r):
+                        raise LedgerError(
+                            f"There's already a tab called {there} with other things on it. "
+                            "Name another tab for the pivot, or delete that one first."
+                        )
+                    base = f"{'Count' if v is None else v_name} by {g_name}"[:90]
+                    target, n = base, 2
+                    while True:
+                        there = self._title(target)
+                        if there is None:
+                            break
+                        await self._fresh([there])
+                        if not anything_on(there) or holds_it(there):
+                            break
+                        target, n = f"{base} {n}", n + 1
+                if there is None:
+                    added = await self.google.sheets_batch(
+                        self.id, [{"addSheet": {"properties": {"title": target}}}]
+                    )
+                    made = added["replies"][0]["addSheet"]["properties"]
+                    new_id, there = made["sheetId"], target
+                    self._know_tab(there, new_id, made.get("gridProperties"))
+                else:
+                    new_id = self._tab(there)[1]
+                    if holds_it(there):
+                        verb = "Updated the pivot"
+                at_row, at_col, where, dest = 0, 0, f"on tab {there}", there
             else:  # beside the data, where they're already looking (a new tab goes unseen)
-                new_id, at_row, at_col = sheet_id, head, width + 1
-                where = f"beside the data on {title}, from {get_column_letter(width + 2)}{head + 1}"
+                shown = self.shown.get(title, [])
+                same = next(
+                    (
+                        b
+                        for b in _blocks(shown, g_name, avoid=g)
+                        if _same_heading([g_name, *(t for _, t in b[3])], heading, names)
+                    ),
+                    None,
+                )
+                if same is not None:  # the same pivot again: written where it is, never beside it
+                    at_row, at_col = same[0], same[2]
+                    verb = "Updated the pivot"
+                else:
+                    # Right of everything that shows there: a pivot already beside the data
+                    # has no typed cells, and a second one must not land on top of it.
+                    at_row, at_col = head, max([width] + [len(r) for r in shown]) + 1
+                new_id, dest = sheet_id, title
+                where = f"beside the data on {title}, from {get_column_letter(at_col + 1)}{at_row + 1}"
             pivot = {
                 "source": {
                     "sheetId": sheet_id,
                     "startRowIndex": head,
-                    "endRowIndex": len(rows),
+                    "endRowIndex": last,
                     "startColumnIndex": 0,
                     "endColumnIndex": width,
                 },
                 "rows": [{"sourceColumnOffset": g, "showTotals": True, "sortOrder": "ASCENDING"}],
                 "values": [
-                    {"summarizeFunction": fn, "sourceColumnOffset": v if v is not None else g}
+                    {"summarizeFunction": fn, "sourceColumnOffset": c} for c in (cols or [g])
                 ],
                 "valueLayout": "HORIZONTAL",
             }
-            await self.google.sheets_batch(
-                self.id,
-                [
-                    {
-                        "updateCells": {
-                            "rows": [{"values": [{"pivotTable": pivot}]}],
-                            "start": {"sheetId": new_id, "rowIndex": at_row, "columnIndex": at_col},
-                            "fields": "pivotTable",
-                        }
+            requests: list[dict[str, Any]] = [
+                {
+                    "updateCells": {
+                        "rows": [{"values": [{"pivotTable": pivot}]}],
+                        "start": {"sheetId": new_id, "rowIndex": at_row, "columnIndex": at_col},
+                        "fields": "pivotTable",
                     }
-                ],
+                }
+            ]
+            size = self._size(dest)
+            short = at_col + len(pivot["values"]) + 1 - int(size.get("columnCount") or 10**6)
+            if short > 0:  # the tab ends before the pivot would: Google refuses a write past it
+                requests.insert(
+                    0,
+                    {"appendDimension": {"sheetId": new_id, "dimension": "COLUMNS", "length": short}},
+                )
+                size["columnCount"] = int(size["columnCount"]) + short
+            # A pivot beside the data changes what shows there and nothing that was typed.
+            (self.reshown if dest == title else self.dirty).add(dest)
+            await self.google.sheets_batch(self.id, requests)
+            self.placed.setdefault(dest, []).append(
+                {"row": at_row, "col": at_col, "source": title, "group": g, "values": cols or [g]}
             )
-            await self.load()  # a chart in the same batch goes beside the pivot, not under it
-            g_name = rows[head][g] if g < len(rows[head]) else get_column_letter(g + 1)
-            v_name = rows[head][v] if v is not None and v < len(rows[head]) else "rows"
-            return f"Made a pivot table {where}: {agg} of {v_name} by {g_name}"
+            return f"{verb} {where}: {what}"
         if name == "chart":
-            title, sheet_id, rows = self._tab(op.get("sheet"))
+            title, sheet_id, _ = self._tab(op.get("sheet"))
+            self._whole(title)
+            rows = self._seen(title)  # a pivot's cells count: they are what's being charted
             if not rows:
                 raise LedgerError(f"{title} is empty, so there's nothing to chart yet.")
             head = self._header(rows)
@@ -1161,6 +1800,10 @@ class GoogleSheet(SheetExtras):
             vc = self._col(rows, op.get("values"), head)
             if vc is None:
                 raise LedgerError("chart needs values: the column to plot.")
+            if max(lc, vc) >= len(rows[head]):
+                raise LedgerError(
+                    f"{title} has no column {get_column_letter(max(lc, vc) + 1)} to chart."
+                )
             label_name, value_name = str(rows[head][lc]), str(rows[head][vc])
             last = len(rows)  # one past the last data row (the API's end is exclusive)
             while last > head + 1 and str((rows[last - 1] or [""])[0]).strip().lower() in (
@@ -1172,22 +1815,55 @@ class GoogleSheet(SheetExtras):
                 last -= 1
             while last > head + 1 and all(c in (None, "") for c in rows[last - 1][: vc + 1]):
                 last -= 1
-            # Where it reads from: the column itself, or, when a label repeats (North on several
-            # rows), a pivot's totals: a plain chart draws one bar per row, never per region.
             r0, r1, dc, sc = head, last, lc, vc
+
+            def of_a_pivot(c: int) -> bool:
+                return rows[head][c] not in (None, "") and not self._typed(title, head, c)
+
             labels = [str(r[lc]) for r in rows[head + 1 : last] if len(r) > lc]
-            shown = await self.google.sheets_values(self.id, f"'{title}'!A1:Z500")
-            if len(set(labels)) < len(labels):
-                block = _summary_block(shown, label_name, avoid=lc)
-                if block is None:
-                    await self.apply(
+            if of_a_pivot(lc) or of_a_pivot(vc):
+                # They named a pivot's own cells (the outline lists them: "SUM of Sales", or
+                # columns G and H beside the data). Its groups are the bars: not the Grand
+                # Total, and not the blank rows under it down to where the data ends.
+                c0 = lc if of_a_pivot(lc) else vc
+                while not of_a_pivot(lc) and c0 > 0 and of_a_pivot(c0 - 1):
+                    c0 -= 1
+                r0, r1, dc = head, _block_end(rows, head, c0), c0
+                sc = vc if of_a_pivot(vc) and vc > c0 else c0 + 1
+                label_name, value_name = str(rows[head][dc]), str(rows[head][sc])
+            elif len(set(labels)) < len(labels):
+                # A label repeats (North on several rows), so the bars are a pivot's totals: a
+                # plain chart draws one bar per row, never per region. The pivot of the column
+                # that was asked for: with a pivot of Sales beside the data, a chart of Units
+                # used to draw Sales under the title "Units by Region".
+                def known() -> set[str]:  # the groups, as the data shows them
+                    shown = self.shown.get(title, [])
+                    return {str(r[lc]).strip() for r in shown[head + 1 : last] if len(r) > lc}
+
+                def mine() -> tuple[int, int, int, int] | None:
+                    # A pivot of these very columns that this job wrote: it is at a cell
+                    # Ledger knows, whatever its headings say. They are worded in the
+                    # spreadsheet's language, so nothing may hang on the words "SUM of".
+                    for p in reversed(self.placed.get(title, [])):
+                        if p["source"] == title and p["group"] == lc and vc in p["values"]:
+                            end = _block_end(self.shown.get(title, []), p["row"], p["col"], total=True)
+                            if end > p["row"] + 1:
+                                return p["row"], end, p["col"], p["col"] + 1 + p["values"].index(vc)
+                    return None
+
+                def look() -> tuple[int, int, int, int] | None:
+                    return _pick(self.shown.get(title, []), label_name, lc, value_name, known()) or mine()
+
+                found = look()
+                if found is None:
+                    await self._first_edits(
                         {"op": "pivot", "sheet": title, "group_by": label_name, "value": value_name}
                     )
-                    shown = await self.google.sheets_values(self.id, f"'{title}'!A1:Z500")
-                    block = _summary_block(shown, label_name, avoid=lc)
-                if block is not None:
-                    r0, r1, dc = block
-                    sc = dc + 1
+                    await self._fresh([title])
+                    rows = self._seen(title)
+                    found = look()
+                if found is not None:
+                    r0, r1, dc, sc = found
 
             def col(c: int) -> dict[str, Any]:
                 return {
@@ -1232,7 +1908,7 @@ class GoogleSheet(SheetExtras):
                     },
                 }
             # Right of everything shown there (the data and a pivot's cells), so nothing is covered.
-            free = max([len(r) for r in shown] + [len(r) for r in rows]) + 1
+            free = max(len(r) for r in rows) + 1
             anchor = {"sheetId": sheet_id, "rowIndex": head, "columnIndex": free}
             if op.get("at"):  # where they asked for it
                 at_row, at_col = cell_rc(op["at"])
@@ -1255,40 +1931,92 @@ class GoogleSheet(SheetExtras):
             title = str(op.get("name") or "Sheet")
             sheets = self.meta.get("sheets", [])
             only = sheets[0]["properties"]["title"] if len(sheets) == 1 else None
-            if op.get("rows") and only and not any(any(c not in ("", None) for c in r) for r in self.grids.get(only, [])):
+            if op.get("rows") and only and not any(any(c not in ("", None) for c in r) for r in self._seen(only)):
                 # A brand-new, blank spreadsheet open in front of them: the data goes on it, from
                 # A1, where they're looking (a new tab next to an empty Sheet1 looked like nothing
                 # had happened).
-                await self.google.sheets_write(self.id, [{"range": f"'{only}'!A1", "values": op["rows"]}])
+                await self.google.sheets_write(self.id, [{"range": f"{a1_tab(only)}!A1", "values": op["rows"]}])
+                # What was just written is what is there: no need to read it back.
                 self.grids[only] = [list(r) for r in op["rows"]]
+                self.shown[only] = [["" if c is None else str(c) for c in r] for r in op["rows"]]
                 self.aliases[title.lower()] = only  # a later edit "on Sample Sales" means here
                 return f"Put the data on {only}, from A1"
-            await self.google.sheets_batch(
+            self.tabs_stale = True
+            added = await self.google.sheets_batch(
                 self.id, [{"addSheet": {"properties": {"title": title}}}]
             )
+            made = ((added or {}).get("replies") or [{}])[0].get("addSheet", {}).get("properties", {})
+            if made.get("sheetId") is not None and self._title(title) is None:
+                self._know_tab(title, made["sheetId"], made.get("gridProperties"))
             if op.get("rows"):
+                self.dirty.add(title)
                 await self.google.sheets_write(
-                    self.id, [{"range": f"'{title}'!A1", "values": op["rows"]}]
+                    self.id, [{"range": f"{a1_tab(title)}!A1", "values": op["rows"]}]
                 )
             return f"Added tab {title}"
         raise LedgerError(f"Google Sheets doesn't have an edit called {name!r} here.")
 
 
-def _summary_block(grid: list[list[Any]], label: str, avoid: int) -> tuple[int, int, int] | None:
-    """A pivot's output in the shown grid: a header cell named like the labels column (not that
-    column itself), a number column to its right, and one row per group until Grand Total.
-    Returns (header row, one past the last group row, label column)."""
+def _block_end(grid: list[list[Any]], r: int, c: int, total: bool = False) -> int:
+    """One past the last group row of a pivot whose top-left cell is (r, c): its rows run down
+    to the first blank, and its Grand Total row is not a group. ``total``: the pivot is known
+    to end with a totals row, whatever that row is called in the spreadsheet's language."""
+    end = r + 1
+    while end < len(grid) and len(grid[end]) > c and str(grid[end][c]).strip():
+        if str(grid[end][c]).strip().lower() in ("grand total", "total"):
+            return end
+        end += 1
+    return end - 1 if total and end > r + 2 else end
+
+
+def _blocks(grid: list[list[Any]], label: str, avoid: int) -> list[tuple[int, int, int, list[tuple[int, str]]]]:
+    """Every pivot shown on a tab that groups by this column: a header cell named like it (not
+    that column itself, ``avoid``), heading cells to its right, a row per group under it.
+    Each is (header row, one past the last group row, label column, [(column, heading)..])."""
+    out = []
     for r, row in enumerate(grid[:60]):
         for c, v in enumerate(row):
             if c == avoid or c + 1 >= len(row) or str(v).strip().lower() != label.strip().lower():
                 continue
-            end = r + 1
-            while end < len(grid) and len(grid[end]) > c + 1 and str(grid[end][c]).strip():
-                if str(grid[end][c]).strip().lower() in ("grand total", "total"):
+            end = _block_end(grid, r, c)
+            if end <= r + 1:
+                continue
+            heads = []
+            for sc in range(c + 1, len(row)):
+                if not str(row[sc]).strip():
                     break
-                end += 1
-            if end > r + 1:
-                return r, end, c
+                heads.append((sc, str(row[sc]).strip()))
+            if heads:
+                out.append((r, end, c, heads))
+    return out
+
+
+def _pick(
+    grid: list[list[Any]], label: str, avoid: int, value: str, known: set[str] | None = None
+) -> tuple[int, int, int, int] | None:
+    """The pivot to chart for "value by label", as (header row, one past the last group row,
+    label column, value column), or None when no pivot shown there is of that column.
+
+    A sum of it first ("SUM of Sales"), then any other summary of it (the average they made
+    a moment ago is what they mean to chart), then a column that is simply called that (they
+    named the pivot's own heading, "SUM of Sales", which the outline shows them). Last, in a
+    spreadsheet that isn't in English ("SUMME von Sales"), a heading that ends in its name.
+    ``known``: the groups the data has. A last row that isn't one of them is the pivot's
+    grand total under another name, and is left off."""
+    want = value.strip().lower()
+    blocks = _blocks(grid, label, avoid)
+    for fits in (
+        lambda h, heads: h == f"sum of {want}",
+        lambda h, heads: h.endswith(f" of {want}"),
+        lambda h, heads: h == want,
+        lambda h, heads: h.endswith(f" {want}") and not any(" of " in t.lower() for _, t in heads),
+    ):
+        for r, end, c, heads in blocks:
+            for sc, text in heads:
+                if fits(text.lower(), heads):
+                    if known and end > r + 2 and str(grid[end - 1][c]).strip() not in known:
+                        end -= 1
+                    return r, end, c, sc
     return None
 
 
@@ -1311,9 +2039,20 @@ class GoogleDoc(DocExtras):
         self.google = google
         self.id = doc_id
         self.doc: dict[str, Any] = {}
+        self.stale = False  # a change went through and the read after it failed
 
     async def load(self) -> None:
         self.doc = await self.google.docs_get(self.id)
+        self.stale = False
+
+    async def _reread(self) -> None:
+        """Read the doc again after a change (its indexes moved). If the read fails the change
+        still happened: the edit is not reported as failed (and so not done a second time),
+        and the next edit reads first."""
+        try:
+            await self.load()
+        except Exception:
+            self.stale = True
 
     @property
     def title(self) -> str:
@@ -1425,11 +2164,13 @@ class GoogleDoc(DocExtras):
         if bullets:
             reqs.append({"createParagraphBullets": {"range": rng, "bulletPreset": bullets}})
         await self.google.docs_batch(self.id, reqs)
-        await self.load()  # indexes moved
+        await self._reread()  # indexes moved
 
     async def apply(self, op: dict[str, Any]) -> str:
         """One edit. The wider set lives in ledger_google.DocExtras (``x_<name>``); what Ledger
         started with is below."""
+        if self.stale:
+            await self.load()
         fn = getattr(self, f"x_{op.get('op')}", None)
         return await fn(op) if fn else await self._first_edits(op)
 
@@ -1471,7 +2212,7 @@ class GoogleDoc(DocExtras):
                 ],
             )
             n = (r.get("replies") or [{}])[0].get("replaceAllText", {}).get("occurrencesChanged", 0)
-            await self.load()
+            await self._reread()
             if not n:
                 raise LedgerError(f"'{find[:40]}' isn't in the doc.")
             return f"Replaced '{find[:40]}' {n} times"
@@ -1513,7 +2254,7 @@ class GoogleDoc(DocExtras):
                 ]
                 if reqs:
                     await self.google.docs_batch(self.id, reqs)
-                    await self.load()
+                    await self._reread()
             return f"Added a {n_rows} x {n_cols} table"
         if name in ("set_style", "delete_paragraph", "align"):
             i = op.get("i", op.get("paragraph"))
@@ -1533,7 +2274,7 @@ class GoogleDoc(DocExtras):
                     for e in block["paragraph"].get("elements", [])
                 ).strip()
                 await self.google.docs_batch(self.id, [{"deleteContentRange": {"range": rng}}])
-                await self.load()
+                await self._reread()
                 return f"Deleted '{gone[:40]}'" if gone else "Deleted an empty line"
             if name == "align":
                 how = _ALIGN.get(str(op.get("align") or "").lower())
@@ -1563,7 +2304,7 @@ class GoogleDoc(DocExtras):
                 e.get("textRun", {}).get("content", "")
                 for e in block["paragraph"].get("elements", [])
             ).strip()
-            await self.load()
+            await self._reread()
             what = f"'{text[:40]}'" if text else f"paragraph {int(i) + 1}"
             if name == "align":
                 verb = {"CENTER": "Centred", "END": "Right-aligned", "JUSTIFIED": "Justified"}.get(
@@ -1605,7 +2346,7 @@ class GoogleDoc(DocExtras):
                     for a, b in ranges
                 ],
             )
-            await self.load()
+            await self._reread()
             look = _look(op)
             shown = f"'{str(op.get('find'))[:40]}'" if op.get("find") else "the line"
             return f"Made {shown} {look}" + (f" ({len(ranges)} places)" if len(ranges) > 1 else "")
@@ -1616,7 +2357,7 @@ class GoogleDoc(DocExtras):
                 else {"endOfSegmentLocation": {}}
             )
             await self.google.docs_batch(self.id, [{"insertPageBreak": where}])
-            await self.load()
+            await self._reread()
             return "Added a page break"
         raise LedgerError(f"Google Docs doesn't have an edit called {name!r} here.")
 
@@ -1640,7 +2381,7 @@ _SHEET_EDITS = """Spreadsheets (Excel .xlsx and Google Sheets). "sheet" names a 
 - {"op": "set_cells", "sheet"?: name, "cells": {"B5": 120, "C5": "=B5*1.13"}}
 - {"op": "append_row", "sheet"?: name, "values": [..]}
 - {"op": "totals_row", "sheet"?: name, "columns"?: ["B", "Amount"], "function"?: "SUM"|"AVERAGE"|"COUNT"|"MAX"|"MIN", "label"?: "Total"}  (finds the number columns and the last row itself)
-- {"op": "pivot", "sheet"?: name, "group_by": column, "value"?: column, "agg": "sum"|"count"|"average", "target"?: "Pivot"}  (Google Sheets: beside the data, where they can see it; give "target" only when they asked for a new tab. Excel: on a new sheet)
+- {"op": "pivot", "sheet"?: name, "group_by": column, "value"?: column or [columns], "agg": "sum"|"count"|"average", "target"?: "Pivot"}  (Google Sheets: beside the data, where they can see it; give "target" only when they asked for a new tab; several value columns go in one pivot as a list, never as raw requests. Excel: on a new sheet)
 - {"op": "chart", "sheet"?: name, "labels": column, "values": column, "type": "bar"|"horizontal bar"|"line"|"area"|"pie", "title"?: "..", "at"?: "H2"}  (beside the data unless "at" says where; repeated labels are summed)
 - {"op": "move_chart", "chart"?: its id or title from the outline, "to": "H2", "width"?: pixels, "height"?: pixels}  (no "chart": the newest one. A chart that's already there is moved, never added again)
 - {"op": "delete_chart", "chart"?: ..}
@@ -1657,7 +2398,7 @@ _SHEET_EDITS = """Spreadsheets (Excel .xlsx and Google Sheets). "sheet" names a 
 - {"op": "dropdown", "range": "E2:E50", "options": ["Yes", "No"]}
 - {"op": "clear", "range": "A2:D9", "what"?: "values"|"formats"|"all"}
 - {"op": "find_replace", "find": "..", "replace": "..", "sheet"?: name, "match_case"?: true, "whole_cell"?: true}
-- {"op": "copy", "from": "A1:C5", "to": "E1", "cut"?: true, "values_only"?: true}  ("cut" moves it)
+- {"op": "copy", "from": "A1:C5", "to": "E1", "cut"?: true, "values_only"?: true, "format_only"?: true}  ("cut" moves it; "format_only" copies how the cells look and nothing in them, repeated over the whole "to" range: "give B2:D2 the same background, font and colour as A2" is {"op": "copy", "from": "A2", "to": "B2:D2", "format_only": true}. You never need to know a cell's colour to match it)
 - {"op": "note", "cell": "B2", "text": ".."}
 - {"op": "remove_duplicates", "columns"?: [..]}  and  {"op": "trim"}  (strips stray spaces)
 - {"op": "add_sheet", "name": "Summary", "rows"?: [[..], [..]]}  (only when they ask for a new tab; sample or new data for an empty sheet is set_cells on it from A1)
@@ -1740,10 +2481,12 @@ _ALL_KINDS = {"xlsx", "gsheet", "docx", "gdoc", "pptx", "gslides"}
 
 
 def edits_for(kinds: set[str]) -> str:
-    """The edit menu for these kinds of file only: a Doc job isn't sent the spreadsheet edits."""
+    """The edit menu for these kinds of file only: a Doc job isn't sent the spreadsheet edits.
+    A document open in Excel, Word or PowerPoint has a menu of its own (ledger_live.py)."""
+    menus = _MENUS if kinds <= _ALL_KINDS else (*_MENUS, *_live_menus())
     return (
         'Edits you can use (each is a JSON object with "file": <file number> and "op"):\n'
-        + "\n".join(menu for wanted, menu in _MENUS if wanted & kinds)
+        + "\n".join(menu for wanted, menu in menus if wanted & kinds)
     )
 
 
@@ -1813,6 +2556,15 @@ class LedgerResult:
     problems: list[str] = field(default_factory=list)
     summary: str = ""
     cost_usd: float = 0.0
+    live: list[str] = field(default_factory=list)  # documents changed in the open app, unsaved
+    sent: bool = False  # an edit's calls went to an open app (whether or not it worked)
+    declined: bool = False  # they said no on a card that asked before replacing cells
+    # A workbook built sheet by sheet (ledger_build.py): what was built, said in full, and
+    # the sheets by name. Empty for an ordinary edit.
+    headline: str = ""
+    built: dict[str, list[str]] = field(default_factory=dict)
+    made: list[str] = field(default_factory=list)  # outputs that are new files, not copies
+    kind: str = ""  # "deck" for a new deck (deck_build.py): its problems are notes, not failed edits
 
 
 def parse_edits(text: str) -> dict[str, Any]:
@@ -1827,17 +2579,155 @@ def parse_edits(text: str) -> dict[str, Any]:
 
 
 async def _apply(target: Any, op: dict[str, Any]) -> str:
-    result = target.apply(op)
-    return await result if asyncio.iscoroutine(result) else result
+    """One edit on one target. A local file's edit runs in a thread, one at a time and in
+    order: working a workbook's formulas out through LibreOffice takes 6 to 14 seconds, and on
+    the event loop that froze all of Pyxi for as long."""
+    if asyncio.iscoroutinefunction(target.apply):
+        return await target.apply(op)
+    return await asyncio.to_thread(target.apply, op)
+
+
+# Local edits that can write something and then fail with a plain LedgerError (a table that
+# grew rows before a cell turned out not to exist). After one of these the file is opened
+# again; after any other LedgerError nothing was written, so there's nothing to undo. Every
+# PowerPoint edit counts: several place a thing on the slide before they check its look.
+_WRITES_FIRST = {
+    "xlsx": {"resize", "move_chart"},
+    "docx": {
+        "set_table_cells",
+        "add_table_row",
+        "add_table_column",
+        "add_table",
+        "format_table",
+        "page_setup",
+        "spacing",
+    },
+}
+
+
+def _didnt_work(what: str, exc: Exception) -> str:
+    """One edit that broke, for the card: what it was and, when the cause is one a person
+    can mend (a picture that won't open, a full disk, no internet), that. Never Python's own
+    words: "The insert picture didn't work (cannot identify image file 'C:\\Users\\...')"."""
+    from pyxi.plainwords import explain
+
+    known = explain(exc)
+    if known is not None:
+        return f"The {what} didn't work. {known.line}"
+    return f"The {what} didn't work, so that part is unchanged. Ask me for it again, worded another way."
+
+
+def _may_have_written(target: Any, op: dict[str, Any], exc: Exception) -> bool:
+    kind = getattr(target, "kind", "")
+    if not isinstance(exc, LedgerError) or kind == "pptx":
+        return True
+    return str(op.get("op")) in _WRITES_FIRST.get(kind, set())
+
+
+def _alike(failed: dict[str, Any], new: dict[str, Any]) -> int:
+    """How much a second-pass edit looks like the try again of one that failed: the same kind
+    of edit, or one that names the same things (a raw addChart with the failed chart's title)."""
+    text = json.dumps(new, default=str).lower()
+    op = str(failed.get("op") or "")
+    score = 3 if op and op == new.get("op") else 0
+    score += 1 if op and op.replace("_", "") in text.replace("_", "") else 0
+    for key, value in failed.items():
+        if key not in ("op", "file") and isinstance(value, str) and len(value) >= 3:
+            score += 1 if value.lower() in text else 0
+    return score
+
+
+def _reopen(path: Any, edits: list[dict[str, Any]]) -> Any:
+    # A workbook being built from nothing has no file to open again: it is made again.
+    target = path() if callable(path) else open_local(path)
+    for e in edits:
+        try:
+            target.apply(e)
+        except Exception:  # it worked a moment ago on the same file; say so and carry on
+            log.warning("ledger: %s didn't replay on %s", e.get("op"), target.path.name, exc_info=True)
+    return target
+
+
+def _edit_key(index: int, edit: dict[str, Any]) -> str:
+    """An edit as one string to compare by: which file, and every field of it."""
+    return json.dumps({**edit, "file": index}, sort_keys=True, default=str)
+
+
+async def _reopened(path: Any, edits: list[dict[str, Any]]) -> Any:
+    """A local file opened afresh, with the edits that worked done again in order. An edit
+    that died part-way leaves half its work in memory (a sort that stopped at a merged cell
+    had already rewritten three rows): this is the file without that half."""
+    return await asyncio.to_thread(_reopen, path, edits)
 
 
 Ask = Callable[[str, str], Awaitable[tuple[str, float]]]
 
 
-async def run_ledger(
+async def run_ledger(task: str, *, live: list[Any] | None = None, **kw: Any) -> LedgerResult:
+    """Open the targets, ask the model for edits once (and once more to fix any that failed),
+    apply them, save copies. ``ask(system, prompt)`` returns (text, cost).
+
+    ``live`` holds documents open in Excel, Word or PowerPoint (ledger_live.py): edited where
+    they are, never saved, and let go when the job ends, however it ends. When one of them
+    can't be reached at the start the job stops with ``Unreachable`` and nothing changed.
+
+    An edit that worked is never applied a second time, whatever the second reply says, and
+    how long each part took is logged (live, one chart took 20.9 s and nothing said where).
+
+    A big spreadsheet build doesn't fit in one reply, so it is planned first and written a
+    sheet at a time (ledger_build.py); ``new`` starts it in a workbook that doesn't exist
+    yet, saved under its own name in ``new_dir``. ``ask_quick``, when given, is the same
+    model answering without thinking first: the build uses it for its plan, for the sheets
+    of typed-in rows and for its last check. Nothing else uses it."""
+    try:
+        return await _run_ledger(task, live=live or [], **kw)
+    finally:
+        for t in live or []:
+            await t.close()
+
+
+async def _new_deck(
+    task: str,
+    title: str,
+    files: list[str],
+    ask: Ask,
+    *,
+    name: str,
+    context: str,
+    progress: Callable[[str], Awaitable[None]] | None,
+    new_dir: Path | None,
+) -> LedgerResult:
+    """A new .pptx, built by deck_build.py: beside the file it is made from, or in
+    Documents\\Pyxi when it is made from a topic. Never over a file that is there."""
+    from pyxi.agents import deck_build
+    from pyxi.agents.pixel_common import out_dir_for, pyxi_folder
+
+    sources = [Path(f) for f in files]
+    folder = new_dir or (out_dir_for(sources[0]) if sources else pyxi_folder())
+    try:
+        deck = await deck_build.build(
+            task, title, ask=ask, sources=sources, folder=folder, name=name, context=context,
+            progress=progress,
+        )  # fmt: skip
+    except deck_build.DeckError as exc:
+        raise LedgerError(str(exc)) from None
+    return LedgerResult(
+        outputs=[str(deck.path)],
+        made=[str(deck.path)],
+        changes=deck.changes(),
+        problems=deck.problems,
+        headline=deck.headline(),
+        built={"done": [s.title for s in deck.kept], "not_done": []},
+        cost_usd=deck.cost_usd,
+        kind="deck",
+    )
+
+
+async def _run_ledger(
     task: str,
     *,
     files: list[str],
+    live: list[Any],
     google: Any = None,
     google_refs: list[str] | None = None,
     ask: Ask,
@@ -1845,16 +2735,45 @@ async def run_ledger(
     persona: str = "",
     context: str = "",
     progress: Callable[[str], Awaitable[None]] | None = None,
+    new: list[dict[str, Any]] | None = None,
+    new_dir: Path | None = None,
+    ask_quick: Ask | None = None,
 ) -> LedgerResult:
-    """Open the targets, ask the model for edits once (and once more to fix any that failed),
-    apply them, save copies. ``ask(system, prompt)`` returns (text, cost)."""
+    began = time.perf_counter()
+    deck = next((n for n in new or [] if str(n.get("kind") or "") == "pptx"), None)
+    if deck is not None:
+        # "new pptx: <title>": a deck that doesn't exist yet, planned and built from the brief
+        # (and from the files given, as what it is made from). See deck_build.py.
+        return await _new_deck(
+            task, str(deck.get("title") or "Presentation"), files, ask_quick or ask,
+            name=name, context=context, progress=progress, new_dir=new_dir,
+        )  # fmt: skip
     targets: list[Any] = []
+    # Local files by their place in ``targets``: the path, or for a workbook that is being
+    # built from nothing, how to make an empty one again.
+    sources: dict[int, Any] = {}
+    fresh: set[int] = set()
     for f in files:
+        sources[len(targets)] = Path(f)
         targets.append(await asyncio.to_thread(open_local, Path(f)))
+    for item in new or []:
+        # "new xlsx: NEXORA": an empty workbook, filled from the brief and saved under its
+        # own name (Documents\Pyxi unless the caller says where).
+        if str(item.get("kind") or "xlsx") != "xlsx":
+            raise LedgerError("I can start a new Excel workbook (.xlsx), or a new Google file.")
+        from pyxi.agents.pixel_common import pyxi_folder
+
+        def make(title: str = str(item.get("title") or "Workbook")) -> Workbook:
+            return new_workbook(title, new_dir or pyxi_folder())
+
+        sources[len(targets)] = make
+        fresh.add(len(targets))
+        targets.append(await asyncio.to_thread(make))
     for ref in google_refs or []:
         if google is None or not google.connected():
             raise LedgerError("Google isn't connected. Connect it in Settings, then ask again.")
         targets.append(await google.open_for_edit(ref))
+    targets.extend(live)
     if not targets:
         raise LedgerError(
             "Which file? Give me the path of the Excel, Word or PowerPoint file, or the Google Sheet or Doc."
@@ -1862,6 +2781,7 @@ async def run_ledger(
     for t in targets:
         if hasattr(t, "load"):
             await t.load()
+    log.info("ledger: opened and read %d file(s) in %.1fs", len(targets), time.perf_counter() - began)
     outline = "\n\n".join(f"# File {i}\n{t.describe()}" for i, t in enumerate(targets))
     prompt = f"Task: {task}\n\n{outline}"
     if context:
@@ -1870,12 +2790,122 @@ async def run_ledger(
     result = LedgerResult()
     allowed = f"{task}\n{context}".lower()  # the only web addresses an edit may load from
     changed: set[int] = set()
+    done: list[tuple[int, dict[str, Any], str]] = []  # edits that worked: file, edit, what it said
+    done_keys: set[str] = set()
+    half_done: set[int] = set()  # local files an edit died on: reopened before they're used again
+    first: list[tuple[int, dict[str, Any], str]] = []  # the first pass's failures: file, edit, why
     tried = False
     pending = prompt
-    for attempt in range(2):
-        text, cost = await ask(system, pending)
+    unread = False  # the model's last reply was not the plan asked for
+    gone = False  # an open app stopped answering: nothing more is sent to it, or asked
+
+    async def clean(index: int) -> None:
+        if index in half_done:
+            targets[index] = await _reopened(
+                sources[index], [e for i, e, _ in done if i == index]
+            )
+            half_done.discard(index)
+
+    async def put(e: dict[str, Any]) -> str:
+        """One edit of a workbook that is being built sheet by sheet, onto the one file:
+        "" when it is in, else why it isn't. The same care as an edit of the usual pass: it
+        loads nothing from a web address the task didn't name, and a local file an edit died
+        on is opened afresh before it is used again."""
+        try:
+            if stray := fetched_from(e, allowed):
+                raise LedgerError(
+                    f"I only load things from web addresses you gave me, and {stray} isn't one."
+                )
+            await clean(0)
+            said = await _apply(targets[0], e)
+        except LedgerError as exc:
+            why, wrote = str(exc), _may_have_written(targets[0], e, exc)
+        except Exception as exc:
+            what = str(e.get("op") or "edit").replace("_", " ")
+            log.warning("ledger: the %s failed: %s", what, type(exc).__name__, exc_info=True)
+            why, wrote = _didnt_work(what, exc), True
+        else:
+            changed.add(0)
+            done.append((0, e, said))
+            done_keys.add(_edit_key(0, e))
+            return ""
+        if 0 in sources and wrote:
+            half_done.add(0)
+        return why
+
+    async def now() -> Any:
+        await clean(0)
+        return targets[0]
+
+    async def build(least: int | None = None) -> bool:
+        """The job as a sheet-by-sheet build (ledger_build.py). False when it isn't one:
+        nothing was changed, and it goes the usual way."""
+        from pyxi.agents import ledger_build
+
+        builder = ledger_build.Builder(
+            task, target=now, put=put, ask=ask, system=system, name=name, context=context,
+            progress=progress, least=least, quick=ask_quick,
+        )  # fmt: skip
+        try:
+            built = await builder.run()
+        finally:
+            result.cost_usd += builder.cost
+        if built is None:
+            return False
+        result.changes = built.changes()
+        result.problems = built.problems
+        result.headline = built.headline()
+        result.built = {
+            "done": [s.name for s in built.done],
+            "not_done": [s.name for s in built.not_done],
+        }
+        log.info(
+            "ledger: built %d of %d sheets in %.1fs",
+            len(built.done), len(built.sheets), time.perf_counter() - began,
+        )  # fmt: skip
+        return True
+
+    # A big spreadsheet build is planned first and written a sheet at a time: one reply for
+    # all of it is cut off at its length limit (live: a 15-sheet workbook, "my plan came out
+    # unreadable, twice"). A small edit never takes this road.
+    one_sheet_file = len(targets) == 1 and getattr(targets[0], "kind", "") in ("xlsx", "gsheet")
+    split = False
+    if one_sheet_file:
+        from pyxi.agents.ledger_build import looks_big
+
+        split = looks_big(task) and await build()
+
+    for attempt in range(0 if split else 2):
+        asked = time.perf_counter()
+        try:
+            text, cost = await ask(system, pending)
+        except Exception:
+            if attempt == 0:
+                raise
+            # The second call is only there to mend what failed. When it can't be made, what
+            # the first pass did still stands and is still reported, with what didn't work.
+            # (It used to end the whole job as failed, with the first pass's edits in place.)
+            log.warning("ledger: the second model call failed; keeping the first pass", exc_info=True)
+            break
+        log.info("ledger: model call %d took %.1fs", attempt + 1, time.perf_counter() - asked)
         result.cost_usd += cost
         data = parse_edits(text)
+        if not data and attempt == 0:
+            # Cut off at its limit, or not JSON at all (live: a pivot ended "I couldn't make
+            # that change" twice, with nothing said about why). Asked once more, plainly.
+            unread = True
+            asked = time.perf_counter()
+            text, cost = await ask(
+                system,
+                prompt
+                + "\n\nYour last reply could not be read: it was cut off or was not the JSON "
+                "object asked for. Reply again with ONLY that JSON object, as short as it can "
+                "be: named edits, no raw requests unless nothing else can do it.",
+            )
+            log.info("ledger: asking again took %.1fs", time.perf_counter() - asked)
+            result.cost_usd += cost
+            data = parse_edits(text)
+        unread = not data
         edits = [e for e in data.get("edits") or [] if isinstance(e, dict)]
         if attempt == 1 and not edits:
             break  # nothing more it can do: keep the first round's problems
@@ -1884,6 +2914,8 @@ async def run_ledger(
         tried = tried or bool(edits)
         failed: list[str] = []  # for the model: the edit itself and why
         reasons: list[str] = []  # for the user's card: just why
+        fails: list[tuple[int, dict[str, Any], str]] = []
+        retried: list[tuple[int, dict[str, Any]]] = []  # this pass's edits that were tried
         for e in edits:
             try:
                 index = int(e.get("file") or 0)
@@ -1891,43 +2923,134 @@ async def run_ledger(
             except (ValueError, IndexError):
                 failed.append(f"{json.dumps(e)[:200]}: there's no file {e.get('file')}")
                 reasons.append(f"There's no file {e.get('file')}.")
+                fails.append((-1, e, reasons[-1]))
+                continue
+            key = _edit_key(index, e)
+            if key in done_keys and attempt == 1:
+                # It worked in the first pass and is in the file. Live, the second reply sent
+                # the pivot again along with the chart, and a second pivot tab was made.
                 continue
             if progress:
                 await progress(f"{e.get('op', 'edit').replace('_', ' ')}")
+            began_edit = time.perf_counter()
+            retried.append((index, e))
+            why, wrote = "", False
             try:
                 if stray := fetched_from(e, allowed):
                     raise LedgerError(
                         f"I only load things from web addresses you gave me, and {stray} isn't one."
                     )
-                result.changes.append(await _apply(target, e))
+                if index in sources:
+                    await clean(index)
+                    target = targets[index]
+                said = await _apply(target, e)
+                result.changes.append(said)
                 changed.add(index)
+                done.append((index, e, said))
+                done_keys.add(key)
             except LedgerError as exc:
                 failed.append(f"{json.dumps(e)[:200]}: {exc}")
-                reasons.append(str(exc))
+                why, wrote = str(exc), _may_have_written(target, e, exc)
+                gone = gone or isinstance(exc, Unreachable)
             except Exception as exc:  # a bad cell address, a style the file lacks...
                 failed.append(f"{json.dumps(e)[:200]}: {type(exc).__name__}: {str(exc)[:160]}")
                 what = str(e.get("op") or "edit").replace("_", " ")
-                reasons.append(f"The {what} didn't work ({str(exc)[:120]}).")
-        result.problems = reasons
-        if not failed:
+                why, wrote = _didnt_work(what, exc), True
+            if why:
+                reasons.append(why)
+                fails.append((index, e, why))
+                # Only an edit that may have got part-way has anything to undo. An edit that
+                # was refused before it wrote ("no column called Nope") used to cost a second
+                # opening of the whole file all the same: 4 seconds more on a 20,000-row one.
+                if index in sources and wrote:
+                    half_done.add(index)
+            log.info(
+                "ledger: %s took %.1fs%s",
+                e.get("op"),
+                time.perf_counter() - began_edit,
+                " (it failed)" if why else "",
+            )
+            if gone:
+                break  # the edits after it would each wait on an app that isn't answering
+        if attempt == 0:
+            first = fails
+            result.problems = reasons
+        else:
+            # A problem from the first pass is dropped only when this pass tried something in
+            # its place: the edit most like the one that failed, not whichever failed first.
+            # One it never came back to is still reported: it used to vanish whenever a second
+            # reply arrived, even one that mended nothing.
+            left = list(first)
+            for index, e in retried:
+                on_file = [f for f in left if f[0] == index]
+                scored = sorted(on_file, key=lambda f: -_alike(f[1], e))
+                if scored and (_alike(scored[0][1], e) > 0 or len(on_file) == 1):
+                    left.remove(scored[0])
+            result.problems = list(dict.fromkeys([*(why for _, _, why in left), *reasons]))
+        if not failed or gone:
             break
         if attempt == 0:
+            try:  # the outline for the second try is read fresh, never remembered
+                for i, t in enumerate(targets):
+                    if i in sources:
+                        await clean(i)
+                    elif hasattr(t, "load") and getattr(t, "stale", True):
+                        await t.load()
+            except Exception:
+                log.warning("ledger: couldn't read the files again for a second try", exc_info=True)
+                break
             outline = "\n\n".join(f"# File {i}\n{t.describe()}" for i, t in enumerate(targets))
+            already = "\n".join(
+                f"- {json.dumps({**e, 'file': i})[:200]} ({said})" for i, e, said in done
+            )
             pending = (
                 f"Task: {task}\n\nThese edits failed:\n"
                 + "\n".join(failed)
+                + (
+                    "\n\nThese edits already worked and are in the files now. Do not send them "
+                    f"again:\n{already}"
+                    if already
+                    else ""
+                )
                 + f"\n\nThe files now (with the edits that worked):\n{outline}\n\nReturn only the edits still needed, or none if one can't be done."
             )
-    for i, t in enumerate(targets):
-        if i not in changed:
-            continue
-        if hasattr(t, "save"):
+    if one_sheet_file and not split and unread and not tried and not gone:
+        # The plan was cut off twice and nothing was touched: it was a bigger job than its
+        # words let on. It is written in parts instead, however few sheets it has.
+        split = await build(least=1)
+        unread = not split
+    if split and not result.changes:
+        changed.clear()  # no sheet was written: a file of empty tabs is not worth saving
+    saving = time.perf_counter()
+    for i in sorted(changed):
+        if i in sources:
+            await clean(i)
+        t = targets[i]
+        if getattr(t, "live", False):
+            result.live.append(t.title)  # changed where it's open; saving is theirs to do
+        elif hasattr(t, "save"):
             result.outputs.append(str(await asyncio.to_thread(t.save)))
+            if i in fresh:
+                result.made.append(result.outputs[-1])
         else:
             result.links.append(t.url)
+    result.sent = any(getattr(t, "sent", False) for t in live)
+    result.declined = any(getattr(t, "declined", False) for t in live)
+    log.info(
+        "ledger: saved in %.1fs; %.1fs in all, %d edit(s) made, %d problem(s)",
+        time.perf_counter() - saving,
+        time.perf_counter() - began,
+        len(result.changes),
+        len(result.problems),
+    )
     if not result.changes and (tried or not result.summary):
         # The model's summary was written before its edits ran ("Added a total row"): when
         # none of them worked, say why instead.
         why = f" {result.problems[0]}" if result.problems else ""
+        if not why and unread and not tried:
+            why = (
+                " I couldn't work out the edits for it: my plan came out unreadable, twice. "
+                "Nothing in the file was touched. Ask again, or for one part at a time."
+            )
         result.summary = f"I couldn't make that change.{why}"
     return result

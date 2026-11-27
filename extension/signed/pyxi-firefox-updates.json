@@ -1,0 +1,18 @@
+{
+  "addons": {
+    "pyxi-in-your-browser@pyxi.local": {
+      "updates": [
+        {
+          "version": "0.2.0",
+          "update_link": "https://github.com/marzukchowdhury/Pyxi/releases/latest/download/pyxi-firefox.xpi",
+          "update_hash": "sha256:e9c7398035fc34a13a558fde674bcde6d57acb98503c7f76c9fdebd246799af6",
+          "applications": {
+            "gecko": {
+              "strict_min_version": "140.0"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

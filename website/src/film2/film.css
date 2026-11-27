@@ -1,0 +1,13 @@
+/* The film page: the storyboard's pictures at film size, under the film's own type, captions and light. */
+html, body { width: 1920px; height: 1080px; padding: 0; overflow: hidden; background: #06070c; }
+#world { opacity: 1; }
+#stills { position: absolute; inset: 0; }
+.still { position: absolute; left: 0; top: 0; width: 960px; height: 540px; transform: scale(2); transform-origin: 0 0; opacity: 0; }
+.slam span { display: block; }
+#slam3 { line-height: 1.05; }
+#fly, #ptr, #pill { z-index: 9; }
+
+/* ram.css shares a few class names with the storyboard's pictures: put the pictures' own rules back */
+.book .tag { opacity: 1; left: auto; top: auto; padding: 2px 8px; border-radius: 6px; background: #e5383b; color: #fff; font-size: 11.5px; font-weight: 700; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 4px 12px rgba(120, 0, 0, 0.35); }
+.pages .page { width: 300px; padding: 44px 26px 0; }
+.pages .page p { height: auto; background: none; margin-bottom: 9px; border-radius: 0; }

@@ -37,6 +37,8 @@ export interface TrayActions {
   togglePause: () => void;
   setMuted: (muted: boolean) => void;
   stopEverything: () => void;
+  /** Meeting notes with no bot, and live captions: each press turns it on, or off when it is on. */
+  listen: (what: "meeting" | "captions") => void;
   openUrl: (url: string) => void;
   checkForUpdates: () => void;
   quit: () => void;
@@ -52,6 +54,10 @@ export function trayTemplate(a: TrayActions): MenuItemConstructorOptions[] {
     { label: "Mute Pyxi's voice", type: "checkbox", checked: a.muted, click: (item) => a.setMuted(item.checked) },
     { label: `Stop everything  (${a.hotkey("stop")})`, click: a.stopEverything },
     ...(a.openPermissions ? [{ label: "Permissions…", click: a.openPermissions }] : []),
+    { type: "separator" },
+    // Listening starts only from their own press (or their own words): a sign with Stop shows.
+    { label: "Meeting notes: start or stop", click: () => a.listen("meeting") },
+    { label: "Live captions: on or off", click: () => a.listen("captions") },
     { type: "separator" },
     { label: "Report a Bug…", click: () => a.openUrl(issueUrl("bug", a.version)) },
     { label: "Request a Feature…", click: () => a.openUrl(issueUrl("feature", a.version)) },

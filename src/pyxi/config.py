@@ -40,6 +40,12 @@ class VoiceConfig(BaseModel):
         "base.en", description="faster-whisper model: tiny.en, base.en, small.en..."
     )
     stt_device: Literal["auto", "cpu", "cuda"] = "auto"
+    stt_cloud: bool = Field(
+        True,
+        description="Turn speech into text with the cloud model when it can be reached (far "
+        "fewer misheard words); the model on this PC takes over offline. False keeps speech "
+        "on this PC. The Voice panel has the same switch.",
+    )
     tts: TTSProvider = Field(
         "kokoro", description="kokoro (local CPU), chatterbox (local GPU), client (OS voice)."
     )
@@ -101,6 +107,19 @@ class ScreenConfig(BaseModel):
         1366, description="Screenshots are downscaled to this width for the model."
     )
     uia_budget_s: float = 1.5
+    tab_fallback: bool = Field(
+        False,
+        description="With no browser extension connected, let read_tab and use_tab work in the "
+        "browser tab that is showing, through Windows accessibility (pyxi/screenlink.py; what "
+        "it can and can't do is in docs/SCREEN-TAB-FALLBACK.md). The extension is always "
+        "preferred when one is connected.",
+    )
+    tab_keys: bool = Field(
+        True,
+        description="In that mode, may Pyxi press keys in the tab (Enter in a field, Escape, the "
+        "arrows)? A key is posted to the browser window that was read, never typed on the "
+        "keyboard; Chrome and Edge only hear it while their window is in front.",
+    )
 
     @field_validator("excluded_windows", mode="before")
     @classmethod
@@ -165,10 +184,37 @@ class PyxiSettings(BaseSettings):
         description="Takes over driving when the quick model gets stuck (canvas apps like Google "
         "Sheets, a dialog it can't get past). About 8x the cost per look, only when needed.",
     )
+    hands_learn: bool = Field(
+        True,
+        description="After a task in an app or on a site, keep up to two short notes on how "
+        "that place works (never what was done in it), and read them before the next task "
+        "there. Kept in learned.json in the data folder. PYXI_HANDS_LEARN=0 turns it off.",
+    )
+    hands_direct: bool = Field(
+        True,
+        description="Press buttons, switches, tabs, menu items and list rows through the "
+        "accessibility layer, without the mouse, where the control allows it, and do things "
+        "to a control itself in one step: set a field's text, choose a row or an option by "
+        "its name, set a switch, walk a menu by its words (PYXI_HANDS_DIRECT). False: every "
+        "click is a mouse click and every one of those is the clicking and typing it stands for.",
+    )
+    model_dictation: str | None = Field(
+        "anthropic/claude-haiku-5.5",
+        description="Quick model that tidies a long dictation before it is typed "
+        "(PYXI_MODEL_DICTATION): punctuation, capitals and filler words only, one call, and "
+        "only for dictations of 30 words or more. Short ones are tidied by rules alone. "
+        "Empty: the chat model. The Dictation settings have a switch that turns it off.",
+    )
     model_aim: str | None = Field(
         "anthropic/claude-sonnet-5.5",
         description="Model that finds the parts of a picture Pyxi explains (PYXI_MODEL_AIM), on a "
         "zoomed crop: about $0.004 a picture, run while Pyxi speaks. Empty: the chat model's guess.",
+    )
+    model_listen: str | None = Field(
+        None,
+        description="Small fast model that writes a live meeting's notes part by part and "
+        "translates captions (PYXI_MODEL_LISTEN). Empty: Haiku where it can be reached "
+        "(OpenRouter, the beta, an Anthropic key), else the chat model.",
     )
 
     host: str = "127.0.0.1"

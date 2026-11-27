@@ -294,13 +294,13 @@ class BengaliVoice:
                 if (
                     time.monotonic() - self._failed_at < 60
                 ):  # don't retry a failing download per line
-                    raise RuntimeError(self.error or "the Bengali voice isn't downloaded yet")
+                    raise RuntimeError(self.error or "The Bengali voice isn't downloaded yet")
                 try:
                     log.info("downloading the Bengali voice (%s MB) to %s", VOICE_MB, self.dir)
                     await download_bengali_voice(self.dir.parent)
                 except Exception as exc:
                     self._failed_at = time.monotonic()
-                    self.error = f"Couldn't download the Bengali voice ({exc.__class__.__name__})"
+                    self.error = "Couldn't download the Bengali voice. Check the internet connection"
                     raise RuntimeError(self.error) from exc
             self._session, self._tokens = await asyncio.to_thread(self._load)
             self.error = None
@@ -316,7 +316,7 @@ class BengaliVoice:
                 await download_bengali_voice(self.dir.parent)
             except Exception as exc:
                 self._failed_at = time.monotonic()
-                self.error = f"Couldn't download the Bengali voice ({exc.__class__.__name__})"
+                self.error = "Couldn't download the Bengali voice. Check the internet connection"
                 raise RuntimeError(self.error) from exc
 
     def release_idle(self, idle_s: float) -> bool:
@@ -422,7 +422,7 @@ async def download_bengali_voice(models_dir: Path) -> Path:
                 f.write(chunk)
     try:
         if digest.hexdigest() != VOICE_SHA256:
-            raise RuntimeError("the Bengali voice download didn't match the expected file")
+            raise RuntimeError("The Bengali voice download came out damaged, so I'll fetch it again")
         await asyncio.to_thread(_extract, archive, target)
     finally:
         archive.unlink(missing_ok=True)
@@ -440,7 +440,7 @@ def _extract(archive: Path, target: Path) -> None:
                 if src is not None:
                     (tmp / name).write_bytes(src.read())
     if not (tmp / "model.onnx").exists():
-        raise RuntimeError("the Bengali voice archive had no model in it")
+        raise RuntimeError("The Bengali voice download came out damaged, so I'll fetch it again")
     if target.exists():
         for p in target.iterdir():
             p.unlink()

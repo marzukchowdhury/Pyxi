@@ -154,7 +154,7 @@ code { font: 500 0.9em ui-monospace, "Cascadia Code", Consolas, monospace; paddi
   top: 0;
   left: 50%;
   z-index: 70;
-  width: min(760px, calc(100% - 16px));
+  width: min(860px, calc(100% - 16px));
   transform: translateX(-50%);
   border-radius: 0 0 22px 22px;
   background: var(--glass-strong);
@@ -171,7 +171,7 @@ code { font: 500 0.9em ui-monospace, "Cascadia Code", Consolas, monospace; paddi
 .bm-body { fill: #2b2416; stroke: rgba(255, 236, 190, 0.55); stroke-width: 0.5; }
 .bm-core { fill: #ffe08a; filter: drop-shadow(0 0 2px #ffd27a) drop-shadow(0 0 5px rgba(255, 190, 80, 0.8)); }
 .notch-links { display: flex; gap: 2px; margin-left: auto; }
-.notch-links a { padding: 7px 12px; border-radius: 9px; font-size: 14px; font-weight: 500; color: var(--ink-2); text-decoration: none; transition: color 0.2s, background 0.2s; }
+.notch-links a { white-space: nowrap; padding: 7px 12px; border-radius: 9px; font-size: 14px; font-weight: 500; color: var(--ink-2); text-decoration: none; transition: color 0.2s, background 0.2s; }
 .notch-links a:hover, .notch-links a[aria-current="page"] { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
 .notch-cta { margin-left: 6px; }
 .notch-menu { display: none; width: 38px; height: 34px; margin-left: 4px; border-radius: 10px; border: 1px solid var(--hair); background: transparent; color: var(--ink); cursor: pointer; }
@@ -736,4 +736,9 @@ details p { margin: 0; padding: 0 22px 20px; color: var(--ink-2); font-size: 15.
   html:not(.force-motion) .float { transition: opacity 0.4s; }
   html:not(.force-motion) .thread-line, html:not(.force-motion) .target-tag { transition: opacity 0.3s ease !important; }
   html:not(.force-motion) .mw-search .typed { width: auto; border-right: 0; }
+}
+
+/* seven links: on a narrow tablet they sit a little tighter so the bar still fits on one line */
+@media (min-width: 761px) and (max-width: 880px) {
+  .notch-links a { padding: 7px 8px; font-size: 13px; }
 }

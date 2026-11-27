@@ -1,0 +1,156 @@
+/* The demo clips' shared look: the stage, the big type, the floating screen, and Pyxi's own
+   interface. Pyxi's pieces (the notch, the guide mark, the notes card, the OK card, the task
+   tray, the firefly) are taken from desktop/src/renderer/src/overlay/overlay.css and
+   shared/firefly.css, drawn at one and a half times their size so they read in a 1080p frame.
+   Nothing here animates by itself: kit.js sets every moving value from the time it is given. */
+@font-face { font-family: "Inter"; src: url("../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Fraunces"; src: url("../node_modules/@fontsource-variable/fraunces/files/fraunces-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Fraunces"; font-style: italic; src: url("../node_modules/@fontsource-variable/fraunces/files/fraunces-latin-wght-italic.woff2") format("woff2"); font-weight: 100 900; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root { --ice: #9ecbff; --ice-hi: #eaf3ff; --ink: #f4f7fb; --ink-2: rgba(232, 238, 248, .62); --ink-3: rgba(232, 238, 248, .38);
+  --glass-strong: rgba(10, 12, 17, .92); --hair: rgba(255, 255, 255, .08); --hair-hi: rgba(255, 255, 255, .14); --fly: #ffc861; --fly-hi: #fff3cf; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: #06070c; font-family: "Inter", sans-serif; -webkit-font-smoothing: antialiased; font-feature-settings: "cv11", "ss01", "ss03", "tnum"; }
+#stage { position: absolute; inset: 0; overflow: hidden; background: #06070c; }
+
+/* the backdrop: two slow lights on near-black */
+.glow { position: absolute; width: 1500px; height: 1500px; border-radius: 50%; left: 0; top: 0; filter: blur(40px); }
+#g1 { background: radial-gradient(circle, rgba(255, 176, 60, .34), transparent 62%); }
+#g2 { background: radial-gradient(circle, rgba(88, 96, 255, .40), transparent 62%); }
+#vig { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 45%, rgba(0, 0, 0, .55) 100%); }
+
+/* the problem, and the name */
+.type { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.slam { font-weight: 800; font-size: 176px; line-height: 1.04; letter-spacing: -.045em; color: #fff; opacity: 0; white-space: nowrap; will-change: transform, filter; }
+.slam.long { font-size: 150px; }
+.slam em { font-style: normal; background: linear-gradient(100deg, #ffd27a, #ff9f43); -webkit-background-clip: text; background-clip: text; color: transparent; padding: 0 .05em; margin: 0 -.05em; }
+#name { display: flex; align-items: center; gap: 44px; opacity: 0; }
+#name .mark { width: 96px; height: 96px; border-radius: 50%; background: radial-gradient(circle at 40% 38%, #fff8e0, #ffd27a 55%, #f3a93a); box-shadow: 0 0 70px 26px rgba(255, 190, 80, .55), 0 0 200px 90px rgba(255, 176, 60, .22); }
+#name .word { font-weight: 800; font-size: 250px; letter-spacing: -.055em; color: #fff; line-height: 1; }
+#tag { font-family: "Fraunces"; font-style: italic; font-weight: 500; font-size: 84px; color: #ffd98a; margin-top: 18px; opacity: 0; }
+#where { font-size: 34px; font-weight: 600; color: #c4cddd; margin-top: 44px; letter-spacing: -.005em; opacity: 0; }
+#fine { position: absolute; left: 0; right: 0; bottom: 54px; text-align: center; font-size: 21px; font-weight: 500; color: #7f8aa0; opacity: 0; }
+
+/* the screen, floating */
+#cam { position: absolute; inset: 0; perspective: 2400px; perspective-origin: 50% 46%; }
+#world { position: absolute; inset: 0; will-change: transform; }
+#win { position: absolute; left: 150px; top: 58px; width: 1620px; height: 962px; border-radius: 16px; overflow: hidden; background: #f1f3f7; box-shadow: 0 60px 140px rgba(0, 0, 0, .65), 0 0 0 1px rgba(255, 255, 255, .10); }
+/* a plain browser: no real browser's look */
+.tabs { height: 42px; background: #d9dee8; display: flex; align-items: flex-end; padding-left: 14px; }
+.tabs .tab { height: 34px; width: 320px; background: #f7f8fb; border-radius: 10px 10px 0 0; display: flex; align-items: center; gap: 10px; padding: 0 14px; font-size: 14px; color: #2a3140; font-weight: 500; white-space: nowrap; }
+.tabs .tab u { width: 14px; height: 14px; border-radius: 50%; background: #6d5df6; display: block; flex: none; }
+.tabs .dots { margin-left: auto; margin-right: 18px; margin-bottom: 12px; display: flex; gap: 22px; }
+.tabs .dots s { width: 12px; height: 2px; background: #5d6676; display: block; }
+.addr { height: 46px; background: #f7f8fb; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid #e1e5ec; }
+.addr b { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #9aa3b2; display: block; }
+.addr div { flex: 1; height: 30px; border-radius: 15px; background: #e9ecf2; display: flex; align-items: center; padding: 0 16px; font-size: 14px; color: #3c4453; }
+.page { position: absolute; top: 88px; left: 0; right: 0; bottom: 0; overflow: hidden; }
+.bar { height: 14px; border-radius: 7px; background: #dde1e9; }
+
+/* ---- Pyxi's interface */
+.ov { position: absolute; left: 0; top: 0; color: var(--ink); }
+/* the notch: hangs from the top edge of the screen */
+#notch { color: var(--ink); position: absolute; left: 960px; top: 58px; height: 60px; overflow: hidden; background: rgba(7, 8, 12, .95); border: 1.5px solid rgba(158, 203, 255, .16); border-top: 0; border-radius: 0 0 28px 28px;
+  box-shadow: 0 27px 75px rgba(0, 0, 0, .38), 0 0 39px rgba(158, 203, 255, .08); }
+#notch .nrow { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 16px; min-height: 60px; padding: 3px 24px 6px; white-space: nowrap; width: max-content; opacity: 0; }
+#notch .nrow.top { align-items: flex-start; padding: 16px 24px 19px; white-space: normal; }
+#notch .nrow.idle { min-height: 14px; width: 190px; padding: 0; }
+.n-text { font-size: 19.5px; font-weight: 500; color: var(--ink-2); }
+.n-text.strong, .n-text b { color: var(--ink); }
+.n-text b { font-weight: 600; }
+.n-say { font-size: 20px; line-height: 1.5; color: var(--ink); max-width: 560px; }
+.shimmer { background: linear-gradient(90deg, var(--ink-3) 0%, var(--ink) 45%, var(--ink-3) 90%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.n-mark { flex: none; width: 21px; height: 21px; overflow: visible; }
+.n-mark .halo { fill: rgba(255, 200, 97, .45); }
+.n-mark .core { fill: var(--fly-hi); filter: drop-shadow(0 0 4px #ffd27a) drop-shadow(0 0 9px rgba(255, 190, 80, .6)); }
+.n-wave { flex: none; display: flex; align-items: center; gap: 3.75px; height: 30px; }
+.n-wave i { display: block; width: 3.75px; height: 30px; border-radius: 3px; background: var(--ice-hi); box-shadow: 0 0 9px rgba(158, 203, 255, .7); transform: scaleY(.18); }
+.n-wave.small { height: 24px; margin-top: 3px; }
+.n-wave.small i { height: 24px; width: 3px; }
+.n-marks i { display: block; width: 8px; height: 8px; border-radius: 50%; background: var(--c, #9ecbff); box-shadow: 0 0 10px var(--c, #9ecbff); }
+/* a finished job, in the notch */
+#notch .nrow.result { display: block; white-space: normal; width: 640px; padding: 18px 24px 22px; }
+.r-head { display: flex; align-items: center; gap: 14px; }
+.r-head i { width: 13px; height: 13px; border-radius: 3px; transform: rotate(45deg); background: #86e0c3; box-shadow: 0 0 18px #86e0c3; display: block; }
+.r-head b { font-size: 20.5px; font-weight: 600; }
+.r-body { margin: 12px 0 0 27px; font-size: 19.5px; line-height: 1.5; color: var(--ink); }
+
+/* a guide step: the mark round the thing to click, the arrow in from the pointer, the step's pill */
+#guide { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: visible; }
+.g-frame { fill: rgba(158, 203, 255, .10); stroke: var(--ice-hi); stroke-width: 2.4; filter: drop-shadow(0 0 1px rgba(6, 16, 40, .75)) drop-shadow(0 0 9px rgba(158, 203, 255, .65)); }
+.g-pulse { fill: none; stroke: var(--ice); stroke-width: 2.1; }
+.g-arrow { fill: none; stroke: #2f6bff; stroke-width: 4.8; stroke-linecap: round; filter: drop-shadow(0 0 2px rgba(255, 255, 255, .95)) drop-shadow(0 0 12px rgba(63, 140, 255, .7)); }
+.g-head { fill: none; stroke: #2f6bff; stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 2px rgba(255, 255, 255, .95)); }
+.g-label { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 12px; padding: 8px 17px 9px 10px; border-radius: 999px; background: var(--glass-strong); border: 1.5px solid rgba(158, 203, 255, .45); font-size: 19.5px; font-weight: 500; white-space: nowrap; box-shadow: 0 12px 39px rgba(0, 0, 0, .3); color: var(--ink); opacity: 0; }
+.g-label .step { display: grid; place-items: center; min-width: 30px; height: 30px; padding: 0 7px; border-radius: 15px; background: rgba(158, 203, 255, .2); color: var(--ice-hi); font-size: 17px; font-weight: 600; }
+.cheer { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+.cheer i.ring { position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; border-radius: 50%; border: 3px solid rgba(158, 203, 255, .95); box-shadow: 0 0 21px rgba(120, 180, 255, .8); opacity: 0; }
+.cheer i.ring.late { border-color: rgba(255, 214, 140, .9); }
+.cheer i.spark { position: absolute; left: -3px; top: -3px; width: 6px; height: 6px; border-radius: 50%; background: #eaf3ff; box-shadow: 0 0 12px #9ecbff; opacity: 0; }
+.cheer .pill { position: absolute; left: 0; top: 51px; white-space: nowrap; padding: 9px 18px; border-radius: 999px; background: rgba(16, 18, 24, .9); border: 1.5px solid rgba(158, 203, 255, .4); color: #eaf3ff; font: 600 19.5px/1.2 "Inter"; box-shadow: 0 12px 36px rgba(0, 0, 0, .35); opacity: 0; }
+
+/* the notes card, pinned beside what it explains */
+.notes { position: absolute; width: 520px; padding: 27px 30px 22px; border-radius: 33px; color: var(--ink); overflow: hidden; opacity: 0;
+  background: radial-gradient(rgba(255, 255, 255, .07) 1.5px, transparent 1.8px) 0 0 / 24px 24px, linear-gradient(180deg, rgba(14, 17, 24, .96), rgba(9, 11, 16, .97));
+  border: 1.5px solid var(--hair-hi); box-shadow: 0 1.5px 0 var(--hair-hi) inset, 0 45px 120px rgba(0, 0, 0, .42); }
+.notes .nt { font: 600 33px/1.2 "Fraunces", serif; letter-spacing: -.005em; }
+.notes .rule { height: 3px; margin: 12px 0 15px; border-radius: 3px; background: linear-gradient(90deg, var(--ice), transparent); opacity: .55; }
+.notes .row { display: flex; align-items: flex-start; gap: 16px; min-height: 45px; padding: 6px 0; }
+.notes .row span { flex: 1; font: 500 22.5px/1.45 "Inter"; }
+.notes .row i { flex: none; display: block; width: 13px; height: 13px; margin-top: 10px; border-radius: 50%; border: 2px solid var(--ice-hi); background: rgba(158, 203, 255, .55); box-shadow: 0 0 6px rgba(158, 203, 255, .7); }
+.notes .row b { flex: none; margin-top: 7px; font: 600 16.5px/1 "Inter"; color: var(--ice); opacity: .8; }
+.ink path { fill: none; stroke: #3f8cff; stroke-width: 3.3; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 1.2px rgba(255, 255, 255, .95)) drop-shadow(0 0 7px rgba(63, 140, 255, .45)); }
+.ink path.thread { stroke: rgba(63, 140, 255, .7); stroke-width: 2; filter: drop-shadow(0 0 6px rgba(158, 203, 255, .6)); }
+.ink circle { fill: #3f8cff; stroke: #fff; stroke-width: 2.4; filter: drop-shadow(0 3px 9px rgba(20, 60, 140, .45)); }
+.ink text { font: 600 18px/1 "Inter"; fill: #fff; text-anchor: middle; }
+
+/* "Pyxi needs your OK" */
+.request { color: var(--ink); backdrop-filter: blur(22px); position: absolute; width: 660px; padding: 24px 27px; border-radius: 30px; background: var(--glass-strong); border: 1.5px solid rgba(255, 213, 158, .3); box-shadow: 0 1.5px 0 var(--hair-hi) inset, 0 36px 105px rgba(0, 0, 0, .4); opacity: 0; }
+.request .rt { font-size: 16px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #ffd59e; }
+.request .ra { margin: 9px 0 3px; font-size: 21px; line-height: 1.4; font-weight: 600; }
+.request .rr { font-size: 18.75px; line-height: 1.5; color: var(--ink-2); padding: 12px 15px; margin-top: 9px; border-radius: 15px; background: rgba(255, 255, 255, .035); border: 1.5px solid var(--hair); }
+.request .rb { display: flex; gap: 12px; margin-top: 18px; }
+.request .rb u { display: flex; align-items: center; height: 51px; padding: 0 24px; border-radius: 15px; border: 1.5px solid var(--hair-hi); background: rgba(255, 255, 255, .04); font-size: 19.5px; font-weight: 500; text-decoration: none; }
+.request .rb u.yes { background: rgba(158, 203, 255, .16); border-color: rgba(158, 203, 255, .45); color: var(--ice-hi); }
+
+/* the task tray, top right */
+.tray { color: var(--ink); position: absolute; width: 470px; display: grid; gap: 9px; padding: 12px; border-radius: 24px; background: var(--glass-strong); border: 1.5px solid var(--hair); box-shadow: 0 24px 75px rgba(0, 0, 0, .35); opacity: 0; }
+.tray .th { display: flex; justify-content: space-between; padding: 0 6px; font-size: 17px; color: var(--ink-2); }
+.tray .chip { display: flex; align-items: flex-start; gap: 14px; padding: 12px 15px; border-radius: 16px; border: 1.5px solid var(--hair); background: rgba(255, 255, 255, .03); font-size: 18.5px; line-height: 1.35; }
+.tray .chip i { flex: none; display: block; width: 10.5px; height: 10.5px; margin-top: 8px; border-radius: 50%; background: var(--c, #9ecbff); box-shadow: 0 0 12px var(--c, #9ecbff); }
+.tray .chip b { font-weight: 600; }
+.tray .chip small { display: block; margin-top: 3px; color: var(--ink-2); font-size: 17px; }
+
+/* the firefly beside the pointer: the app's own (shared/firefly.css), drawn large */
+#fly { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+#fly svg { position: absolute; left: -60px; top: -60px; width: 120px; height: 120px; overflow: visible; }
+#fly .ff-core { filter: drop-shadow(0 0 .8px rgba(40, 24, 0, .85)) drop-shadow(0 0 3px #ffd27a) drop-shadow(0 0 9px rgba(255, 190, 80, .8)); }
+#fly .ff-wing { fill: rgba(255, 252, 242, .55); stroke: rgba(60, 45, 20, .45); stroke-width: .45; transform-box: fill-box; transform-origin: center; }
+#fly .ff-body { fill: #2b2416; stroke: rgba(255, 236, 190, .45); stroke-width: .45; }
+#fly .ff-feeler { fill: none; stroke: #2b2416; stroke-width: .6; stroke-linecap: round; }
+#fly .ff-halo { transform-box: fill-box; transform-origin: center; }
+#ptr { position: absolute; left: 0; top: 0; width: 30px; height: 30px; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .45)); }
+#tap { position: absolute; left: -26px; top: -26px; width: 52px; height: 52px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .9); box-shadow: 0 0 0 1.5px rgba(20, 30, 50, .35); opacity: 0; }
+
+/* the light the camera flies into */
+#flash { position: absolute; inset: 0; --x: 960px; --y: 540px; background: radial-gradient(circle at var(--x) var(--y), #fff6dc 0%, #ffd27a 30%, #f5a033 100%); opacity: 0; }
+#dip { position: absolute; inset: 0; background: #06070c; opacity: 0; }
+
+/* captions: outside the camera, plain */
+#band { position: absolute; left: 0; right: 0; bottom: 0; height: 330px; background: linear-gradient(180deg, transparent, rgba(4, 6, 12, .8) 45%, rgba(4, 6, 12, .95)); opacity: 0; }
+#cap { position: absolute; left: 0; right: 0; bottom: 56px; text-align: center; color: #fff; opacity: 0; white-space: nowrap; }
+#cap .line { font-size: 54px; font-weight: 650; letter-spacing: -.016em; text-shadow: 0 2px 16px rgba(0, 0, 0, .7); }
+#cap .who { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 28px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+#cap .who.you { color: var(--ice-hi); }
+#cap .who.pyxi { color: #ffd98a; }
+#cap .who.pyxi i { display: block; width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle at 40% 38%, #fff8e0, #ffd27a 55%, #f3a93a); box-shadow: 0 0 14px 4px rgba(255, 190, 80, .6); }
+#cap .keys { display: inline-flex; gap: 7px; margin-right: 6px; }
+kbd { font: 650 19px/1 "Inter"; letter-spacing: 0; text-transform: none; color: #fff; padding: 8px 12px 9px; border-radius: 9px; background: rgba(255, 255, 255, .12); border: 1.5px solid rgba(255, 255, 255, .28); box-shadow: 0 3px 0 rgba(255, 255, 255, .16); }
+
+/* the lesson after the screen, and the film's last list */
+#how { margin-top: 46px; font-size: 40px; font-weight: 550; letter-spacing: -.01em; color: #c4cddd; opacity: 0; }
+#rhead { font-family: "Fraunces"; font-style: italic; font-weight: 500; font-size: 62px; color: #ffd98a; margin-bottom: 44px; opacity: 0; }
+#rrows { display: grid; gap: 22px; }
+.rrow { display: flex; align-items: center; gap: 34px; font-size: 88px; font-weight: 800; letter-spacing: -.04em; color: #fff; line-height: 1.08; opacity: 0; white-space: nowrap; }
+.rrow i { flex: none; display: grid; place-items: center; width: 76px; height: 76px; border-radius: 50%; background: linear-gradient(135deg, #ffd27a, #ff9f43); box-shadow: 0 0 46px rgba(255, 176, 60, .5); }
+.rrow svg { width: 46px; height: 46px; }
+.rrow path { fill: none; stroke: #1a1206; stroke-width: 3.6; stroke-linecap: round; stroke-linejoin: round; }

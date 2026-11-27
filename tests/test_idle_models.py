@@ -119,6 +119,8 @@ async def test_the_brain_only_lets_go_when_idle(tmp_path, state):
     brain.stt._models["base.en"] = FakeWhisper("base.en")
     brain.stt._used["base.en"] = time.monotonic() - 999
     brain.state = state
-    gone = brain.release_idle(300)
+    # (Only what this test loaded: the screen's text reader is shared by the whole process, and
+    # an earlier test may have left it loaded and idle, which is rightly let go of as well.)
+    gone = [name for name in brain.release_idle(300) if name.startswith("ears")]
     assert gone == (["ears base.en"] if state == "idle" else [])
     assert brain.release_idle(0) == []  # 0 keeps everything loaded

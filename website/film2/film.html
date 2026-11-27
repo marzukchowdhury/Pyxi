@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex" />
+    <title>Pyxi launch film</title>
+    <!--
+      Every scene of the launch film except the 3D one (that is film2/ram.html), each as a pure
+      function of time. tools/film2_film.py picks a scene (setScene), then steps draw(t) one frame
+      at a time at 60 frames a second and adds the sound. Not part of the site build.
+      Look at one moment with ?scene=post&t=7.
+    -->
+    <script type="module" src="/src/film2/film.js"></script>
+  </head>
+  <body>
+    <div id="stage">
+      <u id="g1"></u><u id="g2"></u>
+      <div id="world"><div id="stills"></div>
+        <svg id="ptr" viewBox="0 0 28 34"><path d="M3 2v24.800l6.700-5.900 4.400 9.600 4.100-1.800-4.400-9.600h8.200z" /></svg>
+        <div id="pill"><b><s></s><s></s><s></s><s></s></b><span></span></div>
+        <div id="fly"></div>
+      </div>
+      <div id="slam1" class="slam"></div>
+      <div id="slam2" class="slam"></div>
+      <div id="slam3" class="slam"></div>
+      <div id="band"></div>
+      <p id="cap"></p>
+      <div id="flash"></div>
+      <u id="vig"></u>
+    </div>
+  </body>
+</html>

@@ -7,11 +7,23 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Axis, Material, Part } from "../shared/protocol";
+import { hollowProfile, loftGeometry } from "./loft";
+import { blobGeometry, limbGeometry } from "./organic";
+import { applySurface, type Surface, SURFACES, surfaceUVs } from "./surface";
 
 export interface Built {
   geometry: THREE.BufferGeometry;
   /** Mesh scale: unit shapes are stretched to the box; shapes built at true size use [1,1,1]. */
   scale: [number, number, number];
+  /** Where a tag should point, when the middle of the part's box is not on the part (a bent limb). */
+  anchor?: [number, number, number];
+}
+
+/** The middle of a spine, on the spine. */
+function midway(path: number[][]): [number, number, number] {
+  const pts = path.map((v) => new THREE.Vector3(v[0], v[1], v[2]));
+  const m = (pts.length > 2 ? new THREE.CatmullRomCurve3(pts, false, "centripetal") : new THREE.LineCurve3(pts[0], pts[1])).getPoint(0.5);
+  return [m.x, m.y, m.z];
 }
 
 const TAU = Math.PI * 2;
@@ -98,7 +110,23 @@ function beveledCylinder(top: number, bottom: number): THREE.BufferGeometry {
   return new THREE.LatheGeometry(pts, 48);
 }
 
+/** Does this part get surface detail? Light, flows and tags have no surface to draw on. */
+export function surfaceOf(p: Pick<Part, "surface" | "shape" | "material">): Surface | null {
+  if (!p.surface || !(SURFACES as readonly string[]).includes(p.surface)) return null;
+  if (p.shape === "arrow" || p.shape === "marker" || p.shape === "asset" || p.material === "emissive") return null;
+  return p.surface as Surface;
+}
+
 export function buildGeometry(p: Part): Built {
+  const built = shapeGeometry(p);
+  const kind = surfaceOf(p);
+  if (!kind || p.shape === "kit") return built;
+  const mapped = surfaceUVs(built.geometry, built.scale, p.size, kind, p.density ?? 1);
+  built.geometry.dispose();
+  return { ...built, geometry: mapped };
+}
+
+function shapeGeometry(p: Part): Built {
   const [sx, sy, sz] = p.size;
   const unit: [number, number, number] = [sx, sy, sz];
   switch (p.shape) {
@@ -165,20 +193,49 @@ export function buildGeometry(p: Part): Built {
       const pts = (p.path ?? [[0, -0.5, 0], [0, 0.5, 0]]).map((v) => new THREE.Vector3(...v));
       const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
       const r = p.radius ?? Math.max(0.01, across(p.size, p.axis) / 2);
-      return { geometry: new THREE.TubeGeometry(curve, Math.max(16, pts.length * 24), r, 14, false), scale: [1, 1, 1] };
+      return { geometry: new THREE.TubeGeometry(curve, Math.max(16, pts.length * 24), r, 14, false), scale: [1, 1, 1], anchor: p.path ? midway(p.path) : undefined };
+    }
+    case "limb": {
+      // A living thing's body, limb or tail: thick where its radii say, round at both ends.
+      const len = p.size[idx[p.axis]];
+      const path = p.path ?? [axisPoint([0, -len / 2, 0], p.axis), axisPoint([0, len / 2, 0], p.axis)];
+      const radii = p.radii?.length ? p.radii : [p.radius ?? Math.max(0.01, across(p.size, p.axis) / 2)];
+      return { geometry: limbGeometry(path, radii, p.squash ?? 1), scale: [1, 1, 1], anchor: midway(path) };
+    }
+    case "blob": {
+      const lumps = p.lumps?.length || p.path ? (p.lumps ?? []) : [[0, 0, 0, sx / 2, sy / 2, sz / 2]];
+      // Its tag points at its biggest lump: the middle of the whole can be a hollow between two.
+      const big = lumps.reduce<number[] | null>((a, l) => (!a || l[3] * (l[4] ?? l[3]) * (l[5] ?? l[3]) > a[3] * (a[4] ?? a[3]) * (a[5] ?? a[3]) ? l : a), null);
+      const anchor: [number, number, number] | undefined = big ? [big[0], big[1], big[2]] : p.path ? midway(p.path) : undefined;
+      return { geometry: blobGeometry(lumps, p.path, p.radii ?? (p.radius ? [p.radius] : null), p.blend ?? 0.5), scale: [1, 1, 1], anchor };
     }
     case "extrude": {
       const prof = p.profile ?? [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
       const depth = p.size[idx[p.axis === "y" ? "y" : p.axis]];
       const shape = new THREE.Shape(prof.map(([x, y]) => new THREE.Vector2(x, y)));
-      const bevel = Math.min(0.04, depth * 0.25);
-      const g = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.001, depth - bevel * 2), bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 2 });
+      // `bevel` rounds the edges over (a car body, a phone): a share of the thickness, and
+      // never more of the outline than a third of its smaller side, so a thin fin keeps its shape.
+      const xs = prof.map((q) => q[0]), ys = prof.map((q) => q[1]);
+      const small = Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+      const soft = p.bevel != null && p.bevel > 0;
+      const bevel = soft ? Math.min(depth * p.bevel!, depth * 0.49, small * 0.33) : Math.min(0.04, depth * 0.25);
+      // A soft edge is cut into the outline (the part keeps its written size); the hairline one sits on it, as before.
+      const g = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.001, depth - bevel * 2), bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelOffset: soft ? -bevel : 0, bevelSegments: soft ? 6 : 2 });
       g.translate(0, 0, -depth / 2 + bevel);
       return { geometry: fromZ(g, p.axis), scale: [1, 1, 1] };
     }
     case "lathe": {
       // [[along, radius], ...] turned round the axis, closed at both ends, at true size.
       const prof = (p.profile ?? [[-0.5, 0.5], [0.5, 0.5]]).map(([a, r]) => new THREE.Vector2(Math.max(0, r), a));
+      if (p.wall != null && p.wall > 0) {
+        // A hollow vessel, open at its +axis end: the outside as written (smoothed), then over
+        // the rim and down the inside to a floor as thick as the wall.
+        if (prof[0].y > prof[prof.length - 1].y) prof.reverse();
+        const outer = prof.length >= 4 ? new THREE.SplineCurve(prof).getSpacedPoints(Math.min(72, prof.length * 8)) : prof;
+        const walls = hollowProfile(outer.map((q) => [q.x, q.y]), p.wall).map(([r, a]) => new THREE.Vector2(r, a));
+        if (walls[0].x > 0) walls.unshift(new THREE.Vector2(0, walls[0].y));
+        return { geometry: alongAxis(new THREE.LatheGeometry(walls, 64), p.axis), scale: [1, 1, 1] };
+      }
       if (prof[0].x > 0) prof.unshift(new THREE.Vector2(0, prof[0].y));
       if (prof[prof.length - 1].x > 0) prof.push(new THREE.Vector2(0, prof[prof.length - 1].y));
       // A turned profile needs a smooth outline: resample it as a curve unless it's very short.
@@ -188,6 +245,10 @@ export function buildGeometry(p: Part): Built {
       const g = new THREE.LatheGeometry(pts, 64);
       return { geometry: alongAxis(g, p.axis), scale: [1, 1, 1] };
     }
+    case "loft": {
+      const sections = p.sections?.length ? p.sections : [[-sx / 2, sz, sy, 0, 1], [sx / 2, sz, sy, 0, 1]];
+      return { geometry: loftGeometry(sections, p.axis), scale: [1, 1, 1] };
+    }
     case "arrow":
       return { geometry: arrowGeometry(p), scale: [1, 1, 1] };
     case "marker":
@@ -195,6 +256,7 @@ export function buildGeometry(p: Part): Built {
     case "plane":
       return { geometry: new THREE.BoxGeometry(1, 1, 1), scale: [sx, Math.max(0.004, sy), sz] };
     case "rounded_box":
+      return { geometry: new RoundedBoxGeometry(sx, sy, sz, 3, Math.min(sx, sy, sz) * 0.2), scale: [1, 1, 1] };
     case "box":
     default: {
       // Real parts are never razor-edged: a hairline bevel (built at true size, so it stays
@@ -229,6 +291,18 @@ export const MATERIALS: Record<Material, Preset> = {
   ceramic: { color: "#f2f0ea", metalness: 0, roughness: 0.18, clearcoat: 0.7 },
   skin: { color: "#e2b08e", metalness: 0, roughness: 0.55, sheen: 0.5 },
   emissive: { color: "#ffb347", metalness: 0, roughness: 1, emissive: true },
+  // Electronics, as they are: a die is a dark mirror, a board is dull lacquer over glass
+  // fibre, solder is soft grey, copper is warm, anodized aluminium is satin and dark.
+  silicon: { color: "#2b303c", metalness: 0.8, roughness: 0.16, clearcoat: 0.5 },
+  pcb: { color: "#1f5a36", metalness: 0, roughness: 0.52, clearcoat: 0.4 },
+  solder: { color: "#b9bcc0", metalness: 1, roughness: 0.42 },
+  copper: { color: "#c47a4a", metalness: 1, roughness: 0.3 },
+  anodized: { color: "#3a3d44", metalness: 0.8, roughness: 0.52 },
+};
+
+const rgb = (c: THREE.Color): [number, number, number] => {
+  const hex = c.getHex(THREE.SRGBColorSpace);
+  return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
 };
 
 /**
@@ -322,6 +396,13 @@ export function makeMaterial(p: Part, style: string): THREE.MeshPhysicalMaterial
     m.roughness = 1;
     m.clearcoat = 0;
     m.sheen = 0;
+  } else {
+    // Fine detail the builder asked for: pins, traces, a die's cells, fins... (scene/surface.ts).
+    const kind = surfaceOf(p);
+    if (kind) {
+      applySurface(m, kind, { color: rgb(color), rough: preset.roughness, metal: preset.metalness });
+      m.clearcoat *= 0.5; // a coat of lacquer would smooth the detail away
+    }
   }
   // Flows and glowing parts are light already; everything else gets the edge light.
   if (!preset.emissive && p.shape !== "arrow") addRim(m, style === "blueprint" ? 0.9 : style === "xray" ? 0.7 : preset.metalness > 0.5 ? 0.28 : 0.2);

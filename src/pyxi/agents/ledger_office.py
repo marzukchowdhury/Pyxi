@@ -19,6 +19,7 @@ from pyxi.agents.ledger_common import (
     col_letter,
     col_number,
     hex_color,
+    split_tab,
     table_cells,
 )
 
@@ -76,60 +77,212 @@ _COLS = re.compile(r"(\$?)([A-Z]{1,3})")
 _ROWS = re.compile(r"(\$?)(\d+)")
 
 
+_GONE = "#REF!"
+
+
 def _shift_ref(ref: str, axis: str, at: int, delta: int) -> str:
     """One reference (A1, $B$2, A1:C9, A:A, 3:7) after rows or columns moved by ``delta``
-    from ``at`` on."""
+    from ``at`` on.
 
-    def part(text: str) -> str:
+    When rows were deleted (``delta`` below 0) the ones that went are ``at + delta`` to
+    ``at - 1``. A range that ended among them now ends just before them: a total under the
+    last data row used to keep its old end and add itself in. A cell that was one of them is
+    #REF!, as in Excel."""
+    gone = range(at + delta, at) if delta < 0 else range(0)
+
+    def split(text: str):
         if m := _CELL.fullmatch(text):
-            c_abs, col, r_abs, row = m.groups()
-            c, r = col_number(col), int(row)
-            if axis == "row" and r >= at:
-                r = max(1, r + delta)
-            if axis == "col" and c >= at:
-                c = max(1, c + delta)
-            return f"{c_abs}{col_letter(c)}{r_abs}{r}"
+            return m.group(1), col_number(m.group(2)), m.group(3), int(m.group(4))
         if axis == "col" and (m := _COLS.fullmatch(text)):
-            c = col_number(m.group(2))
-            return f"{m.group(1)}{col_letter(max(1, c + delta) if c >= at else c)}"
+            return m.group(1), col_number(m.group(2)), "", None
         if axis == "row" and (m := _ROWS.fullmatch(text)):
-            r = int(m.group(2))
-            return f"{m.group(1)}{max(1, r + delta) if r >= at else r}"
-        return text
+            return "", None, m.group(1), int(m.group(2))
+        return None
 
-    return ":".join(part(p) for p in ref.split(":"))
+    parts = [split(part) for part in ref.split(":")]
+    if len(parts) > 2 or any(part is None for part in parts):
+        return ref
+    out, places = [], []
+    for i, (c_abs, col, r_abs, row) in enumerate(parts):
+        n = row if axis == "row" else col
+        if n is not None:
+            if n in gone:
+                if len(parts) == 1:
+                    return _GONE
+                n = gone.start - 1 if i == 1 else gone.start
+            elif n >= at:
+                n += delta
+            if n < 1:
+                return _GONE
+            places.append(n)
+            if axis == "row":
+                row = n
+            else:
+                col = n
+        out.append(f"{c_abs}{col_letter(col) if col else ''}{r_abs}{row if row else ''}")
+    if len(places) == 2 and places[1] < places[0]:
+        return _GONE  # every row of the range went
+    return ":".join(out)
+
+
+def _shift_text(formula: str, owner: str, moved: str, axis: str, at: int, delta: int) -> str:
+    """A formula (with its =) written on sheet ``owner``, after rows or columns moved on sheet
+    ``moved``: the references that point there now point at where the cells went."""
+    from openpyxl.formula.tokenizer import Token, Tokenizer
+
+    try:
+        tokens = Tokenizer(formula).items
+    except Exception:
+        return formula
+    changed = False
+    for t in tokens:
+        if t.type != Token.OPERAND or t.subtype != Token.RANGE:
+            continue
+        prefix, bang, ref = t.value.rpartition("!")
+        if (prefix.strip("'").replace("''", "'") if bang else owner) != moved:
+            continue
+        new = _shift_ref(ref, axis, at, delta)
+        if new != ref:
+            t.value = f"{prefix}{bang}{new}"
+            changed = True
+    return "=" + "".join(t.value for t in tokens) if changed else formula
+
+
+def _reads(
+    formula: Any, owner: str, moved: str, axis: str, lo: int, hi: int, own: int | None = None
+) -> bool:
+    """Does this formula (written on sheet ``owner``) read rows or columns ``lo`` to ``hi`` of
+    sheet ``moved``? Then what it came to before those were deleted or reordered may no
+    longer hold. A reference to just ``own`` (the formula's own row, which moves with it)
+    doesn't count, and neither does a range that takes in all of ``lo`` to ``hi`` when rows
+    were only reordered (a total is the same whatever the order)."""
+    from openpyxl.formula.tokenizer import Token, Tokenizer
+
+    try:
+        tokens = Tokenizer(str(formula)).items
+    except Exception:
+        return True
+    for t in tokens:
+        if t.type != Token.OPERAND or t.subtype != Token.RANGE:
+            continue
+        prefix, bang, ref = t.value.rpartition("!")
+        if (prefix.strip("'").replace("''", "'") if bang else owner) != moved:
+            continue
+        places = []
+        for part in ref.split(":"):
+            if m := _CELL.fullmatch(part):
+                places.append(int(m.group(4)) if axis == "row" else col_number(m.group(2)))
+            elif axis == "col" and (m := _COLS.fullmatch(part)):
+                places.append(col_number(m.group(2)))
+            elif axis == "row" and (m := _ROWS.fullmatch(part)):
+                places.append(int(m.group(2)))
+            else:  # a whole column, a name, a table: it may well
+                return True
+        first, last = min(places), max(places)
+        if last < lo or first > hi or (own is not None and first == last == own):
+            continue
+        if own is not None and first <= lo and last >= hi:
+            continue
+        return True
+    return False
 
 
 def shift_formulas(wb, ws, axis: str, at: int, delta: int) -> None:
     """After rows or columns were inserted or deleted on ``ws``: every formula in the workbook
     that points at cells which moved now points at where they went. (openpyxl moves the cells
     but leaves the formulas as they were, so a total would quietly add up the wrong rows.)"""
-    from openpyxl.formula.tokenizer import Token, Tokenizer
-
     for sheet in wb.worksheets:
         for row in sheet.iter_rows():
             for cell in row:
                 v = cell.value
-                if not (isinstance(v, str) and v.startswith("=")):
+                if isinstance(v, str) and v.startswith("="):
+                    new = _shift_text(v, sheet.title, ws.title, axis, at, delta)
+                    if new != v:
+                        cell.value = new
+
+
+def shift_ranges(wb, ws, axis: str, at: int, delta: int) -> None:
+    """The rest of what names cells follows the rows or columns that moved on ``ws``:
+    conditional formats, dropdowns, the filter, tables, and what every chart draws. openpyxl
+    leaves all of these where they were: after one row was inserted at the top, a chart read
+    the header row as its first value and a colour rule sat one row too high."""
+    from openpyxl.formatting.formatting import ConditionalFormattingList
+
+    def text(f: Any, owner: str) -> Any:  # a formula kept without its "=" (rules, charts)
+        if not isinstance(f, str) or not f:
+            return f
+        lead = f.startswith("=")
+        new = _shift_text(f if lead else "=" + f, owner, ws.title, axis, at, delta)
+        return new if lead else new[1:]
+
+    def spans(sqref: Any) -> str:  # "A1:A5 C1:C5", without the ranges that went altogether
+        moved = (_shift_ref(part, axis, at, delta) for part in str(sqref).split())
+        return " ".join(m for m in moved if m != _GONE)
+
+    for sheet in wb.worksheets:
+        here = sheet is ws
+        rules = ConditionalFormattingList()
+        for cf in sheet.conditional_formatting:
+            where = spans(cf.sqref) if here else str(cf.sqref)
+            for rule in cf.rules:
+                if rule.formula:
+                    rule.formula = [text(f, sheet.title) for f in rule.formula]
+                if where:
+                    rules.add(where, rule)
+        sheet.conditional_formatting = rules
+        validations = sheet.data_validations.dataValidation
+        for dv in list(validations):
+            if here:
+                where = spans(dv.sqref)
+                if not where:
+                    validations.remove(dv)
                     continue
-                try:
-                    tokens = Tokenizer(v).items
-                except Exception:
+                dv.sqref = where
+            dv.formula1, dv.formula2 = text(dv.formula1, sheet.title), text(dv.formula2, sheet.title)
+        for chart in getattr(sheet, "_charts", []):
+            for series in getattr(chart, "series", None) or []:
+                for part in ("val", "cat", "tx", "xVal", "yVal", "zVal", "bubbleSize"):
+                    for kind in ("numRef", "strRef", "multiLvlStrRef"):
+                        source = getattr(getattr(series, part, None), kind, None)
+                        if source is not None and getattr(source, "f", None):
+                            source.f = text(source.f, sheet.title)
+            if not here:
+                continue
+            anchor = getattr(chart, "anchor", None)
+            if isinstance(anchor, str):  # the chart itself moves down with its rows
+                new = _shift_ref(anchor, axis, at, delta)
+                chart.anchor = anchor if new == _GONE else new
+                continue
+            for mark in (getattr(anchor, "_from", None), getattr(anchor, "to", None)):
+                if mark is None:
                     continue
-                changed = False
-                for t in tokens:
-                    if t.type != Token.OPERAND or t.subtype != Token.RANGE:
-                        continue
-                    prefix, bang, ref = t.value.rpartition("!")
-                    owner = prefix.strip("'") if bang else sheet.title
-                    if owner != ws.title:
-                        continue
-                    new = _shift_ref(ref, axis, at, delta)
-                    if new != ref:
-                        t.value = f"{prefix}{bang}{new}"
-                        changed = True
-                if changed:
-                    cell.value = "=" + "".join(t.value for t in tokens)
+                if axis == "row" and mark.row + 1 >= at:
+                    mark.row = max(0, mark.row + delta)
+                if axis == "col" and mark.col + 1 >= at:
+                    mark.col = max(0, mark.col + delta)
+    if ws.auto_filter.ref:
+        new = _shift_ref(ws.auto_filter.ref, axis, at, delta)
+        ws.auto_filter.ref = None if new == _GONE else new
+    for table in list(ws.tables.values()):
+        new = _shift_ref(table.ref, axis, at, delta)
+        if new == _GONE:
+            del ws.tables[table.name]
+            continue
+        if new == table.ref:
+            continue
+        table.ref = new
+        if table.autoFilter is not None and table.autoFilter.ref:
+            inner = _shift_ref(table.autoFilter.ref, axis, at, delta)
+            table.autoFilter.ref = new if inner == _GONE else inner
+        if axis == "col":
+            # Its columns are named again from the header cells when the file is saved, and
+            # Excel refuses a table with a blank heading: a new column inside it gets one.
+            table.tableColumns = []
+            c1, r1, c2, _ = a1_bounds(new)
+            for c in range(c1 or 1, (c2 or c1 or 1) + 1):
+                head = ws.cell(r1 or 1, c)
+                if head.value in (None, ""):
+                    head.value = f"Column{c - (c1 or 1) + 1}"
 
 
 class WorkbookExtras:
@@ -138,11 +291,8 @@ class WorkbookExtras:
     # ---------------------------------------------------------------- where
     def _range(self, op: dict[str, Any], key: str = "range"):
         """(worksheet, 'A1:D5') for an edit's range, which may name its sheet (Summary!A1:B4)."""
-        raw = str(op.get(key) or "").strip()
-        sheet = op.get("sheet")
-        if "!" in raw:
-            name, raw = raw.rsplit("!", 1)
-            sheet = name.strip().strip("'")
+        name, raw = split_tab(op.get(key))
+        sheet = name if name is not None else op.get("sheet")
         if not raw:
             raise LedgerError(f"{op.get('op')} needs a range like A1:D10.")
         ws = self.sheet(sheet)
@@ -290,14 +440,30 @@ class WorkbookExtras:
         if not keys:
             raise LedgerError('sort needs "by": the column to sort on.')
         rows = list(range(head + 1, last + 1))
+        # Checked before a single cell is written. A merged cell can't take a value, so the
+        # sort used to stop part-way: one row lost, another there twice, and the copy saved.
+        merged = [
+            str(m)
+            for m in ws.merged_cells.ranges
+            if m.min_row <= last and m.max_row >= head + 1 and m.min_col <= width
+        ]
+        if merged:
+            raise LedgerError(
+                f"{ws.title} has merged cells in the rows to sort ({', '.join(merged[:3])}), "
+                "and sorting would pull them apart. Unmerge them first, then sort."
+            )
+        ranks: dict[tuple[int, int], tuple] = {}
 
         def rank(r: int, c: int):
-            v = self.value(ws, r, c)
-            if v in (None, ""):
-                return (2, 0, "")
-            if isinstance(v, int | float) and not isinstance(v, bool):
-                return (0, v, "")
-            return (1, 0, str(v).lower())
+            if (r, c) not in ranks:
+                v = self.result(ws, r, c)  # a formula's result, never its text
+                if v in (None, ""):
+                    ranks[r, c] = (2, 0, "")
+                elif isinstance(v, int | float) and not isinstance(v, bool):
+                    ranks[r, c] = (0, v, "")
+                else:
+                    ranks[r, c] = (1, 0, str(v).lower())
+            return ranks[r, c]
 
         order = rows
         for c, down in reversed(keys):  # a stable sort, least important key first
@@ -310,6 +476,24 @@ class WorkbookExtras:
             r: [(ws.cell(r, c).value, copy(ws.cell(r, c)._style)) for c in range(1, width + 1)]
             for r in rows
         }
+        # What each formula on the sheet came to, before its row moves. A formula that reads
+        # only its own row comes to the same in its new place; one that reads other rows of
+        # the block (a running total) doesn't, and neither does one outside the block that
+        # reads a single row of it. A total over the whole block is unchanged.
+        known = {
+            at: v
+            for at, v in self._results(ws).items()
+            if not _reads(
+                ws.cell(*at).value,
+                ws.title,
+                ws.title,
+                "row",
+                rows[0],
+                rows[-1],
+                own=at[0] if rows[0] <= at[0] <= rows[-1] and at[1] <= width else 0,
+            )
+        }
+        to = dict(zip(order, rows, strict=True))  # where each row goes
         for dest, src in zip(rows, order, strict=True):
             for c, (v, style) in enumerate(saved[src], 1):
                 cell = ws.cell(dest, c)
@@ -318,6 +502,10 @@ class WorkbookExtras:
                     v = Translator(v, origin=origin).translate_formula(f"{col_letter(c)}{dest}")
                 cell.value = v
                 cell._style = style
+        # Excel's stored results belong to the rows as they were: the ones that moved with
+        # their rows go with them (so a second sort, or a look for duplicates, in the same
+        # job still has them).
+        self._carry(ws, known, lambda r, c: (to[r], c) if r in to and c <= width else (r, c))
         names = " then ".join(str(op[k]) for k in ("by", "then_by") if op.get(k) not in (None, ""))
         return f"Sorted {ws.title} by {names}, {'largest' if keys[0][1] else 'smallest'} first"
 
@@ -336,8 +524,15 @@ class WorkbookExtras:
 
     def op_freeze(self, op: dict[str, Any]) -> str:
         ws = self.sheet(op.get("sheet"))
-        cols = int(op.get("columns") or 0)
-        rows = int(op["rows"]) if op.get("rows") is not None else (0 if cols else 1)
+        # What isn't named stays as it is: "freeze the first column" used to unfreeze a
+        # header row that was already frozen.
+        had_rows = had_cols = 0
+        if ws.freeze_panes:
+            c1, r1, _, _ = a1_bounds(str(ws.freeze_panes))
+            had_rows, had_cols = (r1 or 1) - 1, (c1 or 1) - 1
+        named = op.get("rows") is not None or op.get("columns") is not None
+        rows = int(op["rows"]) if op.get("rows") is not None else (had_rows if named else 1)
+        cols = int(op["columns"]) if op.get("columns") is not None else had_cols
         ws.freeze_panes = ws.cell(rows + 1, cols + 1) if rows or cols else None
         if not rows and not cols:
             return f"Unfroze {ws.title}"
@@ -346,17 +541,82 @@ class WorkbookExtras:
         )
         return f"Froze the {' and the '.join(parts)} on {ws.title}"
 
+    def _move(self, ws, columns: bool, at: int, count: int) -> None:
+        """Insert ``count`` rows or columns at ``at`` (or, below 0, delete that many from
+        there), and have everything that names cells follow them: formulas, merged cells,
+        colour rules, dropdowns, the filter, tables and charts."""
+        axis = "col" if columns else "row"
+        edge, delta = (at, count) if count > 0 else (at - count, count)
+        # What every formula in the workbook is known to come to, to go with the cells that
+        # move. Without this, a sort by a formula column after a title row went in was
+        # refused even on a file Excel had calculated. A formula that read what is being
+        # deleted is not kept: its total is a different number now.
+        known = {}
+        for sheet in self.wb.worksheets:
+            known[id(sheet)] = {
+                cell: v
+                for cell, v in self._results(sheet).items()
+                if count > 0
+                or not _reads(sheet.cell(*cell).value, sheet.title, ws.title, axis, at, edge - 1)
+            }
+        # Merged ranges are taken off first and put back where they belong: openpyxl would
+        # leave them covering whatever slid into their old place.
+        merged = [str(m) for m in ws.merged_cells.ranges]
+        for m in merged:
+            ws.unmerge_cells(m)
+        if count > 0:
+            (ws.insert_cols if columns else ws.insert_rows)(at, count)
+        else:
+            (ws.delete_cols if columns else ws.delete_rows)(at, -count)
+        for m in merged:
+            new = _shift_ref(m, axis, edge, delta)
+            first, _, last = new.partition(":")
+            if new != _GONE and last and first != last:
+                ws.merge_cells(new)
+        shift_formulas(self.wb, ws, axis, edge, delta)
+        shift_ranges(self.wb, ws, axis, edge, delta)
+
+        def moved_to(r: int, c: int) -> tuple[int, int] | None:
+            n = c if columns else r
+            if count < 0 and at <= n < edge:
+                return None  # the cell itself went
+            n = n + delta if n >= edge else n
+            return (r, n) if columns else (n, c)
+
+        for sheet in self.wb.worksheets:
+            self._carry(sheet, known[id(sheet)], moved_to if sheet is ws else lambda r, c: (r, c))
+
+    def _results(self, ws) -> dict[tuple[int, int], Any]:
+        """What each formula on a sheet is known to come to right now, by cell: stored by
+        Excel, carried along by an earlier move, or worked out a moment ago."""
+        out = {}
+        for at, cell in list(ws._cells.items()):
+            if cell.data_type == "f" and isinstance(cell.value, str):
+                try:
+                    out[at] = self.result(ws, at[0], at[1], work_out=False)
+                except LedgerError:
+                    pass
+        return out
+
+    def _carry(self, ws, known: dict[tuple[int, int], Any], where) -> None:
+        """After cells moved on a sheet: Excel's stored results no longer line up with it, and
+        what is still known is these results, at the cells' new places (``where(r, c)``)."""
+        carried = {}
+        for (r, c), value in known.items():
+            new = where(r, c)
+            text = ws.cell(*new).value if new else None
+            if isinstance(text, str) and text.startswith("="):
+                carried[new] = (text, value)
+        self._moved.add(id(ws))
+        self._carried[id(ws)] = carried
+
     def _insert(self, op: dict[str, Any], columns: bool) -> str:
         ws = self.sheet(op.get("sheet"))
         at = self._index(op.get("at"), columns) if op.get("at") not in (None, "") else None
         if at is None:
             raise LedgerError(f"{op.get('op')} needs at: where the new ones go.")
         count = max(1, int(op.get("count") or 1))
-        if columns:
-            ws.insert_cols(at, count)
-        else:
-            ws.insert_rows(at, count)
-        shift_formulas(self.wb, ws, "col" if columns else "row", at, count)
+        self._move(ws, columns, at, count)
         return f"Inserted {_plural(count, 'column' if columns else 'row')} at {op.get('at')} on {ws.title}"
 
     def op_insert_rows(self, op: dict[str, Any]) -> str:
@@ -369,11 +629,7 @@ class WorkbookExtras:
         ws = self.sheet(op.get("sheet"))
         start, end = self._span(op, "from", columns)
         count = end - start + 1
-        if columns:
-            ws.delete_cols(start, count)
-        else:
-            ws.delete_rows(start, count)
-        shift_formulas(self.wb, ws, "col" if columns else "row", end + 1, -count)
+        self._move(ws, columns, start, -count)
         return f"Deleted {_plural(count, 'column' if columns else 'row')} on {ws.title}"
 
     def op_delete_rows(self, op: dict[str, Any]) -> str:
@@ -627,13 +883,23 @@ class WorkbookExtras:
 
         src_ws, src = self._range(op, "from")
         dest_ws, dest = self._range(op, "to")
-        c1, r1, _, _ = a1_bounds(src)
-        dc, dr, _, _ = a1_bounds(dest)
+        c1, r1, c2, r2 = a1_bounds(src)
+        dc, dr, dc2, dr2 = a1_bounds(dest)
+        if op.get("format_only"):
+            # How the cells look, repeated over the whole of the range named, and nothing of
+            # what is in them ("the same background as A2").
+            wide, tall = c2 - c1 + 1, r2 - r1 + 1
+            for r in range(dr, max(dr2, dr + tall - 1) + 1):
+                for c in range(dc, max(dc2, dc + wide - 1) + 1):
+                    like = src_ws.cell(r1 + (r - dr) % tall, c1 + (c - dc) % wide)
+                    dest_ws.cell(r, c)._style = copy(like._style)
+            return f"Made {op.get('to')} look like {op.get('from')}"
         moved = []
         for cell in self._cells(src_ws, src):
-            moved.append(
-                (cell.row - r1, cell.column - c1, cell.value, copy(cell._style), cell.coordinate)
-            )
+            v = cell.value
+            if op.get("values_only"):  # what the formula comes to (it used to paste a blank)
+                v = self.result(src_ws, cell.row, cell.column)
+            moved.append((cell.row - r1, cell.column - c1, v, copy(cell._style), cell.coordinate))
         if op.get("cut"):
             for cell in self._cells(src_ws, src):
                 cell.value = None
@@ -641,8 +907,6 @@ class WorkbookExtras:
             target = dest_ws.cell(dr + row, dc + col)
             if isinstance(v, str) and v.startswith("=") and not op.get("values_only"):
                 v = Translator(v, origin=origin).translate_formula(target.coordinate)
-            elif isinstance(v, str) and v.startswith("=") and self.values is not None:
-                v = self.values[src_ws.title][origin].value
             target.value = v
             target._style = style
         return f"{'Moved' if op.get('cut') else 'Copied'} {src} to {dest.split(':')[0]}"
@@ -662,16 +926,35 @@ class WorkbookExtras:
             if op.get("columns")
             else list(range(1, width + 1))
         )
+        from openpyxl.formula.translate import Translator
+
+        def part(r: int, c: int) -> Any:
+            v = ws.cell(r, c).value
+            if not (isinstance(v, str) and v.startswith("=")):
+                return str(v or "").strip().lower()
+            try:
+                return str(self.result(ws, r, c) or "").strip().lower()
+            except LedgerError:
+                # A formula nobody has calculated. Named as a column to compare by, its
+                # result is what's asked for and isn't known. Among all the columns, two
+                # rows are the same when their other cells are and the formula is the same
+                # one (read as from its own row), which is how it used to be counted.
+                if op.get("columns"):
+                    raise
+                at = f"{col_letter(c)}{r}"
+                return ("=", Translator(v, origin=at).translate_formula(f"{col_letter(c)}{head + 1}"))
+
         seen: set[tuple] = set()
         gone = []
         for r in range(head + 1, last + 1):
-            key = tuple(str(self.value(ws, r, c) or "").strip().lower() for c in cols)
+            key = tuple(part(r, c) for c in cols)
+            if all(isinstance(k, tuple) for k in key):  # nothing but formulas to go by
+                self.result(ws, r, cols[0])
             if key in seen:
                 gone.append(r)
             seen.add(key)
         for r in reversed(gone):
-            ws.delete_rows(r, 1)
-            shift_formulas(self.wb, ws, "row", r + 1, -1)
+            self._move(ws, False, r, -1)
         return f"Removed {_plural(len(gone), 'duplicate row')} on {ws.title}"
 
     def op_trim(self, op: dict[str, Any]) -> str:

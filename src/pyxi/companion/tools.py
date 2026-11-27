@@ -8,6 +8,7 @@ from pyxi.agents.pixel import OPERATIONS as PIXEL_OPERATIONS
 from pyxi.companion.notes import DIAGRAM_SCHEMA
 from pyxi.scenes import TITLES, tool_schema
 from pyxi.scenes import library as model_library
+from pyxi.scenes.diagram import DIAGRAM_TOOL_SCHEMA
 from pyxi.scenes.object_gallery import OBJECT_TITLES
 from pyxi.scenes.objects import build_tool_schema, edit_tool_schema
 from pyxi.scenes.sketch import SKETCH_TOOL_SCHEMA
@@ -16,7 +17,9 @@ _QUOTE = {
     "quote": {
         "type": "string",
         "description": "The exact words on screen this is about, copied from the OCR text list (e.g. "
-        "'Iran War'). Pyxi finds those words and marks them precisely; best for text in images.",
+        "'Iran War'). Pyxi finds those words and marks them precisely; best for text in images. If those "
+        "words are on screen in more than one place, also give x and y (or a box) roughly where you "
+        "mean: Pyxi takes the match nearest to it.",
     }
 }
 _TARGET = {
@@ -100,6 +103,66 @@ BUILD_BRIEF = _tool(
     ["subject", "show"],
 )
 
+# A photo made into a 3D model (scenes/photo.py). Offered only when a 3D builder is configured.
+MODEL_FROM_PHOTO = _tool(
+    "model_from_photo",
+    "Make a 3D model of the thing in a PICTURE: a photo on their screen (in a browser, an image "
+    "viewer, a shop page), a picture they put in the chat box, or an image file they name. Use "
+    "it whenever they ask for a 3D model OF a picture or of the thing in one ('make a 3D model "
+    "of this', 'turn this photo into 3D', 'model the chair in this picture', 'make a 3D model of "
+    "the photo on my desktop called chair'). The model is measured against the photo (shape, "
+    "proportions, colours) and shown with the photo beside it; it takes about half a minute. "
+    "Use build_3d_model instead when there is no picture and they just name a thing. In the "
+    "same reply `say` ONE short line (that you are on it), and never describe the picture's "
+    "parts or promise what the model will have: its own narration does that. It models things, "
+    "not people: never use it to model a person or a face (say you can do an object in the "
+    "picture, not the person).",
+    {
+        "source": {
+            "type": "string",
+            "enum": ["screen", "attached", "file"],
+            "description": "Where the picture is. attached: the picture they put in the chat box "
+            "with this message (the last image you were sent), or the same picture as a moment "
+            "ago when they are answering which thing in it they meant. screen: a picture "
+            "showing on their screen. file: an image file they named.",
+        },
+        "element_id": {
+            "type": "integer",
+            "description": "source screen: the picture's element on screen, when it has one.",
+        },
+        "box": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "source screen, when the picture has no element: [x, y, width, height] "
+            "of the picture in screenshot px, with a little room round it.",
+        },
+        "path": {
+            "type": "string",
+            "description": "source file: the full path, when they gave one or search_files found it.",
+        },
+        "name": {
+            "type": "string",
+            "description": "source file, when they gave only a name: the file's name without "
+            "its folder ('chair'). Pyxi looks for a picture called that.",
+        },
+        "folder": {
+            "type": "string",
+            "description": "source file with `name`: where they said it is ('desktop', "
+            "'downloads', 'pictures', 'documents'), if they said.",
+        },
+        "object": {
+            "type": "string",
+            "description": "Which thing in the picture, ONLY if they said ('the chair', 'the red "
+            "car'). Leave out otherwise: Pyxi takes the main thing and says so.",
+        },
+        "show": {
+            "type": "string",
+            "description": "Anything they asked to have explained or shown about it, if they did.",
+        },
+    },
+    ["source"],
+)
+
 COMPANION_TOOLS: list[ToolSpec] = [
     SAY,
     _tool("point", "Fly over and point at something on screen.", {**_TARGET, **_LABEL}),
@@ -131,7 +194,8 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "a block; the card places itself where it hides nothing. Give every point a `say`: one short sentence "
         "(under 15 words) you speak as it appears (its mark draws at that moment), in your voice, not reading "
         "the card. "
-        "Your separate `say` call is only the opener (the verdict and a hook, no [note:N] markers); Pyxi then "
+        "Your separate `say` call is only the opener: ONE sentence, the verdict (no [note:N] markers). "
+        "Anything after its first sentence is not spoken, because Pyxi then "
         "talks through the points in order. Answer their actual question in the points (the why, the catch). "
         "Finish with `closing`, so the explanation lands instead of stopping. "
         "PICTURES: when they ask about a diagram, photo, drawing, map or illustration on screen (a heart, an "
@@ -274,8 +338,8 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "guide",
         "Teach them to do it themselves, in any app or site (Vercel, CapCut, Excel, Settings), one step at a "
         "time until they're done: mark the one thing to act on next, with an arrow to it, and say what to do "
-        "and why in one short friendly sentence. Pyxi waits for them to do it (a click on the mark, or Done "
-        "for other steps), looks at the new screen, and you give the next step (call guide again), until "
+        "and why in one short friendly sentence. Pyxi waits for them to do it (a click on the mark; for a "
+        "scroll, typing, a key or a drag it sees the screen change, or they press Done or say 'done'), looks at the new screen, and you give the next step (call guide again), until "
         "the goal is reached (done=true, with a cheerful line). Use `use_computer` instead when they want "
         "you to do it for them. If you're not sure where things are in this version of the app, web_search "
         "the current steps first. Before a step that inserts or pastes something at the cursor, first "
@@ -285,6 +349,12 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "data. To select a range, they click the first cell, then Shift+click the last one (or type the "
         "range, like A1:C13, in the Name box at the top left). Call done=true only when the screen shows "
         "the finished result (a pivot with its rows and values filled in, not just the empty editor). "
+        "A control listed as '(cut off at the bottom edge: only part of it shows)' needs a scroll first: "
+        "action 'scroll' with its element_id and the direction, and Pyxi marks the list it is in. Never "
+        "give the step you just gave a second time: if they haven't done it, say one short line and wait "
+        "(only a scroll that hasn't brought the thing into view yet may be asked for once more). "
+        "Point at the control they act on: `element_id` is the switch, the button or the row itself, "
+        "never the words beside it, and `quote` is the words on it. "
         "If the app isn't on screen any more (they switched away), don't guess: say one short line and "
         "stop calling guide, which ends the coaching.",
         {
@@ -348,9 +418,11 @@ COMPANION_TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         "sketch_diagram",
-        "Draw a hand-made diagram that inks itself in while you talk: the fastest, clearest way to explain a "
-        "mechanism, force, flow, process or comparison ('is this real?', 'how does it hover?', 'why does it "
-        "float?', 'how does the signal get there?'). Grid is 100 wide x 64 tall, y down. Draw the subject simply "
+        "Draw a hand-made diagram that inks itself in while you talk: the fastest, clearest way to explain how "
+        "a physical thing works, a mechanism, a force or a flow through a shape ('is this real?', 'how does it "
+        "hover?', 'why does it float?', 'how does the signal get there?'). For an idea with a known shape (a "
+        "process, a decision, an order of events, a comparison, a hierarchy, a cycle) use draw_diagram instead. "
+        "Grid is 100 wide x 64 tall, y down. Draw the subject simply "
         "(a side view outline as one polygon or curve, its key parts as rects/ellipses), then what acts on it "
         "(arrows; flow=true when something moves: air, water, current, data), then short labels (text) next to "
         "what they name, and finish with the takeaway as an `equation` or rule ('Lift = weight'). Each shape has "
@@ -364,6 +436,22 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "step 2; arrow [[58,40],[58,52]] muted step 2; text 'Weight' at [61,50] step 2; equation 'Lift = weight' "
         "at [58,12] step 3.",
         SKETCH_TOOL_SCHEMA,
+    ),
+    ToolSpec(
+        "draw_diagram",
+        "Draw a tidy diagram of an idea that inks itself in while you talk. You choose the type and give only "
+        "the content; Pyxi lays it out, so nothing overlaps. Types: steps (a process in order), flowchart (a "
+        "decision with branches), timeline (events in order, each with `when`), comparison (two `columns` "
+        "with a `side` on each item, or two `axes` with x and y on each item), tree (a hierarchy), loop (a "
+        "cycle that feeds itself). Fewer is clearer: 3-7 items, never more than 9, each label 1-4 words and "
+        "28 characters at most ('Valve drops pressure', not 'Expansion valve drops pressure': a longer one "
+        "is sent back and the drawing is late), and "
+        "`focus` on the one or two that matter most (the answer, the turning point). Each item has a `step`; "
+        "give 2-5 steps, each one short spoken sentence, so it builds with the words. For how a physical thing "
+        "works (a jet hovering, a pump, a force) use sketch_diagram instead. Example, 'what happens if I miss "
+        "my flight': type flowchart; items a 'Flight missed' step 0, b 'Flexible ticket?' step 1, c 'Rebooked "
+        "free' step 1, d 'Pay the change fee' step 2 focus; links a to b, b to c 'yes', b to d 'no'.",
+        DIAGRAM_TOOL_SCHEMA,
     ),
     ToolSpec(
         "build_3d_model",
@@ -388,6 +476,7 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "for vehicles and profiles, iso to show depth, close for a detail.",
         build_tool_schema(),
     ),
+    MODEL_FROM_PHOTO,
     ToolSpec(
         "edit_3d_model",
         "Change the 3D model already on screen: 'show the inside' (cutaway), 'remove the casing' (hide), "
@@ -436,22 +525,36 @@ COMPANION_TOOLS: list[ToolSpec] = [
         "for work that needs a site worked step by step (a form, a sign-in, a cart, a booking, many pages compared "
         "in depth); that takes a minute or more, so never for 'find me / what's a good / the cheapest / the best X', "
         "which web_search answers in seconds. "
-        "Writers (like Quill) draft text; explainers (like Sketch) build 3D scenes. Chain a handoff with then_agent/"
-        "then_task, e.g. Scout researches then Quill drafts. Give complete, specific instructions. For files use "
-        "convert_files (Pixel) and edit_document (Ledger) instead: they're faster and exact.",
+        "Writers (like Quill) draft text, and fix the grammar of, translate, rewrite or summarize a document "
+        "given in files; explainers (like Sketch) build 3D scenes. Quill fixes a PDF too, on its own: it turns "
+        "the PDF into Word itself and returns the corrected Word file beside the original, so 'turn this PDF "
+        "into Word and fix the grammar' is ONE delegate to Quill with the PDF, never a conversion first. "
+        "Two teammates, one after the other (Scout researches, then Quill drafts): pass then_agent and "
+        "then_task in this same call, and the second starts by itself on what the first made. Whenever your "
+        "line says a second teammate comes next ('then Quill...'), then_agent must be in the call, or that "
+        "teammate never starts. Give complete, specific instructions. For other file work use convert_files "
+        "(Pixel) and edit_document (Ledger) instead: they're faster and exact.",
         {
             "agent": {"type": "string"},
             "task": {"type": "string"},
             "start_url": {"type": "string"},
-            "then_agent": {"type": "string"},
-            "then_task": {"type": "string"},
+            "then_agent": {
+                "type": "string",
+                "description": "The teammate who takes over when this one is done (Quill, Pixel, "
+                "Ledger, Scout...). It gets the result, and any file that was made, by itself.",
+            },
+            "then_task": {
+                "type": "string",
+                "description": "What then_agent does with the result, in full: it has not heard "
+                "the conversation ('Fix the grammar and spelling; keep the meaning').",
+            },
             "files": {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Paths of documents on this PC for a writer to fix, translate or "
                 "rewrite (.docx, .txt, .md, .pdf) or summarize (also .xlsx, .pptx, .html); the new "
-                "copy is saved beside the original. Say what to do in task ('Summarize the key "
-                "dates', 'Translate into French').",
+                "copy is saved beside the original (a PDF comes back as a Word file). Say what "
+                "to do in task ('Summarize the key dates', 'Translate into French').",
             },
         },
         ["agent", "task"],
@@ -490,7 +593,9 @@ COMPANION_TOOLS: list[ToolSpec] = [
     ),
     _tool(
         "read_page",
-        "Read the text of one web page (a search result, or a link on screen) when the snippet isn't enough.",
+        "Read the text of one web page (a search result, or a link on screen) when the snippet isn't enough. "
+        "Not needed for a shop's search results: open those with quick_action open_url and every result "
+        "comes back to you as a list, with its price and rating.",
         {"url": {"type": "string"}},
         ["url"],
     ),
@@ -537,7 +642,7 @@ COMPANION_TOOLS += [
     _tool(
         "errand",
         "Do something in the background with the user's connected accounts: set up a meeting or "
-        "invite, write or reply to an email, create a doc, post to Discord or LinkedIn. You say one short "
+        "invite, write or reply to an email, create a doc. You say one short "
         "line first that names the job ('Writing to Sam about Friday.') and they're told when it's "
         "done. Write the task completely and exactly: every name, email address, date and time as the "
         "user said them. If something essential is missing (like when the meeting is), ask the user "
@@ -552,12 +657,16 @@ COMPANION_TOOLS += [
         "for?', 'find subscriptions I forgot', 'how much do I spend on subscriptions?'. "
         "action=cancel with the service ('cancel Netflix', 'stop my Adobe plan') opens its cancel "
         "page after an approval card; Pyxi never cancels anything itself, the user presses the "
-        "final button. Say one short line that names the job; the result comes as a notification.",
+        "final button. Say one short line that names the job; the result is said and shown on a "
+        "card when it is ready. It has no options: a second find reads the same receipts and "
+        "gives the same list, so never promise a stricter or deeper recheck. When they say one "
+        "on the list isn't a subscription or isn't something they pay for, action=not_one with "
+        "its name takes it off for good; that answers at once, so say what it tells you.",
         {
-            "action": {"type": "string", "enum": ["find", "cancel"]},
+            "action": {"type": "string", "enum": ["find", "cancel", "not_one"]},
             "service": {
                 "type": "string",
-                "description": "For cancel: the service, as they said it.",
+                "description": "For cancel and not_one: the service, as they said it.",
             },
         },
     ),
@@ -572,16 +681,35 @@ COMPANION_TOOLS += [
     ),
     _tool(
         "quick_action",
-        "Do a small thing for the user right now: open_url (a website), open_app (notepad, calculator, chrome, "
-        "word, excel, spotify, discord, settings, 'sound settings', 'microphone privacy'...), copy (exact text to "
+        "Do a small thing for the user right now: open_url (a website), open_app (ANY program on this PC, by the "
+        "name they said, even if it sounds a little off: it knows every program in their Start menu and on "
+        "their desktop, so try it before saying you can't see one, and never say you can't open or launch "
+        "an app: Excel, Word and the rest open this way; also settings pages like 'sound settings', "
+        "'microphone privacy'), copy (exact text to "
         "the clipboard), or insert (type a drafted message into the text field they're in, e.g. 'write a reply "
         "to this'), media (the music or video that's playing, in any app: value playpause, next, "
         "previous; instant, no mouse), or volume (Windows' volume, instant: a number like 30, a change "
-        "like -15, or lower, a bit lower, higher, low, mute). Only when they asked for it.",
+        "like -15, or lower, a bit lower, higher, low, mute), or tabs (the tabs of the browser in "
+        "front, by its own keys, instant, no mouse: value close (the tab they're on), "
+        "'close last 4' (that many tabs counted from the right end), new, reopen (the tab "
+        "just closed), next, previous), or listening (where their speech is turned into text: "
+        "value 'this pc' keeps their voice on this PC so nothing they say is sent, 'cloud' is the "
+        "usual way; for 'turn my speech into text on this PC only', 'stop sending my voice to "
+        "the cloud', 'listen offline'). Only when they asked for it.",
         {
             "action": {
                 "type": "string",
-                "enum": ["open_url", "open_app", "copy", "insert", "media", "volume", "screen_playpause"],
+                "enum": [
+                    "open_url",
+                    "open_app",
+                    "copy",
+                    "insert",
+                    "media",
+                    "volume",
+                    "screen_playpause",
+                    "tabs",
+                    "listening",
+                ],
             },
             "value": {"type": "string", "description": "The URL, app name, or text."},
         },
@@ -595,9 +723,12 @@ COMPANION_TOOLS += [
         "Google Sheets or Docs, Excel, Word, Notion, Airtable, an email). Use it to put data, a sample "
         "table, a list of rows or an empty table into the file they're looking at whenever Ledger can't "
         "reach that file: it's Excel or Word in a browser tab, another app or site, or edit_document said "
-        "it can't open it. It only fills cells: a cell that starts with = is a formula in a spreadsheet, "
-        "but a pivot, a chart or formatting needs edit_document. It lands where their cursor is, so if "
-        "nothing is selected yet say 'click the cell where it should start' first. Say one short line.",
+        "it can't open it. It only fills cells: a cell that starts with = is a formula in a spreadsheet; "
+        "a pivot, a chart or formatting is edit_document in a Google file, a file on disk or the "
+        "Excel, Word or PowerPoint app (which puts the cells in too, so use it alone there), and "
+        "use_computer through the app's menus anywhere else. It lands at the selected cell and clicks "
+        "it itself when it has to: a new sheet has A1 selected, so paste, and never ask them to click a "
+        "cell first. Say one short line.",
         {
             "rows": {
                 "type": "array",
@@ -789,7 +920,9 @@ COMPANION_TOOLS += [
         "from the taskbar, or a new tab, then come back), search Maps, rename or move files in Explorer, "
         "change a setting in an app, click through a site. Never for files, PDFs, images, Excel, Word, "
         "PowerPoint, Google Sheets or Google Docs: convert_files and edit_document do those in the "
-        "background, in seconds, without their mouse. They see an Allow card first, watch the cursor move, and can stop it by "
+        "background, in seconds, without their mouse, and that includes the workbook, document or "
+        "deck open in the Excel, Word or PowerPoint app (edit_document with app), unless "
+        "edit_document just said it can't reach it. They see an Allow card first, watch the cursor move, and can stop it by "
         "moving the mouse or pressing Esc; anything that sends, buys, posts or deletes asks again. Use it "
         "whenever they ask you to DO something on screen; use `guide` instead when they want to learn to "
         "do it themselves. Give `task` exactly: what to do, in which app, and what done looks like, plus "
@@ -818,7 +951,13 @@ COMPANION_TOOLS += [
         "Arrange their windows, right now, in one call: two, three or four windows side by side, stacked or in "
         "a grid (layout 'panes'), split the screen in two ('split'), or snap, maximize, minimize or restore the "
         "window they're in. Any request to lay windows out goes here, never to use_computer: this places "
-        "every window exactly and instantly. Just do it when asked; never tell them to do it themselves.",
+        "every window exactly and instantly. Just do it when asked; never tell them to do it themselves. "
+        "It also OPENS what a pane names when that isn't open yet, so 'open X on the left' is this one call "
+        "with X as a pane: a website by its address, an app by its name, a new blank Google file by its "
+        "address (https://sheets.new, https://docs.new, https://slides.new), an empty browser tab as "
+        "'new tab'. Give each pane exactly what they asked for on that side: 'current' only for the window "
+        "they're in when they meant it, never in place of a new tab or a new file they asked for. Only say "
+        "something is being opened when a pane names it; otherwise say what goes where.",
         {
             "layout": {
                 "type": "string",
@@ -840,8 +979,10 @@ COMPANION_TOOLS += [
                 "description": "For panes: what goes in each part, in order (left to right, or top to "
                 "bottom; for a grid: top left, top right, bottom left, bottom right). Each is 'current' "
                 "(the window they're in), a website (https://stake.com, https://mail.google.com), an app "
-                "(notepad, spotify), or a window that's already open (Gmail, CapCut). Open windows are "
-                "reused; the rest open in new windows of their browser.",
+                "(notepad, spotify), a window that's already open (Gmail, CapCut), a new blank Google "
+                "file (https://sheets.new) or 'new tab' (an empty browser window). Open windows are "
+                "reused; the rest open in new windows of their browser; a new file or a new tab is "
+                "always opened new.",
             },
             "arrangement": {
                 "type": "string",
@@ -857,8 +998,9 @@ COMPANION_TOOLS += [
             },
             "open": {
                 "type": "string",
-                "description": "For split: the website (e.g. https://sheets.google.com) or app (excel, notepad) "
-                "for the other half.",
+                "description": "For split: the website (e.g. https://sheets.google.com), app (excel, notepad), "
+                "new blank Google file (https://sheets.new) or 'new tab' for the other half. It is opened "
+                "if it isn't open already.",
             },
             "current_side": {
                 "type": "string",
@@ -988,7 +1130,15 @@ COMPANION_TOOLS += [
         "for scans); a searchable PDF from a scan; compare two documents; HEIC to JPG; resize or "
         "shrink images; CSV and Excel. Needs real paths: from what's on screen (an Explorer window, "
         "an attachment you downloaded), from search_files, or from them. The original is never "
-        "changed; the new file goes beside it. Say one short line that names the job; they get a notification.",
+        "changed; the new file goes beside it. A size they name is passed on, not just said: "
+        "'make it under 80 KB' is compress_pdf with options target_kb 80, 'at least 20 KB "
+        "smaller' is reduce_by_kb 20, and Pixel works down to it or says why it can't. "
+        "When they ask for a second step on the new file in the same breath ('turn it into Word, "
+        "then shorten it', 'merge these and have Ledger total them'), pass then_agent and "
+        "then_task in this same call: that teammate starts on the new file the moment Pixel is "
+        "done. Never say 'then Quill...' without them: nothing would follow. One exception that "
+        "needs no chain: fixing the grammar of a PDF is a single delegate to Quill with the PDF "
+        "(Quill turns it into Word itself). Say one short line that names the job; they get a notification.",
         {
             "operation": {
                 "type": "string",
@@ -1006,9 +1156,22 @@ COMPANION_TOOLS += [
                 "delete_pages, rotate_pages, pdf_to_images; 'last' works), order ('3, 1-2' for "
                 "reorder_pages), angle (90, 180, 270, left, right), text (the watermark), "
                 "position ('bottom right', 'top center') and format ('Page {n} of {total}') for "
-                "page numbers, values ({field name: value} for fill_form, only what they told "
+                "page numbers, values ({what the form asks for, in its own words: their answer} for fill_form, "
+                "such as {\"Monthly rent\": \"1800\", \"Landlord name\": \"Sam Example\"}, only what they told "
                 "you), name (new file's name, no extension), format (jpg, png, webp...), "
-                "quality (1-95), max_side, width, height, percent, dpi, sheet. Never a password.",
+                "quality (1-95), max_side, width, height, percent, dpi, sheet, target_kb (the "
+                "size a PDF must get under, in KB) or reduce_by_kb (how many KB to take off "
+                "it) for compress_pdf. Never a password.",
+            },
+            "then_agent": {
+                "type": "string",
+                "description": "The teammate who works on the new file next (Quill, Ledger...), "
+                "when they asked for two steps. It is handed the file by itself.",
+            },
+            "then_task": {
+                "type": "string",
+                "description": "What then_agent does with the new file, in full ('Make it more "
+                "formal', 'Add a totals row').",
             },
         },
         ["operation", "files"],
@@ -1025,19 +1188,51 @@ COMPANION_TOOLS += [
         "text boxes, shapes, pictures, tables and charts on a slide, moving and resizing things, "
         "backgrounds, speaker notes. Changing something already there (the table in this doc, the "
         "chart on this sheet) is this tool too: say which one in the task. A local file is saved as "
-        "a copy beside the original; Google files are edited in place. For fixing the grammar of a "
-        "document, delegate to Quill instead. Say one short line that names the job; they get a "
-        "notification.",
+        "a copy beside the original; Google files are edited in place. A workbook, document or deck "
+        "that is OPEN in the Excel, Word or PowerPoint app on this PC is changed right there, live, "
+        "in a few seconds and without their mouse: give `app` (and no files). Nothing is saved and "
+        "no copy is made; it can do cells, formulas, totals, formatting, sorting, a pivot and a chart "
+        "in Excel, headings, text, formatting, find and replace, tables and page setup in Word, and "
+        "slides, text, pictures and slide order in PowerPoint, and it says so itself when a request "
+        "needs the mouse instead. "
+        "BUILDING a workbook is Ledger's as well, and only Ledger's: anything more than a sheet "
+        "or two (a financial model, a tracker with several tabs, 'a 15-sheet workbook') is never "
+        "use_computer and never `app`, whatever app they named, because the mouse and keyboard "
+        "cannot click fifteen tabs into being. Ledger builds it as a file, sheet by sheet, and "
+        "it is opened for them when it's ready: files ['new xlsx: <title>'] when they named "
+        "Excel or any desktop app (GenOffice, LibreOffice, WPS: they all open .xlsx), or google "
+        "['new sheet: <title>'] when they named Google Sheets or no app at all and Google is "
+        "connected. Put their whole brief in task, word for word: every sheet, column and "
+        "formula they asked for. Say in your one line that it is being built as a file and "
+        "will open when ready. "
+        "MAKING A DECK is Ledger's too ('make a presentation about X', 'turn this report into "
+        "slides', 'a 10-slide pitch deck from this PDF'): files ['new pptx: <title>'], and "
+        "when it is made from a file (Word, PDF, text, Markdown, Excel or CSV) that file's "
+        "path beside it in files. It is a real PowerPoint file with designed layouts, native "
+        "charts from the file's own figures and speaker notes; a deck made from a file holds "
+        "only what the file says. Put in task everything they said: the subject, who it is "
+        "for, how many slides, a theme if they named one (slate, paper, signal, forest, "
+        "dusk). Use google ['new slides: <title>'] only when they asked for Google Slides. "
+        "If they haven't said what the deck is about and gave no file, ask that first. "
+        "For fixing the grammar of a "
+        "document, delegate to Quill instead. A second teammate on the result (Ledger builds "
+        "it, then Pixel makes it a PDF) is then_agent and then_task in this same call. Say one "
+        "short line that names the job; they get a notification.",
         {
             "task": {
                 "type": "string",
                 "description": "Exactly what to change, with every value they gave, e.g. 'Add a "
-                "totals row under the Amount column' or 'Make a pivot of total sales by region'.",
+                "totals row under the Amount column' or 'Make a pivot of total sales by region'. "
+                "For a workbook to build, the whole brief.",
             },
             "files": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Full paths of .xlsx, .docx or .pptx files on this PC.",
+                "description": "Full paths of .xlsx, .docx or .pptx files on this PC. Or, to "
+                "build a new Excel workbook that doesn't exist yet, the one entry 'new xlsx: "
+                "<title>' (it is saved in Documents\\Pyxi and opened for them). Or, to make a "
+                "new deck, 'new pptx: <title>', alone for a deck on a subject or with the "
+                "paths of the files to make it from (saved beside them and opened).",
             },
             "google": {
                 "type": "array",
@@ -1046,6 +1241,22 @@ COMPANION_TOOLS += [
                 "words from the file's name ('sales sheet'), 'this sheet' / 'this doc' / 'this "
                 "deck' for the one open on screen, or 'new sheet: <title>' / 'new doc: <title>' / "
                 "'new slides: <title>' to make a new one.",
+            },
+            "app": {
+                "type": "string",
+                "enum": ["excel", "word", "powerpoint"],
+                "description": "The Microsoft Excel, Word or PowerPoint app on this PC, for the "
+                "workbook, document or deck open in it now (the window in front, or the app they "
+                "named). Not for Office in a browser tab, and never together with files or google.",
+            },
+            "then_agent": {
+                "type": "string",
+                "description": "The teammate who works on the edited file next (Pixel, Quill...), "
+                "when they asked for two steps. It is handed the file by itself.",
+            },
+            "then_task": {
+                "type": "string",
+                "description": "What then_agent does with it, in full ('Turn it into a PDF').",
             },
         },
         ["task"],
@@ -1114,6 +1325,12 @@ from pyxi.companion.specialists import SPECS as SPECIALIST_TOOLS  # noqa: E402
 
 COMPANION_TOOLS += SPECIALIST_TOOLS
 INFO_TOOLS |= SPECIALIST_INFO
+
+# Listening to what the PC plays: live meeting notes (no bot) and live captions with
+# translation (companion/listening.py). Both start only when they ask, in that moment.
+from pyxi.companion.listening import SPECS as LISTENING_TOOLS  # noqa: E402
+
+COMPANION_TOOLS += LISTENING_TOOLS
 
 # Pyxi in your browser: read_tab and use_tab (companion/tabwork.py). They are not in
 # COMPANION_TOOLS: the brain adds them to a turn only while the extension is connected.

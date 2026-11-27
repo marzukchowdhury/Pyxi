@@ -1,0 +1,95 @@
+/* The home page's own pieces: the film in the hero, the four demo clips, the short "what it
+   sees" section, and the price and questions. Every clip's box has its shape before the video
+   loads (aspect-ratio 16 / 9), so nothing on the page moves when one arrives. */
+
+/* ---- the backdrop: three soft lights that drift very slowly, in place of the firefly swarm
+   (which now only gathers at the very end of the page) */
+.sky { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.sky i { position: absolute; border-radius: 50%; filter: blur(90px); will-change: transform; animation: sky-drift 46s ease-in-out infinite alternate; }
+.sky i:nth-child(1) { right: -8vw; top: -6vh; width: 62vw; height: 62vw; max-width: 980px; max-height: 980px; background: radial-gradient(closest-side, rgba(255, 200, 97, 0.17), rgba(255, 200, 97, 0.05) 55%, transparent); }
+.sky i:nth-child(2) { left: -16vw; bottom: -22vh; width: 58vw; height: 58vw; max-width: 900px; max-height: 900px; background: radial-gradient(closest-side, rgba(158, 203, 255, 0.14), rgba(158, 203, 255, 0.04) 55%, transparent); animation-duration: 58s; animation-delay: -20s; }
+.sky i:nth-child(3) { left: 30vw; top: 38vh; width: 36vw; height: 36vw; max-width: 560px; max-height: 560px; background: radial-gradient(closest-side, rgba(190, 150, 255, 0.07), transparent); animation-duration: 70s; animation-delay: -35s; }
+@keyframes sky-drift { from { transform: translate3d(-3vw, -2vh, 0) scale(1); } to { transform: translate3d(4vw, 5vh, 0) scale(1.12); } }
+@media (prefers-reduced-motion: reduce) { .sky i { animation: none; } }
+
+/* ---- the film, in the hero */
+.film { position: relative; margin: 0; }
+.film-frame { position: relative; aspect-ratio: 16 / 9; border-radius: 20px; overflow: hidden; background: #06070c; border: 1px solid var(--hair-hi); box-shadow: 0 40px 110px rgba(0, 0, 0, 0.55), 0 0 90px rgba(255, 200, 97, 0.07); }
+.film-frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.film-frame video[hidden] { display: none; }
+.film-play { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 20px 0 16px; border-radius: 99px; border: 1px solid rgba(255, 200, 97, 0.55); background: rgba(10, 12, 17, 0.82); color: var(--fly-hi); font: 600 15.5px/1 var(--font); letter-spacing: -0.005em; cursor: pointer; white-space: nowrap; backdrop-filter: blur(12px); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45); transition: background 0.2s, border-color 0.2s, transform 0.25s var(--spring); }
+.film-play:hover { background: rgba(255, 200, 97, 0.16); border-color: var(--fly); transform: translateX(-50%) translateY(-2px); }
+.film-play:focus-visible, .clip-toggle:focus-visible { outline: 2px solid var(--fly); outline-offset: 3px; }
+.film-play svg { width: 15px; height: 15px; fill: var(--fly); }
+.film-play span { color: var(--ink-3); font-weight: 500; font-size: 13.5px; }
+.film.playing .film-play, .film.playing .clip-toggle { display: none; }
+.film figcaption, .shows-note { margin-top: 14px; font-size: 13.5px; line-height: 1.5; color: var(--ink-3); text-align: center; }
+
+/* pause and play, on every clip that moves by itself */
+.clip-toggle { position: absolute; right: 12px; top: 12px; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--hair-hi); background: rgba(10, 12, 17, 0.72); cursor: pointer; opacity: 0.55; transition: opacity 0.2s, background 0.2s; }
+.clip-toggle:hover, .clip-toggle:focus-visible, .clip-toggle[aria-pressed="true"] { opacity: 1; background: rgba(10, 12, 17, 0.9); }
+/* two bars while it plays, a triangle while it is paused */
+.clip-toggle::before { content: ""; position: absolute; left: 13px; top: 12px; width: 3px; height: 11px; background: var(--ink); box-shadow: 6px 0 0 var(--ink); border-radius: 1px; }
+.clip-toggle[aria-pressed="true"]::before { left: 14px; top: 11px; width: 0; height: 0; background: none; box-shadow: none; border-radius: 0; border: 6.5px solid transparent; border-left: 10px solid var(--ink); border-right: 0; }
+
+/* ---- the four clips */
+.shows { padding: clamp(70px, 9vw, 130px) 0 clamp(50px, 7vw, 90px); }
+.shows .h2 { margin-bottom: clamp(36px, 5vw, 64px); }
+.show { display: grid; grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.4fr); gap: clamp(26px, 4.4vw, 68px); align-items: center; margin-bottom: clamp(52px, 7vw, 104px); }
+.shows-more { margin: 0 0 clamp(40px, 5vw, 72px); text-align: center; font-size: clamp(30px, 3.4vw, 48px); font-weight: 680; line-height: 1.06; letter-spacing: -0.035em; }
+.show.flip .show-copy { order: 2; }
+.show.flip { grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.92fr); }
+.show-ask { margin: 0 0 14px; font: italic 500 clamp(17px, 1.5vw, 20px) / 1.35 "Fraunces Variable", "Fraunces", Georgia, serif; color: var(--fly); }
+.show-copy h3 { margin: 0 0 14px; font-size: clamp(26px, 2.5vw, 35px); font-weight: 660; line-height: 1.08; letter-spacing: -0.032em; }
+.show-copy p:last-child { margin: 0; font-size: clamp(16px, 1.25vw, 18px); line-height: 1.6; color: var(--ink-2); }
+.show-win { margin: 0; border-radius: 16px; overflow: hidden; border: 1px solid var(--hair-hi); background: #0b0d12; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5); }
+.show-bar { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; background: rgba(255, 255, 255, 0.035); border-bottom: 1px solid var(--hair); }
+.show-bar i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, 0.16); }
+.show-bar span { margin-left: 8px; font-size: 12.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.show-clip { position: relative; aspect-ratio: 16 / 9; background: #06070c; }
+.show-clip video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.shows-note { margin-top: 0; }
+.shows-note a, .costs .fine a, .layers.short .fine a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+.shows-note a:hover, .costs .fine a:hover, .layers.short .fine a:hover { color: var(--ink); }
+
+/* ---- what it sees: the lens, without the long scroll */
+.layers.short .layers-track { height: auto; }
+.layers.short .layers-sticky { position: static; height: auto; padding: clamp(70px, 9vw, 120px) 0; overflow: visible; }
+
+/* ---- price, and the questions asked first */
+.costs { padding: clamp(70px, 9vw, 130px) 0 clamp(40px, 6vw, 80px); }
+.tiers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 8px; }
+.tier { display: grid; gap: 6px; padding: 22px 24px 24px; border-radius: 22px; border: 1px solid var(--hair); background: rgba(12, 14, 20, 0.78); color: var(--ink-2); font-size: 15px; line-height: 1.5; text-decoration: none; transition: border-color 0.2s, transform 0.3s var(--spring); }
+.tier:hover { border-color: rgba(255, 200, 97, 0.5); transform: translateY(-3px); }
+.tier.pro { background: linear-gradient(180deg, rgba(255, 200, 97, 0.09), rgba(12, 14, 20, 0.82) 60%); border-color: rgba(255, 200, 97, 0.36); }
+.tier b { font-size: 21px; font-weight: 660; letter-spacing: -0.02em; color: var(--ink); }
+.tier-price { color: var(--ink-2); }
+.tier-price strong { font-size: 34px; font-weight: 700; letter-spacing: -0.035em; color: var(--ink); margin-right: 4px; }
+.home-asks { margin-top: clamp(48px, 6vw, 84px); max-width: 860px; }
+.home-asks-title { margin: 0 0 16px; font-size: clamp(24px, 2.4vw, 32px); font-weight: 650; letter-spacing: -0.03em; }
+.home-asks-list { display: grid; gap: 10px; }
+.home-q { border-radius: 16px; border: 1px solid var(--hair); background: rgba(255, 255, 255, 0.028); }
+.home-q[open] { border-color: var(--hair-hi); }
+.home-q summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px 20px; cursor: pointer; list-style: none; font-size: 16.5px; font-weight: 600; letter-spacing: -0.012em; border-radius: 16px; }
+.home-q summary::-webkit-details-marker { display: none; }
+.home-q summary::after { content: ""; flex: none; width: 9px; height: 9px; border-right: 2px solid var(--ink-3); border-bottom: 2px solid var(--ink-3); transform: translateY(-2px) rotate(45deg); transition: transform 0.25s var(--ease); }
+.home-q[open] summary::after { transform: translateY(2px) rotate(-135deg); }
+.home-q summary:focus-visible { outline: 2px solid var(--fly); outline-offset: 2px; }
+.home-q summary h4 { margin: 0; font: inherit; letter-spacing: inherit; }
+.home-q p { margin: 0; padding: 0 20px 19px; font-size: 15.5px; line-height: 1.6; color: var(--ink-2); }
+.home-q p a { color: var(--ink); text-underline-offset: 3px; }
+
+@media (max-width: 999px) {
+  .film { margin-top: 8px; }
+  .show, .show.flip { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .show.flip .show-copy { order: 0; }
+}
+@media (max-width: 760px) {
+  .tiers { grid-template-columns: minmax(0, 1fr); }
+  .film-play { height: 44px; font-size: 14.5px; bottom: 12px; }
+  .film-frame { border-radius: 14px; }
+  .show-win { border-radius: 12px; }
+  .show-bar { height: 28px; }
+  .home-q summary { padding: 15px 16px; font-size: 15.5px; }
+  .home-q p { padding: 0 16px 16px; }
+}

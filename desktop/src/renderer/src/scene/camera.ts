@@ -32,6 +32,45 @@ export function nearestAngle(from: number, to: number): number {
   return from + d;
 }
 
+/** Much wider and deeper than it is tall: a chip, a circuit board, a phone lying down. */
+export function isFlat(span: [number, number, number]): boolean {
+  return span[1] > 0 && span[1] < 0.3 * Math.min(span[0], span[2]);
+}
+
+/** From in front, to one side, and well above: the top face and two edges all show. */
+export const THREE_QUARTER: [number, number, number] = [0.7, 0.85, 1.1];
+
+/**
+ * The direction to look at a flat thing from, or null to keep the beat's own view. From the
+ * usual low angle a flat thing is a sliver, and straight from above it is a diagram with no
+ * depth (live: an AI chip that opened as flat coloured tiles). So its three-quarter views are
+ * lifted, and it never opens seen from straight above; a later beat may still look down on it.
+ */
+export function flatView(camera: string, span: [number, number, number], firstBeat: boolean): [number, number, number] | null {
+  if (!isFlat(span)) return null;
+  if (camera === "iso" || camera === "wide" || camera === "close") return THREE_QUARTER;
+  return camera === "top" && firstBeat ? THREE_QUARTER : null;
+}
+
+/**
+ * Where to look from to see a model the way its photo was taken: `azimuth` degrees round from
+ * straight in front (+z; 90 is from the model's +x side), `elevation` degrees above level. The
+ * same sum as view_axes in scenes/raster.py, which is what the model was checked from.
+ */
+export function photoDirection(azimuth: number, elevation: number): [number, number, number] {
+  const az = (azimuth * Math.PI) / 180;
+  const el = (Math.max(-89, Math.min(89, elevation)) * Math.PI) / 180;
+  return [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+}
+
+/** The angle a photo was taken from, if it is one the camera can go to (null for anything else). */
+export function photoAngle(view: unknown): [number, number] | null {
+  if (!Array.isArray(view) || view.length < 2) return null;
+  const [az, el] = view;
+  if (typeof az !== "number" || typeof el !== "number" || !Number.isFinite(az) || !Number.isFinite(el)) return null;
+  return [az, Math.max(-89, Math.min(89, el))];
+}
+
 export interface Orbit {
   radius: number;
   /** Around the vertical axis, radians (0 = looking down -z from +z). */

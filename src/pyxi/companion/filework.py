@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,33 @@ if TYPE_CHECKING:
 FILE_TOOLS = {"convert_files", "edit_document", "search_files", "read_file"}
 
 CONSENT_ACTION = "Let Pyxi search your files?"
+
+
+OLD_OFFICE = {".doc", ".xls", ".ppt", ".rtf", ".odt", ".ods", ".odp"}
+
+
+def _unreadable(tool: str, path: Path, exc: BaseException) -> str:
+    """A file that could not be read, as a note the model can pass on: why in plain words
+    and what they can do, never the error itself ("[Errno 13] Permission denied: 'C:\\...'")."""
+    from pyxi import plainwords
+
+    ext = path.suffix.lower()
+    if ext in OLD_OFFICE and "can't read" in str(exc):
+        # Not the end: saved in today's format, or as a PDF copy, it can be read.
+        newer = ".xlsx" if ext in (".xls", ".ods") else ".pptx" if ext in (".ppt", ".odp") else ".docx"
+        return (
+            f"{tool}: {path.name} is an older kind of file ({ext}) that Pyxi can't read as it "
+            f"is. Tell them in one short line: save it as {newer} from the app it opens in "
+            "(File, Save As), or ask you for a PDF copy of it, and then ask again."
+        )
+    known = plainwords.explain(exc)
+    why = known.line if known else plainwords.safe_line(
+        str(exc), "It may be damaged, or open in another app.", 200
+    )
+    return (
+        f"{tool}: couldn't read {path.name}. {why} Tell them that in one short line; don't "
+        "guess at what the file says."
+    )
 
 
 def _paths(raw: Any) -> list[str]:
@@ -115,7 +143,32 @@ async def _open_google_file(brain: Brain, ref: str) -> str:
             url = await asyncio.to_thread(uia.browser_url, hwnd)
             if url and _GOOGLE_LINK.search(url):
                 return url
+    if generic:
+        # "This sheet", and no window gave up its link (the address bar can't always be read):
+        # the file Ledger made or edited a moment ago is the one they mean. Live: Ledger made
+        # a new sheet, and the next request, "make the header bold" on "this sheet", ended
+        # "I couldn't find a Google Sheet called 'this sheet'".
+        return _just_worked_on(brain, kind)
     return "" if _UNTITLED.match(ref) else ref
+
+
+_RECENT_S = 30 * 60  # how long "this sheet" still means the file Ledger last touched
+_KIND_IN_LINK = {"Sheets": "spreadsheets", "Docs": "document", "Slides": "presentation"}
+
+
+def _just_worked_on(brain: Brain, kind: str) -> str:
+    """The link of the Google file Ledger last made or edited, if that was recent ('' if not).
+    ``kind``: 'Sheets', 'Docs', 'Slides', or '' for whichever was last."""
+    now = time.time()
+    for job in reversed(brain.jobs.recent(12)):
+        if job.agent_name != "Ledger" or job.status != "done":
+            continue
+        if job.ended_at is None or now - job.ended_at > _RECENT_S:
+            continue
+        for m in re.finditer(r"https://docs\.google\.com/(spreadsheets|document|presentation)/d/[\w-]+", job.summary or ""):
+            if not kind or m.group(1) == _KIND_IN_LINK.get(kind):
+                return m.group(0) + "/edit"
+    return ""
 
 
 # Ledger can't open the file, but the file is open in front of them: cells can still go in.
@@ -153,6 +206,50 @@ async def _reachable(brain: Brain, ref: str) -> bool:
     return True
 
 
+_APP_WORDS = {"ppt": "powerpoint", "power point": "powerpoint", "slides": "powerpoint", "xl": "excel"}
+
+
+async def _open_app(brain: Brain, app: str) -> tuple[dict[str, Any] | None, str | None]:
+    """The document open in Excel, Word or PowerPoint, for a direct edit: (what the job needs,
+    None), or (None, a note for the model) when the app can't be reached right now, or
+    (None, None) when no such app was named and none is in front.
+
+    The look changes nothing and comes back within three seconds whatever the app is doing."""
+    from pyxi import windows
+    from pyxi.agents import ledger_live
+    from pyxi.screen.context import WindowInfo
+
+    app = " ".join(app.lower().split())
+    app = _APP_WORDS.get(app, app)
+    w = brain._ctx.window if brain._ctx else None
+    front = ledger_live.app_of(w.process) if w else ""
+    if not app:
+        app = front  # they're looking at it, and named no file
+    if not app:
+        return None, None
+    if app not in ledger_live.APPS:
+        return None, "edit_document: app is excel, word or powerpoint."
+    label = ledger_live.APPS[app]["label"]
+    hwnd, title, exe = (w.hwnd, w.title, w.process) if w and front == app else (0, "", "")
+    if not hwnd:  # named, not in front: its topmost window
+        for h, t, e in await asyncio.to_thread(windows.open_windows):
+            if ledger_live.app_of(e) == app:
+                hwnd, title, exe = h, t, e
+                break
+    is_excluded = getattr(brain.screen, "is_excluded", None)
+    if is_excluded and title and is_excluded(WindowInfo(title, exe)):
+        return None, f"edit_document: that {label} window is one of their private apps, so Pyxi leaves it alone."
+    why, name = await asyncio.to_thread(ledger_live.probe, app, hwnd or None)
+    if why:
+        return None, (
+            f"edit_document: {why} So Pyxi can't change it directly right now. If {label} is open "
+            "on their screen, do this with use_computer now through the app's own menus (or "
+            "paste_table when it's only cells to put in), and don't mention this note; if it "
+            f"isn't open, say in one short line that there's nothing open in {label}."
+        )
+    return {"app": app, "hwnd": int(hwnd or 0), "name": name, "label": label}, None
+
+
 async def _open_when_done(brain: Brain, job_id: str) -> None:
     """A sheet or doc Pyxi made (asked for, or because the open one was out of reach): put it
     on their screen when it's ready."""
@@ -160,9 +257,162 @@ async def _open_when_done(brain: Brain, job_id: str) -> None:
         job = await brain.jobs.wait(job_id)
     except KeyError:
         return  # no such job (it was never started): nothing to open
-    links = (job.data or {}).get("links") or []
+    data = job.data if isinstance(job.data, dict) else {}
+    links = data.get("links") or []
     if job.status == "done" and links:
         await brain._quick_action("open_url", links[0])
+    elif job.status == "done" and job.params.get("new") and job.outputs:
+        # A workbook Ledger built from nothing: it opens in Excel (or whatever opens .xlsx).
+        try:
+            await asyncio.to_thread(open_path, Path(job.outputs[0]))
+        except OSError:  # no app for it: the notice still has the file and its Open button
+            pass
+
+
+def open_path(path: Path) -> None:
+    """Open a file in its usual app (Excel for a workbook). Replaced in tests."""
+    import os
+    import sys
+
+    if sys.platform == "darwin":  # Numbers, or Excel when it is installed
+        import subprocess
+
+        subprocess.Popen(["open", str(path)])
+        return
+    os.startfile(str(path))  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------- one job, then another
+# Words that say a second teammate works on the first one's result.
+_AFTER = (
+    r"(?:and then|then|after that|afterwards?|next|"
+    r"once (?:that|it|she|he|they)(?:'s| is| has|'ve| are)? (?:done|finished|through)|"
+    r"when (?:that|it)(?:'s| is) (?:done|ready))"
+)
+
+
+def promised_next(spoken: str, starting: str, names: list[str]) -> str:
+    """The teammate a spoken line says will take the result next, or "".
+
+    Live, 13 November: "Pixel's turning your statement into Word first, then Quill gets the
+    grammar". Pixel finished in 3.7 seconds, no Quill job was ever started, and nothing said
+    so: the model had promised the second step and passed only the first."""
+    for name in names:
+        if not name or name.lower() == starting.lower():
+            continue
+        n = re.escape(name)
+        if (
+            re.search(rf"(?i)\b{_AFTER}\b[^.!?\n]{{0,60}}\b{n}\b", spoken)
+            or re.search(rf"(?i)\b{n}\b[^.!?\n]{{0,60}}\b(?:after(?:wards)?|next|then)\b", spoken)
+            or re.search(rf"(?i)\bfirst\b[^.!?\n]{{0,80}}\b{n}\b", spoken)
+            or re.search(
+                rf"(?i)\b(?:hand(?:s|ing)?|pass(?:es|ing)?|send(?:s|ing)?|giv(?:e|es|ing))\s+"
+                rf"(?:it|that|them|the \w+)\s+(?:on |over |off )?to\s+{n}\b",
+                spoken,
+            )
+        ):
+            return name
+    return ""
+
+
+def handoff(brain: Brain, tool: str, starting: str, args: dict[str, Any]) -> tuple[Any, str | None]:
+    """The ``then`` of a call that starts a teammate: (the hand-off or None, a note that sends
+    the call back to the model or None).
+
+    The call goes back, once a turn, when the line Pyxi is saying promises a second teammate
+    and the call names none. A teammate that doesn't exist is said too: it used to be dropped
+    without a word, which is the same broken promise."""
+    from pyxi.agents.jobs import Handoff
+
+    who = str(args.get("then_agent") or "").strip()
+    if getattr(brain, "registry", None) is None:
+        return None, None
+    if who:
+        agent = brain.registry.get(who)
+        if agent is None or agent.role == "companion":
+            names = ", ".join(a.name for a in brain.registry.all() if a.role != "companion")
+            return None, f"{tool}: there's no teammate called {who!r} for then_agent. The team: {names}."
+        what = str(args.get("then_task") or "").strip()
+        return Handoff(agent=who, task=what or "Use the result."), None
+    calls = getattr(brain, "_calls", None)
+    if calls is not None and getattr(brain, "_handoff_sent_back", None) is calls:
+        return None, None  # said once this turn already: the call goes ahead as it is
+    spoken = " ".join([*getattr(brain, "_said", []), getattr(brain, "_round_say", "") or ""])
+    names = [a.name for a in brain.registry.all() if a.role != "companion"]
+    promised = promised_next(spoken, starting, names)
+    if not promised:
+        return None, None
+    for call in calls or []:  # started in this same turn: the promise is kept another way
+        a = call.get("arguments") or {}
+        if promised.lower() in (str(a.get("agent", "")).lower(), str(a.get("then_agent", "")).lower()):
+            return None, None
+    brain._handoff_sent_back = calls
+    return None, (
+        f"{tool}: not started yet. You are telling them {promised} takes it next, but this call "
+        f"has no then_agent, so {promised} would never start and nobody would tell them. Call "
+        f'{tool} again now with then_agent "{promised}" and then_task (what {promised} does with '
+        "the result, in full: the new file is handed over by itself). Or, when one teammate can "
+        "do the whole thing (Quill fixes the grammar of a PDF and returns a Word file on its "
+        "own), start only that one. No new line of your own first."
+    )
+
+
+def _just_made(brain: Brain, drafts_only: bool = False) -> tuple[list[str], str]:
+    """The files the last finished job made, if that was recent, and where a new file from
+    them should be saved ("" for beside them). A writer's draft comes under a real name."""
+    from pyxi.agents.jobs import named_draft
+    from pyxi.agents.pixel_common import pyxi_folder
+
+    now = time.time()
+    for job in reversed(brain.jobs.recent(12)):
+        if job.status != "done" or job.ended_at is None or now - job.ended_at > _RECENT_S:
+            continue
+        if draft := named_draft(job):
+            return [str(draft)], str(pyxi_folder())
+        made = [o for o in job.outputs if Path(o).is_file()]
+        if made:
+            return ([], "") if drafts_only else (made, "")
+    return [], ""
+
+
+_NEW_FILE = re.compile(
+    r"(?i)^\s*new\s+(xlsx|excel(?: file| workbook)?|workbook|spreadsheet|pptx|ppt|"
+    r"powerpoint(?: file| deck| presentation)?|deck|presentation|slides?|slide deck)"
+    r"\s*[:\-]\s*(.+?)\s*$"
+)
+_DECK_WORD = re.compile(r"(?i)^(pptx?|powerpoint|deck|presentation|slide)")
+
+
+def _new_kind(ref: str) -> str:
+    """'new pptx: Tea' is a deck to build, 'new xlsx: Budget' a workbook."""
+    m = _NEW_FILE.match(ref)
+    return "pptx" if m and _DECK_WORD.match(m.group(1)) else "xlsx"
+
+
+def _deck_not_ready(task: str, new: list[str], files: list[str], google: Any) -> str:
+    """Why a new deck can't be started as asked ("" when it can): said to the model, which
+    asks them or calls again."""
+    from pyxi.agents import deck_build
+
+    if len(new) > 1 or google:
+        return (
+            "edit_document: a new deck is made on its own: one 'new pptx: <title>' in files, "
+            "with the files it is made from beside it if there are any, and nothing in google."
+        )
+    odd = [Path(f).name for f in files if Path(f).suffix.lower() not in deck_build.SOURCE_EXTS]
+    if odd:
+        return (
+            f"edit_document: a deck can be made from Word, PDF, text, Markdown, Excel and CSV "
+            f"files, not {', '.join(odd[:3])}. Tell them in one short line (Pixel can turn "
+            "most files into a PDF first)."
+        )
+    if not files and not deck_build.has_topic(task, new[0] if new else ""):
+        return (
+            "edit_document: not started. They haven't said what the deck is about, and a deck "
+            "about nothing would be made up. Ask them in one short line what it is about (or "
+            "which file to make it from), then call again with their answer in the task."
+        )
+    return ""
 
 
 async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
@@ -172,6 +422,16 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             return f"convert_files: operation must be one of {', '.join(OPERATIONS)}."
         files = _paths(args.get("files"))
         missing = [f for f in files if not Path(f).is_file()]
+        save_in = ""
+        if not files or missing:
+            # "Just convert it to PDF", about the plan Quill wrote a minute ago: the file
+            # is one Pyxi made, so it needs no search of theirs to find it. (Live: "I
+            # can't find the Word plan without file search, and I need its location".)
+            # A path that isn't there (the model's guess at "the Word plan") is taken to
+            # mean a draft only, and only on its way to a PDF: never some other file.
+            found, where = _just_made(brain, drafts_only=bool(missing))
+            if found and (not missing or op in ("to_pdf", "word_to_pdf")):
+                files, save_in, missing = found, where, []
         if not files or missing:
             return (
                 f"convert_files: I can't find {', '.join(Path(f).name for f in missing) or 'the file'}. "
@@ -180,16 +440,33 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         raw = args.get("options") if isinstance(args.get("options"), dict) else {}
         # A password never travels through the model or the job record: Pixel asks for it on a
         # masked card. Saved details are read on this PC by the job itself.
-        options = {k: v for k, v in raw.items() if k not in ("password", "details", "out_dir")}
+        options = {k: v for k, v in raw.items() if k not in ("password", "details", "out_dir", "placed", "labels")}
         if op == "compare_documents" and len(files) != 2:
             return "convert_files: compare_documents needs exactly two files, the old one first."
         names = ", ".join(Path(f).name for f in files[:3])
+        then, note = handoff(brain, "convert_files", "Pixel", args)
+        if note:
+            return note
         job = await brain.jobs.start(
             "pixel",
             f"{op.replace('_', ' ')}: {names}",
             files=files,
-            params={"operation": op, "options": options},
+            params={"operation": op, "options": options, **({"save_in": save_in} if save_in else {})},
+            then=then,
         )
+        if then is not None:
+            return (
+                f"Started {job.id}: {job.agent_name} is on it, and the new file goes straight to "
+                f"{then.agent} when it's done ({then.task[:120]}). Say one short line that names "
+                "both steps; they're told when the last one is finished."
+            )
+        if op == "fill_form":
+            return (
+                f"Started {job.id}: {job.agent_name} is reading the form and will put a card on "
+                "their screen with every question it asks; their name, email, phone and the like "
+                "are typed in already, and they type the rest. Don't ask them for the answers "
+                "yourself. Say one short line, like 'I'll ask you for the answers on a card.'"
+            )
         if op in NEEDS_PASSWORD:
             return (
                 f"Started {job.id}: a card is asking them to type the password (never ask for it "
@@ -201,7 +478,12 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         )
     if name == "edit_document":
         task = str(args.get("task") or "").strip()
-        files = _paths(args.get("files"))
+        given = args.get("files")
+        given = given if isinstance(given, list) else [given] if given else []
+        # "new xlsx: NEXORA": a workbook that doesn't exist yet, built from the brief.
+        new = [m.group(2).strip().strip('"')[:80] for f in given if (m := _NEW_FILE.match(str(f)))]
+        deck = any(_new_kind(str(f)) == "pptx" for f in given if _NEW_FILE.match(str(f)))
+        files = _paths([f for f in given if not _NEW_FILE.match(str(f))])
         raw = args.get("google")
         google = [
             str(g).strip()
@@ -209,6 +491,8 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             if g and str(g).strip()
         ]
         missing = [f for f in files if not Path(f).is_file()]
+        if deck and not missing and (note := _deck_not_ready(task, new, files, google)):
+            return note
         if not task:
             return "edit_document: say what to change."
         if missing:
@@ -216,18 +500,81 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
                 f"edit_document: I can't find {', '.join(Path(f).name for f in missing)}. Find the "
                 "exact path with search_files first, or ask them."
             )
+        then, note = handoff(brain, "edit_document", "Ledger", args)
+        if note:
+            return note
+        if new and deck:
+            # "new pptx: Tea": a deck that doesn't exist yet, planned and built from the brief
+            # and, when files are given, from them and nothing else (agents/deck_build.py).
+            job = await brain.jobs.start(
+                "ledger", task, files=files, params={"new": [{"kind": "pptx", "title": new[0]}]}, then=then
+            )
+            if then is None:
+                brain._spawn(_open_when_done(brain, job.id))
+            made_from = f" from {', '.join(Path(f).name for f in files[:2])}" if files else ""
+            return (
+                f"Started {job.id}: {job.agent_name} is building {new[0]}.pptx{made_from} in the "
+                "background: a plan of the slides, then the slides, then a check that nothing "
+                "runs off a slide and every figure is the source's (about a minute). It opens "
+                "on their screen when it's ready. Say one short line that names the job."
+            )
+        if new:
+            if files or google or len(new) > 1:
+                return (
+                    "edit_document: a new workbook is made on its own: one 'new xlsx: <title>' "
+                    "in files, and nothing else in files or google."
+                )
+            job = await brain.jobs.start(
+                "ledger", task, files=[], params={"new": [{"kind": "xlsx", "title": new[0]}]}, then=then
+            )
+            if then is None:
+                brain._spawn(_open_when_done(brain, job.id))
+            return (
+                f"Started {job.id}: {job.agent_name} is building {new[0]}.xlsx in the background, "
+                "sheet by sheet (a big workbook takes a minute or two), and it opens on their "
+                "screen when it's ready. Say one short line that names the job."
+            )
         if not files and not google:
-            return "edit_document: which file? Give files (paths on this PC) or google (a link or the file's name)."
+            # The workbook, document or deck open in Excel, Word or PowerPoint: edited where it
+            # is (agents/ledger_live.py), when the app can be reached right now.
+            ref, note = await _open_app(brain, str(args.get("app") or ""))
+            if note:
+                return note
+            if ref:
+                job = await brain.jobs.start(
+                    "ledger", task, files=[], params={"live": [ref]}, then=then
+                )
+                return (
+                    f"Started {job.id}: {job.agent_name} is changing {ref['name']} right in "
+                    f"{ref['label']}, where it's open; it takes a few seconds and nothing is saved. "
+                    "Say one short line that names the job; they're told when it's done."
+                )
+            return (
+                "edit_document: which file? Give files (paths on this PC), google (a link or the "
+                "file's name), or app (excel, word or powerpoint) for the one open in that app."
+            )
         if google and not brain.connectors.google.connected():
             return (
                 "edit_document: Google isn't connected. Tell them to connect it in Settings first."
             )
+        if google and getattr(brain.connectors.google, "expired", False):
+            # Known since Google refused the sign-in earlier: say so now, with the button,
+            # not "Ledger's on it" and a failure half a second later (26 November, three times).
+            await brain.google_expired_card()
+            return (
+                "edit_document: their Google sign-in has run out, so Pyxi can't work in Google "
+                "files until they sign in again. A card with a Sign in to Google button is on "
+                "screen now. Tell them in one short line to press it and then ask again. Don't "
+                "say a teammate is working on it, and don't call edit_document again in this reply."
+            )
         google = [await _open_google_file(brain, g) for g in google]
         if "" in google:
             return (
-                "edit_document: I can't tell which Untitled file they mean: none is open in a "
-                "browser window I can read. Ask them to bring it to the front (or say its name), "
-                "and never guess by the name Untitled."
+                "edit_document: I can't tell which file they mean: none is open in a browser "
+                "window I can read, and there is none I worked on in the last half hour. Ask "
+                "them to bring it to the front (or say its name or paste its link), and never "
+                "guess by the name Untitled. Don't call edit_document again in this reply: say "
+                "that in one short line and stop."
             )
         out_of_reach = [g for g in google if not await _reachable(brain, g)]
         made_instead = False
@@ -257,7 +604,9 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
             title = "Sample data" if kind == "sheet" else "Sample document"
             google = [f"{_NEW[kind]}: {title}" if g in out_of_reach else g for g in google]
             made_instead = True
-        job = await brain.jobs.start("ledger", task, files=files, params={"google": google})
+        job = await brain.jobs.start(
+            "ledger", task, files=files, params={"google": google}, **({"then": then} if then else {})
+        )
         if not made_instead and any(g.lower().startswith("new ") for g in google):
             # "Open a new Google Doc and write...": a file made in their Drive goes on screen.
             brain._spawn(_open_when_done(brain, job.id))
@@ -301,6 +650,6 @@ async def handle(brain: Brain, name: str, args: dict[str, Any]) -> str | None:
         try:
             text = await asyncio.to_thread(files_access.read_text, path)
         except Exception as exc:
-            return f"read_file: couldn't read {path.name}: {str(exc)[:160]}"
+            return _unreadable("read_file", path, exc)
         return f"read_file {path.name}:\n{text}"
     return None

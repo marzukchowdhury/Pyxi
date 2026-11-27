@@ -97,7 +97,45 @@ capture, Apple Events, Documents, Desktop, Downloads.
 Any two or three of ctrl, alt/option, meta/cmd/win. A chord the same as the other one is moved
 off it. Fn can't be used: the keyboard hook (libuiohook) doesn't report Fn on a Mac.
 
+Dictation's own settings (Settings, Dictate into any app: on or off, the keys, hold or press
+once, tidying) work on a Mac as on Windows. Its three key choices are the same keys by position:
+Control+Command, Option+Command, Shift+Command. A `dictate` chord in `hotkeys.json` or the
+environment wins over the keys chosen in Settings; on, off and hold or press still come from
+Settings.
+
 ## What's stubbed or reduced on a Mac
+
+Since 0.1.15 (everything `main` gained after 0.1.11, checked on 27 November 2026):
+
+- **Meeting notes and live captions** (`companion/listening.py`, `pyxi/listen/`) don't work on a
+  Mac: hearing what the computer plays is Windows' loopback capture, and macOS has nothing like
+  it without extra system software. Asked for by voice, typing or the button, Pyxi says so in
+  one sentence (`listening.MAC_NOTE`) and tries nothing. Windows' own Live Captions as a source
+  doesn't apply.
+- **The tab on screen** (`screen.tab_fallback`, `pyxi/screenlink.py`: tab work without the
+  extension, through Windows UI Automation) stays off on a Mac even when switched on.
+- **Editing the document open in Excel, Word or PowerPoint directly** (`agents/ledger_live.py`,
+  the apps' COM automation) is Windows only. On a Mac the same request goes through the app's
+  own menus with the mouse and keyboard, as it did before, or on the file itself.
+- **Pressing a control with no mouse** and doing a thing to a control by name
+  (`screen/press.py`, `screen/control.py`) are Windows UI Automation. On a Mac each one falls
+  back to the click or the typing it stands for, so tasks are slower and take the mouse.
+- **The other windows on the same screen** aren't read on a look (`uia.other_windows`): only
+  the window in front, as before.
+- **Dictation** types where the cursor is. What has the keyboard comes from Accessibility's
+  focused element: a password box is never typed into; anything that isn't plainly a text box
+  is typed and also left on the clipboard. The Windows checks for an app run as administrator
+  and for a visible caret don't exist there.
+- **"Open it on Chrome"** opens the named browser when it is installed (`open -a`). With no
+  browser named, a link opens in the default browser; on Windows the browser they are in also
+  counts.
+- **The idle clock** (`uia.input_idle_s`) answers "not known" on a Mac, so nothing waits on it.
+- **Notes learned about an app or site** (`companion/learned.py`) tell browsers apart by their
+  Windows program names, so on a Mac a browser's notes are kept per app, not per site.
+- **Speech-to-text on an NVIDIA card** doesn't apply; the Mac uses the processor.
+
+From before:
+
 
 - **"Is the song playing?"** A Mac has no per-app sound meter without extra system software, so
   `is_sounding` is always False and YouTube songs are reported as opened, not as playing. Pyxi

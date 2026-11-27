@@ -10,6 +10,38 @@ const config = JSON.parse(readFileSync(resolve(root, "site.config.json"), "utf8"
 config.macWaitlistOnly = !config.macDownloadUrl && config.macWaitlistUrl ? "yes" : "";
 config.macNotYet = !config.macDownloadUrl && !config.macWaitlistUrl ? "yes" : "";
 
+// The site is on sale: it must say who to write to, and every address on it comes from siteUrl.
+// A build with either missing stops here, loudly, instead of printing "[contact email]" on the
+// terms and the privacy policy or pointing search engines at the wrong host.
+if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(config.contactEmail ?? "")) {
+  throw new Error('site.config.json: "contactEmail" is empty or not an address. The footer, the terms and the privacy policy all print it.');
+}
+if (!/^https:\/\/[^/\s]+$/.test(config.siteUrl ?? "")) {
+  throw new Error('site.config.json: "siteUrl" must be the site\'s https address with no path and no trailing slash.');
+}
+
+// The pages people can land on, by their clean address (Vercel serves /pricing, not /pricing.html).
+// The sitemap lists exactly these. Left out on purpose: the 404, the two pages Stripe sends the
+// browser back to, and the 3D how-to that only plays inside the home page.
+const PAGES = ["index", "download", "features", "ask", "team", "why", "faq", "pricing", "privacy", "terms"];
+
+function sitemap() {
+  const day = new Date().toISOString().slice(0, 10);
+  const urls = PAGES.map((p) => `${config.siteUrl}/${p === "index" ? "" : p}`);
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+    urls.map((u) => `  <url><loc>${u}</loc><lastmod>${day}</lastmod></url>`).join("\n") +
+    "\n</urlset>\n"
+  );
+}
+
+/** robots.txt is a plain file in public/: it must name the sitemap at the address above. */
+function checkRobots() {
+  const robots = readFileSync(resolve(root, "public/robots.txt"), "utf8");
+  const want = `Sitemap: ${config.siteUrl}/sitemap.xml`;
+  if (!robots.split(/\r?\n/).includes(want)) throw new Error(`public/robots.txt needs the line "${want}"`);
+}
+
 /**
  * The privacy and terms pages are docs/PRIVACY.md and docs/TERMS.md, rendered at build time so
  * the site never drifts from them. Vercel only uploads website/, so every local build refreshes
@@ -24,8 +56,10 @@ function docHtml(name) {
   }
   let md = readFileSync(copy, "utf8");
   md = md.replace(/^# .*\n/, ""); // the page supplies its own title
-  if (config.contactEmail) {
-    md = md.replaceAll("**[contact email]**", `[${config.contactEmail}](mailto:${config.contactEmail})`);
+  md = md.replaceAll("**[contact email]**", `[${config.contactEmail}](mailto:${config.contactEmail})`);
+  if (/\[?contact email\]?/i.test(md)) {
+    // Written some other way ("[contact email]" without the bold): it would be printed as it is.
+    throw new Error(`docs/${name}.md still has a "contact email" placeholder the build can't fill. Write it as **[contact email]**.`);
   }
   const html = marked.parse(md, { gfm: true });
   // Unfilled placeholders such as [contact email] stand out instead of reading as finished copy.
@@ -55,6 +89,13 @@ function site() {
         return String(config[key]);
       });
     },
+    buildStart() {
+      checkRobots();
+    },
+    generateBundle() {
+      // /sitemap.xml, made from the real pages at every build.
+      this.emitFile({ type: "asset", fileName: "sitemap.xml", source: sitemap() });
+    },
   };
 }
 
@@ -64,16 +105,15 @@ export default defineConfig({
     target: "es2020",
     rollupOptions: {
       input: {
-        index: resolve(root, "index.html"),
-        download: resolve(root, "download.html"),
-        features: resolve(root, "features.html"),
-        ask: resolve(root, "ask.html"),
-        team: resolve(root, "team.html"),
-        why: resolve(root, "why.html"),
-        faq: resolve(root, "faq.html"),
-        privacy: resolve(root, "privacy.html"),
-        terms: resolve(root, "terms.html"),
+        ...Object.fromEntries(PAGES.map((p) => [p, resolve(root, `${p}.html`)])),
         404: resolve(root, "404.html"),
+        // where Stripe Checkout sends the browser back to (the server's success and cancel URLs)
+        welcome: resolve(root, "welcome.html"),
+        "signed-in": resolve(root, "signed-in.html"),
+        account: resolve(root, "account.html"),
+        "billing-cancelled": resolve(root, "billing-cancelled.html"),
+        // the RAM how-to, played inside the home page's 3D section
+        ram: resolve(root, "film2/ram.html"),
       },
     },
   },

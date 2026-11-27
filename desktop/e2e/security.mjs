@@ -33,6 +33,7 @@ const app = await electron.launch({
     PYXI_VOICE__TTS: "client",
     PYXI_MUTE: "1",
     PYXI_E2E: "1",
+    PYXI_TOUR: "0", // a new data folder: the first-run tour would play over what is checked
   },
 });
 const errors = [];

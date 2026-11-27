@@ -87,7 +87,24 @@ def build_diagram(raw: Any, points: int) -> NoteDiagram | None:
     except Exception:
         return None
     caption = " ".join(str(raw.get("caption") or "").split())[:48] or None
-    return NoteDiagram(caption=caption, shapes=board.shapes)
+    return NoteDiagram(caption=caption, shapes=one_accent(board.shapes))
+
+
+def one_accent(shapes: list[DiagramShape]) -> list[DiagramShape]:
+    """One accent, used sparingly: amber on the one or two things to notice (and their labels),
+    everything else in plain ink. Five colours in a card-sized diagram is a legend to decode,
+    and the same rule a typed diagram follows (pyxi/scenes/diagram.py)."""
+    drawn = written = 0
+    for s in shapes:
+        if s.color in ("ink", "muted"):
+            continue
+        is_text = s.kind in ("text", "equation")
+        used = written if is_text else drawn
+        if s.color == "amber" and used < 2:
+            written, drawn = written + is_text, drawn + (not is_text)
+        else:
+            s.color = "ink"
+    return shapes
 
 
 _DIAGRAM_SHAPE = dict(SKETCH_TOOL_SCHEMA["properties"]["shapes"]["items"])
@@ -104,9 +121,10 @@ DIAGRAM_SCHEMA: dict[str, Any] = {
     "description": "Optional small hand-drawn diagram inside the card. Only when the answer is a "
     "process (steps in order, a cycle, cause and effect, a request going through systems) or a "
     "structure (layers, parts of a whole, a hierarchy) and a picture makes it click; leave it out "
-    "for opinions, summaries and jokes. 100 wide x 64 tall grid, y down, ~6 units of margin. 4-14 "
-    "shapes: rect or ellipse boxes with 1-2 word text labels inside, arrows between them (flow: "
-    "true on what moves), colour ice for the key path and amber for the one thing to notice. "
+    "for opinions, summaries and jokes. 100 wide x 64 tall grid, y down, ~6 units of margin. "
+    "Fewer is clearer: 3-6 rect or ellipse boxes with 1-2 word text labels inside, arrows "
+    "between them (flow: true on what moves), 14 shapes at most. One accent only: amber on the "
+    "one or two things to notice, everything else ink. "
     "Give each shape the `step` of the point it belongs to, so it builds as you talk.",
     "properties": {
         "caption": {"type": "string", "description": "Optional, under 6 words."},
@@ -129,6 +147,7 @@ class NoteCard(BaseModel):
     style: Literal["card", "picture"] = "card"  # picture: tags pinned onto it, no card
     picture: tuple[int, int, int, int] | None = None
     diagram: NoteDiagram | None = None  # a process or structure, drawn small inside the card
+    moved: tuple[int, int] = (0, 0)  # how far a picture's tags were moved, with the page
 
 
 def _union(rects: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int] | None:
@@ -141,16 +160,117 @@ def _union(rects: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int] 
     return x0, y0, x1 - x0, y1 - y0
 
 
-def target_rect(ctx: ScreenContext | None, raw: dict[str, Any]) -> tuple[int, int, int, int] | None:
+def near_point(ctx: ScreenContext | None, raw: dict[str, Any]) -> tuple[int, int] | None:
+    """Where the model thought the thing was, in screen px: the middle of its box, or its x
+    and y. Not exact, but enough to tell which of two places that say the same words it
+    meant (live, the right box came with "Settings" and was thrown away)."""
+    if ctx is None:
+        return None
+    try:
+        box = raw.get("box")
+        if isinstance(box, list | tuple) and len(box) == 4:
+            x, y, w, h = (float(v) for v in box)
+            return resolve_point(ctx, None, [x + w / 2, y + h / 2])
+        if raw.get("x") is not None and raw.get("y") is not None:
+            return resolve_point(ctx, None, [float(raw["x"]), float(raw["y"])])
+        return _point(ctx, raw.get("at"))
+    except (TypeError, ValueError):
+        return None
+
+
+def target_rect(
+    ctx: ScreenContext | None, raw: dict[str, Any], near: tuple[int, int] | None = None
+) -> tuple[int, int, int, int] | None:
     """What a point is about. Quoted words win: OCR finds those exact words on screen (inside
-    the element, if one was given), so an underline sits under the words themselves."""
+    the element, if one was given), so an underline sits under the words themselves. When
+    they are on screen in more than one place, ``near`` (else the model's own box or x, y)
+    says which was meant."""
     if ctx is None:
         return None
     elem = resolve_rect(ctx, raw.get("element_id"), None)
     quote = str(raw.get("quote") or "").strip()
-    if quote and (hit := ctx.find_text(quote, elem)):
+    if quote and (hit := ctx.find_text(quote, elem, near or near_point(ctx, raw))):
         return hit
     return elem or resolve_rect(ctx, None, raw.get("box"))
+
+
+def _mid(r: tuple[int, int, int, int]) -> tuple[float, float]:
+    return r[0] + r[2] / 2, r[1] + r[3] / 2
+
+
+def _goes_with(words: tuple[int, int, int, int], thing: tuple[int, int, int, int]) -> bool:
+    """Are these words the name of that thing: on its row (a switch and the words beside
+    it), or right under or over it (an icon and its caption)?"""
+    tall = max(words[3], thing[3])
+    if abs(_mid(words)[1] - _mid(thing)[1]) <= tall * 0.75:
+        return True  # the same row, however far along it
+    across = min(words[0] + words[2], thing[0] + thing[2]) - max(words[0], thing[0])
+    apart = max(words[1], thing[1]) - min(words[1] + words[3], thing[1] + thing[3])
+    return across > 0 and apart <= 1.5 * tall
+
+
+def step_rect(
+    ctx: ScreenContext | None, raw: dict[str, Any], near: tuple[int, int] | None = None
+) -> tuple[int, int, int, int] | None:
+    """Where a guide step's mark goes, when that is known exactly (None: only a guessed box).
+
+    `target_rect` finds words to underline. A step is clicked, so its mark is the control,
+    whole. Live, eight steps in twenty were "you clicked something else" although they had
+    done the step: a switch named by its element id, with the words beside it as the quote,
+    was marked on the words (a quote that isn't inside the element is looked for anywhere);
+    a menu row was marked on its words alone, so a click on its icon missed; and a Start
+    menu icon, given as a box with its caption as the quote, was marked on the caption."""
+    if ctx is None:
+        return None
+    elem = resolve_rect(ctx, raw.get("element_id"), None)
+    quote = str(raw.get("quote") or "").strip()
+    where = near or near_point(ctx, raw)
+    hit = ctx.find_text(quote, elem, where) if quote else None
+    if elem and hit:
+        (hx, hy), (ex, ey, ew, eh) = _mid(hit), elem
+        if ex <= hx <= ex + ew and ey <= hy <= ey + eh:
+            # The words are in it. A row or a button is taken whole; in something big (a
+            # list, a pane, a card) the words say which part was meant.
+            return elem if eh <= max(3.5 * hit[3], 80) else hit
+        # The words are somewhere else. Beside or under the control they are its name, and
+        # the control is what gets clicked; far from it the words win, as they always have.
+        return elem if _goes_with(hit, elem) else hit
+    if elem or not hit:
+        return elem
+    box = resolve_rect(ctx, None, raw.get("box"))
+    # An icon and its caption: a click on either is the step. The box is the model's guess,
+    # so it only widens the mark when it is the size of a control, not of half the window.
+    if box and box[2] <= 240 and box[3] <= 160 and _goes_with(hit, box):
+        return _union([hit, box])
+    return hit
+
+
+_HOLDS_ROWS ={"List", "Pane", "Group", "Document", "Table", "Tree", "DataGrid", "Tab"}
+
+
+def scroll_area(
+    ctx: ScreenContext, element_id: Any, rect: tuple[int, int, int, int]
+) -> tuple[int, int, int, int]:
+    """Where a "scroll" step is marked: the list the thing is in (the nearest container well
+    bigger than it), else the part of the window on screen. Not the thing itself: it is the
+    row half under the edge, so a frame on it is a sliver at the bottom of the window, and
+    it stays there, on nothing, once they have scrolled."""
+    view = ctx.view_rect() or ctx.window.rect
+    e = ctx.element(int(element_id)) if str(element_id or "").lstrip("-").isdigit() else None
+    seen = 0
+    while e is not None and e.parent is not None and seen < 12:
+        e = ctx.element(e.parent)
+        seen += 1
+        if e is None:
+            break
+        x, y, w, h = e.rect
+        if e.role in _HOLDS_ROWS and h >= 3 * max(rect[3], 1) and w >= rect[2]:
+            # Only the part of it that is on screen.
+            x0, y0 = max(x, view[0]), max(y, view[1])
+            x1, y1 = min(x + w, view[0] + view[2]), min(y + h, view[1] + view[3])
+            if x1 - x0 > 40 and y1 - y0 > 40:
+                return x0, y0, x1 - x0, y1 - y0
+    return view if view[2] > 0 and view[3] > 0 else rect
 
 
 def picture_rect(
@@ -179,16 +299,21 @@ def build_card(
     avoid: list[tuple[int, int, int, int]] | None = None,
     survey: Survey | None = None,
     keep: NoteCard | None = None,
+    rows: int = 0,
 ) -> NoteCard:
     """Turn the model's tool call (quotes, element ids, screenshot px) into screen-exact geometry.
-    On a picture, each point is pinned to its part where the aiming survey found it."""
+    On a picture, each point is pinned to its part where the aiming survey found it.
+    ``rows``: how many points to leave room for, while the card is still arriving."""
     if args.get("style") == "on_picture" and (pic := picture_rect(ctx, args)):
-        return _picture_card(ctx, args, pic, survey, keep)
+        return _picture_card(ctx, args, pic, survey, keep, avoid)
     items: list[NoteItem] = []
-    for i, raw in enumerate(args.get("items", [])[:7], start=1):
-        if not isinstance(raw, dict) or not str(raw.get("text", "")).strip():
-            continue
-        rect = target_rect(ctx, raw)
+    numbered = [
+        (i, raw)
+        for i, raw in enumerate(_raw_items(args)[:7], start=1)
+        if isinstance(raw, dict) and str(raw.get("text", "")).strip()
+    ]
+    rects = _item_rects(ctx, [raw for _, raw in numbered])
+    for (i, raw), rect in zip(numbered, rects, strict=True):
         kind = (
             raw.get("kind") if raw.get("kind") in ("point", "step", "formula", "aside") else "point"
         )
@@ -240,10 +365,233 @@ def build_card(
         region=region,
         diagram=build_diagram(args.get("diagram"), len(items)),
     )
-    card.place = place_card(
-        ctx, region, [it.text for it in items], card.title, avoid, diagram=card.diagram is not None
-    )
+    place_again(ctx, card, avoid, rows)
     return card
+
+
+def _raw_items(args: dict[str, Any]) -> list[Any]:
+    items = args.get("items")
+    return items if isinstance(items, list) else []
+
+
+def has_points(args: dict[str, Any]) -> bool:
+    """Does an explaining call have anything in it: one point with words, at least?"""
+    return any(isinstance(r, dict) and str(r.get("text", "")).strip() for r in _raw_items(args))
+
+
+# What the model is told when it calls an explaining tool with nothing in it. Live, an empty
+# explain_on_picture left one spoken sentence and nothing on screen, with no second try.
+EMPTY_CARD = "explain_on_screen: that call had no points in it, so nothing was drawn."
+EMPTY_CARD_NOTE = (
+    EMPTY_CARD + " Call it again now, complete: `items` with 2 to 4 points, each with `text` "
+    "and what it is about (a `quote` of words on screen, an `element_id`, or for a picture "
+    "its `part`), and for a picture the `picture` box first. If there is nothing on screen "
+    "to mark, answer in words instead. Don't say again what you have already said."
+)
+
+
+def merge_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
+    """Several explaining calls in one answer are one card: the points of each, in order.
+
+    The overlay shows one card. Live, a second call in the same answer took the first one's
+    place. Empty calls add nothing; a call of the other style (a picture's tags after a
+    card, or the other way round) is left out, since one card cannot be both."""
+    real = [c for c in calls if isinstance(c, dict) and has_points(c)]
+    if not real:
+        return dict(calls[0]) if calls else {}
+    out = dict(real[0])
+    items = list(_raw_items(out))
+    sketches = list(out.get("sketches") or []) if isinstance(out.get("sketches"), list) else []
+    for more in real[1:]:
+        if (more.get("style") == "on_picture") != (out.get("style") == "on_picture"):
+            continue
+        by = len(items)
+        items += _raw_items(more)
+        for s in more.get("sketches") or [] if isinstance(more.get("sketches"), list) else []:
+            if isinstance(s, dict):
+                after = int(s.get("after", 0) or 0)
+                sketches.append({**s, "after": after + by if after else 0})
+        diagram = more.get("diagram")
+        if not out.get("diagram") and isinstance(diagram, dict):
+            shapes = [
+                {**s, "step": int(s.get("step", 0) or 0) + by} if s.get("step") else s
+                for s in diagram.get("shapes") or []
+                if isinstance(s, dict)
+            ]
+            out["diagram"] = {**diagram, "shapes": shapes}
+        if str(more.get("closing") or "").strip():
+            out["closing"] = more["closing"]
+    out["items"] = items
+    if sketches:
+        out["sketches"] = sketches
+    return out
+
+
+def _item_rects(
+    ctx: ScreenContext | None, raws: list[dict[str, Any]]
+) -> list[tuple[int, int, int, int] | None]:
+    """What each point of a card is about. A quote that is on screen in several places, with
+    nothing from the model to say which ("See more", a name, a price), goes to the place
+    nearest what the card's other points are about: one card explains one thing."""
+    rects = [target_rect(ctx, raw) for raw in raws]
+    if ctx is None:
+        return rects
+    unsure = []
+    for i, raw in enumerate(raws):
+        quote = str(raw.get("quote") or "").strip()
+        if not quote or rects[i] is None or near_point(ctx, raw) is not None:
+            continue
+        places = ctx.find_places(quote, resolve_rect(ctx, raw.get("element_id"), None))
+        if len(places) > 1 and rects[i] in places:
+            unsure.append(i)
+    sure = [_mid(r) for i, r in enumerate(rects) if r is not None and i not in unsure]
+    if not unsure or not sure:
+        return rects
+    middle = (sum(p[0] for p in sure) / len(sure), sum(p[1] for p in sure) / len(sure))
+    for i in unsure:
+        rects[i] = target_rect(ctx, raws[i], (round(middle[0]), round(middle[1]))) or rects[i]
+    return rects
+
+
+def place_again(
+    ctx: ScreenContext | None,
+    card: NoteCard,
+    avoid: list[tuple[int, int, int, int]] | None = None,
+    rows: int = 0,
+) -> None:
+    """Where the card goes, from where its marks are now (they may just have been moved)."""
+    if card.style == "picture":
+        return
+    marks = [it.rect for it in card.items if it.rect]
+    card.region = _union(marks + [(x, y, 1, 1) for s in card.sketches for x, y in s.points])
+    texts = [it.text for it in card.items]
+    texts += ["x" * 40] * max(0, rows - len(texts))  # points still to come: room for them now
+    card.place = place_card(
+        ctx, card.region, texts, card.title, avoid, diagram=card.diagram is not None, marks=marks
+    )
+
+
+def covers_marks(place: tuple[int, int] | None, card: NoteCard) -> bool:
+    """Would the card, put there, sit on something one of its own points marks?"""
+    if place is None or card.style == "picture":
+        return False
+    w, h = card_size([it.text for it in card.items], card.title, card.diagram is not None)
+    box = (place[0], place[1], w, h)
+    return any(_overlap(box, (r[0] - 8, r[1] - 8, r[2] + 16, r[3] + 16)) for it in card.items if (r := it.rect))
+
+
+def _far(a: tuple[int, int], b: tuple[int, int], by: int) -> bool:
+    return abs(a[0] - b[0]) > by or abs(a[1] - b[1]) > by
+
+
+def settle_marks(
+    ctx: ScreenContext | None,
+    args: dict[str, Any],
+    card: NoteCard,
+    now: list[Any],
+    keep: NoteCard | None = None,
+) -> list[int]:
+    """Put a card's marks where their things are NOW; returns the points whose mark was dropped.
+
+    A card is built from a look taken when they pressed talk, and drawn seconds later. Live,
+    on a post with a video loading above it, a frame sat 100 px above the name it was for,
+    an underline 120 px above its caption, and one mark 500 px from its words. ``now`` is
+    the screen's text read again just before drawing (OCR lines). Each mark's own words (its
+    quote, else its control's name) are looked for again, where the page as a whole went:
+    found, the mark goes there; not found, the point keeps its text and loses its mark, since
+    a mark on the wrong thing is worse than none. A mark with no words to check goes with
+    the page. ``keep``: the same card as shown so far, whose picture tags were moved already."""
+    from pyxi.screen import ocr
+
+    if ctx is None or not ctx.text or not now:
+        return []
+    shift = ocr.page_shift(ctx.text, now, card.picture or card.region)
+    if card.style == "picture":
+        return _settle_picture(card, shift, keep)
+    moved = shift or (0, 0)
+    gone = shift is None and ocr.share_still_there(ctx.text, now) < 0.25  # another page now
+    if ctx.screenshot is not None:
+        screen = (ctx.origin[0], ctx.origin[1], ctx.screenshot.width, ctx.screenshot.height)
+    else:
+        screen = None
+    raws = {i: raw for i, raw in enumerate(_raw_items(args)[:7], start=1) if isinstance(raw, dict)}
+    dropped: list[int] = []
+
+    def drop(it: NoteItem) -> None:
+        it.rect, it.mark = None, "none"
+        dropped.append(it.n)
+
+    for it in card.items:
+        if it.rect is None:
+            continue
+        raw = raws.get(it.n, {})
+        words = str(raw.get("quote") or "").strip()
+        if not words and str(raw.get("element_id") or "").isdigit():
+            e = ctx.element(int(raw["element_id"]))
+            words = e.name if e else ""
+        mid = _mid(it.rect)
+        was = ctx.find_text(words, near=mid) if len(re.sub(r"\W", "", words)) >= 3 else None
+        if was is not None and (
+            abs(_mid(was)[0] - mid[0]) > it.rect[2] / 2 + 40
+            or abs(_mid(was)[1] - mid[1]) > it.rect[3] / 2 + 40
+        ):
+            was = None  # its words were not read at that spot: nothing to check it by
+        if was is None:
+            if gone:
+                drop(it)
+                continue
+            move = moved
+        else:
+            hit = ocr.find_text(now, words, near=(mid[0] + moved[0], mid[1] + moved[1]))
+            if hit is None:
+                drop(it)
+                continue
+            move = (hit[0] - was[0], hit[1] - was[1])
+            # Neither where the page went nor where it was? If these words are on screen
+            # once, that is where they are; if not, it is anyone's guess which is meant.
+            astray = shift is not None and _far(move, shift, 14) and _far(move, (0, 0), 6)
+            if astray and len(ocr.find_places(now, words)) != 1:
+                drop(it)
+                continue
+        if not _far(move, (0, 0), 6):
+            continue
+        x, y, w, h = it.rect
+        new = (x + move[0], y + move[1], w, h)
+        if screen is not None and not _inside((round(_mid(new)[0]), round(_mid(new)[1])), screen):
+            drop(it)  # scrolled out of the picture
+            continue
+        it.rect = new
+    if _far(moved, (0, 0), 6):
+        for s in card.sketches:
+            s.points = [(x + moved[0], y + moved[1]) for x, y in s.points]
+    return dropped
+
+
+def _settle_picture(
+    card: NoteCard, shift: tuple[int, int] | None, keep: NoteCard | None
+) -> list[int]:
+    """A picture's tags are pinned to its parts, which have no words: they go with the page."""
+    total = shift or (0, 0)
+    before = keep.moved if keep is not None and keep.style == "picture" else (0, 0)
+    kept = {it.n: it for it in keep.items} if keep is not None and keep.style == "picture" else {}
+    card.moved = total
+    if not _far(total, (0, 0), 6) and not _far(before, (0, 0), 6):
+        card.moved = before
+        return []
+
+    def go(p: tuple[int, int] | None, by: tuple[int, int]) -> tuple[int, int] | None:
+        return (p[0] + by[0], p[1] + by[1]) if p else None
+
+    for it in card.items:
+        old = kept.get(it.n)
+        same = old is not None and old.text == it.text and old.at is not None
+        by = (total[0] - before[0], total[1] - before[1]) if same else total
+        it.at, it.tag = go(it.at, by), go(it.tag, by)
+        it.trace = [(x + by[0], y + by[1]) for x, y in it.trace]
+    if card.picture:
+        x, y, w, h = card.picture
+        card.picture = card.region = (x + total[0], y + total[1], w, h)
+    return []
 
 
 def _picture_card(
@@ -252,6 +600,7 @@ def _picture_card(
     pic: tuple[int, int, int, int],
     survey: Survey | None,
     keep: NoteCard | None = None,
+    avoid: list[tuple[int, int, int, int]] | None = None,
 ) -> NoteCard:
     """``keep``: the same card as shown so far (while it streams in); its tags stay put."""
     shown = {it.n: it for it in keep.items} if keep and keep.style == "picture" else {}
@@ -292,6 +641,21 @@ def _picture_card(
         )
         if (old := shown.get(i)) and old.text == items[-1].text and old.at:
             items[-1].at, items[-1].tag, items[-1].trace = old.at, old.tag, old.trace
+    if items and not any(it.at for it in items):
+        # Not one of its parts could be found on the picture. Tags with nowhere to go are not
+        # drawn at all, so the explanation was spoken and the screen stayed bare: the points
+        # go on a card beside the picture instead, where they can at least be read.
+        raws = _raw_items(args)
+        for it in items:
+            it.text = str(raws[it.n - 1]["text"]).strip()[:120]
+        card = NoteCard(
+            title=str(args.get("title", "")).strip()[:60] or "Notes",
+            closing=(str(args.get("closing") or "").strip()[:300] or None),
+            items=items,
+            region=pic,
+        )
+        card.place = place_card(ctx, pic, [it.text for it in items], card.title, avoid)
+        return card
     place_tags(items, pic, ctx)
     return NoteCard(
         title=str(args.get("title", "")).strip()[:60] or "Notes",
@@ -408,16 +772,30 @@ def place_card(
     title: str = "",
     avoid: list[tuple[int, int, int, int]] | None = None,
     diagram: bool = False,
+    marks: list[tuple[int, int, int, int]] | None = None,
 ) -> tuple[int, int] | None:
     """The spot near what's being explained that hides the least: no text (OCR'd too, so text
-    in images counts), no busy pixels, never the notch or Pyxi's other things on screen."""
+    in images counts), no busy pixels, never the notch or Pyxi's other things on screen, and
+    never what its own points mark (``marks``).
+
+    Live, the card sat on the header of the post its first point was about. The marks were
+    only kept clear of as one box around all of them; when that box is most of the screen
+    (four marks down a tall post) there is nowhere outside it, every spot costs the same,
+    and the card lands on a mark. So each mark is off limits by itself, and the box around
+    them all is, too, only while it leaves room."""
     if ctx is None or region is None or ctx.screenshot is None:
         return None
     k = _dpi_scale()
     w, h = card_size(texts, title, diagram)
     rx, ry, rw, rh = region
     gap = int(26 * k)
-    occ = Occupancy(ctx, [*(avoid or []), (rx - gap // 2, ry - gap // 2, rw + gap, rh + gap)], k=k)
+    pad = int(10 * k)
+    off_limits = [*(avoid or [])]
+    off_limits += [(x - pad, y - pad, mw + 2 * pad, mh + 2 * pad) for x, y, mw, mh in marks or []]
+    roomy = rw * rh <= 0.3 * ctx.screenshot.width * ctx.screenshot.height
+    if roomy or not marks:
+        off_limits.append((rx - gap // 2, ry - gap // 2, rw + gap, rh + gap))
+    occ = Occupancy(ctx, off_limits, k=k)
     x0, y0, sw, sh = occ.bounds()
     x1, y1 = x0 + sw, y0 + sh
     step = int(24 * k)
@@ -489,6 +867,53 @@ class Guide(BaseModel):
     step: int = 1
     action: str = "click"
     total: int | None = None
+    # The window the step was drawn on, so Pyxi can tell "they went another way in it" from
+    # "they left it" (closed it, tucked it away, went to something else).
+    hwnd: int = 0
+    app: str = ""
+    title: str = ""
+    # For a scroll: the words being scrolled to, so "is it in view yet" can be read off the
+    # screen; and whether this is the same scroll asked a second time (it is, once at most).
+    words: str = ""
+    again: bool = False
+
+
+def guide_left(
+    hwnd: int,
+    front: int,
+    known: set[int],
+    *,
+    exists: bool,
+    minimized: bool,
+    same_app: bool,
+) -> bool:
+    """Has the user left the window a guide step was drawn on? ``front``: the window in
+    front now (0 for the bare desktop). ``known``: the windows that were already open when
+    the step was drawn.
+
+    They left when it is tucked away; when it is gone and nothing is in front but the
+    desktop; or when what is in front is another window that was already open: they went to
+    something else. A window that has opened since is the step's own doing (the Start menu
+    closes and Settings opens), and the walk-through carries on there. Nothing in front for
+    a moment, with the window still there, is a click on the desktop or the taskbar, not
+    leaving. With no window to go by (0), nobody can tell, so nobody has left."""
+    if not hwnd:
+        return False
+    if exists and minimized:
+        return True
+    if exists and (front == hwnd or same_app):
+        return False
+    if not front:
+        return not exists
+    return front in known
+
+
+def where_they_were(title: str) -> str:
+    """A window's name as said aloud: "Settings", "Google Chrome" (the app at the end of a
+    browser's title), or "that window" when it has no short name."""
+    dashes = "-|" + chr(0x2013) + chr(0x2014)  # a hyphen, a bar, and the two long dashes
+    name = re.split(rf"\s+[{dashes}]\s+", title.strip())[-1].strip()
+    return name if 0 < len(name) <= 28 else "that window"
 
 
 # ---------------------------------------------------------------------------- answer cards

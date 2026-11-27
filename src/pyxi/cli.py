@@ -176,7 +176,7 @@ def connect(service: str = typer.Argument(..., help="google, linkedin, or status
     s = PyxiSettings()
     hub = Connectors(s.data_dir, Path.home() / "Documents" / "Pyxi")
     if service == "status":
-        for st in hub.statuses():
+        for st in hub.statuses(everything=True):
             mark = "[green]connected[/]" if st["connected"] else "[yellow]not connected[/]"
             console.print(f"{st['name']}: {mark}  {st['detail']}")
             if not st["connected"]:

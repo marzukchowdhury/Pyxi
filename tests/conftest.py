@@ -64,6 +64,39 @@ def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv(browsersetup.HOME_ENV, str(tmp_path / "extension-home"))
     monkeypatch.setattr(browsersetup, "front", lambda key="", open_windows=None: None)
+    # No test sends sound to the cloud to be written down: the key that makes the cloud
+    # reachable is taken out (a test that means to listen there sets one of its own).
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    # Nor believes it is in the beta because an earlier test joined it (cloud.apply sets this
+    # for the whole process): what a refused key is called depends on it (plainwords.py).
+    monkeypatch.delenv("PYXI_BETA", raising=False)
+    # No test opens an address in a real browser: links go out as the app's own "action".
+    from pyxi import windows
+
+    def no_browser(words, like=None):
+        return ""
+
+    no_browser.real = windows.browser_for  # for the test of the real one
+    monkeypatch.setattr(windows, "browser_for", no_browser)
+    def no_open(exe, url, window=None):
+        return None
+
+    no_open.real = windows.open_in  # for the test of the real one
+    monkeypatch.setattr(windows, "open_in", no_open)
+    # No test asks the internet whether a site exists (the test of that gives its own answers).
+    from pyxi.companion import actions as actions_mod
+
+    async def every_site_exists(host):
+        return True
+
+    every_site_exists.real = actions_mod._resolves  # for the test of the real one
+    monkeypatch.setattr(actions_mod, "_resolves", every_site_exists)
+    from pyxi.companion import answers as answers_mod
+
+    async def no_shop_page(url, limit):  # a shop's results are never fetched from the real web
+        return b"", ""
+
+    monkeypatch.setattr(answers_mod, "_shop_page", no_shop_page)
     monkeypatch.setattr(browsersetup, "_addon", None)
     monkeypatch.setattr(browsersetup, "last_fault", None)
     clip = {"text": "what I had copied"}
@@ -72,11 +105,83 @@ def _no_real_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(browsersetup, "clip_set", lambda text: clip.__setitem__("text", text) or True)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_account_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test reaches the real Pyxi server, Google's sign-in or a browser for the account
+    (pyxi/account.py): every request finds no internet (a test of the account gives its own
+    pretend server and browser)."""
+    import httpx
+
+    from pyxi.account import Account
+
+    def no_internet(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("tests never reach the real server", request=request)
+
+    monkeypatch.setattr(Account, "transport", httpx.MockTransport(no_internet))
+    monkeypatch.delenv("PYXI_ACCOUNT", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_windows_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test reads the other windows that are really on this PC's screen: a look at the
+    screen finds none besides the one it is given (a test of several gives its own)."""
+    from pyxi.screen import uia
+
+    monkeypatch.setattr(uia, "other_windows", lambda screen, main=0, limit=3: [])
+    # Nor asks Windows which control has the keyboard: a dictation finds a text box in front
+    # (a test of the other cases gives its own answer).
+    from pyxi import dictation
+
+    def a_text_box() -> dictation.Target:
+        return dictation.Target("field", 0)
+
+    a_text_box.real = dictation.where_to_type  # type: ignore[attr-defined]
+    monkeypatch.setattr(dictation, "where_to_type", a_text_box)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_listening(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test listens to this PC's speakers or microphone, starts Windows Live Captions or
+    asks Windows what is playing: the real capture refuses to open (tests of the listening
+    give LiveEars a pretend one)."""
+    from pyxi.companion import listening
+    from pyxi.listen import capture, wincaptions
+
+    def refuse(self: Any, wait_s: float = 3.0) -> bool:
+        self.problem = "Tests never listen to the real PC."
+        return False
+
+    refuse.real = capture.Capture.start  # for the test of the capture's own thread (fake device)
+    monkeypatch.setattr(capture.Capture, "start", refuse)
+    monkeypatch.setattr(capture, "muted", lambda: False)
+    monkeypatch.setattr(wincaptions, "installed", lambda: False)
+    monkeypatch.setattr(wincaptions, "window", lambda: 0)
+    monkeypatch.setattr(listening, "sound_playing", lambda: False)
+    monkeypatch.setattr(listening, "sound_screen", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _addresses_are_right(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test waits on the "is this the address you meant?" card (companion/addresscheck.py):
+    it is shown, and answered at once with "Yes, that's it". Tests of the card itself give
+    their own answers (tests/test_address_check.py)."""
+    real = Hub.request
+
+    async def request(self: Hub, type: str, timeout: float = 300, **data: Any) -> Any:
+        if type != "check_address":
+            return await real(self, type, timeout=timeout, **data)
+        await self.emit(type, request_id="req_test", **data)
+        return {"addresses": [a["address"] for a in data["addresses"]]}
+
+    monkeypatch.setattr(Hub, "request", request)
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> PyxiSettings:
     return PyxiSettings(
         _env_file=None,
         data_dir=tmp_path / ".pyxi",
         voice={"tts": "client"},
-        screen={"ambient_memory": False},
+        # tab_fallback: off here whatever the default is, so no test reaches for real windows.
+        screen={"ambient_memory": False, "tab_fallback": False},
     )

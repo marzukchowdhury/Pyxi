@@ -89,7 +89,7 @@ async def test_a_failing_cloud_voice_falls_back_to_mitali_not_to_english(studio,
 
     monkeypatch.setattr(studio, "_gemini", boom)
     speech = await studio.synthesize("আজ বিকেল চারটায় মিটিং আছে।")
-    assert speech.wav == b"RIFF-bn" and "gemini voice failed" in (studio.last_error or "")
+    assert speech.wav == b"RIFF-bn" and "Gemini voice failed" in (studio.last_error or "")
 
 
 async def test_no_bengali_voice_yet_shows_the_words_instead_of_an_english_voice(
@@ -225,3 +225,16 @@ async def test_automatic_still_hears_spanish_locally(monkeypatch):
 def test_no_speech_replies_become_empty():
     assert stt_mod._tidy("(no speech)") == ""
     assert stt_mod._tidy('"হাই পিক্সি"') == "হাই পিক্সি"
+
+
+async def test_with_their_switch_on_nothing_they_say_is_sent(monkeypatch):
+    """Voice panel, "Turn my speech into text on this PC only": that means Bengali and speech
+    the PC can't place too, or the switch says more than it does."""
+    t, model, sent = _transcriber(monkeypatch, {"bn": 0.5}, cloud="আমার ফোল্ডারটা খোলো", offline=True)
+    t.on_this_pc = True
+    text, _, spoken = await t.transcribe(b"clip", "bn")
+    assert (text, spoken, sent, model.calls) == ("local words", "bn", [], ["bn"])
+    t, model, sent = _transcriber(monkeypatch, {"pl": 0.74, "en": 0.04}, cloud="অশোক স্যার")
+    t.on_this_pc = True
+    await t.transcribe(b"clip", "auto")
+    assert sent == []  # the cloud was reachable, and was not asked

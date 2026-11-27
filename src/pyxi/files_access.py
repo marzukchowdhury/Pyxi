@@ -227,14 +227,34 @@ def search(
 
 
 # ---------------------------------------------------------------------------- read
+def _pdf_text(path: Path, max_chars: int) -> str:
+    """A PDF for the model: columns in reading order, tables as tables, the running header and
+    footer left out (agents/pdf_layout.py). "" when that reader can't read it: the plain one
+    is used then. No OCR here: a quick look at a file never waits on a scan."""
+    try:
+        from pyxi.agents import pdf_layout
+
+        layout = pdf_layout.read(path, ocr=False, max_chars=max_chars)
+    except Exception:
+        return ""
+    pages = [f"[page {i}]\n{t}" for i, t in enumerate(layout.page_texts(marks=True), 1) if t]
+    if not pages:
+        return ""
+    return f"PDF, {layout.pages} pages.\n" + "\n\n".join(pages)
+
+
 def read_text(path: Path, max_chars: int = 8000) -> str:
     ext = path.suffix.lower()
     if ext in TEXT_EXTS:
         text = path.read_text(encoding="utf-8", errors="replace")
+    elif ext == ".pdf" and (text := _pdf_text(path, max_chars)):
+        pass
     elif ext == ".pdf":
         from pypdf import PdfReader
 
         reader = PdfReader(str(path))
+        if reader.is_encrypted and reader.decrypt("") == 0:
+            raise ValueError(f"{path.name} is password-protected. Ask Pixel to unlock it first.")
         pages = []
         for i, page in enumerate(reader.pages, 1):
             pages.append(f"[page {i}] {page.extract_text() or ''}")

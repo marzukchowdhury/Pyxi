@@ -18,11 +18,12 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -161,7 +162,7 @@ class KokoroTTS:
             if self._engine is None:
                 if not self.installed():
                     raise RuntimeError(
-                        "Kokoro model files are missing. Run `pyxi setup-voice` to download them (~350 MB)."
+                        "Pyxi's own voice isn't on this PC yet. Download it in the Voice tab (about 350 MB)."
                     )
                 from kokoro_onnx import Kokoro
 
@@ -309,22 +310,62 @@ def make_tts(config: VoiceConfig, models_dir: Path, prefs_path: Path | None = No
     return FallbackTTS(primary)
 
 
-async def download_kokoro(models_dir: Path) -> list[Path]:
-    """Fetch the Kokoro ONNX model and voice pack from the kokoro-onnx release."""
+# About how big each file is, for a progress figure before the server says (bytes).
+KOKORO_SIZES = {"kokoro-v1.0.onnx": 326_000_000, "voices-v1.0.bin": 28_000_000}
+
+
+async def download_kokoro(
+    models_dir: Path,
+    *,
+    force: bool = False,
+    progress: Any = None,
+    client: Any = None,
+) -> list[Path]:
+    """Fetch the Kokoro ONNX model and voice pack from the kokoro-onnx release.
+
+    ``force``: fetch both again even if they are here (a repair). Each file arrives beside the
+    old one and replaces it only once it is whole, so a download that breaks off leaves the
+    working voice as it was. ``progress(done, total)`` is called with bytes as they arrive."""
     import httpx
 
     models_dir.mkdir(parents=True, exist_ok=True)
+    urls = (KOKORO_MODEL, KOKORO_VOICES)
+    names = [u.rsplit("/", 1)[-1] for u in urls]
+    sizes = {n: KOKORO_SIZES.get(n, 1) for n in names}
+    got = dict.fromkeys(names, 0)
+
+    def tell() -> None:
+        if progress is not None:
+            progress(sum(got.values()), max(1, sum(sizes.values())))
+
     out = []
-    async with httpx.AsyncClient(follow_redirects=True, timeout=None) as client:
-        for url in (KOKORO_MODEL, KOKORO_VOICES):
-            target = models_dir / url.rsplit("/", 1)[-1]
-            if not target.exists():
+    own = client is None
+    client = client or httpx.AsyncClient(follow_redirects=True, timeout=None)
+    try:
+        for url, name in zip(urls, names, strict=True):
+            target = models_dir / name
+            if target.exists() and not force:
+                got[name] = sizes[name] = target.stat().st_size
+                tell()
+            else:
                 tmp = target.with_suffix(".part")
                 async with client.stream("GET", url) as r:
                     r.raise_for_status()
+                    length = int(r.headers.get("content-length") or 0)
+                    if length:
+                        sizes[name] = length
                     with tmp.open("wb") as f:
                         async for chunk in r.aiter_bytes(1 << 20):
                             f.write(chunk)
-                tmp.rename(target)
+                            got[name] += len(chunk)
+                            tell()
+                if length and got[name] != length:  # cut off part-way: never a half voice
+                    tmp.unlink(missing_ok=True)
+                    raise OSError(f"the download of {name} broke off")
+                sizes[name] = got[name]
+                os.replace(tmp, target)
             out.append(target)
+    finally:
+        if own:
+            await client.aclose()
     return out

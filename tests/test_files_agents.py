@@ -786,7 +786,23 @@ async def test_sample_data_then_a_pivot_on_an_empty_sheet_in_one_go():
     assert any(c[0] == "batch" and "updateCells" in c[1][0] for c in g.calls)  # the pivot
 
 
-def test_a_switched_off_google_api_says_which_and_where_to_turn_it_on():
+def test_whose_google_client_it_is(tmp_path, monkeypatch):
+    from pyxi.connectors.google import GoogleConnector
+
+    monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+    g = GoogleConnector(tmp_path / "connectors", tmp_path)
+    assert not g.own_client()  # the one the installer ships, or none: a customer
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "made-up")
+    assert not g.own_client()
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "made-up")
+    assert g.own_client()
+    monkeypatch.delenv("GOOGLE_CLIENT_SECRET")
+    g.client_path.write_bytes(b"{}")
+    assert g.own_client()
+
+
+def test_a_switched_off_google_api_says_which_and_where_to_turn_it_on(caplog):
     from pyxi.agents.jobs import describe_failure
     from pyxi.companion.brain import friendly_error
     from pyxi.connectors.google import google_error
@@ -803,12 +819,23 @@ def test_a_switched_off_google_api_says_which_and_where_to_turn_it_on():
             }
         }
     )
-    said = google_error(403, body)
+    # A developer, on a Google client of their own: which API, and where to turn it on.
+    said = google_error(403, body, own_client=True)
     assert said.startswith("The Google Sheets API is switched off in Pyxi's Google Cloud project")
     assert "console.cloud.google.com/apis/library/sheets.googleapis.com?project=83793709681" in said
     assert "{" not in said
     assert describe_failure(RuntimeError(said)) == said  # the notification keeps all of it
     assert friendly_error(RuntimeError(said)) == said
+    # Everyone else is on the Google client Pyxi ships and cannot turn anything on: it is
+    # ours to mend, and they are told so. Which API and where goes to the log only.
+    ours = "That's a problem on our side with Google, not something you did. Try again later."
+    with caplog.at_level("ERROR", logger="pyxi.connectors.google"):
+        said = google_error(403, body)
+    assert said == ours
+    assert "console.cloud" not in said and "API" not in said and "Cloud project" not in said
+    assert "sheets.googleapis.com?project=83793709681" in caplog.text
+    assert describe_failure(RuntimeError(said)) == ours
+    assert friendly_error(RuntimeError(said)) == ours
     other = google_error(404, json.dumps({"error": {"message": "Requested entity was not found."}}))
     assert other == "Google said 404: Requested entity was not found."
 
@@ -1062,3 +1089,41 @@ async def test_the_open_sheet_is_found_on_any_screen_and_untitled_is_never_guess
     monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(1, "Claude", "")])
     assert await filework._open_google_file(brain, "Untitled spreadsheet") == ""  # never by name
     assert await filework._open_google_file(brain, "Budget 2026") == "Budget 2026"  # a real name is fine
+
+
+async def test_this_sheet_is_the_one_ledger_just_worked_on_when_no_window_gives_its_link(monkeypatch):
+    """Live: Ledger made a new sheet; the next request, "make the header bold" on "this sheet",
+    ended "I couldn't find a Google Sheet called 'this sheet'"."""
+    import time
+    from types import SimpleNamespace
+
+    from pyxi import windows
+    from pyxi.companion import filework
+    from pyxi.screen import uia
+
+    made = "https://docs.google.com/spreadsheets/d/1NC6-A_new/edit"
+    doc = "https://docs.google.com/document/d/1Gzj_doc/edit"
+
+    def job(agent, summary, ago, status="done"):
+        return SimpleNamespace(agent_name=agent, status=status, ended_at=time.time() - ago, summary=summary)
+
+    jobs = [
+        job("Ledger", f"Added a 3 x 3 table. It's a new file in your Google Drive: {doc}", 600),
+        job("Ledger", f"Set 12 cells on Sheet1. It's a new file in your Google Drive: {made}", 20),
+        job("Scout", "Found https://docs.google.com/spreadsheets/d/someoneElses/edit on a page", 5),
+    ]
+    brain = SimpleNamespace(
+        _ctx=SimpleNamespace(window=SimpleNamespace(hwnd=1, title="Claude")),
+        jobs=SimpleNamespace(recent=lambda n=8: jobs),
+    )
+    monkeypatch.setattr(windows, "open_windows", lambda minimized=False: [(1, "Claude", ""), (5, "Sample data - Google Sheets - Mozilla Firefox", "")])
+    monkeypatch.setattr(uia, "browser_url", lambda hwnd, budget_s=0.5: None)  # the address bar can't be read
+    assert await filework._open_google_file(brain, "this sheet") == made  # Ledger's, never a link Scout read
+    assert await filework._open_google_file(brain, "this doc") == doc
+    assert await filework._open_google_file(brain, "this deck") == ""  # none: it asks, it doesn't guess
+    # Half an hour on, "this sheet" is no longer that file.
+    jobs[1].ended_at = time.time() - 3600
+    assert await filework._open_google_file(brain, "this sheet") == ""
+    # A window that does give its link still wins.
+    monkeypatch.setattr(uia, "browser_url", lambda hwnd, budget_s=0.5: "https://docs.google.com/spreadsheets/d/onScreen/edit" if hwnd == 5 else None)
+    assert await filework._open_google_file(brain, "this sheet") == "https://docs.google.com/spreadsheets/d/onScreen/edit"

@@ -253,6 +253,17 @@ def test_signing_gives_up_politely_when_mozilla_takes_too_long_or_refuses_the_ke
     with pytest.raises(SystemExit) as stop:
         sign_firefox.main(["--out", str(tmp_path / "s")], env=SECRETS, client=httpx.Client(transport=httpx.MockTransport(refuse)), sleep=lambda s: None)
     assert "Mozilla refused the API key (401)" in str(stop.value) and SECRETS["WEB_EXT_API_SECRET"] not in str(stop.value)
+    # Mozilla's answer says which of the two values is wrong: it is passed on, in plain words.
+    assert '"bad signature"' in str(stop.value) and "WEB_EXT_API_SECRET isn't the secret" in str(stop.value)
+
+    def unknown(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"detail": "Unknown JWT iss (issuer)."})
+
+    with pytest.raises(SystemExit) as stop:
+        sign_firefox.main(["--out", str(tmp_path / "s")], env=SECRETS, client=httpx.Client(transport=httpx.MockTransport(unknown)), sleep=lambda s: None)
+    assert "WEB_EXT_API_KEY isn't the issuer" in str(stop.value)
+    for value in SECRETS.values():
+        assert value not in str(stop.value)
 
 
 def test_a_version_mozilla_already_has_is_picked_up_and_not_sent_again(tmp_path, capsys):
@@ -1514,7 +1525,14 @@ async def test_setup_says_so_when_no_browser_is_open_or_one_is_already_connected
 # ====================================================================== when they ask, and Settings
 async def test_connect_my_browser_is_a_tool_only_while_none_is_connected(settings, bundle, monkeypatch, setups):
     brain = _brain(settings)
-    assert [t.name for t in tabwork.tools(brain)] == ["connect_browser"]
+    # Only in a turn whose own words are about the browser: offered in every turn, the extra
+    # tool changed what the model did with requests that had nothing to do with it.
+    for words in ("", "What's this about, in two sentences?", "add milk to my list", "what's on my calendar"):
+        brain._user_text = words
+        assert tabwork.tools(brain) == [], words
+    for words in ("connect my browser", "set up the extension", "Can you work in Chrome?", "install the Firefox add-on", "ব্রাউজার কানেক্ট করো"):
+        brain._user_text = words
+        assert [t.name for t in tabwork.tools(brain)] == ["connect_browser"], words
     cards = Cards(brain.hub, answer=True)
     note = await tabwork.handle(brain, "connect_browser", {})
     assert note.startswith("connect_browser: no browser Pyxi can set up is open") and cards.asked == []

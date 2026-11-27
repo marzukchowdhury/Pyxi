@@ -205,3 +205,28 @@ async def test_what_alarms_do_i_have_is_instant(settings) -> None:
     await b.turn("set an alarm for 6:30 am tomorrow")
     await b.turn("What alarms do I have?")
     assert said[-1].startswith("Your alarm: 6:30 AM")
+
+
+def test_a_volume_change_that_changes_nothing_says_so(monkeypatch):
+    """Live: "increase the volume" three times with Windows already near the top and the
+    video's own slider low. "Nothing happened", and Pyxi said it had forgotten to do it."""
+    from pyxi import media
+
+    set_to = []
+
+    class Speakers:
+        def SetMute(self, *a):
+            pass
+
+        def SetMasterVolumeLevelScalar(self, level, _):
+            set_to.append(level)
+
+    monkeypatch.setattr(media, "_speakers", lambda: Speakers())
+    monkeypatch.setattr(media, "volume", lambda: 1.0)
+    note = media.set_volume("+15")
+    assert note.startswith("volume: Windows' volume is already at 100%") and "the app's own volume is low" in note
+    assert set_to == []
+    monkeypatch.setattr(media, "volume", lambda: 0.5)
+    assert media.set_volume("+15") == "Volume 50% -> 65%." and set_to == [0.65]
+    for said in ("increase", "raise it", "decrease", "reduce it a bit"):
+        assert media.parse_volume(said, 0.5) is not None, said

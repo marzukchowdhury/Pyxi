@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pyxi demo clip: "214 files. All called Screenshot."</title>
+<!--
+  A built mock-up, not a recording. What it shows is the app's tidy_folder: Pyxi works out
+  where everything would go and asks first, on its OK card (overlay/Requests.tsx), with the
+  app's own wording: the plan in one line (tidy.py), that files are only moved, and the
+  buttons Allow and Don't. Nothing moves until Allow is clicked. What it says afterwards is
+  the app's line too. The 214 icons on this desktop are counted, group by group, so the card
+  adds up. Made up: every file name.
+-->
+<link rel="stylesheet" href="kit.css">
+<style>
+#win { background: linear-gradient(180deg, #23305f 0%, #4a4a8c 38%, #b96f86 70%, #f0b27a 100%); }
+#win::before { content: ""; position: absolute; left: 0; right: 0; bottom: 56px; height: 330px; background: #1b2147; opacity: .55; clip-path: polygon(0 100%, 0 58%, 12% 36%, 26% 60%, 41% 22%, 57% 55%, 70% 30%, 86% 62%, 100% 38%, 100% 100%); }
+#win::after { content: ""; position: absolute; left: 0; right: 0; bottom: 56px; height: 210px; background: #141a3a; opacity: .7; clip-path: polygon(0 100%, 0 70%, 18% 44%, 33% 72%, 50% 40%, 64% 68%, 80% 46%, 100% 74%, 100% 100%); }
+#bar { position: absolute; left: 0; right: 0; bottom: 0; height: 56px; background: rgba(16, 19, 34, .86); display: flex; align-items: center; justify-content: center; gap: 16px; z-index: 3; }
+#bar i { display: block; width: 32px; height: 32px; border-radius: 9px; background: rgba(255, 255, 255, .16); }
+#bar i:first-child { background: linear-gradient(135deg, #8fb4ff, #5e7cf0); }
+#bar b { position: absolute; right: 24px; top: 9px; font-size: 14.5px; line-height: 1.3; font-weight: 500; color: #e6eaf4; text-align: right; }
+#icons { position: absolute; left: 10px; top: 8px; z-index: 2; }
+.ic { position: absolute; left: 0; top: 0; width: 64px; height: 98px; will-change: transform; }
+.ic u { position: absolute; left: 12px; top: 8px; width: 40px; height: 44px; border-radius: 5px; background: #fff; display: block; box-shadow: 0 2px 5px rgba(0, 0, 0, .28); overflow: hidden; }
+.ic span { position: absolute; left: -2px; right: -2px; top: 58px; text-align: center; font-size: 11px; line-height: 1.2; font-weight: 500; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .8); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-all; }
+/* what each kind of file looks like */
+.ic.shot u { background: linear-gradient(180deg, #dfe6f5 0 22%, #f7f9fd 22%); }
+.ic.shot u::after { content: ""; position: absolute; left: 5px; right: 5px; top: 15px; height: 4px; border-radius: 2px; background: #b8c2d6; box-shadow: 0 8px 0 #cfd6e4, 0 16px 0 #cfd6e4; }
+.ic.doc u::after { content: ""; position: absolute; left: 7px; right: 7px; top: 9px; height: 4px; border-radius: 2px; background: #5b8def; box-shadow: 0 9px 0 #c3cde0, 0 18px 0 #c3cde0, 0 27px 0 #c3cde0; }
+.ic.img u { background: linear-gradient(180deg, #8fc7ff, #d9efff 60%, #7fb069 60%); }
+.ic.img u::after { content: ""; position: absolute; right: 7px; top: 7px; width: 9px; height: 9px; border-radius: 50%; background: #ffe08a; }
+.ic.exe u { background: linear-gradient(160deg, #6b7a99, #3d4763); border-radius: 9px; }
+.ic.exe u::after { content: ""; position: absolute; left: 12px; top: 13px; width: 16px; height: 16px; border-radius: 4px; border: 3px solid #dfe6f5; }
+.ic.vid u { background: #23283a; }
+.ic.vid u::after { content: ""; position: absolute; left: 15px; top: 13px; border: 9px solid transparent; border-left: 14px solid #ff9f6b; border-right: 0; }
+.ic.zip u { background: #f1d48a; }
+.ic.zip u::after { content: ""; position: absolute; left: 18px; top: 0; width: 4px; height: 100%; background: repeating-linear-gradient(180deg, #8a6d1c 0 4px, transparent 4px 8px); }
+/* the folders it makes */
+.fold { position: absolute; left: 0; top: 0; width: 64px; height: 98px; z-index: 3; opacity: 0; }
+.fold u { position: absolute; left: 8px; top: 12px; width: 48px; height: 38px; border-radius: 5px; background: linear-gradient(180deg, #ffd978, #f2b23c); display: block; box-shadow: 0 3px 8px rgba(0, 0, 0, .35); }
+.fold u::before { content: ""; position: absolute; left: 0; top: -7px; width: 22px; height: 12px; border-radius: 5px 5px 0 0; background: #f2b23c; }
+.fold span { position: absolute; left: -14px; right: -14px; top: 58px; text-align: center; font-size: 12.5px; font-weight: 600; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .85); }
+.fold b { position: absolute; left: 34px; top: 2px; min-width: 26px; height: 22px; padding: 0 6px; border-radius: 11px; background: #2f6bff; color: #fff; font-size: 13px; line-height: 22px; font-weight: 700; text-align: center; opacity: 0; }
+#req { left: 630px; top: 150px; z-index: 5; }
+</style>
+</head>
+<body>
+<script src="story.js"></script>
+<script src="kit.js"></script>
+<script>
+// What is on the desktop, group by group. The card's line is built from these counts the way
+// the app builds it (tidy.py: most files first), so the plan on the card is the desktop.
+const GROUPS = [
+  { into: "Screenshots", n: 131, cls: "shot", name: (k) => `Screenshot (${k + 1}).png` },
+  { into: "Documents", n: 38, cls: "doc", name: (k) => ["Invoice 0412.pdf", "Notes.docx", "CV final v3.docx", "Rota March.xlsx", "Lease.pdf", "Recipe.docx", "Quote 88.pdf"][k % 7] },
+  { into: "Images", n: 21, cls: "img", name: (k) => `IMG_${4801 + k * 7}.jpg` },
+  { into: "Installers", n: 9, cls: "exe", name: (k) => ["setup.exe", "installer.msi", "update.exe"][k % 3] },
+  { into: "Videos", n: 8, cls: "vid", name: (k) => `Clip ${k + 1}.mp4` },
+  { into: "Archives", n: 7, cls: "zip", name: (k) => ["backup.zip", "photos.zip", "old site.zip"][k % 3] },
+];
+const FILES = GROUPS.reduce((a, g) => a + g.n, 0);
+if (FILES !== 214) throw new Error("the desktop does not hold 214 files");
+const PLAN = `Move ${FILES} files into ${GROUPS.length} folders: ${GROUPS.map((g) => `${g.into} (${g.n})`).join(", ")}.`;
+const COLS = 25, CW = 64, CH = 98;
+// a fixed shuffle: the same desktop every time it is drawn
+function shuffled(n) {
+  const a = [...Array(n).keys()];
+  let s = 20261126;
+  const rnd = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+const ITEMS = [];
+GROUPS.forEach((g, gi) => { for (let k = 0; k < g.n; k++) ITEMS.push({ g: gi, cls: g.cls, name: g.name(k) }); });
+const ORDER = shuffled(ITEMS.length);
+ORDER.forEach((cell, i) => { ITEMS[i].cell = cell; });
+
+Film.scene({
+  id: "desktop",
+  screen: `
+    <div id="icons">
+      ${ITEMS.map((f) => `<div class="ic ${f.cls}"><u></u><span>${f.name}</span></div>`).join("")}
+      ${GROUPS.map((g) => `<div class="fold"><u></u><b>0</b><span>${g.into}</span></div>`).join("")}
+    </div>
+    <div id="bar"><i></i><i></i><i></i><i></i><i></i><i></i><b>16:42<br>26 Nov 2026</b></div>`,
+  overlay: `<div class="request" id="req"><div class="rt">Pyxi needs your OK</div><div class="ra">${PLAN}</div>
+    <div class="rr">In Desktop. Files are only moved, never deleted or overwritten. Say 'undo that' and I'll put everything back.</div>
+    <div class="rb"><u class="yes" id="allow">Allow</u><u>Don't</u></div></div>`,
+
+  // The plan is on the card before anything moves; the click on Allow is what starts it.
+  plan(d, B) {
+    const v0 = B.act, card = v0 + 0.25;
+    const click = onBeat(Math.max(card + 2.25, v0 + d[0] + 0.9));
+    const fold = [click + 0.2, click + 2.0];
+    const v1 = fold[1] - 0.25;
+    return {
+      card, click, fold, voice: [v0 + 0.05, v1], taps: [click],
+      c: onBeat(v1 + d[1] + 0.6), poster: v1 + d[1] + 0.1, show: [click - 1.0, click + 3.5],
+      sfx: [["listen", B.listen], ["pin", card], ["click", click], ...Array.from({ length: 16 }, (_, k) => ["move", fold[0] + 0.15 + k * 0.1]), ["done", fold[1]]],
+    };
+  },
+  notch(T, N) {
+    const says = window.STORY.desktop.says;
+    return [N.idle(0), N.listen(T.listen), N.look(T.look, "Looking at your screen"), N.say(T.voice[0] - 0.05, says[0]),
+      N.idle(T.voice[0] + 2.0), N.say(T.voice[1] - 0.05, says[1]), N.idle(T.c - 0.9)];
+  },
+
+  init(T) {
+    this.ics = $$(".ic"); this.folds = $$(".fold");
+    ITEMS.forEach((f, i) => { f.x = (f.cell % COLS) * CW; f.y = Math.floor(f.cell / COLS) * CH; f.el = this.ics[i]; f.el.style.transform = `translate(${f.x}px, ${f.y}px)`; });
+    // the folders stand in the first column, top to bottom, the way a tidy desktop sits
+    this.folds.forEach((el, k) => { el.style.transform = `translate(0px, ${k * CH}px)`; });
+    // the order files leave in: nearest their folder first
+    GROUPS.forEach((g, gi) => {
+      const mine = ITEMS.filter((f) => f.g === gi).sort((a, b) => Math.hypot(a.x, a.y - gi * CH) - Math.hypot(b.x, b.y - gi * CH));
+      mine.forEach((f, r) => { f.rank = r / Math.max(1, mine.length - 1); f.nth = r; });
+    });
+    const allow = boxOf("#allow"), req = boxOf("#req");
+    this.allow = allow;
+    this.stops = [{ at: 0, d: 0, x: 1120, y: 640 }, { at: T.click - 0.75, d: 0.6, x: allow.cx + 4, y: allow.cy + 4 }, { at: T.click + 0.4, d: 0.8, x: allow.cx + 200, y: allow.cy + 150 }];
+    this.cam = [
+      { at: 0, v: [960, 539, 0.97, -8, 4] },
+      { at: T.listen - 0.2, d: 0.6, v: [960, 300, 1.55, -4, 2] },
+      { at: T.look - 0.2, d: 0.7, v: [960, 539, 0.97, -3, 1.4] },
+      { at: T.card - 0.1, d: 0.8, v: [req.cx, req.cy + 70, 1.5, -3, 1.2] },        // in on the card, to read it
+      { at: T.click + 0.1, d: 0.9, v: [560, 420, 1.34, 5, 1.5] },                   // across to the folders as the files go in
+      { at: T.fold[1] - 0.5, d: 1.3, v: [960, 539, 0.99, -2, 1] },                  // back out: a clean desktop
+      { at: T.fold[1] + 0.9, d: T.c - T.fold[1] - 0.9, v: [640, 400, 1.42, 3, 0.8] },
+    ];
+  },
+
+  draw(t, T) {
+    const req = $("#req"), u = back(seg(t, T.card, T.card + 0.4)), gone = seg(t, T.click + 0.08, T.click + 0.3);
+    req.style.opacity = seg(t, T.card, T.card + 0.1) * (1 - gone);
+    req.style.transform = `translateY(${-16 * (1 - u) - 10 * gone}px) scale(${mix(0.94, 1, u)})`;
+    $("#allow").style.background = t > T.click - 0.02 ? "rgba(158, 203, 255, .38)" : "";
+
+    // every file goes to its folder: a short flight, shrinking as it lands
+    const [f0, f1] = T.fold, span = f1 - f0 - 0.55, counts = GROUPS.map(() => 0);
+    for (const f of ITEMS) {
+      const at = f0 + f.rank * span, m = io3(seg(t, at, at + 0.5));
+      if (m >= 1) { counts[f.g]++; if (f.el.style.opacity !== "0") f.el.style.opacity = 0; continue; }
+      const tx = 0, ty = f.g * CH;
+      const x = mix(f.x, tx, m), y = mix(f.y, ty, m) - 26 * Math.sin(Math.PI * m);
+      f.el.style.opacity = 1 - seg(m, 0.8, 1);
+      f.el.style.transform = `translate(${x}px, ${y}px) scale(${mix(1, 0.35, m)})`;
+      f.el.style.zIndex = m > 0 ? 2 : 1;
+    }
+    this.folds.forEach((el, k) => {
+      const a = back(seg(t, f0 - 0.1 + k * 0.05, f0 + 0.25 + k * 0.05));
+      el.style.opacity = seg(t, f0 - 0.1 + k * 0.05, f0 + k * 0.05);
+      const full = counts[k] === GROUPS[k].n, bump = 0.06 * Math.sin(Math.PI * seg(t, f1 - 0.15, f1 + 0.15));
+      el.firstElementChild.style.transform = `scale(${mix(0.5, 1, a) + (full ? bump : 0.05 * Math.abs(Math.sin(t * 22)) * (counts[k] > 0 ? 1 : 0))})`;
+      const badge = el.children[1];
+      badge.textContent = counts[k]; badge.style.opacity = (counts[k] > 0 ? 1 : 0) * (1 - seg(t, f1 + 1.2, f1 + 1.6));
+    });
+
+    const k = keyed(t, this.cam);
+    return { ptr: pointer(t, this.stops), cam: { x: k[0], y: k[1], s: k[2], ry: k[3], rx: k[4] } };
+  },
+});
+</script>
+</body>
+</html>

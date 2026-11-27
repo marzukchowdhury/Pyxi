@@ -36,6 +36,8 @@ CODE = {
 MAX_BYTES = 600_000
 MAX_CHANGED = 12  # lines: a small fix, not a rewrite
 WINDOW = 60  # lines either side of the error in a big file
+WHOLE_CHARS = 60_000  # a big file with no line to go by: this much of it, from the top
+BOM = chr(0xFEFF)  # the byte-order mark some Windows editors put at the start of a file
 
 # file, line pairs in the ways tools print them
 LOCATIONS = [
@@ -113,11 +115,37 @@ def locations(error: str, cwd: Path | None = None) -> list[Location]:
     return [loc for _, loc in ordered]
 
 
+def as_line(value: Any) -> int:
+    """A line number however it was written: 12, "12", "line 12", "12-14" (the first). 0 when
+    there is none ("unknown" used to fail the whole job with int()'s own words)."""
+    m = re.search(r"\d+", str(value if value is not None else ""))
+    return int(m.group(0)) if m else 0
+
+
+def line_in(error: str, path: Path) -> int:
+    """The line the error names for this file (the deepest one), or 0."""
+    try:
+        want = str(Path(path).resolve()).lower()
+    except OSError:
+        return 0
+    for loc in locations(error, cwd=Path(path).parent):
+        if loc.path.lower() == want:
+            return loc.line
+    return 0
+
+
 def excerpt(text: str, line: int, window: int = WINDOW) -> tuple[str, int]:
-    """Numbered lines: the whole file if it's small, else ``window`` lines around ``line``."""
+    """Numbered lines: the whole file if it's small, else ``window`` lines around ``line``.
+    With no line to go by (``line`` 0), the whole file up to ``WHOLE_CHARS``: the first
+    lines of a long script are rarely where it broke."""
     lines = text.splitlines()
     if len(lines) <= 2 * window + 40:
         lo, hi = 1, len(lines)
+    elif line <= 0:
+        lo, hi, size = 1, 0, 0
+        while hi < len(lines) and size + len(lines[hi]) + 8 <= WHOLE_CHARS:
+            size += len(lines[hi]) + 8
+            hi += 1
     else:
         lo, hi = max(1, line - window), min(len(lines), line + window)
     return "\n".join(f"{i:>5}| {lines[i - 1]}" for i in range(lo, hi + 1)), lo
@@ -155,7 +183,9 @@ def check(path: Path, text: str, find: str, replace: str) -> str | None:
     )
     if changed > MAX_CHANGED * 2:
         return "that's more than a small fix"
-    new = text.replace(find, replace, 1)
+    # Without the byte-order mark Notepad, Visual Studio and PowerShell put first: as text
+    # it is a syntax error to Python and to JSON, so every fix to such a file was refused.
+    new = text.replace(find, replace, 1).lstrip(BOM)
     if path.suffix.lower() in (".py", ".pyw"):
         try:
             ast.parse(new)
@@ -207,18 +237,29 @@ def apply(fix: Fix) -> Path:
     path = Path(fix.path)
     data = path.read_bytes()
     text, encoding = decode(data)
-    crlf = "\r\n" in text
-    body = text.replace("\r\n", "\n")
-    if body.count(fix.find) != 1:
+    # Every line keeps the ending it has: the text to replace is looked for with either
+    # ending, and only those lines are written anew, with the ending they had (a file with
+    # both kinds used to come back with every line CRLF).
+    pattern = re.escape(fix.find.replace("\r\n", "\n")).replace("\\\n", "\r?\n")
+    found = list(re.finditer(pattern, text))
+    if len(found) != 1:
         raise RuntimeError(f"{path.name} changed since the fix was made. Ask me again.")
+    old, after = found[0].group(0), text[found[0].end() : found[0].end() + 2]
+    if "\n" in old:
+        ending = "\r\n" if "\r\n" in old else "\n"
+    elif after[:1] in ("\r", "\n"):
+        ending = "\r\n" if after == "\r\n" else "\n"
+    else:
+        ending = "\r\n" if text.count("\r\n") * 2 > text.count("\n") else "\n"
+    put = fix.replace.replace("\r\n", "\n").replace("\n", ending)
+    new = text[: found[0].start()] + put + text[found[0].end() :]
     backup = path.with_name(path.name + ".bak")
     n = 2
     while backup.exists():
         backup = path.with_name(f"{path.name}.bak{n}")
         n += 1
-    new = fix.apply_to(body)
     try:
-        out = (new.replace("\n", "\r\n") if crlf else new).encode(encoding)
+        out = new.encode(encoding)
     except UnicodeEncodeError:
         raise RuntimeError(f"The fix has characters {path.name} can't hold.") from None
     backup.write_bytes(data)
@@ -237,7 +278,9 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     from otto.llm.base import Message
 
     error = str(job.params.get("error") or job.context or "").strip()
-    loc = Location(job.files[0], int(job.params.get("line") or 0)) if job.files else None
+    loc = Location(job.files[0], as_line(job.params.get("line"))) if job.files else None
+    if loc is not None and not loc.line:  # the file was named, the line is in the error
+        loc.line = line_in(error, Path(loc.path))
     if loc is None:
         found = locations(error)
         loc = found[0] if found else None
@@ -249,14 +292,24 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     if path.suffix.lower() not in CODE or path.stat().st_size > MAX_BYTES:
         raise RuntimeError(f"{path.name} isn't a script I can safely edit.")
     raw = decode(path.read_bytes())[0].replace("\r\n", "\n")
-    numbered, _ = excerpt(raw, loc.line or 1)
+    numbered, _ = excerpt(raw, loc.line)
+    shown = numbered.count("\n") + 1 if numbered else 0
+    cut = not loc.line and shown < len(raw.splitlines())
     await manager._status(
         job, f"Reading {path.name}" + (f" around line {loc.line}" if loc.line else "")
     )
+    # The error is read off the screen or pasted in: it is data too, and fenced like the
+    # file (a line in it "to the assistant" went into the prompt as if they had said it).
+    said = (
+        safety.fence("the error text", error[-4000:])
+        if error
+        else f"(they only said: {job.task})"
+    )
     prompt = (
-        f"The error:\n{error[-4000:] or '(they only said: ' + job.task + ')'}\n\n"
+        f"The error:\n{said}\n\n"
         f"File {path.name}"
         + (f", the error points at line {loc.line}" if loc.line else "")
+        + (f", its first {shown} lines (it is longer)" if cut else "")
         + ":\n"
         + safety.fence(path.name, numbered)  # a comment in the code is data, never orders
     )
@@ -270,7 +323,7 @@ async def run(manager: JobManager, job: Job, agent: AgentProfile) -> None:
     data = parse(resp.text)
     if data is None:
         raise RuntimeError("The fix didn't come out right. Try again in a moment.")
-    line = int(data.get("line") or loc.line or 0)
+    line = as_line(data.get("line")) or loc.line
     explain = clean(data.get("explain"))
     find = normalise(raw, str(data.get("find") or ""))
     replace = str(data.get("replace") or "")

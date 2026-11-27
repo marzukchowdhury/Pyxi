@@ -14,12 +14,12 @@ import { type MutableRefObject, Suspense, useEffect, useMemo, useRef, useState }
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { Beat, ObjectScene, Part } from "../shared/protocol";
-import { fromOrbit, orbitSpring, type OrbitSpring, smoothDamp, stepOrbit, toOrbit } from "./camera";
+import { flatView, fromOrbit, orbitSpring, type OrbitSpring, photoAngle as cleanAngle, photoDirection, smoothDamp, stepOrbit, toOrbit } from "./camera";
 import { children, evaluate } from "./motion";
 import { usePace } from "./pace";
 import { useAsset } from "./assets";
 import { buildKit } from "./kit";
-import { buildGeometry, makeMaterial, prepareAssetMaterial } from "./parts";
+import { buildGeometry, makeMaterial, prepareAssetMaterial, surfaceOf } from "./parts";
 
 export interface Clock {
   story: number;
@@ -38,6 +38,8 @@ interface Props {
   width: number;
   height: number;
   onPick?: (part: Part) => void;
+  /** Held at this angle (the photo's own), whatever the beat says: for comparing with the photo. */
+  photoAngle?: [number, number] | null;
 }
 
 interface Layer {
@@ -77,7 +79,7 @@ const VIEWS: Record<Beat["camera"], [number, number, number]> = {
   wide: [0.82, 0.58, 1.3],
 };
 
-export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, height, onPick }: Props) {
+export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, height, onPick, photoAngle }: Props) {
   const registry = useRef(new Map<string, Registered>());
   const callouts = useRef(new Map<string, { el: HTMLDivElement | null; line: SVGPathElement | null; dot: SVGCircleElement | null }>());
   const labelled = scene.parts.filter((p) => p.label);
@@ -114,7 +116,7 @@ export function ObjectView({ scene, clock, beat, beatIndex, cutaway, width, heig
         <Measure registry={registry} sceneId={fit} out={bounds} />
         <Studio style={scene.style} bounds={bounds} sceneId={fit} shadows={high} />
         <Model scene={scene} clock={clock} beat={beat} cutaway={cutaway} registry={registry} onPick={onPick} />
-        <Rig registry={registry} beat={beat} beatIndex={beatIndex} sceneId={scene.id} />
+        <Rig registry={registry} beat={beat} beatIndex={beatIndex} sceneId={scene.id} photoView={photoAngle ?? cleanAngle(scene.photo_view)} photoHeld={photoAngle != null} />
         <CalloutDriver registry={registry} callouts={callouts} beat={beat} width={width} height={height} />
         <Shadow bounds={bounds} sceneId={fit} style={scene.style} />
       </Canvas>
@@ -410,7 +412,7 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const kit = useMemo(() => (part.shape === "kit" && part.kit ? buildKit(part.kit, part.size, part.axis, part.teeth) : null), [sig]);
   const kitMats = useMemo(
-    () => kit?.map((l) => makeMaterial({ ...part, shape: "box", material: l.material, color: l.main ? (part.color ?? l.color ?? null) : (l.color ?? null) }, style)) ?? null,
+    () => kit?.map((l) => makeMaterial({ ...part, shape: "box", surface: l.surface ?? null, material: l.material, color: l.main ? (part.color ?? l.color ?? null) : (l.color ?? null) }, style)) ?? null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [kit, style],
   );
@@ -442,7 +444,8 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
     } else {
       if (!mesh.current) return;
       built.geometry.computeBoundingBox();
-      center = built.geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3();
+      // A bent part's box is centred on thin air (the crook of a tail): its tag points at the part.
+      center = built.anchor ? new THREE.Vector3(...built.anchor) : (built.geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3());
       layers = [{ mesh: mesh.current, mat }];
     }
     registry.current.set(part.id, { part, group: group.current, mesh: layers[0].mesh, mat: layers[0].mat, layers, edges: asset || kit ? null : edges.current, center });
@@ -454,10 +457,14 @@ function PartNode({ part, style, registry, onPick, children: kids }: {
   // Flows and glowing parts are light, not matter: they never throw a shadow.
   const casts = part.shape !== "arrow" && part.material !== "emissive" && part.material !== "glass";
 
-  const click = onPick ? (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onPick(part); } : undefined;
+  // A click, not the end of a drag: turning the model round ended over a part every time, and
+  // each time that asked Pyxi to "tell me more" about it (live: the same question three times
+  // in twenty seconds, answered aloud each time). e.delta is how far the pointer moved.
+  const click = onPick ? (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); if (e.delta > 4) return; onPick(part); } : undefined;
   const hover = onPick ? (on: boolean) => (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); document.body.style.cursor = on ? "pointer" : ""; } : undefined;
   const lineColor = style === "blueprint" ? "#9ecbff" : "#dbe9ff";
-  const rounded = part.shape === "rounded_box";
+  // With surface detail it is drawn from our own geometry, which carries the detail's mapping.
+  const rounded = part.shape === "rounded_box" && !surfaceOf(part);
   const radius = Math.min(...part.size) * 0.2;
   return (
     <group ref={group}>
@@ -556,7 +563,9 @@ function samplePoints(registry: Map<string, Registered>, ids: Set<string> | null
       const g = mesh.geometry;
       let local = SAMPLES.get(g);
       if (!local) {
-        const pos = g.getAttribute("position");
+        // A mesh between two models (its geometry just let go) or an empty shape has no points.
+        const pos = g?.getAttribute("position");
+        if (!pos) continue;
         const n = Math.min(60, pos.count);
         local = new Float32Array(n * 3);
         for (let i = 0; i < n; i++) {
@@ -595,7 +604,7 @@ function Pace({ clock, deps }: { clock: MutableRefObject<Clock>; deps: unknown[]
 }
 
 /** Frames the beat's subject from the beat's angle and follows it; hands over when you drag. */
-function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObject<Map<string, Registered>>; beat: Beat; beatIndex: number; sceneId: string }) {
+function Rig({ registry, beat, beatIndex, sceneId, photoView, photoHeld }: { registry: MutableRefObject<Map<string, Registered>>; beat: Beat; beatIndex: number; sceneId: string; photoView?: [number, number] | null; photoHeld?: boolean }) {
   const controls = useRef<OrbitControlsImpl>(null);
   const { camera, size, invalidate } = useThree();
   const manual = useRef(false);
@@ -619,6 +628,11 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
   useEffect(() => {
     first.current = true;
   }, [sceneId]);
+  // "Compare with the photo": swing back to the photo's angle even after they turned it.
+  useEffect(() => {
+    if (photoHeld) manual.current = false;
+    invalidate();
+  }, [photoHeld, invalidate]);
   useEffect(() => {
     const c = controls.current;
     if (!c) return;
@@ -653,11 +667,16 @@ function Rig({ registry, beat, beatIndex, sceneId }: { registry: MutableRefObjec
     // "side" means a profile view: look across the object's longest axis, not down it.
     const whole = boundsOf(registry.current, null, new THREE.Box3());
     const span = whole.isEmpty() ? new THREE.Vector3(1, 1, 1) : whole.getSize(new THREE.Vector3());
-    let view = VIEWS[beat.camera];
+    // A flat thing (a chip, a board, a phone) is shown from three quarters, never edge-on, and
+    // never opens seen from straight above.
+    let view = flatView(beat.camera, [span.x, span.y, span.z], beatIndex === 0) ?? VIEWS[beat.camera];
     if (beat.camera === "side" || beat.camera === "left") {
       const sign = beat.camera === "side" ? 1 : -1;
       view = span.x >= span.z ? [0, 0.16, sign] : [sign, 0.16, 0.02];
     }
+    // A model built from a photo opens from the photo's own angle (and is held there while
+    // the two are being compared), so the first thing seen is the thing in the picture.
+    if (photoView && (photoHeld || beatIndex === 0)) view = photoDirection(photoView[0], photoView[1]);
     const dir = new THREE.Vector3(...view).normalize();
     // Tight fit: the closest distance at which all 8 corners of the box are inside the view.
     const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir);

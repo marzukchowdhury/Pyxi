@@ -2,9 +2,35 @@
 // user inside a daily allowance and the whole beta inside a monthly cap. The founder's
 // OpenRouter key lives only here (an environment variable), never on anyone's PC.
 
+import { type AccountRecord, accountGate, accountOf, accountUsage, accountView, spendKey } from "./accounts.js";
 import type { Store } from "./store.js";
+import { bearer, clientIp, json, randomToken, sameSecret, sha256 } from "./util.js";
+
+export { clientIp, json };
+
+export type PaidPlan = "starter" | "pro" | "max";
+export const PAID_PLANS: readonly PaidPlan[] = ["starter", "pro", "max"];
 
 export interface Config {
+  /** The Google client the desktop app signs in with; empty means sign-in is off. */
+  googleClientId: string;
+  /** The Google "Web application" client the website's account page signs in with; empty means
+   * that page has no sign-in (it then says to choose a plan inside Pyxi). */
+  googleWebClientId: string;
+  /** Stripe's secret key and the webhook signing secret; either empty means plans aren't open. */
+  stripeKey: string;
+  stripeWebhookSecret: string;
+  /** Stripe price ids, by "starter", "starter_yearly", "pro", ... (only the ones that are set). */
+  prices: Record<string, string>;
+  /** Where Stripe sends people back to. Checkout never takes an address from a request. */
+  siteUrl: string;
+  /** Days a failed payment keeps working before chat stops. */
+  graceDays: number;
+  /** Model cost allowed, in USD: the whole trial, then each calendar month by plan. */
+  limits: Record<"trial" | PaidPlan, number>;
+  /** Sign-in and billing tries allowed per IP address per hour. */
+  authPerIpPerHour: number;
+  billingPerIpPerHour: number;
   openrouterKey: string;
   inviteCodes: Set<string>;
   usesPerCode: number;
@@ -33,7 +59,33 @@ const EARS_MAX_TOKENS = 600; // a transcript of a spoken question, never an essa
 
 export function configFromEnv(env: Record<string, string | undefined> = process.env): Config {
   const list = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const amount = (v: string | undefined, fallback: number) => {
+    const n = Number(v === undefined || v.trim() === "" ? fallback : v);
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+  };
+  const prices: Record<string, string> = {};
+  for (const plan of PAID_PLANS) {
+    const monthly = (env[`STRIPE_PRICE_${plan.toUpperCase()}`] ?? "").trim();
+    const yearly = (env[`STRIPE_PRICE_${plan.toUpperCase()}_YEARLY`] ?? "").trim();
+    if (monthly) prices[plan] = monthly;
+    if (yearly) prices[`${plan}_yearly`] = yearly;
+  }
   return {
+    googleClientId: (env.GOOGLE_SIGNIN_CLIENT_ID ?? "").trim(),
+    googleWebClientId: (env.GOOGLE_WEB_CLIENT_ID ?? "").trim(),
+    stripeKey: (env.STRIPE_SECRET_KEY ?? "").trim(),
+    stripeWebhookSecret: (env.STRIPE_WEBHOOK_SECRET ?? "").trim(),
+    prices,
+    siteUrl: siteUrl(env.SITE_URL),
+    graceDays: amount(env.GRACE_DAYS, 3),
+    limits: {
+      trial: amount(env.TRIAL_LIMIT_USD, 1.5),
+      starter: amount(env.STARTER_LIMIT_USD, 4),
+      pro: amount(env.PRO_LIMIT_USD, 9),
+      max: amount(env.MAX_LIMIT_USD, 20),
+    },
+    authPerIpPerHour: amount(env.AUTH_PER_IP_PER_HOUR, 20),
+    billingPerIpPerHour: amount(env.BILLING_PER_IP_PER_HOUR, 30),
     openrouterKey: env.OPENROUTER_API_KEY ?? "",
     inviteCodes: new Set(list(env.INVITE_CODES).map((c) => c.toUpperCase())),
     usesPerCode: Number(env.USES_PER_CODE ?? 3),
@@ -50,36 +102,25 @@ export function configFromEnv(env: Record<string, string | undefined> = process.
   };
 }
 
+const DEFAULT_SITE_URL = "https://www.heypyxi.com";
+
+/** SITE_URL as a bare https origin; anything else falls back to the real site. */
+function siteUrl(value: string | undefined): string {
+  try {
+    const url = new URL((value ?? "").trim() || DEFAULT_SITE_URL);
+    return url.protocol === "https:" && !url.username && !url.password ? url.origin : DEFAULT_SITE_URL;
+  } catch {
+    return DEFAULT_SITE_URL;
+  }
+}
+
 const day = (d = new Date()) => d.toISOString().slice(0, 10);
 const month = (d = new Date()) => d.toISOString().slice(0, 7);
 const DAY_TTL = 3 * 86400;
 const MONTH_TTL = 40 * 86400;
 
-async function sha256(text: string): Promise<string> {
-  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function randomToken(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(24));
-  return "pyxi_" + [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-export function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
-
 async function codeRevoked(store: Store, cfg: Config, code: string): Promise<boolean> {
   return cfg.revokedCodes.has(code) || (await store.get(`revoked-code:${code}`)) !== null;
-}
-
-/** The caller's address as Vercel's edge saw it (the edge sets these headers itself). */
-export function clientIp(req: Request): string {
-  return (
-    req.headers.get("x-real-ip") ??
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    "unknown"
-  );
 }
 
 /** POST /api/join: a few attempts per IP address an hour, then the invite code. Only a hash of
@@ -114,33 +155,60 @@ export async function join(store: Store, cfg: Config, code: unknown): Promise<Re
 
 export interface Who {
   id: string;
+  /** The invite code the device joined with; "" for a device signed in to an account. */
   code: string;
+  /** The account this device is signed in to (Google sign-in), if any. */
+  account?: AccountRecord;
+  /** A sign-in from the website's account page: it can see the plan and open Stripe's pages,
+   * and nothing else. It never reaches a model. */
+  web?: boolean;
 }
 
 /** A device's short id: what /api/me shows, OpenRouter sees as X-User, and revoking takes. */
 export const userId = (who: Who) => who.id.slice(0, 16);
 
-/** Who is calling, from "Authorization: Bearer pyxi_...". Revoked tokens and codes are nobody. */
+/** Who is calling, from "Authorization: Bearer pyxi_...". Revoked tokens, codes and accounts are
+ * nobody. The token is only ever looked up by its hash, so there is no secret comparison whose
+ * timing could leak; the account comes from the token's own record, never from the request. */
 export async function identify(store: Store, req: Request, cfg?: Config): Promise<Who | null> {
-  const auth = req.headers.get("authorization") ?? "";
-  const token = auth.replace(/^Bearer\s+/i, "").trim();
+  const token = bearer(req);
   if (!token.startsWith("pyxi_")) return null;
   const id = await sha256(token);
   const raw = await store.get(`tok:${id}`);
   if (!raw) return null;
-  const rec = JSON.parse(raw) as { code: string; created?: number };
-  const who = { id, code: rec.code };
+  const rec = JSON.parse(raw) as { code?: string; acct?: string; created?: number; web?: boolean; expires?: number };
+  if (rec.expires && Date.now() >= rec.expires) {
+    await store.del(`tok:${id}`); // a website sign-in lasts an hour
+    return null;
+  }
+  const who: Who = { id, code: rec.code ?? "" };
+  if (rec.web) who.web = true;
   if ((await store.get(`revoked:${userId(who)}`)) !== null) return null;
   const before = Number((await store.get("revoked-before")) ?? 0);
   if (before && Number(rec.created ?? 0) <= before) return null; // "revoke all" happened since
+  if (rec.acct) {
+    const account = await accountOf(store, rec.acct);
+    if (!account || account.revoked || account.erased) return null;
+    who.account = account;
+    return who;
+  }
+  if (!who.code) return null;
+  // Invite-code devices work as they always have, until INVITE_CODES is emptied: then the
+  // invite-code beta is over and they are asked to sign in.
+  if (cfg && cfg.inviteCodes.size === 0) return null;
   if (cfg && (await codeRevoked(store, cfg, who.code))) return null;
   return who;
 }
 
 /** Today's spend, for the caller only: the key is their own token's hash, so no request can
- * name someone else. */
+ * name someone else. For an account device, what is left is what is left of the account's
+ * allowance (there is no daily limit), and the "limit" is the most today could still reach. */
 export async function usage(store: Store, cfg: Config, who: Who) {
   const today = Number((await store.get(`spend:${who.id}:${day()}`)) ?? 0);
+  if (who.account) {
+    const left = await accountUsage(store, cfg, who.account);
+    return { user: userId(who), spent_today_usd: today, daily_limit_usd: today + left, left_today_usd: left };
+  }
   return {
     user: userId(who),
     spent_today_usd: today,
@@ -149,10 +217,12 @@ export async function usage(store: Store, cfg: Config, who: Who) {
   };
 }
 
-/** GET /api/me */
+/** GET /api/me: today's figures as before, plus the account (null for an invite-code device). */
 export async function me(store: Store, cfg: Config, req: Request): Promise<Response> {
   const who = await identify(store, req, cfg);
-  return who ? json(await usage(store, cfg, who)) : json({ error: "not signed in" }, 401);
+  if (!who) return json({ error: "not signed in" }, 401);
+  const account = who.account ? await accountView(store, cfg, who.account) : null;
+  return json({ ...(await usage(store, cfg, who)), account });
 }
 
 /** POST /api/admin/revoke (Bearer ADMIN_TOKEN), for the founder (cloud/admin.ts calls it):
@@ -162,8 +232,7 @@ export async function me(store: Store, cfg: Config, req: Request): Promise<Respo
  * Add "restore": true to undo. Without ADMIN_TOKEN set, the route doesn't exist. */
 export async function revoke(store: Store, cfg: Config, req: Request): Promise<Response> {
   if (!cfg.adminToken) return json({ error: "not found" }, 404);
-  const given = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-  if ((await sha256(given)) !== (await sha256(cfg.adminToken))) return json({ error: "not allowed" }, 403);
+  if (!(await sameSecret(bearer(req), cfg.adminToken))) return json({ error: "not allowed" }, 403);
   const body = ((await req.json().catch(() => ({}))) ?? {}) as { user?: unknown; code?: unknown; all?: unknown; restore?: unknown };
   if (body.all === true) {
     if (body.restore === true) await store.del("revoked-before");
@@ -183,6 +252,10 @@ export async function revoke(store: Store, cfg: Config, req: Request): Promise<R
 async function record(store: Store, who: Who, cost: number): Promise<void> {
   if (!(cost > 0)) return;
   await store.incr(`spend:${who.id}:${day()}`, cost, DAY_TTL);
+  if (who.account) {
+    const { key, ttl } = spendKey(who.account);
+    await store.incr(key, cost, ttl);
+  }
   await store.incr(`spend:all:${month()}`, cost, MONTH_TTL);
 }
 
@@ -209,6 +282,13 @@ export function earsProblem(body: Record<string, unknown>, cfg: Config): string 
   return "";
 }
 
+/** What chat says to a device whose token it doesn't know (never joined, signed out, revoked).
+ * With Google sign-in on, that is how anyone gets in, so it says to sign in. The invite
+ * wording is only for a server that still runs on invite codes alone. */
+export function notSignedIn(cfg: Config): string {
+  return cfg.googleClientId ? "Sign in to Pyxi to carry on." : "Sign in to the Pyxi beta first (Settings, invite code).";
+}
+
 /** OpenAI-style chat completions, passed through to OpenRouter with the beta's limits. */
 export async function chat(
   store: Store,
@@ -217,11 +297,18 @@ export async function chat(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
   const who = await identify(store, req, cfg);
-  if (!who) return json({ error: { message: "Sign in to the Pyxi beta first (Settings, invite code)." } }, 401);
+  // A website sign-in is for the plan pages only: to a model it is nobody.
+  if (!who || who.web) return json({ error: { code: "not_signed_in", message: notSignedIn(cfg) } }, 401);
   if (!cfg.openrouterKey) return json({ error: { message: "The beta server has no model key set." } }, 503);
-  const mine = await usage(store, cfg, who);
-  if (mine.left_today_usd <= 0)
-    return json({ error: { message: "You've used today's Pyxi beta allowance. It resets at midnight UTC." } }, 429);
+  if (who.account) {
+    // An account: the trial clock, the plan's standing and its allowance decide.
+    const stop = await accountGate(store, cfg, who.account);
+    if (stop) return stop;
+  } else {
+    const mine = await usage(store, cfg, who);
+    if (mine.left_today_usd <= 0)
+      return json({ error: { message: "You've used today's Pyxi beta allowance. It resets at midnight UTC." } }, 429);
+  }
   const all = Number((await store.get(`spend:all:${month()}`)) ?? 0);
   if (all >= cfg.monthlyCapUsd)
     return json({ error: { message: "The Pyxi beta is at its limit for this month. Back soon." } }, 429);

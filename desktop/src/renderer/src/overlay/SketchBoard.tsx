@@ -9,7 +9,9 @@ import { rectToLocal } from "../shared/bridge";
 import { Close, Cube, Replay } from "../shared/icons";
 import type { SketchShape, Sketchboard } from "../shared/protocol";
 import { brain } from "../shared/socket";
+import { H_MAX, diagramTimeline, layoutDiagram } from "../scene/diagramLayout";
 import { GRID, drawShape, fitView, placeText, smooth, timeline } from "../scene/sketchPaths";
+import { DiagramArt } from "./DiagramArt";
 import { Interactive } from "./Interactive";
 import { useLinger } from "./linger";
 import { useOverlay, voice } from "./store";
@@ -37,6 +39,14 @@ export function SketchBoard() {
   const started = useRef("");
   const board = sketch?.board;
   const key = sketch ? `${sketch.audioKey}#${take}` : "";
+  // A typed diagram arrives as content only: its layout is worked out here, and the board takes
+  // the height that layout needs instead of the freehand grid's 64.
+  const layout = useMemo(() => {
+    if (!board?.diagram) return null;
+    const last = Math.max(0, board.steps.length - 1);
+    return layoutDiagram({ ...board.diagram, items: board.diagram.items.map((it) => ({ ...it, step: Math.min(it.step, last) })) });
+  }, [board]);
+  const gridH = layout ? Math.min(layout.h, H_MAX) : GRID.h;
 
   // A new board (or a replay) starts from the top.
   useEffect(() => {
@@ -61,10 +71,10 @@ export function SketchBoard() {
     h: Math.min(place ? place.h : innerHeight * 0.7, innerHeight - 2 * EDGE),
   };
   // Readable first: never narrower than MIN_W (it may cover a little more of the page instead).
-  const fits = Math.round(Math.min(room.w, ((room.h - chrome) * GRID.w) / GRID.h));
+  const fits = Math.round(Math.min(room.w, ((room.h - chrome) * GRID.w) / gridH));
   const width = Math.min(innerWidth - 2 * EDGE, Math.max(MIN_W, fits));
   const scale = width / GRID.w;
-  const height = Math.round(GRID.h * scale);
+  const height = Math.round(gridH * scale);
   const total = height + chrome;
   const clampX = (x: number) => Math.round(Math.max(EDGE, Math.min(x, innerWidth - width - EDGE)));
   const clampY = (y: number) => Math.round(Math.max(EDGE, Math.min(y, innerHeight - total - EDGE)));
@@ -84,17 +94,23 @@ export function SketchBoard() {
   }, [height, chrome, key]);
 
   // Zoom to what was drawn, so a drawing in one corner still fills the board.
-  const view = useMemo(() => (board ? fitView(board.shapes, scale, width, height) : `0 0 ${width} ${height}`), [board, scale, width, height]);
-  const timing = useMemo(
-    () => (board ? board.steps.map((_, i) => timeline(board.shapes, i, scale)) : []),
-    [board, scale],
+  // (A typed diagram already fills its frame, so it is shown whole.)
+  const view = useMemo(
+    () => (layout ? `0 0 ${width} ${(layout.h * scale).toFixed(1)}` : board ? fitView(board.shapes, scale, width, height) : `0 0 ${width} ${height}`),
+    [board, layout, scale, width, height],
   );
+  const timing = useMemo(
+    () => (board && !layout ? board.steps.map((_, i) => timeline(board.shapes, i, scale)) : []),
+    [board, layout, scale],
+  );
+  const inking = useMemo(() => (board && layout ? board.steps.map((_, i) => diagramTimeline(layout, i)) : null), [board, layout]);
 
   // When a step starts, note when its ink will be dry.
   useEffect(() => {
-    if (!board || !timing[step]) return;
-    inkedAt.current[step] = performance.now() + timing[step].total * 1000;
-  }, [board, step, timing, key]);
+    const dry = (inking ?? timing)[step];
+    if (!board || !dry) return;
+    inkedAt.current[step] = performance.now() + dry.total * 1000;
+  }, [board, step, timing, inking, key]);
 
   // Say the step's sentence once its audio arrives (or fall back to the OS voice).
   useEffect(() => {
@@ -144,6 +160,10 @@ export function SketchBoard() {
     const what = shape.ask ?? shape.text ?? "";
     brain.send({ type: "text", text: `In the "${board.title}" drawing, tell me more about ${what}.` });
   };
+  const askItem = (item: number) => {
+    const label = layout?.texts.find((t) => t.role === "label" && t.item === item)?.lines.join(" ") ?? "";
+    brain.send({ type: "text", text: `In the "${board.title}" diagram, tell me more about ${label}.` });
+  };
   const to3d = () => brain.send({ type: "text", text: `Build ${board.title} as a 3D model and explain it.` });
   const current = board.steps[Math.min(step, board.steps.length - 1)];
 
@@ -156,13 +176,14 @@ export function SketchBoard() {
           <div className="sketch-title">{board.title}</div>
           {board.subtitle && <div className="sketch-sub">{board.subtitle}</div>}
           <div className="sketch-tools">
-            <button className="icon" onClick={to3d} title="See it in 3D"><Cube /></button>
+            {!layout && <button className="icon" onClick={to3d} title="See it in 3D"><Cube /></button>}
             <button className="icon" onClick={() => setTake(take + 1)} title="Draw it again"><Replay /></button>
             <button className="icon" onClick={close} title="Close"><Close /></button>
           </div>
         </div>
         <svg className="sketch-art" width={width} height={height} viewBox={view} key={key}>
-          {board.shapes.map((shape, i) =>
+          {layout && <DiagramArt layout={layout} scale={scale} step={step} delays={inking?.[step]?.delays} onAsk={askItem} />}
+          {!layout && board.shapes.map((shape, i) =>
             shape.step <= step ? (
               <Stroke key={i} shape={shape} index={i} scale={scale} delay={shape.step === step ? timing[step]?.delays.get(i) ?? 0 : -1} onAsk={ask} />
             ) : null,

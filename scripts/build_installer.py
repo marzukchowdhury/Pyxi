@@ -31,6 +31,7 @@ import importlib.util
 import json
 import marshal
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -308,10 +309,31 @@ def _pyxi_node(driver_path: Path) -> Path:
     (site / "playwright" / "driver" / "node.exe").unlink(missing_ok=True)
 
 
+def clear(folder: Path) -> None:
+    """Make way for a fresh ``folder``: the old one is moved aside and then removed, not
+    removed in place. A folder just emptied can stay "in use" for a while on Windows (a virus
+    scan, the search index), and on 25 November that stopped four builds running with
+    "access is denied" or a folder that was still there. What cannot be removed yet stays in
+    its side folder and is cleared by the next build."""
+    for old in folder.parent.glob(f"{folder.name}.old-*"):
+        shutil.rmtree(old, ignore_errors=True)
+    if not folder.exists():
+        return
+    aside = folder.with_name(f"{folder.name}.old-{int(time.time())}")
+    for attempt in range(6):
+        try:
+            folder.rename(aside)
+            break
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(2)
+    shutil.rmtree(aside, ignore_errors=True)
+
+
 def slim(version: str) -> None:
     started = time.monotonic()
-    if BUNDLE.exists():
-        shutil.rmtree(BUNDLE)
+    clear(BUNDLE)
     BUNDLE.mkdir(parents=True)
     for f in FULL.glob("*"):
         if f.is_file() and f.suffix.lower() in (".exe", ".dll"):
@@ -333,7 +355,7 @@ def slim(version: str) -> None:
     site.mkdir(parents=True)
     packages = Zip(BUNDLE / "python-packages.zip")
     pack_dir = DESKTOP / "build" / "packs" / "voice"
-    shutil.rmtree(pack_dir.parent, ignore_errors=True)
+    clear(pack_dir.parent)
     pack_dir.mkdir(parents=True)
 
     all_dists = dists(full_site)
@@ -487,6 +509,63 @@ def check_bundle() -> None:
         subprocess.run([str(BUNDLE / "python.exe"), "-c", CHECK], check=True, cwd=packs, env=env)
 
 
+# Run in the bundle: makes the wrappers Windows' automation and file search are used through.
+WRAPPERS = """
+import comtypes.client
+comtypes.client.GetModule("UIAutomationCore.dll")  # UI Automation: how the screen is read
+try:
+    comtypes.client.CreateObject("ADODB.Connection")  # Windows Search: how files are found
+    comtypes.client.CreateObject("ADODB.Recordset")
+except Exception as exc:  # no such component on this PC: made on first use instead
+    print("note: no file-search wrappers:", exc)
+import os; os._exit(0)
+"""
+
+
+_STAMP = re.compile(r"^_check_version\('([^']+)', [0-9.]+\)\s*$", re.M)
+
+
+def any_pc(module: Path) -> bool:
+    """A shipped wrapper ends with the date of the Windows file it was made from, on the PC
+    that built the installer. On any other PC that date is different, so comtypes threw the
+    wrapper away and made it again at the first look at the screen: slow, and with several
+    threads at it at once the first tester's came out broken and the screen could not be
+    read at all. The wrapper now checks against the date of the file on the PC it runs on."""
+    text = module.read_text(encoding="utf-8")
+    new, n = _STAMP.subn(
+        "def _made_from():\n"
+        "    try:\n"
+        "        return __import__('os').stat(typelib_path).st_mtime\n"
+        "    except OSError:\n"
+        "        return 0.0\n"
+        "\n\n"
+        r"_check_version('\1', _made_from())" "\n",
+        text,
+    )
+    if n:
+        module.write_text(new, encoding="utf-8", newline="\n")
+    return bool(n)
+
+
+def make_wrappers() -> None:
+    """comtypes writes a Python module for each Windows component the first time it is used,
+    into comtypes/gen inside the app's own folder. An update replaces that folder, so the
+    first look at the screen after every install made them again: 28 seconds before the first
+    answer, live, every time. They are made here once and shipped."""
+    gen = BUNDLE / "Lib" / "site-packages" / "comtypes" / "gen"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "VIRTUAL_ENV"))}
+    with tempfile.TemporaryDirectory() as cwd:
+        subprocess.run([str(BUNDLE / "python.exe"), "-c", WRAPPERS], check=True, cwd=cwd, env=env)
+    for cache in gen.rglob("__pycache__"):
+        shutil.rmtree(cache, ignore_errors=True)
+    for module in gen.glob("*.py"):
+        any_pc(module)
+    made = sorted(p.name for p in gen.glob("*.py") if p.name != "__init__.py")
+    if "UIAutomationClient.py" not in made:
+        raise SystemExit(f"STOP: the automation wrappers weren't made in {gen} (found {made}).")
+    print(f"automation wrappers shipped: {len(made)} modules")
+
+
 def ship_google_client() -> None:
     """Beta testers connect Gmail, Calendar and Docs with Pyxi's own Google OAuth client, so they
     only press Connect. The client JSON lives in desktop/build-secrets (git-ignored) and goes in
@@ -518,6 +597,8 @@ def ship_browser_extension(out: Path | None = None) -> Path:
     finally:
         sys.path.remove(str(ROOT / "extension"))
     out = out or DESKTOP / "build" / "browser-extension"
+    if out.parent == DESKTOP / "build":
+        clear(out)  # our own staging folder: moved aside, as the bundle is
     for target in ("chrome", "firefox"):
         build(target, out / target)
     return out
@@ -534,6 +615,7 @@ def main() -> None:
     if "--skip-python" not in sys.argv:
         slim(version)
         check_bundle()
+        make_wrappers()
     ship_google_client()
     ship_browser_extension()
     npm = shutil.which("npm") or "npm"

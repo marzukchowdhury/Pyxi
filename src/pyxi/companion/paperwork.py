@@ -70,8 +70,12 @@ async def _show_file(brain: Brain, args: dict[str, Any]) -> str:
         return "show_file: that file is outside the folders they allowed (Settings > Let Pyxi search my files)."
     try:
         await asyncio.to_thread(open_path, path)
-    except (OSError, AttributeError) as exc:
-        return f"show_file: Windows couldn't open {path.name} ({exc})."
+    except (OSError, AttributeError):
+        return (
+            f"show_file: Windows couldn't open {path.name}: no app on this PC opens that "
+            "kind of file, or the file is in use. Tell them so in one short line, and that "
+            "they can pick an app for it with Open with in File Explorer."
+        )
     # The viewer takes a moment to draw the first page; then look at it, like look_again.
     seen = await brain._act("look_again", {"seconds": 2.5})
     return (
@@ -131,7 +135,9 @@ async def _read_documents(brain: Brain, paths: list[str]) -> dict[str, str] | st
         try:
             out[str(path)] = await asyncio.to_thread(files_access.read_text, path, 8000)
         except Exception as exc:
-            return f"fill_form: couldn't read {path.name}: {str(exc)[:160]}"
+            from pyxi.companion.filework import _unreadable
+
+            return _unreadable("fill_form", path, exc)
     return out
 
 
@@ -275,12 +281,17 @@ def notice(job: Job, data: dict[str, Any]) -> dict[str, Any] | None:
                 "link": link,
                 "actions": ["link"] if link else [],
             }
-        link = str(data.get("link") or "") or None
+        # A check-in that broke before it reached the airline (no browser, no internet) left
+        # a card that said "needs you" with nothing to press: the airline's own page is the
+        # way on, so the card opens it.
+        start = str(job.start_url or "")
+        link = str(data.get("link") or "") or (start if start.startswith("http") else None)
         need = str(data.get("needs_you") or "").strip()
+        own = "" if need or data.get("link") or not link else " Press Open to check in yourself."
         return {
             "ok": False,
             "title": f"Check-in needs you: {flight}"[:70],
-            "body": (f"It needs {need}. " if need else "") + (job.summary or job.status)[:200],
+            "body": (f"It needs {need}. " if need else "") + (job.summary or job.status)[:200] + own,
             "link": link,
             "actions": ["link"] if link else [],
         }

@@ -3,9 +3,11 @@
 import { create } from "zustand";
 import { AudioQueue, RemoteVoice, type Voice } from "../shared/audio";
 import { bridge, currentDisplay, onThisDisplay, toLocal } from "../shared/bridge";
-import type { Annotation, AnswerCard, BrainEvent, BrainState, Job, NoteCard, ObjectScene, Pin, SceneSpec, Sketchboard, TimelineMoment, Walkthrough } from "../shared/protocol";
+import type { Annotation, AnswerCard, BrainEvent, BrainState, FormField, Job, NoteCard, ObjectScene, Pin, SceneSpec, Sketchboard, TimelineMoment, Walkthrough } from "../shared/protocol";
 import { startChime } from "../shared/chime";
 import { brain } from "../shared/socket";
+import { type AddressItem, spoken } from "./addressParts";
+import { type DictationView, takesOver } from "./dictationText";
 
 export const display = currentDisplay();
 export const isPrimary = display.primary;
@@ -68,7 +70,10 @@ export interface ChatLine {
 }
 
 interface Request {
-  kind: "confirm" | "ask";
+  kind: "confirm" | "ask" | "address";
+  /** "Is this the address you meant?": the addresses to check, and whether they were heard. */
+  addresses?: AddressItem[];
+  voice?: boolean;
   handover?: boolean; // their turn in the browser (paying): a Done button, no text box
   secret?: boolean; // a password: typed into a masked box, sent straight to the teammate
   request_id: string;
@@ -78,6 +83,8 @@ interface Request {
   question?: string;
   /** A third button, e.g. "Always allow" (answers "always"). */
   always?: string;
+  /** A PDF form's questions: answered together on one card (FormAsk). */
+  fields?: FormField[];
 }
 
 interface OverlayState {
@@ -107,6 +114,8 @@ interface OverlayState {
   pins: Pin[];
   captureFlash: number;
   listening: boolean;
+  /** Dictation's sign (main screen): listening, being written down, or what became of it. */
+  dictation: DictationView | null;
   /** The notch's short conversation: the last few exchanges, sentences of one reply merged. */
   chat: ChatLine[];
   notice: { text: string; at: number } | null;
@@ -124,7 +133,18 @@ interface OverlayState {
   /** A guide they finished themselves: a brief moment of light where they made the last move. */
   cheer: { x: number; y: number; at: number } | null;
   /** Finished background jobs, shown quietly as cards (newest first). */
-  toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null }[];
+  toasts: { job_id: string; agent: string; ok: boolean; title: string; body: string; link?: string | null; files: string[]; changes: string[]; notes: string[]; actions: string[]; calendar?: string | null; retry?: string | null }[];
+  /** The first-run tour is playing on some screen (overlay/onboarding): the notch keeps its own hint back. */
+  touring: boolean;
+  /** The brain said the tour has not been seen yet (or broke off last time). */
+  tourDue: boolean;
+  /** From the brain's hello, for the tour: could they join the beta, and is the brain scripted (demo mode)? */
+  beta: { joined: boolean; can_join: boolean; own_key?: boolean } | null;
+  demo: boolean;
+  /** The tour is drawing its own firefly, so the one beside the cursor steps aside. */
+  tourFirefly: boolean;
+  /** When the tour's firefly landed in the notch: it glows once. */
+  notchGlow: number;
   dismissToast(id: string): void;
   closeNotes(): void;
   closeAnswer(): void;
@@ -164,6 +184,7 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   pins: [],
   captureFlash: 0,
   listening: false,
+  dictation: null,
   chat: [],
   notice: null,
   seeing: "",
@@ -174,6 +195,12 @@ export const useOverlay = create<OverlayState>((set, get) => ({
   driving: null,
   cheer: null,
   toasts: [],
+  touring: false,
+  tourDue: false,
+  beta: null,
+  demo: false,
+  tourFirefly: false,
+  notchGlow: 0,
   dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.job_id !== id) }),
   closeNotes: () => set({ notes: null }),
   closeAnswer: () => {
@@ -312,7 +339,8 @@ brain.onStatus((up) => {
   useOverlay.setState({ connected: up });
   if (!up) {
     document.documentElement.classList.remove("capturing");
-    useOverlay.setState({ capturing: false });
+    // (A tour that was playing ends with the brain: the cursor's firefly must not stay hidden.)
+    useOverlay.setState({ capturing: false, touring: false, tourFirefly: false });
   }
 });
 
@@ -354,6 +382,9 @@ brain.on((e: BrainEvent) => {
   switch (e.type) {
     case "hello":
     case "settings":
+      // The first-run tour is due (only "hello" says so): the main screen asks for it (overlay/onboarding).
+      if (e.onboarding) useOverlay.setState({ tourDue: e.onboarding.due || e.onboarding.active });
+      if (e.type === "hello") useOverlay.setState({ beta: e.beta ?? null, demo: !!e.demo });
       useOverlay.setState({ state: e.state, paused: e.privacy_paused, watching: !!e.ambient_memory && !e.privacy_paused, captions: e.voice?.captions ?? true, jobs: Object.fromEntries(e.jobs.map((j) => [j.id, j])) });
       break;
     case "state":
@@ -489,6 +520,12 @@ brain.on((e: BrainEvent) => {
     case "ask":
       if (isPrimary) useOverlay.setState((s) => ({ requests: [...s.requests, { kind: "ask", ...e }] }));
       break;
+    case "check_address":
+      if (isPrimary) useOverlay.setState((s) => ({ requests: [...s.requests, { kind: "address", ...e }] }));
+      break;
+    case "address_voice":
+      if (isPrimary) spoken(e);
+      break;
     case "notes": {
       const r = e.card.region;
       const mine = r ? onThisDisplay(r[0] + r[2] / 2, r[1] + r[3] / 2) : isPrimary;
@@ -531,8 +568,25 @@ brain.on((e: BrainEvent) => {
     case "action":
       if (isPrimary) bridge.runAction(e.kind, e.value);
       break;
+    case "dictated":
+      // The sign on the main screen says what became of the words (overlay/DictationSign.tsx).
+      if (isPrimary && takesOver(useOverlay.getState().dictation, e.how))
+        useOverlay.setState({ dictation: { phase: "done", how: e.how, text: e.text, note: e.note, at: performance.now() } });
+      break;
     case "pins":
       useOverlay.setState({ pins: e.pins.filter((p) => onThisDisplay(p.rect[0], p.rect[1])) });
+      break;
+    case "onboarding":
+      // Every screen knows the tour is on (it plays on one of them); see overlay/onboarding.
+      if (e.event === "start") useOverlay.setState({ touring: true, tourFirefly: true });
+      // The tour draws its own firefly, except while they talk and point (the cursor's own does that).
+      else if (e.event === "step") useOverlay.setState({ touring: true, tourFirefly: e.step !== "talk" && e.step !== "screen" });
+      else if (e.event === "ended") {
+        useOverlay.setState({ touring: false, tourFirefly: false });
+        // Played on another screen: the notch (here, on the main one) still glows at its end.
+        const last = useOverlay.getState().notchGlow;
+        if (isPrimary && e.how === "finished" && performance.now() - last > 10000) useOverlay.setState({ notchGlow: performance.now() });
+      }
       break;
   }
 });
