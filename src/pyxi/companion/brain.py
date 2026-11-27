@@ -494,7 +494,9 @@ class Brain:
 
         async def wait_and_ring() -> None:
             await asyncio.sleep(timer.seconds)
-            await self.jobs.settle(job, ok=True, summary=f"Timer done: {span}.")
+            # "Remind me in two minutes to stretch" ended as "Timer done: 2 minutes."
+            done = f"Reminder: {timer.label}." if timer.label else f"Timer done: {span}."
+            await self.jobs.settle(job, ok=True, summary=done)
             await self.ring(timer.label or f"{span} timer", alarm=False, reminder=timer.reminder)
 
         self.jobs._tasks[job.id] = asyncio.create_task(wait_and_ring())
@@ -1311,6 +1313,7 @@ class Brain:
             url = safe_url(value)
             if url is None:
                 return "open_url: that isn't a web address."
+            url = _no_made_up_account(url, self._user_text or "", addresscheck.own_addresses(self))
             g = self.connectors.google
             url = in_account(url, g._saved_email() if g.connected() else None)
             url = answers.place_for_later(url, self._user_text or "")
@@ -4081,7 +4084,7 @@ class Brain:
                     self._gave_up = True
                     unsaid = unsaid or call.name in can_refuse  # nothing started: nothing to claim
                     continue
-                entry = {"round": round_no, "tool": call.name, "arguments": call.arguments}
+                entry = {"round": round_no, "tool": call.name, "arguments": _kept(call, self._user_text or "")}
                 self._calls.append(entry)
                 if call.arguments.get("__unparseable__"):
                     # Cut off by the length limit or garbled in transit: ask for it again.
@@ -4950,6 +4953,9 @@ class Brain:
                 self.memory.remember("agent:pyxi", str(args["key"]), str(args["content"]))
             except SensitiveMemory as exc:
                 return f"remember: {exc} Tell them, briefly."
+            if not any(c["tool"] == "say" for c in self._calls):
+                # Live: it was saved in silence, and they had to ask "?" to hear so.
+                return "remember: saved. Say so in one short line, with what you'll remember."
             return None
         if name == "recall_memories":
             q = str(args.get("query") or "").strip()
@@ -6356,6 +6362,39 @@ def same_errand(old: str, new: str) -> bool:
 
 
 _SMALL_WORDS = {"the", "and", "for", "from", "with", "that", "this", "his", "her", "their", "you", "your"}
+
+
+_AUTHUSER = re.compile(r"([?&])authuser=([^&#]+)(&?)")
+
+
+def _no_made_up_account(url: str, user_text: str, own: set[str]) -> str:
+    """A Google address with an account on it, when nobody said that account and it isn't
+    theirs: the account is taken off, so Google shows the page for the one they are in (or its
+    own chooser). Live: "switch my account to..." was misheard, and Gmail was opened for an
+    address the model had put together itself."""
+    from urllib.parse import unquote
+
+    m = _AUTHUSER.search(url)
+    if not m:
+        return url
+    account = unquote(m.group(2)).strip().lower()
+    if "@" not in account or account in {a.lower() for a in own} or addresscheck.said(account, user_text):
+        return url  # a number ("authuser=1"), their own address, or one they said in full
+    cut = m.group(1) if m.group(3) else ""
+    return (url[: m.start()] + cut + url[m.end() :]).rstrip("?&")
+
+
+_SECRET_ASK = re.compile(r"(?i)\b(pass ?word|pass ?phrase|passcode|pin\b|secret)")
+
+
+def _kept(call: ToolCall, user_text: str) -> dict[str, Any]:
+    """A tool call's arguments as they go into the record of the turn. A password Pyxi made
+    and copied for them is used, never kept: live, "make a password" left the password itself
+    in the turn's record on the PC."""
+    args = call.arguments
+    if call.name == "quick_action" and args.get("action") == "copy" and _SECRET_ASK.search(user_text):
+        return {**args, "value": "(not kept)"}
+    return args
 
 
 # Said while Pyxi is using the mouse: these end that work. Anything else lets it carry on.

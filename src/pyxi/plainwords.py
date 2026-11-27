@@ -512,7 +512,9 @@ def explain(exc: BaseException, *, beta: bool | None = None, job: bool = False) 
     if "browsertype.launch" in low or "executable doesn't exist" in low:
         return Plain(BROWSER_START, "browser")
     if "TargetClosedError" in names or re.search(
-        r"target (page, context or browser|closed)|(browser|page|context) has been closed", low
+        r"target (page, context or browser|closed)|(browser|page|context) has been closed|"
+        r"^no open tabs",  # its last tab was closed (live: a booking died on these three words)
+        low,
     ):
         return Plain(BROWSER_CLOSED, "browser")
     if "net::err_name_not_resolved" in low or "net::err_internet" in low:
