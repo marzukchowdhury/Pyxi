@@ -174,7 +174,7 @@ describe("dictation settings", () => {
 
   it("press once to start, press again to stop", () => {
     const { got, ev } = events();
-    startHoldToTalk(ev, prefs({ mode: "toggle" }));
+    startHoldToTalk(ev, prefs({ mode: "toggle" }), { quietTap: true }); // as on Windows
     press(CTRL, WIN);
     vi.advanceTimersByTime(100);
     let_go(WIN, CTRL); // under 200 ms: nothing, in this mode too
