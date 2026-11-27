@@ -158,6 +158,12 @@ def _worked_out(wb: Any, suffix: str) -> Any:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _worked_out_for_save(wb: Any, suffix: str) -> Any:
+    """The same working-out, for the results written into a file as it is saved. Under its
+    own name so the tests can keep the real LibreOffice (seconds a run) out of every save."""
+    return _worked_out(wb, suffix)
+
+
 def _soffice() -> str | None:
     """Where LibreOffice is, or None when it isn't installed."""
     from pyxi.agents.pixel import libreoffice
@@ -432,8 +438,7 @@ class Workbook(WorkbookExtras):
     def op_pivot(self, op: dict[str, Any]) -> str:
         """A pivot-style summary on its own sheet, with live SUMIFS/COUNTIFS/AVERAGEIFS formulas, so
         it updates when the data does."""
-        from openpyxl.styles import Font
-        from openpyxl.utils import get_column_letter, quote_sheetname
+        from openpyxl.utils import get_column_letter
 
         src = self.sheet(op.get("sheet"))
         head = _header_row(src)
@@ -453,6 +458,42 @@ class Workbook(WorkbookExtras):
             raise LedgerError("pivot agg should be sum, count or average.")
         if agg != "count" and not vs:
             raise LedgerError(f"pivot with {agg} needs value: the column to {agg}.")
+        ws, keys, groups, counts, known = self._summary(
+            src, head, last, g, vs, agg, str(op.get("target") or "Pivot")
+        )
+        name = ws.title
+        g_name = src.cell(head, g).value or get_column_letter(g)
+        v_names = [src.cell(head, vc).value or get_column_letter(vc) for vc in vs] or ["rows"]
+
+        def result(k: Any) -> float:
+            fold = k.casefold() if isinstance(k, str) else k
+            xs = groups[fold][0] if vs else []
+            if agg == "count":
+                return float(counts[fold])
+            if agg == "sum":
+                return sum(xs)
+            return sum(xs) / len(xs) if xs else 0.0
+
+        said = f"Made a pivot on sheet {name}: {agg} of {' and '.join(str(v) for v in v_names)} by {g_name}, {len(keys)} groups"
+        if len(v_names) == 1 and (known or agg == "count"):
+            # The biggest groups, when they're known. Formulas nobody has calculated yet used
+            # to count as nothing, and the summary read "top: Gadget 0, Widget 0".
+            top = sorted(keys, key=result, reverse=True)[:3]
+            said += f" (top: {', '.join(f'{k} {_shown(result(k))}' for k in top)})"
+        return said
+
+    def _summary(
+        self, src, head: int, last: int, g: int, vs: list[int], agg: str, title: str, *, sort: bool = True
+    ) -> tuple[Any, list[Any], dict[Any, list[list[float]]], dict[Any, int], bool]:
+        """The sheet a pivot is: one row per group of column ``g`` (rows head+1 to last of
+        ``src``) with a live formula for each value column, and a total under them. For the
+        pivot edit, and for a chart of a column whose labels repeat. Back come the new sheet,
+        the groups as first spelled (in A to Z order, or as they first appear with
+        ``sort=False``), each group's numbers and row count, and whether every number is
+        known."""
+        from openpyxl.styles import Font
+        from openpyxl.utils import get_column_letter, quote_sheetname
+
         # Groups the way SUMIFS matches them, without regard to capitals: "West" and "west"
         # as two rows each showed the sum of both, and the total counted them twice.
         keys: list[Any] = []  # each group as it's first spelled
@@ -479,8 +520,9 @@ class Workbook(WorkbookExtras):
                     groups[fold][i].append(float(x))
         if not keys:
             raise LedgerError(f"There's nothing to group in that column on {src.title}.")
-        keys.sort(key=lambda k: (not isinstance(k, str), str(k).lower()))
-        title = str(op.get("target") or "Pivot")[:31]
+        if sort:
+            keys.sort(key=lambda k: (not isinstance(k, str), str(k).lower()))
+        title = title[:31]
         name, n = title, 2
         while name in self.wb.sheetnames:
             name, n = f"{title} {n}"[:31], n + 1
@@ -515,23 +557,7 @@ class Workbook(WorkbookExtras):
         if agg != "average":
             ws.cell(end + 1, 1, "Total").font = Font(bold=True)
         ws.column_dimensions["A"].width = max(12, min(40, max(len(str(k)) for k in keys) + 2))
-
-        def result(k: Any) -> float:
-            fold = k.casefold() if isinstance(k, str) else k
-            xs = groups[fold][0] if vs else []
-            if agg == "count":
-                return float(counts[fold])
-            if agg == "sum":
-                return sum(xs)
-            return sum(xs) / len(xs) if xs else 0.0
-
-        said = f"Made a pivot on sheet {name}: {agg} of {' and '.join(str(v) for v in v_names)} by {g_name}, {len(keys)} groups"
-        if len(v_names) == 1 and (known or agg == "count"):
-            # The biggest groups, when they're known. Formulas nobody has calculated yet used
-            # to count as nothing, and the summary read "top: Gadget 0, Widget 0".
-            top = sorted(keys, key=result, reverse=True)[:3]
-            said += f" (top: {', '.join(f'{k} {_shown(result(k))}' for k in top)})"
-        return said
+        return ws, keys, groups, counts, known
 
     def op_make_table(self, op: dict[str, Any]) -> str:
         from openpyxl.utils import get_column_letter
@@ -573,13 +599,86 @@ class Workbook(WorkbookExtras):
         chart = {"line": LineChart, "pie": PieChart, "area": AreaChart}.get(kind, BarChart)()
         if kind == "horizontal bar":
             chart.type = "bar"
-        chart.title = str(op.get("title") or ws.cell(head, vc).value or "Chart")
-        chart.add_data(Reference(ws, min_col=vc, min_row=head, max_row=last), titles_from_data=True)
-        chart.set_categories(Reference(ws, min_col=lc, min_row=head + 1, max_row=last))
         at = str(op.get("at") or f"{get_column_letter(ws.max_column + 2)}{head}").upper()
         cell_rc(at)
+        value = ws.cell(head, vc).value or "the values"
+        # A label on several rows (North, North, South...): a chart of the rows as they are
+        # drew a bar per row with the same names along the axis. Live, "a pivot table and a
+        # chart of that data" got exactly that, beside a pivot that had the right four totals.
+        # Whatever was asked for, such a chart is of the totals: one bar per label.
+        labels = [self.value(ws, r, lc) for r in range(head + 1, last + 1)] if lc != vc else []
+        folded = [x.casefold() if isinstance(x, str) else x for x in labels if x not in (None, "")]
+        if len(set(folded)) == len(folded):
+            chart.title = str(op.get("title") or ws.cell(head, vc).value or "Chart")
+            chart.add_data(
+                Reference(ws, min_col=vc, min_row=head, max_row=last), titles_from_data=True
+            )
+            chart.set_categories(Reference(ws, min_col=lc, min_row=head + 1, max_row=last))
+            ws.add_chart(chart, at)
+            return f"Added a {kind} chart of {value} on {ws.title}"
+        label = ws.cell(head, lc).value or get_column_letter(lc)
+        found = self._totals_of(ws, head, last, lc, vc, set(folded))
+        if found:
+            sums, label_col, value_col, top, bottom = found
+            where = f"the totals already on sheet {sums.title}"
+        else:
+            name = re.sub(r"[\[\]:*?/\\']", " ", f"{value} by {label}").strip() or "Summary"
+            sums, keys, *_ = self._summary(ws, head, last, lc, [vc], "sum", name, sort=False)
+            label_col, value_col, top, bottom = 1, 2, 2, len(keys) + 1
+            where = f"a small table of totals written for it on the new sheet {sums.title}"
+        named = top > 1 and sums.cell(top - 1, value_col).value not in (None, "")
+        chart.title = str(op.get("title") or f"{value} by {label}")
+        chart.add_data(
+            Reference(sums, min_col=value_col, min_row=top - 1 if named else top, max_row=bottom),
+            titles_from_data=named,
+        )
+        chart.set_categories(Reference(sums, min_col=label_col, min_row=top, max_row=bottom))
         ws.add_chart(chart, at)
-        return f"Added a {kind} chart of {ws.cell(head, vc).value or 'the values'} on {ws.title}"
+        return (
+            f"Added a {kind} chart of {value} by {label} on {ws.title}. {label} repeats down "
+            f"the rows, so the chart shows one total for each of the {bottom - top + 1}, drawn "
+            f"from {where}"
+        )
+
+    def _totals_of(self, src, head: int, last: int, lc: int, vc: int, labels: set[Any]):
+        """A summary that is already in the workbook of exactly these labels and this column
+        of ``src``: one row per label, each with =SUMIFS(the values, the labels, its own label
+        cell), which is what a pivot here writes. As (its sheet, label column, totals column,
+        first row, last row), or None when there isn't one (or it is of other rows: data
+        added since is not in it)."""
+        from openpyxl.utils import column_index_from_string, get_column_letter, quote_sheetname
+
+        def plain(text: str) -> str:
+            return text.replace("$", "").casefold()
+
+        L, V = get_column_letter(lc), get_column_letter(vc)
+        names = [f"{quote_sheetname(src.title)}!"]
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", src.title):
+            names.append(f"{src.title}!")  # typed by hand, without the quotes
+        for ws in self.wb.worksheets:
+            starts = [
+                plain(f"=SUMIFS({n}{V}{head + 1}:{V}{last},{n}{L}{head + 1}:{L}{last},")
+                for n in (names if ws is not src else [*names, ""])
+            ]
+            runs: dict[tuple[int, int], list[int]] = {}
+            for (r, c), cell in ws._cells.items():
+                v = cell.value
+                if not (isinstance(v, str) and v.startswith("=")):
+                    continue
+                text = plain(v).replace(" ", "") if "'" not in v else plain(v)
+                for start in starts:
+                    m = re.fullmatch(r"([a-z]{1,3})(\d+)\)", text[len(start) :]) if text.startswith(start) else None
+                    if m and int(m[2]) == r:
+                        runs.setdefault((c, column_index_from_string(m[1].upper())), []).append(r)
+                        break
+            for (c, k), rows in sorted(runs.items()):
+                rows.sort()
+                if len(rows) != len(labels) or rows[-1] - rows[0] + 1 != len(rows):
+                    continue
+                got = {self.value(ws, r, k) for r in rows}
+                if {x.casefold() if isinstance(x, str) else x for x in got} == labels:
+                    return ws, k, c, rows[0], rows[-1]
+        return None
 
     def op_add_sheet(self, op: dict[str, Any]) -> str:
         ws = self.wb.create_sheet(str(op.get("name") or "Sheet")[:31])
@@ -595,8 +694,104 @@ class Workbook(WorkbookExtras):
             out = unique_path(
                 out_dir_for(self.path), f"{self.path.stem} (edited by Pyxi){self.path.suffix}"
             )
+        # Excel still works everything out for itself as it opens the file, whatever results
+        # are written into it below (this is openpyxl's own default for a new workbook; a
+        # file that came from Excel loads with it off).
+        from openpyxl.workbook.properties import CalcProperties
+
+        if self.wb.calculation is None:
+            self.wb.calculation = CalcProperties()
+        self.wb.calculation.fullCalcOnLoad = True
         self.wb.save(out)
+        try:
+            self._keep_results(out)
+        except Exception:  # the file is saved; results in it are an extra, never a failure
+            log.info("ledger: formula results not kept in %s", out.name, exc_info=True)
         return out
+
+    def _untouched(self) -> bool:
+        """Is every cell the file came with still what it was (same sheets, same formulas,
+        same numbers and text)? Then every result Excel stored still holds. Sheets added in
+        this job don't count: nothing that was there reads them."""
+        if self.values is None or self._moved:
+            return False
+        here = {self._origin.get(id(ws)): ws for ws in self.wb.worksheets if id(ws) in self._origin}
+        if set(here) != set(self._was) or any(ws.title != title for title, ws in here.items()):
+            return False
+        for title, ws in here.items():
+            was, stored = self._was[title], self.values[title]
+            now = {at: c.value for at, c in ws._cells.items() if c.value is not None}
+            then = {at: c.value for at, c in stored._cells.items() if c.value is not None}
+            if {at: v for at, v in now.items() if ws._cells[at].data_type == "f"} != was:
+                return False
+            if {at: v for at, v in now.items() if at not in was} != {
+                at: v for at, v in then.items() if at not in was
+            }:
+                return False
+        return True
+
+    def _keep_results(self, out: Path) -> int:
+        """Write what the formulas come to into the file just saved, and say how many.
+
+        openpyxl saves a formula without its result. Excel works them out as it opens the
+        file; an app that doesn't showed every one as 0. Live: a new sales workbook, opened
+        in such an app, had CA$0.00 down the whole Sales column and a chart of nothing.
+
+        Where the results come from, in order: what Excel had stored, while every cell the
+        file came with is as it was; LibreOffice, when it's installed (the same working-out a
+        sort by a formula column uses); and without it, only the simplest formulas, worked
+        out here (ledger_results.simple_results). All of them or none: a file with some
+        results and not others would read, to the next job, as one Excel had calculated."""
+        from openpyxl.utils import get_column_letter
+
+        from pyxi.agents.ledger_results import ErrorValue, simple_results, write_results
+
+        cells = [
+            (ws, r, c)
+            for ws in self.wb.worksheets
+            for (r, c), cell in ws._cells.items()
+            if cell.data_type == "f"
+        ]
+        if not cells:
+            return 0
+        held = self._untouched()
+
+        def stored(ws, r: int, c: int) -> Any:
+            if not held or id(ws) not in self._origin:
+                return None
+            got = self._stored(ws, r, c)
+            if got is not None and self.values[ws.title].cell(r, c).data_type == "e":
+                return ErrorValue(got)
+            return got
+
+        results: dict[str, dict[str, Any]] | None = {}
+        for ws, r, c in cells:
+            got = stored(ws, r, c)
+            if got is None:
+                results = None
+                break
+            results.setdefault(ws.title, {})[f"{get_column_letter(c)}{r}"] = got
+        if results is None:
+            # What LibreOffice worked out for the last edit is good only if nothing ran since.
+            if self._solved_at != self._edits or self._solved is None:
+                self._solved_at = self._edits
+                self._solved = _worked_out_for_save(self.wb, self.path.suffix)
+            solved = self._solved
+            if solved is not None and all(ws.title in solved.sheetnames for ws, _, _ in cells):
+                results = {}
+                for ws, r, c in cells:
+                    cell = solved[ws.title].cell(r, c)
+                    got = ErrorValue(cell.value) if cell.data_type == "e" else cell.value
+                    # Worked out, and it came to nothing (=IF(A2="","",..)): empty text.
+                    results.setdefault(ws.title, {})[f"{get_column_letter(c)}{r}"] = (
+                        "" if got is None else got
+                    )
+            else:
+                results = simple_results(self.wb, stored)
+        if not results:
+            log.info("ledger: %s is saved without its formulas' results (not known)", out.name)
+            return 0
+        return write_results(out, results, self.wb)
 
 
 def new_workbook(title: str, folder: Path) -> Workbook:
@@ -2382,7 +2577,8 @@ _SHEET_EDITS = """Spreadsheets (Excel .xlsx and Google Sheets). "sheet" names a 
 - {"op": "append_row", "sheet"?: name, "values": [..]}
 - {"op": "totals_row", "sheet"?: name, "columns"?: ["B", "Amount"], "function"?: "SUM"|"AVERAGE"|"COUNT"|"MAX"|"MIN", "label"?: "Total"}  (finds the number columns and the last row itself)
 - {"op": "pivot", "sheet"?: name, "group_by": column, "value"?: column or [columns], "agg": "sum"|"count"|"average", "target"?: "Pivot"}  (Google Sheets: beside the data, where they can see it; give "target" only when they asked for a new tab; several value columns go in one pivot as a list, never as raw requests. Excel: on a new sheet)
-- {"op": "chart", "sheet"?: name, "labels": column, "values": column, "type": "bar"|"horizontal bar"|"line"|"area"|"pie", "title"?: "..", "at"?: "H2"}  (beside the data unless "at" says where; repeated labels are summed)
+- {"op": "chart", "sheet"?: name, "labels": column, "values": column, "type": "bar"|"horizontal bar"|"line"|"area"|"pie", "title"?: "..", "at"?: "H2"}  (beside the data unless "at" says where)
+  A chart of a column whose labels repeat (Region on many rows) is drawn from the totals, one bar per label: from the pivot of those two columns when there is one, else from a small summary the edit writes itself. Name the data's own columns; don't write that summary by hand.
 - {"op": "move_chart", "chart"?: its id or title from the outline, "to": "H2", "width"?: pixels, "height"?: pixels}  (no "chart": the newest one. A chart that's already there is moved, never added again)
 - {"op": "delete_chart", "chart"?: ..}
 - {"op": "edit_chart", "chart"?: .., "title"?: "..", "type"?: "bar"|"line"|"area"}

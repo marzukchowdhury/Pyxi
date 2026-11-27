@@ -176,6 +176,24 @@ def _addresses_are_right(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Hub, "request", request)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_libreoffice_on_save(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test starts the real LibreOffice to work a workbook's formulas out as Ledger saves
+    it (agents/ledger.py, Workbook._keep_results): that is seconds a save, on a PC that has
+    it. A test that gives its own stand-in (``_worked_out``, or ``_soffice`` and
+    ``_convert``) is still asked."""
+    from pyxi.agents import ledger
+
+    real = (ledger._worked_out, ledger._soffice, ledger._convert)
+
+    def for_save(wb: Any, suffix: str) -> Any:
+        if (ledger._worked_out, ledger._soffice, ledger._convert) == real:
+            return None
+        return ledger._worked_out(wb, suffix)
+
+    monkeypatch.setattr(ledger, "_worked_out_for_save", for_save)
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> PyxiSettings:
     return PyxiSettings(
