@@ -1,6 +1,6 @@
 # Pyxi privacy policy
 
-*Draft, last updated 26 November 2026. It describes how the software works today. It isn't legal advice: have a lawyer review it before the public launch.*
+*Draft, last updated 27 November 2026. It describes how the software works today. It isn't legal advice: have a lawyer review it before the public launch.*
 
 Pyxi is a desktop assistant that can see your screen, read the files you point it at and work in the accounts you connect, so privacy is the core of the product, not a footnote. This page says plainly what Pyxi looks at, what leaves your computer, what is kept, and how to delete it.
 
@@ -166,6 +166,10 @@ Pyxi controls your mouse and keyboard only after you press **Allow** on its requ
 ## This website
 
 The Pyxi website uses no cookies, no analytics and no trackers. It's hosted on Vercel, which keeps standard request logs, and the installer downloads from GitHub.
+
+**The plan you press on the pricing page.** If you press a plan there, the website remembers which one (and monthly or yearly) in your own browser's storage for up to 30 days. It isn't sent to us. The first time you sign in to Pyxi and your trial starts, your browser stops briefly at a page on this website, which hands that choice to the Pyxi app on your own computer so the app can have it ready when your trial ends. That page is told only how to reach the app on your computer: it doesn't learn who you are, and it sends nothing to a server. The app keeps the choice in a small file on your computer until you have a plan.
+
+**Your account page.** If you sign in on the website's account page, the page loads Google's sign-in button from Google, and Google tells us your Google account's ID and email address, the same as when you sign in inside Pyxi. That sign-in lasts an hour, is kept only while the page is open, and can only show your plan and open Stripe's pages. It can't start a trial or use Pyxi's AI.
 
 ## Children
 
