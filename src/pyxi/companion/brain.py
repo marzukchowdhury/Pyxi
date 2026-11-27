@@ -4443,7 +4443,7 @@ class Brain:
         if name != "say" and (no := await addresscheck.before(self, name, args)):
             return no  # an email address they gave was not confirmed: nothing is sent or searched
         if name == "say":
-            text = strip_filler(str(args.get("text", "")))
+            text = addresscheck.spoken(self, strip_filler(str(args.get("text", ""))))
             self._pending_say = ""
             self._noted |= {
                 int(m.group(2)) for m in MARKER.finditer(text) if m.group(1).lower() == "note"

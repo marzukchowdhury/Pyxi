@@ -391,3 +391,14 @@ def test_the_file_is_small_and_survives_being_damaged(tmp_path):
     assert book.all() == set()
     book.add(*(f"person{i}@example.com" for i in range(ac.KEEP + 20)))
     assert len(book.all()) == ac.KEEP and "person0@example.com" not in book.all()
+
+
+def test_what_is_said_uses_the_address_put_right_on_the_card(brain):
+    from pyxi.companion import addresscheck
+
+    turn = addresscheck._turn(brain)
+    turn.final["sam.rivera@example.com"] = "sam.river@example.com"  # corrected on the card
+    turn.final["alex@example.com"] = "alex@example.com"  # confirmed as it was
+    assert addresscheck.spoken(brain, "Will do, Sam.Rivera@example.com.") == "Will do, sam.river@example.com."
+    assert addresscheck.spoken(brain, "Sending it to alex@example.com now.") == "Sending it to alex@example.com now."
+    assert addresscheck.spoken(brain, "On it.") == "On it."

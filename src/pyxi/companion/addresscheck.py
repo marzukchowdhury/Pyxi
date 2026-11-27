@@ -266,6 +266,14 @@ def _swap(value: Any, changes: dict[str, str]) -> Any:
     return value
 
 
+def spoken(brain: Brain, text: str) -> str:
+    """What Pyxi is about to say, with any address that was put right on the card this turn
+    said as it now stands. Live: the card changed the address, the invite went to the right
+    one, and Pyxi said "Will do" with the wrong one."""
+    changes = {old: new for old, new in _turn(brain).final.items() if old != new.lower()}
+    return _swap(text, changes) if changes else text
+
+
 def own_addresses(brain: Brain) -> set[str]:
     out: set[str] = set()
     try:

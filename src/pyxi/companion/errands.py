@@ -62,6 +62,9 @@ their latest email, gmail_read it if you need what it said, then gmail_send with
 from="Nabiha", when="last week", has_attachment=true. "Anything from Amazon this month" is \
 from="Amazon", when="this month". Put their time words in `when` as they said them; don't \
 work out dates yourself. Only put words in `words` that are likely in the email itself.
+- "The person I sent that to", "whoever I last emailed": search with sent=true. In mail the \
+user sent, the user is the sender, so the person they mean is the one it went to. That is a \
+clear answer: use that address, don't ask which of the two they meant.
 - Writing: short and natural, in the user's voice, saying only what they asked. Sign with \
 their name if you know it. Always give gmail_send a short subject (unless it's a reply) and a \
 one-line `gist` of what it says; the user sees both on the approval card. Don't ask them to \
