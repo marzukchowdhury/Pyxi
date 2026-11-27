@@ -166,6 +166,18 @@ THANKED = re.compile(
 )
 # A bill or a statement is money owed again and again, whatever else it says.
 BILL = re.compile(r"\b(?:e-?bills?|bills?|statements?)\b", re.I)
+# A lender, by its name or by what its mail is about: what it takes is a loan's payment, never a
+# subscription. Live, 27 November: a lender's weekly payment notices were read out as
+# "CA$4,150.00 a week", and the month's subscriptions came to CA$17,983.33.
+LOAN = re.compile(
+    r"\b(?:loans?|lend(?:er|ers|ing)|financial|financing|finance|mortgages?|credit union|"
+    r"line of credit|credit builder|instal?lments?|repayments?|amount owing|balance owing|"
+    r"principal|payoff|pay-off)\b",
+    re.I,
+)
+# More than this a month is not what a subscription costs. One above it is still listed, but it
+# is kept out of the total and the card says so: a wrong line must never make the whole total wrong.
+TOO_MUCH_A_MONTH = 1000.0
 
 
 # The money did not move. Live, 12 November: eight "$29.00 payment to ... was unsuccessful
@@ -880,7 +892,12 @@ def find_subscriptions(
                 every_days=round(every, 1),
                 # A bill by any of its mails (the others are its reminders and "payment
                 # received" notes), unless one of them calls it a subscription or membership.
-                kind="bill" if any(c.bill for c in charges) and not any(c.about_sub for c in charges) else "subscription",
+                kind=(
+                    "bill"
+                    if LOAN.search(f"{g['name']} {latest.get('subject') or ''}")
+                    or (any(c.bill for c in charges) and not any(c.about_sub for c in charges))
+                    else "subscription"
+                ),
                 unpaid=charges[0].unpaid_bill,
             )
         )
@@ -972,8 +989,9 @@ def subscriptions_report(subs: list[Subscription]) -> tuple[str, str, list[str]]
             [],
         )
     by_currency: dict[str, float] = {}
+    doubtful = [s for s in subs_only if s.cadence != "once" and s.monthly > TOO_MUCH_A_MONTH]
     for s in subs_only:
-        if s.cadence != "once":
+        if s.cadence != "once" and s not in doubtful:
             by_currency[s.currency] = by_currency.get(s.currency, 0.0) + s.monthly
     once = len([s for s in subs_only if s.cadence == "once"])
     n = len(subs_only)
@@ -992,6 +1010,14 @@ def subscriptions_report(subs: list[Subscription]) -> tuple[str, str, list[str]]
             f"{'does' if once == 1 else 'do'}n't say how often, so "
             f"{'it is' if once == 1 else 'they are'} not in the total. "
             if once and by_currency
+            else ""
+        )
+        + (
+            f"{', '.join(s.service for s in doubtful)} "
+            f"{'is' if len(doubtful) == 1 else 'are'} listed but not in that total: "
+            f"{'that is' if len(doubtful) == 1 else 'those are'} too much to be a subscription, "
+            "so I may have misread the mail. Check it. "
+            if doubtful
             else ""
         )
         + billed

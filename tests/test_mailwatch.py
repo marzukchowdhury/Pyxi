@@ -479,3 +479,38 @@ def test_european_amounts_are_read_with_a_comma_decimal():
     assert amount_in("Order total: $1,234.56") == (1234.56, "$")
     assert amount_in("Total: £1,200") == (1200.0, "GBP")
     assert amount_in("Total 45.00 EUR") == (45.0, "EUR")
+
+
+# ------------------------------------------------------------------ a lender is not a subscription
+def _weekly(sender: str, subject: str, body: str) -> list[dict[str, Any]]:
+    return [{"from": sender, "subject": subject, "body": body, "html": "", "date": ago(d)} for d in (2, 9, 16, 23)]
+
+
+async def test_a_lenders_weekly_payment_is_never_a_subscription():
+    """Live, 27 November: a lender's payment notices were read out as "CA$4,150.00 a week",
+    and the card's title was "CA$17,983.33 a month in subscriptions"."""
+    loan = _weekly(
+        "Maple Financial <notices@maplefinancial.example>",
+        "Your weekly payment was received",
+        "Hi Sam,\nThank you for your payment.\nAmount paid: $4,150.00\nYour next weekly payment is due soon.\n",
+    )
+    subs = find_subscriptions(await fetched([*receipts(), *loan]), now())
+    lender = next(s for s in subs if "Maple" in s.service)
+    assert lender.kind == "bill"  # listed apart, with the gas and the power
+    title, body, lines = subscriptions_report(subs)
+    assert "17," not in title and "4,150" not in title
+    assert any("Maple" in line and "a bill of" in line for line in lines)
+    assert "not in that total" in body
+
+
+async def test_one_absurd_line_never_makes_the_whole_total_absurd():
+    odd = _weekly(
+        "Cloudhop <billing@cloudhop.example>",
+        "Your Cloudhop subscription receipt",
+        "Thanks for your payment.\nCloudhop subscription, billed weekly\nAmount paid: $4,200.00\n",
+    )
+    subs = find_subscriptions(await fetched([*receipts(), *odd]), now())
+    title, body, lines = subscriptions_report(subs)
+    assert "18," not in title  # 4,200 a week would be about 18,200 a month
+    assert "Cloudhop is listed but not in that total" in body and "I may have misread the mail" in body
+    assert any("Cloudhop" in line for line in lines)
