@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pyxi demo clip: "Long post. Zero patience."</title>
+<!--
+  A built mock-up, not a recording. What it shows is the app's notes card (explain_on_screen):
+  a short serif title, then one point at a time, each written in as Pyxi says its sentence,
+  each marked on the page in blue with its number and tied to the card by a thread
+  (overlay/NotesCard.tsx). Made up: the site (Lumen), the observatory, the comet.
+-->
+<link rel="stylesheet" href="kit.css">
+<style>
+#nav { position: absolute; left: 0; top: 0; bottom: 0; width: 250px; padding: 26px 24px; }
+#nav .logo { font-family: "Fraunces"; font-weight: 700; font-size: 28px; color: #6d5df6; margin-bottom: 30px; }
+#nav p { margin-bottom: 22px; }
+#post { position: absolute; left: 262px; top: 22px; width: 730px; background: #fff; border-radius: 16px; box-shadow: 0 1px 3px rgba(20, 30, 60, .10); padding: 24px 28px 20px; }
+#post .who { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+#post .who em { width: 48px; height: 48px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ffe9a8 0 12%, #2a2f6b 13% 100%); display: block; }
+#post .who strong { display: block; font-size: 18px; color: #151a26; font-weight: 650; }
+#post .who small { font-size: 15px; color: #7a8394; }
+#post p { font-size: 19.5px; line-height: 1.55; color: #1d2330; margin-bottom: 11px; }
+#post p.head { font-weight: 700; letter-spacing: .01em; }
+#sky { height: 150px; border-radius: 12px; margin: 14px 0 12px; position: relative; overflow: hidden; background:
+  radial-gradient(2px 2px at 12% 22%, #fff 50%, transparent 51%), radial-gradient(2px 2px at 31% 64%, #cfe0ff 50%, transparent 51%),
+  radial-gradient(1.5px 1.5px at 47% 18%, #fff 50%, transparent 51%), radial-gradient(2px 2px at 58% 48%, #fff 50%, transparent 51%),
+  radial-gradient(1.5px 1.5px at 22% 80%, #fff 50%, transparent 51%), radial-gradient(2px 2px at 90% 70%, #dfe8ff 50%, transparent 51%),
+  radial-gradient(1.5px 1.5px at 70% 84%, #fff 50%, transparent 51%), radial-gradient(1.5px 1.5px at 6% 52%, #fff 50%, transparent 51%),
+  linear-gradient(180deg, #070b1f, #131a44 70%, #2a2a5e); }
+#sky::before { content: ""; position: absolute; left: 52%; top: 26%; width: 250px; height: 7px; border-radius: 4px; transform-origin: left center; transform: rotate(-24deg); background: linear-gradient(90deg, #fff, rgba(190, 215, 255, .55) 20%, transparent); filter: blur(1.6px); }
+#sky::after { content: ""; position: absolute; left: calc(52% - 7px); top: calc(26% - 4px); width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 0 18px 6px rgba(200, 225, 255, .8); }
+#sky span { position: absolute; left: 0; right: 0; bottom: 0; height: 46px; background: #05070f; clip-path: polygon(0 100%, 0 62%, 18% 40%, 34% 55%, 46% 20%, 50% 0, 54% 20%, 66% 52%, 82% 36%, 100% 60%, 100% 100%); }
+#post .acts { display: flex; gap: 34px; padding-top: 12px; border-top: 1px solid #eceff4; font-size: 15px; color: #6b7485; font-weight: 600; }
+#side { position: absolute; left: 1040px; top: 24px; width: 540px; }
+#side p { margin-bottom: 20px; background: #e1e5ec; }
+#card { left: 1200px; top: 262px; }
+</style>
+</head>
+<body>
+<script src="story.js"></script>
+<script src="kit.js"></script>
+<script>
+const POINTS = [
+  { h: "h1", text: "Free, this Friday from 8 pm" },
+  { h: "h2", text: "Park in the lower lot" },
+  { h: "h3", text: "Best view after 10 pm" },
+];
+Film.scene({
+  id: "post",
+  screen: `
+    <div class="tabs"><div class="tab"><u></u>Northlight Observatory on Lumen</div><div class="dots"><s></s><s></s><s></s></div></div>
+    <div class="addr"><b></b><b></b><div>lumen.example/northlight/posts/comet-night</div></div>
+    <div class="page">
+      <div id="nav"><div class="logo">lumen</div><p class="bar" style="width:150px"></p><p class="bar" style="width:120px"></p><p class="bar" style="width:170px"></p><p class="bar" style="width:110px"></p><p class="bar" style="width:140px"></p></div>
+      <div id="post">
+        <div class="who"><em></em><div><strong>Northlight Observatory</strong><small>2 hours ago</small></div></div>
+        <p class="head">COMET NIGHT IS BACK.</p>
+        <p><span id="h1">This Friday the 20th we open the hill to everyone, free, from 8 pm</span> until the sky gives up.</p>
+        <p>Comet Halden-Reyes is at its brightest this week and will not be back for 74 years. Our volunteers will have six telescopes on the east lawn, and the big dome is open for short turns.</p>
+        <div id="sky"><span></span></div>
+        <p>A few things to know. Parking at the top is for those who need it. <span id="h2">Everyone else, please use the lower lot</span> and take the ten minute path. Bring a blanket and a red torch: white light ruins everyone's night vision.</p>
+        <p>If it is cloudy we move to Saturday, and we will post by 4 pm on the day. <span id="h3">Best viewing is after 10 pm</span>, once the moon has set.</p>
+        <p>Children welcome. Dogs on leads. Hot chocolate by donation.</p>
+        <div class="acts"><span>412 likes</span><span>87 comments</span><span>Share</span></div>
+      </div>
+      <div id="side"><p class="bar" style="width:220px"></p><p class="bar" style="width:420px"></p><p class="bar" style="width:380px"></p></div>
+    </div>`,
+  overlay: `<svg id="ink" class="ov ink" width="1920" height="1080" style="overflow:visible"></svg>
+    <div class="notes" id="card"><div class="nt">Comet night</div><div class="rule"></div>
+      ${POINTS.map((p, k) => `<div class="row"><i></i><span>${p.text}</span><b>${k + 1}</b></div>`).join("")}</div>`,
+
+  // The card pins as Pyxi starts to speak; each point is written as its sentence is said.
+  plan(d, B) {
+    const card = B.act, v0 = card + 0.25;
+    const v1 = v0 + d[0] + 0.3, v2 = v1 + d[1] + 0.3;
+    return {
+      card, voice: [v0, v1, v2], points: [v0 + 0.1, v1 + 0.1, v2 + 0.1], taps: [], show: [card, card + 4.5], poster: v2 + d[2] + 0.2,
+      c: onBeat(v2 + d[2] + 0.7),
+      sfx: [["listen", B.listen], ["pin", card], ["tick", v0 + 0.2], ["tick", v1 + 0.2], ["tick", v2 + 0.2]],
+    };
+  },
+  notch(T, N) {
+    const says = window.STORY.post.says;
+    return [N.idle(0), N.listen(T.listen), N.look(T.look, "Looking at your screen"), ...says.map((s, i) => N.say(T.voice[i] - 0.05, s)), N.idle(T.c - 0.9)];
+  },
+
+  init(T) {
+    const ink = $("#ink"), card = $("#card");
+    ink.innerHTML = "";
+    card.style.opacity = 1; card.style.height = "auto";
+    const rows = $$(".row", card), edge = boxOf("#post");
+    this.rows = rows.map((row, k) => {
+      const rects = [...document.getElementById(POINTS[k].h).getClientRects()];
+      // the mark on the page: a blue line under the words, the way the app underlines what a point comes from
+      const under = rects.map((r) => { const p = svg("path", { d: `M ${r.left} ${r.bottom + 1} Q ${r.left + r.width / 2} ${r.bottom + 4.5} ${r.right} ${r.bottom + 1}`, pathLength: 1, "stroke-dasharray": "1 1" }); ink.append(p); return p; });
+      const last = rects[rects.length - 1], dot = row.querySelector("i").getBoundingClientRect();
+      const x0 = edge.x + edge.w + 22, y0 = last.top + last.height / 2, x1 = dot.left - 14, y1 = dot.top + dot.height / 2;
+      const thread = svg("path", { class: "thread", d: `M ${x1} ${y1} C ${x1 - 90} ${y1} ${x0 + 80} ${y0} ${x0 + 16} ${y0}`, pathLength: 1, "stroke-dasharray": "1 1" });
+      const badge = svg("g");
+      badge.append(svg("circle", { cx: x0, cy: y0, r: 15 }), Object.assign(svg("text", { x: x0, y: y0 + 6.5 }), { textContent: k + 1 }));
+      ink.append(thread, badge);
+      return { row, under, thread, badge, text: row.querySelector("span"), num: row.querySelector("b"), dot: row.querySelector("i") };
+    });
+    const top = card.getBoundingClientRect().top;
+    this.heights = [$(".rule", card).getBoundingClientRect().bottom - top + 26, ...rows.map((r) => r.getBoundingClientRect().bottom - top + 24)];
+    this.stops = [{ at: 0, d: 0, x: 1290, y: 760 }, { at: T.b + 0.2, d: 0.9, x: 930, y: 400 }];
+    this.cam = [
+      { at: 0, v: [960, 539, 0.97, -8, 4] },
+      { at: T.listen - 0.2, d: 0.6, v: [960, 300, 1.55, -4, 2] },
+      { at: T.look - 0.2, d: 0.7, v: [960, 539, 0.97, -3, 1.4] },
+      { at: T.card - 0.3, d: 0.9, v: [1110, 472, 1.22, -3, 1.2] },
+      { at: T.card + 0.6, d: T.c - T.card, v: [1112, 468, 1.29, -1.5, 1], ease: out3 },
+    ];
+  },
+
+  draw(t, T) {
+    const card = $("#card");
+    const c = back(seg(t, T.card, T.card + 0.42));
+    card.style.opacity = seg(t, T.card, T.card + 0.1);
+    card.style.transform = `translate(${40 * (1 - c)}px, ${14 * (1 - c)}px) scale(${mix(0.9, 1, c)})`;
+    let tall = this.heights[0];
+    this.rows.forEach((r, k) => {
+      const at = T.points[k];
+      tall += (this.heights[k + 1] - this.heights[k]) * out3(seg(t, at - 0.12, at + 0.3));
+      // the words write themselves in, left to right
+      const wr = io3(seg(t, at, at + 0.8));
+      r.row.style.opacity = seg(t, at - 0.1, at + 0.05);
+      r.text.style.clipPath = `inset(0 ${(1 - wr) * 100}% 0 0)`;
+      r.dot.style.opacity = seg(t, at, at + 0.2); r.num.style.opacity = 0.8 * seg(t, at + 0.7, at + 0.9);
+      const n = r.under.length;
+      r.under.forEach((p, i) => { const u = io3(seg(t, at + 0.15 + (0.6 * i) / n, at + 0.15 + (0.6 * (i + 1)) / n)); p.setAttribute("stroke-dashoffset", 1 - u); p.style.opacity = u > 0 ? 1 : 0; });
+      const th = io3(seg(t, at + 0.4, at + 0.95));
+      r.thread.setAttribute("stroke-dashoffset", 1 - th); r.thread.style.opacity = th > 0 ? 1 : 0;
+      const b = back(seg(t, at + 0.75, at + 1.05));
+      r.badge.style.opacity = seg(t, at + 0.75, at + 0.85); r.badge.style.transformBox = "fill-box"; r.badge.style.transformOrigin = "center"; r.badge.style.transform = `scale(${mix(0.4, 1, b)})`;
+    });
+    card.style.height = tall + "px";
+    // the firefly leaves the pointer for the corner of the card as it pins it
+    const ptr = pointer(t, this.stops);
+    const go = io3(seg(t, T.card - 0.3, T.card + 0.4));
+    const fly = [mix(ptr[0] + 44, 1188, go), mix(ptr[1] + 42, 250, go) - 34 * Math.sin(Math.PI * go)];
+    const k = keyed(t, this.cam);
+    return { ptr, fly, cam: { x: k[0], y: k[1], s: k[2], ry: k[3], rx: k[4] } };
+  },
+});
+</script>
+</body>
+</html>

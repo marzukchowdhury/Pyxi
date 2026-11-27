@@ -42,6 +42,17 @@ anyway, for example in a demo on a PC with animations turned off.
 - `..\.venv\Scripts\python scripts\shots.py og` renders `public/og.png` (the social preview) from `scripts/og.html`.
 - `..\.venv\Scripts\python scripts\shots.py pages http://localhost:5173 <dir>` saves desktop and phone screenshots of every page.
 
+## The demo clips and the film
+
+The clips on the home page are designed demos, built the way `docs/FILM-MOCKUP.md` describes: nothing is recorded from a screen. Never call them screen recordings.
+
+- `film3/story.js` holds every clip's words: the problem line, the ask, what Pyxi says, the payoff. Change them there.
+- `film3/<scene>.html` (`setting`, `post`, `pivot`, `desktop`) draws one scene as a function of time; `film3/kit.js` and `kit.css` hold the shared stage and Pyxi's interface, copied from the app's overlay.
+- `..\.venv\Scripts\python film3\render.py look <scene>` makes a quick contact sheet in `.shots/film3/look`. `... render.py all` renders everything (about ten minutes): masters with Pyxi's voice in `public/clips/master`, the silent loops and posters in `public/clips` (`demo-*.mp4`, `.webm`, `.webp`), the film (`pyxi-film.mp4`) and its preview loop. Full-quality masters and the contact sheets stay in `.shots/film3`. Needs `PYTHONPATH` set to the repo's `src`, Pyxi's voice pack, and ffmpeg on PATH.
+- `..\.venv\Scripts\python film3\listen.py` prints a transcript and the loudness of each master.
+- `npm run build`, then `..\.venv\Scripts\python scripts\home_check.py` checks the home page at a desktop and a phone size: weight before any video plays, layout shift, console errors, that clips play only on screen, and that the film plays with sound.
+- The music in the masters is a stand-in made in `render.py`. Swap in a licensed track before posting them.
+
 ## Deploy
 
 ```bash

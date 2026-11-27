@@ -3,14 +3,14 @@
   <head>
     <!--include:head-->
     <title>Pyxi: a little firefly that helps with anything on your screen</title>
-    <meta name="description" content="Pyxi lives beside your cursor on Windows. Ask about anything on screen and it answers out loud, points at the right button, writes notes on the page, builds 3D models, and does the clicking when you let it." />
+    <meta name="description" content="Pyxi lives beside your cursor on Windows. Ask about anything on screen and it answers out loud, marks the right button, pins notes beside the page, hands bigger jobs to a teammate, and does the clicking when you let it." />
     <link rel="canonical" href="{{siteUrl}}/" />
     <meta property="og:url" content="{{siteUrl}}/" />
     <meta property="og:title" content="Hey Pyxi" />
     <meta property="og:description" content="A little firefly on your Windows desktop. It sees what you see, shows you instead of telling you, and does the clicking when you let it." />
     <meta name="twitter:title" content="Hey Pyxi" />
     <meta name="twitter:description" content="A little firefly on your Windows desktop that points, draws, explains in 3D and does the clicking when you let it." />
-    <link rel="preload" as="image" href="/img/targeting.webp" imagesrcset="/img/targeting-800.webp 800w, /img/targeting.webp 1440w" imagesizes="(min-width: 1000px) 56vw, 92vw" fetchpriority="high" />
+    <link rel="preload" as="image" href="/clips/pyxi-film.webp" fetchpriority="high" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -25,34 +25,34 @@
       }
     </script>
     <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/pages/home.js"></script>
   </head>
   <body class="home">
     <!--include:nav-->
     <!--include:firefly-->
     <canvas class="swarm" aria-hidden="true"></canvas>
     <nav class="rail" aria-label="On this page">
-      <a href="#in3d"><i></i><b>01</b><span>Explained in 3D</span></a>
-      <a href="#onpicture"><i></i><b>02</b><span>On any picture</span></a>
-      <a href="#story"><i></i><b>03</b><span>What Pyxi does</span></a>
-      <a href="#how"><i></i><b>04</b><span>How it works</span></a>
-      <a href="#demos"><i></i><b>05</b><span>Watch it work</span></a>
-      <a href="#explore"><i></i><b>06</b><span>Explore</span></a>
-      <a href="#get"><i></i><b>07</b><span>Get Pyxi</span></a>
+      <a href="#shows"><i></i><b>01</b><span>See it work</span></a>
+      <a href="#in3d"><i></i><b>02</b><span>Explained in 3D</span></a>
+      <a href="#onpicture"><i></i><b>03</b><span>On any picture</span></a>
+      <a href="#how"><i></i><b>04</b><span>What it sees</span></a>
+      <a href="#pricing"><i></i><b>05</b><span>Price and questions</span></a>
+      <a href="#get"><i></i><b>06</b><span>Get Pyxi</span></a>
     </nav>
 
     <main id="main">
       <!-- ============================================================ hero -->
-      <section class="hero" data-swarm="vortex" data-swarm-at="#stage" data-say="Hi, I'm Pyxi. Move your mouse, I'll keep you company.">
+      <section class="hero" data-swarm="vortex" data-swarm-at="#film" data-say="Hi, I'm Pyxi. Move your mouse, I'll keep you company.">
         <div class="wrap hero-grid">
           <div class="hero-copy">
             <p class="eyebrow reveal"><span class="chip chip-fly">3-day free trial</span> For Windows 10 and 11 &middot; Speaks English and Bengali</p>
             <h1 class="display reveal">
               <span class="hey">Hey Py<span class="dotless">x</span><span class="perch-i">&#305;<span class="perch" data-perch></span></span>,</span>
-              <span class="ask" aria-hidden="true"><span class="ask-text">where's the export button?</span><span class="caret"></span></span>
+              <span class="ask" aria-hidden="true"><span class="ask-text" data-asks="where's the privacy setting?|what's this post about?|pivot these sales by region.|organise my desktop.">where's the privacy setting?</span><span class="caret"></span></span>
               <span class="sr-only">a little firefly that helps with anything on your screen.</span>
             </h1>
             <p class="lead reveal">
-              Pyxi is a little firefly that lives beside your cursor. Hold <kbd>Ctrl</kbd> <kbd>Alt</kbd> and ask about anything on your screen. It answers out loud, points at the right thing, writes on the page, builds it in 3D, or does the clicking for you when you let it.
+              Pyxi is a little firefly that lives beside your cursor: hold <kbd>Ctrl</kbd> <kbd>Alt</kbd>, ask about anything on your screen, and it shows you where to click, explains what you're looking at, or does the job once you allow it.
             </p>
             <div class="cta-row reveal">
               <a class="btn btn-fly btn-lg" href="{{downloadUrl}}" data-download data-track="hero-download">
@@ -61,80 +61,111 @@
               </a>
               <a class="btn btn-ghost btn-lg" href="/download">How to install</a>
             </div>
-            <p class="hero-peek reveal"><a href="#b3" data-track="hero-3d"><i aria-hidden="true"></i>Watch Pyxi show you how in 3D</a></p>
             <p class="fine reveal">
               Free for 3 days, no card needed. The trial starts when you sign in with Google inside Pyxi. <a href="/pricing" data-track="hero-pricing">Then from $9 a month</a>. Prices in US dollars.<br />
               Version <span data-version>{{version}}</span> &middot; <span data-size>{{downloadSize}}</span> &middot; <!--if:macDownloadUrl-->On a Mac? <a href="{{macDownloadUrl}}" data-track="hero-download-mac">Download for Mac</a> (beta)<!--end--><!--if:macWaitlistOnly-->On a Mac? <a href="{{macWaitlistUrl}}">Join the Mac waitlist</a><!--end--><!--if:macNotYet-->Mac is next on the roadmap<!--end-->
             </p>
           </div>
 
-          <figure class="stage reveal" aria-label="Pyxi at work: real screenshots" data-on="0">
-            <div class="stage-idle">
-              <div class="stage-3d">
-                <i class="stage-edge e1" aria-hidden="true"></i>
-                <i class="stage-edge e2" aria-hidden="true"></i>
-                <div class="stage-screen" id="stage">
-                  <div class="slide is-on" data-ask="where's the export button?" data-say="Right here: the ring is where to click.">
-                    <img src="/img/targeting.webp" srcset="/img/targeting-800.webp 800w, /img/targeting.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="Pyxi pointing at the Export button in a settings window, with a ring on the button and a thread of light from the firefly" fetchpriority="high" />
-                    <video class="clip" data-clip="point" data-start="2" muted loop playsinline preload="none" aria-hidden="true"></video>
-                    <span class="pt" style="--x: 39.4%; --y: 47.2%" data-label="Export"></span>
-                  </div>
-                  <div class="slide" data-ask="how does HTTPS work? Show me." data-say="Five steps, narrated, rising out of the page.">
-                    <img src="/img/explanation-800.webp" srcset="/img/explanation-800.webp 800w, /img/explanation.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="A 3D explanation of HTTPS rising out of a glass panel over a settings window" loading="lazy" />
-                    <span class="pt" style="--x: 75%; --y: 62%" data-label="Session key"></span>
-                  </div>
-                  <div class="slide" data-ask="explode this panel." data-say="The real window, peeled apart by layer.">
-                    <img src="/img/exploded-800.webp" srcset="/img/exploded-800.webp 800w, /img/exploded.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="An exploded view: the settings window peeled apart into layered glass panes with labels" loading="lazy" />
-                    <span class="pt" style="--x: 55.9%; --y: 28.7%" data-label="Appearance page"></span>
-                  </div>
-                  <div class="slide" data-ask="how does a neural network learn?" data-say="Forward pass first. Then the nudge backwards.">
-                    <img src="/img/neural-net-800.webp" srcset="/img/neural-net-800.webp 800w, /img/neural-net.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="A 3D neural network with labelled layers and a narrated step panel" loading="lazy" />
-                    <span class="pt" style="--x: 81.9%; --y: 48%" data-label="Output"></span>
-                  </div>
-                  <div class="slide" data-ask="show me how you did it." data-say="Every click Scout made, replayed as a lesson.">
-                    <img src="/img/walkthrough-800.webp" srcset="/img/walkthrough-800.webp 800w, /img/walkthrough.webp 1440w" sizes="(min-width: 1000px) 56vw, 92vw" width="1440" height="900" alt="A Ghost Walkthrough replaying a browser task with a spotlight on the work email field" loading="lazy" />
-                    <span class="pt" style="--x: 50%; --y: 46%" data-label="Work email"></span>
-                  </div>
-                </div>
-                <div class="stage-floats" aria-hidden="true">
-                  <!-- the screenshot sliced into layers: each pop is a window onto the same image, lifted off the screen -->
-                  <i class="pop pill" data-for="0" style="--xn: 31.25; --yn: 0; --wn: 37.5; --hn: 5.4; --z: 50px"><b></b></i>
-                  <i class="pop win" data-for="0" style="--xn: 21.6; --yn: 26.6; --wn: 56.8; --hn: 46.4; --z: 28px"><b></b></i>
-                  <i class="pop card" data-for="0" style="--xn: 1.5; --yn: 90.2; --wn: 19.9; --hn: 7.6; --z: 76px"><b></b></i>
-                  <i class="pop win" data-for="1" style="--xn: 21.6; --yn: 26.6; --wn: 56.8; --hn: 46.4; --z: 24px"><b></b></i>
-                  <i class="pop card" data-for="1" style="--xn: 44.6; --yn: 62.4; --wn: 52.8; --hn: 31.4; --z: 84px"><b></b></i>
-                  <i class="pop card" data-for="2" style="--xn: 2.2; --yn: 2.8; --wn: 38.6; --hn: 11; --z: 84px"><b></b></i>
-                  <i class="pop card" data-for="2" style="--xn: 20.3; --yn: 79.4; --wn: 59.4; --hn: 9.8; --z: 72px"><b></b></i>
-                  <i class="pop win" data-for="3" style="--xn: 21.6; --yn: 26.6; --wn: 56.8; --hn: 46.4; --z: 24px"><b></b></i>
-                  <i class="pop card" data-for="3" style="--xn: 44.6; --yn: 62.4; --wn: 52.8; --hn: 31.4; --z: 84px"><b></b></i>
-                  <i class="pop pill" data-for="4" style="--xn: 39.6; --yn: 0; --wn: 21.4; --hn: 4.8; --z: 50px"><b></b></i>
-                  <i class="pop field" data-for="4" style="--xn: 27; --yn: 42.8; --wn: 46; --hn: 6.6; --z: 46px"><b></b></i>
-                  <i class="pop card" data-for="4" style="--xn: 11.4; --yn: 87.2; --wn: 77.2; --hn: 10.4; --z: 64px"><b></b></i>
-                  <span class="float ice" data-for="0" style="--x: 64%; --y: 24%; --z: 110px">Export &middot; button</span>
-                  <span class="float gold" data-for="0" style="--x: 8%; --y: 76%; --z: 70px"><b>Pyxi</b>Right here. One click.</span>
-                  <span class="float ice" data-for="1" style="--x: 60%; --y: 20%; --z: 120px">Explaining &middot; 5 steps</span>
-                  <span class="float gold" data-for="1" style="--x: 6%; --y: 70%; --z: 80px"><b>Pyxi</b>Rising out of the page, narrated.</span>
-                  <span class="float ice" data-for="2" style="--x: 14%; --y: 24%; --z: 130px">Sidebar</span>
-                  <span class="float ice" data-for="2" style="--x: 62%; --y: 30%; --z: 90px">Appearance page</span>
-                  <span class="float ice" data-for="3" style="--x: 56%; --y: 18%; --z: 120px">Forward pass</span>
-                  <span class="float gold" data-for="3" style="--x: 6%; --y: 72%; --z: 80px"><b>Pyxi</b>Then the nudge backwards.</span>
-                  <span class="float ice" data-for="4" style="--x: 58%; --y: 26%; --z: 120px">Step 4 &middot; Work email</span>
-                  <span class="float gold" data-for="4" style="--x: 6%; --y: 74%; --z: 80px"><b>Scout</b>Every click, replayed as a lesson.</span>
-                </div>
-              </div>
-              <div class="stage-reflect" aria-hidden="true"></div>
+          <figure class="film reveal" id="film">
+            <div class="film-frame">
+              <video class="film-loop" data-loop muted loop playsinline preload="none" poster="/clips/pyxi-film.webp" width="1280" height="720" aria-label="A short silent preview of the Pyxi film: Pyxi marks a setting to click, pins notes beside a post, has a teammate build a pivot table, and tidies a desktop after asking.">
+                <source src="/clips/pyxi-film-preview.webm" type="video/webm" />
+                <source src="/clips/pyxi-film-preview.mp4" type="video/mp4" />
+              </video>
+              <video class="film-full" controls playsinline preload="none" poster="/clips/pyxi-film.webp" width="1280" height="720" hidden aria-label="The Pyxi film, with sound">
+                <source src="/clips/pyxi-film.mp4" type="video/mp4" />
+              </video>
+              <button class="film-play" type="button" data-track="hero-film">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" /></svg>
+                Play with sound <span>50 sec</span>
+              </button>
+              <button class="clip-toggle" type="button" aria-pressed="false" hidden><span class="sr-only">Pause the preview</span></button>
             </div>
-            <figcaption class="stage-cap">
-              <span class="stage-dots" role="group" aria-label="Choose an example">
-                <button type="button" aria-label="Pointing at a button" aria-pressed="true"></button>
-                <button type="button" aria-label="Explaining HTTPS in 3D" aria-pressed="false"></button>
-                <button type="button" aria-label="An exploded view of a window" aria-pressed="false"></button>
-                <button type="button" aria-label="A neural network in 3D" aria-pressed="false"></button>
-                <button type="button" aria-label="A Ghost Walkthrough" aria-pressed="false"></button>
-              </span>
-              <span>Real screenshots of Pyxi on Windows</span>
-            </figcaption>
+            <figcaption>Designed demos of what Pyxi does. Names and content are made up.</figcaption>
           </figure>
+        </div>
+      </section>
+
+      <!-- ============================================================ what it does, four clips -->
+      <section class="shows" id="shows" data-say="Four small problems. One sentence each.">
+        <div class="wrap">
+          <p class="kicker reveal">See it work</p>
+          <h2 class="h2 reveal" data-scrub>Your computer can do it.<br /><span class="dim">You just have to ask.</span></h2>
+
+          <article class="show reveal">
+            <div class="show-copy">
+              <p class="show-ask">&ldquo;How do I make my profile private?&rdquo;</p>
+              <h3>I'll show you where it is.</h3>
+              <p>Ask how to do something and Pyxi marks the one thing to click, waits for your click, then marks the next. No tutorial, and you know the way next time.</p>
+            </div>
+            <figure class="show-win">
+              <div class="show-bar" aria-hidden="true"><i></i><i></i><i></i><span>Step by step, on your own screen</span></div>
+              <div class="show-clip">
+                <video data-loop muted loop playsinline preload="none" poster="/clips/demo-setting.webp" width="1280" height="720" aria-label="Demo: someone asks how to make their profile private. Pyxi marks their photo, then Settings, then the Private profile switch, one step at a time, and the switch flips.">
+                  <source src="/clips/demo-setting.webm" type="video/webm" />
+                  <source src="/clips/demo-setting.mp4" type="video/mp4" />
+                </video>
+                <button class="clip-toggle" type="button" aria-pressed="false" hidden><span class="sr-only">Pause this demo</span></button>
+              </div>
+            </figure>
+          </article>
+
+          <article class="show flip reveal">
+            <div class="show-copy">
+              <p class="show-ask">&ldquo;What's this post about?&rdquo;</p>
+              <h3>I'll read it so you don't have to.</h3>
+              <p>Pyxi pins the gist beside the page in a few short points, each one tied to the words it came from, and says it out loud while it writes.</p>
+            </div>
+            <figure class="show-win">
+              <div class="show-bar" aria-hidden="true"><i></i><i></i><i></i><span>Notes, pinned beside the page</span></div>
+              <div class="show-clip">
+                <video data-loop muted loop playsinline preload="none" poster="/clips/demo-post.webp" width="1280" height="720" aria-label="Demo: someone asks what a long post is about. Pyxi pins a card beside it with three short points, each underlined in the post.">
+                  <source src="/clips/demo-post.webm" type="video/webm" />
+                  <source src="/clips/demo-post.mp4" type="video/mp4" />
+                </video>
+                <button class="clip-toggle" type="button" aria-pressed="false" hidden><span class="sr-only">Pause this demo</span></button>
+              </div>
+            </figure>
+          </article>
+
+          <article class="show reveal">
+            <div class="show-copy">
+              <p class="show-ask">&ldquo;Make me a pivot table of sales by region.&rdquo;</p>
+              <h3>I'll hand it to a teammate.</h3>
+              <p>Bigger jobs go to a teammate. Ledger builds the pivot in the sheet you have open while you carry on, and a small chip shows it working until it's done.</p>
+            </div>
+            <figure class="show-win">
+              <div class="show-bar" aria-hidden="true"><i></i><i></i><i></i><span>A teammate, working in the background</span></div>
+              <div class="show-clip">
+                <video data-loop muted loop playsinline preload="none" poster="/clips/demo-pivot.webp" width="1280" height="720" aria-label="Demo: someone asks for a pivot table of sales by region. A chip shows the teammate Ledger working while they keep typing, then the pivot table appears beside the data with its totals.">
+                  <source src="/clips/demo-pivot.webm" type="video/webm" />
+                  <source src="/clips/demo-pivot.mp4" type="video/mp4" />
+                </video>
+                <button class="clip-toggle" type="button" aria-pressed="false" hidden><span class="sr-only">Pause this demo</span></button>
+              </div>
+            </figure>
+          </article>
+
+          <article class="show flip reveal">
+            <div class="show-copy">
+              <p class="show-ask">&ldquo;Organise my desktop.&rdquo;</p>
+              <h3>I'll ask before I touch anything.</h3>
+              <p>Before Pyxi moves, sends or deletes anything, a card says exactly what will happen. Nothing does until you press Allow, and "undo that" puts it back.</p>
+            </div>
+            <figure class="show-win">
+              <div class="show-bar" aria-hidden="true"><i></i><i></i><i></i><span>Nothing moves until you say so</span></div>
+              <div class="show-clip">
+                <video data-loop muted loop playsinline preload="none" poster="/clips/demo-desktop.webp" width="1280" height="720" aria-label="Demo: someone asks Pyxi to organise a desktop of 214 files. A card lists six folders and waits. They press Allow, and the files fold into the folders.">
+                  <source src="/clips/demo-desktop.webm" type="video/webm" />
+                  <source src="/clips/demo-desktop.mp4" type="video/mp4" />
+                </video>
+                <button class="clip-toggle" type="button" aria-pressed="false" hidden><span class="sr-only">Pause this demo</span></button>
+              </div>
+            </figure>
+          </article>
+
+          <p class="fine shows-note reveal">Designed demos of what Pyxi does. Names and content are made up. <a href="/features">Everything Pyxi does</a></p>
         </div>
       </section>
 
@@ -236,194 +267,21 @@
         </div>
       </section>
 
-      <!-- ============================================================ what it does -->
-      <section class="story" id="story" aria-labelledby="story-title">
-        <h2 class="sr-only" id="story-title">What Pyxi does</h2>
-        <div class="story-track" data-swarm="chat" data-swarm-at="#story-scenes">
-          <div class="story-sticky">
-            <div class="story-stage" id="story-stage" aria-hidden="true">
-              <!-- Five sharp pictures, one per statement. The fireflies gather along the lines marked
-                   data-fly (swarm.js reads them straight from here), then the picture comes into focus. -->
-              <div class="story-scenes" id="story-scenes">
-                <div class="story-tilt">
-                  <!-- 1. a chat window: a screenshot goes in, paragraphs come out -->
-                  <figure class="scene" data-scene="chat">
-                    <svg viewBox="0 0 640 400">
-                      <rect class="pane" data-fly="ice" data-w="4" x="170" y="28" width="300" height="344" rx="22" />
-                      <line class="rule" data-fly="ice" data-w="3" x1="170" y1="80" x2="470" y2="80" />
-                      <circle class="bar" cx="196" cy="54" r="4.5" /><circle class="bar" cx="214" cy="54" r="4.5" /><circle class="bar" cx="232" cy="54" r="4.5" />
-                      <text class="t dim" x="320" y="59" text-anchor="middle">AI chat</text>
-                      <rect class="ctl" data-fly="ice" data-w="3.5" x="296" y="96" width="154" height="92" rx="14" />
-                      <rect class="thumb" x="308" y="106" width="130" height="56" rx="6" />
-                      <line class="rule" x1="308" y1="118" x2="438" y2="118" />
-                      <rect class="bar" x="316" y="126" width="62" height="5" rx="2.5" /><rect class="bar" x="316" y="137" width="96" height="5" rx="2.5" /><rect class="bar" x="316" y="148" width="44" height="5" rx="2.5" />
-                      <text class="t tiny dim" x="308" y="179">screenshot.png</text>
-                      <rect class="ctl" data-fly="ice" data-w="3.5" x="190" y="200" width="236" height="98" rx="14" />
-                      <rect class="bar" x="204" y="214" width="208" height="5" rx="2.5" /><rect class="bar" x="204" y="228" width="196" height="5" rx="2.5" /><rect class="bar" x="204" y="242" width="210" height="5" rx="2.5" /><rect class="bar" x="204" y="256" width="180" height="5" rx="2.5" /><rect class="bar" x="204" y="270" width="204" height="5" rx="2.5" /><rect class="bar" x="204" y="284" width="120" height="5" rx="2.5" />
-                      <rect class="ctl" data-fly="ice" data-w="3.5" x="190" y="312" width="260" height="42" rx="21" />
-                      <text class="t dim" x="210" y="338">Ask anything</text>
-                      <circle class="send" data-fly="ice" data-w="fill" cx="427" cy="333" r="13" />
-                      <path class="send-arrow" d="M427 339V327M422 332l5-5 5 5" />
-                      <path class="lead" d="M450 134H500" /><circle class="lead-dot" cx="450" cy="134" r="2.5" />
-                      <path class="lead" d="M190 249H140" /><circle class="lead-dot" cx="190" cy="249" r="2.5" />
-                    </svg>
-                    <div class="tags">
-                      <span class="tag r" style="--x: 78.1%; --y: 33.5%">A screenshot goes in</span>
-                      <span class="tag l" style="--x: 21.9%; --y: 62.25%">Paragraphs come out</span>
-                    </div>
-                  </figure>
-
-                  <!-- 2. your monitor, an app on it, and Pyxi on top of the app -->
-                  <figure class="scene" data-scene="screen">
-                    <svg viewBox="0 0 640 400">
-                      <rect class="bezel" data-fly="ice" data-w="5" x="66" y="22" width="508" height="310" rx="20" />
-                      <path class="stand" data-fly="ice" data-w="4" d="M320 332V372M236 374H404" />
-                      <rect class="pane" data-fly="ice" data-w="3" x="118" y="64" width="404" height="228" rx="12" />
-                      <path class="rule" d="M118 96H522M222 96V292" />
-                      <text class="t" x="134" y="85">Report</text>
-                      <rect class="bar" x="138" y="121" width="64" height="6" rx="3" /><rect class="bar" x="138" y="147" width="52" height="6" rx="3" /><rect class="bar" x="138" y="173" width="64" height="6" rx="3" /><rect class="bar" x="138" y="199" width="44" height="6" rx="3" />
-                      <rect class="bar" x="246" y="120" width="150" height="9" rx="4.5" />
-                      <rect class="ctl" x="246" y="148" width="250" height="30" rx="8" />
-                      <rect class="ctl" x="246" y="188" width="250" height="30" rx="8" />
-                      <rect class="btn" x="246" y="236" width="88" height="32" rx="9" />
-                      <text class="t" x="290" y="257" text-anchor="middle">Export</text>
-                      <ellipse class="ice" data-fly="ice" data-w="3" cx="290" cy="252" rx="62" ry="30" />
-                      <path class="cur" d="M326 258v23.8l6.4-5.6 4.2 9.2 3.9-1.7-4.2-9.2h7.9z" />
-                      <circle class="glow" cx="398" cy="250" r="20" />
-                      <circle class="fly" data-fly="gold" data-w="fill" cx="398" cy="250" r="7" />
-                      <path class="thread" d="M391 250H353" />
-                    </svg>
-                    <div class="tags">
-                      <span class="tag c" style="--x: 24%; --y: 5.5%">Your screen</span>
-                      <span class="tag r gold" style="--x: 65.6%; --y: 62.5%">Pyxi</span>
-                    </div>
-                  </figure>
-
-                  <!-- 3. one look at the window: every control by name and place, the password a black bar -->
-                  <figure class="scene" data-scene="read">
-                    <svg viewBox="0 0 640 400">
-                      <rect class="pane" data-fly="ice" data-w="4" x="86" y="30" width="468" height="340" rx="18" />
-                      <line class="rule" x1="86" y1="76" x2="554" y2="76" />
-                      <text class="t" x="108" y="59">Settings</text>
-                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="100" width="124" height="30" rx="6" /><text class="t mono" x="117" y="119">Item "General"</text>
-                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="140" width="124" height="30" rx="6" /><text class="t mono" x="117" y="159">Item "Sync"</text>
-                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="180" width="124" height="30" rx="6" /><text class="t mono" x="117" y="199">Item "Privacy"</text>
-                      <rect class="ice" data-fly="ice" data-w="2.5" x="108" y="220" width="124" height="30" rx="6" /><text class="t mono" x="117" y="239">Item "About"</text>
-                      <rect class="ice" data-fly="ice" data-w="3" x="258" y="100" width="272" height="44" rx="8" /><text class="t mono" x="270" y="126">Edit "Name"</text><text class="t mono dim" x="518" y="126" text-anchor="end">x 258  y 100</text>
-                      <rect class="ice" data-fly="ice" data-w="3" x="258" y="158" width="272" height="44" rx="8" /><text class="t mono" x="270" y="184">Edit "Email"</text><text class="t mono dim" x="518" y="184" text-anchor="end">x 258  y 158</text>
-                      <rect class="ice" data-fly="ice" data-w="3" x="258" y="218" width="150" height="42" rx="10" /><text class="t mono" x="333" y="243" text-anchor="middle">Button "Export"</text>
-                      <rect class="secret" data-fly="ice" data-w="3" x="258" y="290" width="272" height="40" rx="8" />
-                      <path class="lock" d="M275 308h12v10h-12zM277.500 308v-3.500a3.500 3.500 0 0 1 7 0v3.500" />
-                      <text class="t mono dim" x="296" y="314">hidden</text>
-                      <path class="gold" data-fly="gold" data-w="5" d="M70 50V14H106M534 14H570V50M570 350V386H534M106 386H70V350" />
-                      <circle class="glow" cx="596" cy="32" r="18" />
-                      <circle class="fly" data-fly="gold" data-w="fill" cx="596" cy="32" r="6.500" />
-                      <path class="lead" d="M530 122H574" /><circle class="lead-dot" cx="530" cy="122" r="2.5" />
-                    </svg>
-                    <div class="tags">
-                      <span class="tag c gold" style="--x: 50%; --y: 3.5%">One look, when you ask</span>
-                      <span class="tag r" style="--x: 89.7%; --y: 30.5%">The names and positions of the controls</span>
-                      <span class="tag l" style="--x: 39%; --y: 77.5%">Passwords are blacked out</span>
-                    </div>
-                  </figure>
-
-                  <!-- 4. what Pyxi draws on top: a ring, an arrow, a note in handwriting, a model in 3D -->
-                  <figure class="scene" data-scene="draw">
-                    <svg viewBox="0 0 640 400">
-                      <rect class="pane" data-fly="ice" data-w="4" x="56" y="44" width="372" height="312" rx="16" />
-                      <line class="rule" x1="56" y1="88" x2="428" y2="88" />
-                      <text class="t" x="78" y="72">Sales by month</text>
-                      <line class="rule" x1="84" y1="312" x2="400" y2="312" />
-                      <rect class="col" x="100" y="246" width="36" height="66" rx="4" /><rect class="col" x="154" y="206" width="36" height="106" rx="4" /><rect class="col hi" x="208" y="158" width="36" height="154" rx="4" /><rect class="col" x="262" y="222" width="36" height="90" rx="4" /><rect class="col" x="316" y="190" width="36" height="122" rx="4" />
-                      <path class="ice" data-fly="ice" data-w="3.5" d="M226 130c22-1 37 12 37 27 0 16-16 28-38 28-21 0-36-11-36-27 0-15 15-27 37-28z" />
-                      <path class="ice" data-fly="ice" data-w="3" d="M330 136C306 122 286 128 272 146M272 146l2-13M272 146l13-2" />
-                      <text class="t hand" x="304" y="124">best month</text>
-                      <circle class="glow" cx="286" cy="182" r="18" />
-                      <circle class="fly" data-fly="gold" data-w="fill" cx="286" cy="182" r="6.500" />
-                      <ellipse class="ghost" data-fly="gold" data-w="2.5" cx="534" cy="262" rx="72" ry="17" />
-                      <path class="lead" d="M189 158H44" /><circle class="lead-dot" cx="189" cy="158" r="2.5" />
-                      <path class="lead" d="M400 118H470V86" /><circle class="lead-dot" cx="400" cy="118" r="2.5" />
-                    </svg>
-                    <div class="model" style="--x: 83.4%; --y: 49%"><div class="model-spin"><i></i><i></i><i></i></div></div>
-                    <div class="tags">
-                      <span class="tag l ice" style="--x: 6.9%; --y: 39.5%">Rings and arrows</span>
-                      <span class="tag c ice" style="--x: 79%; --y: 16%">Handwritten notes</span>
-                      <span class="tag c ice" style="--x: 83.4%; --y: 80%">3D scenes</span>
-                    </div>
-                  </figure>
-
-                  <!-- 5. the card Pyxi shows before it clicks for you -->
-                  <figure class="scene" data-scene="allow">
-                    <svg viewBox="0 0 640 400">
-                      <rect class="pane" data-fly="ice" data-w="4" x="120" y="56" width="400" height="288" rx="26" />
-                      <circle class="glow" cx="160" cy="103" r="17" />
-                      <circle class="fly" cx="160" cy="103" r="6.500" />
-                      <text class="t big" x="182" y="110">Pyxi needs your OK</text>
-                      <text class="t mid" x="152" y="152">Send this reply to Sam Rivera</text>
-                      <line class="rule" x1="152" y1="184" x2="488" y2="184" />
-                      <rect class="yes" data-fly="gold" data-w="6" x="150" y="216" width="196" height="72" rx="36" />
-                      <text class="t yes-t" x="248" y="261" text-anchor="middle">Allow</text>
-                      <rect class="ctl" data-fly="ice" data-w="3.5" x="364" y="216" width="126" height="72" rx="36" />
-                      <text class="t no-t" x="427" y="260" text-anchor="middle">Don't</text>
-                      <path class="cur" data-fly="ice" data-w="fill" d="M312 262v37.400l10.100-8.800 6.600 14.500 6.200-2.600-6.600-14.500h12.300z" />
-                      <path class="lead" d="M150 252H100" /><circle class="lead-dot" cx="150" cy="252" r="2.5" />
-                      <path class="lead" d="M490 252H540" /><circle class="lead-dot" cx="490" cy="252" r="2.5" />
-                    </svg>
-                    <div class="tags">
-                      <span class="tag l gold" style="--x: 15.6%; --y: 63%">Nothing is clicked until you press this</span>
-                      <span class="tag r" style="--x: 84.4%; --y: 63%">Say no and nothing happens</span>
-                    </div>
-                  </figure>
-                </div>
-              </div>
-            </div>
-            <ol class="story-steps">
-              <li class="story-step" data-shape="chat" data-say="Most AI lives in a chat box.">
-                <p class="story-n">01 <span>/ 05</span></p>
-                <h3 class="story-line">Most AI lives in a chat box.</h3>
-                <p class="story-sub">You paste a screenshot in and read paragraphs out.</p>
-              </li>
-              <li class="story-step" data-shape="screen" data-say="I live on your screen.">
-                <p class="story-n">02 <span>/ 05</span></p>
-                <h3 class="story-line">Pyxi lives on your screen.</h3>
-                <p class="story-sub">It already sees what you see, and it answers on top of it.</p>
-              </li>
-              <li class="story-step" data-shape="read" data-say="I look when you ask. Never before.">
-                <p class="story-n">03 <span>/ 05</span></p>
-                <h3 class="story-line">It looks when you ask.</h3>
-                <p class="story-sub">One look at the window you're on: the picture, and the names and positions of the controls on it. Nothing in the background unless you turn that on.</p>
-              </li>
-              <li class="story-step" data-shape="draw" data-say="I draw the answer right on your screen.">
-                <p class="story-n">04 <span>/ 05</span></p>
-                <h3 class="story-line">It answers right where you're looking.</h3>
-                <p class="story-sub">Rings, arrows, handwritten notes and 3D scenes, each drawn the moment Pyxi says it. You hear the answer and see it in the same place.</p>
-              </li>
-              <li class="story-step" data-shape="allow" data-say="I'll ask first. Then I can do the clicking.">
-                <p class="story-n">05 <span>/ 05</span></p>
-                <h3 class="story-line">And it does the clicking when you say so.</h3>
-                <p class="story-sub">Pyxi can move your mouse and type after you press Allow. Move the mouse or press <kbd>Esc</kbd> and you're back in control on the spot.</p>
-              </li>
-            </ol>
-            <div class="story-bar" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
-            <p class="story-hint" aria-hidden="true">Scroll</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- ============================================================ how it works, in 3D -->
-      <section class="layers" id="how" data-say="Here's what happens under the glass.">
+      <!-- ============================================================ what it sees -->
+      <section class="layers short" id="how" data-say="I look when you ask. Never before.">
         <div class="layers-track">
           <div class="layers-sticky">
             <div class="wrap layers-grid">
               <div class="layers-copy">
-                <p class="kicker">How it works</p>
-                <h2 class="h2">Three layers.<br /><span class="dim">One glance.</span></h2>
+                <p class="kicker">What it sees</p>
+                <h2 class="h2">It looks when you ask.<br /><span class="dim">Not before.</span></h2>
                 <ol class="layer-steps">
-                  <li data-layer="1"><b>Your screen, as it is</b><span>When you talk to Pyxi, it takes one look at the window you're on. Nothing in the background.</span></li>
-                  <li data-layer="2"><b>What Pyxi reads</b><span>Every control, its name and exactly where it sits, from Windows UI Automation. Password fields are blacked out before anything is sent.</span></li>
-                  <li data-layer="3"><b>What Pyxi draws</b><span>Rings, threads, notes and 3D models on a see-through layer above your apps. Your clicks go straight through it.</span></li>
+                  <li data-layer="1"><b>One look, at one window</b><span>When you talk to Pyxi it takes a single look at the window you're on. Nothing runs in the background unless you turn that on.</span></li>
+                  <li data-layer="2"><b>Passwords are blacked out first</b><span>Pyxi reads the names and places of the controls. Password fields, banking apps and anything that looks like a key are masked before anything is sent.</span></li>
+                  <li data-layer="3"><b>It draws on glass, above your apps</b><span>Marks, notes and models sit on a see-through layer. Your clicks go straight through it, and <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>P</kbd> pauses everything.</span></li>
                 </ol>
-                <p class="lens-hint"><span class="mouse">Move your mouse over the window: wherever Pyxi hovers, the screen turns to glass. Hover a step to hold it.</span><span class="touch">Pyxi's lens roams the window on its own. Tap a step to hold it.</span></p>
+                <p class="lens-hint"><span class="mouse">Move your mouse over the window to see what Pyxi reads. Hover a step to hold it.</span><span class="touch">Pyxi's lens roams the window on its own. Tap a step to hold it.</span></p>
+                <p class="fine"><a href="/privacy">What leaves your computer, in full</a></p>
               </div>
               <div class="layers-stage" role="img" aria-label="A lens over a dark Settings window. Inside the lens the window turns to glass: every control is a wireframe with its role, name and position, and the password field is a black bar. Pyxi's firefly threads light to the Export button.">
                 <div class="lens-world">
@@ -438,234 +296,60 @@
         </div>
       </section>
 
-      <!-- ============================================================ demos -->
-      <section class="demos" id="demos" data-say="Watch me work. Anything that reaches people waits for your OK.">
+      <!-- ============================================================ price, and the questions people ask first -->
+      <section class="costs" id="pricing" data-say="Three days free. Then pick a plan.">
         <div class="wrap">
-          <p class="kicker reveal">Watch it work</p>
-          <h2 class="h2 reveal" data-scrub>It works the way you would.<br /><span class="dim">Only with your OK.</span></h2>
-          <p class="lead narrow reveal">Ask in your own words. Pyxi explains what's on your screen right where it is, writes the email, books the meeting, and sends Scout off to research in the background while you keep working. Anything that reaches another person, or costs money, waits until you press Allow.</p>
+          <p class="kicker reveal">Pricing</p>
+          <h2 class="h2 reveal" data-scrub>Free for 3 days.<br /><span class="dim">Then from $9 a month.</span></h2>
+          <p class="lead narrow reveal">Every plan starts with 3 days of Pro, free, and no card is asked for. Every plan does everything Pyxi does: a bigger plan has a bigger monthly allowance. Prices in US dollars.</p>
+          <div class="tiers reveal">
+            <a class="tier" href="/pricing" data-track="home-plan-starter">
+              <b>Starter</b>
+              <span class="tier-price"><strong>$9</strong> a month</span>
+              <span>For the odd question and a few errands.</span>
+            </a>
+            <a class="tier pro" href="/pricing" data-track="home-plan-pro">
+              <b>Pro</b>
+              <span class="tier-price"><strong>$19</strong> a month</span>
+              <span>For using Pyxi through the working day.</span>
+            </a>
+            <a class="tier" href="/pricing" data-track="home-plan-max">
+              <b>Max</b>
+              <span class="tier-price"><strong>$39</strong> a month</span>
+              <span>For handing Pyxi real work, all day.</span>
+            </a>
+          </div>
+          <p class="fine reveal">Pay by the year and two months are free. <a href="/pricing" data-track="home-pricing">Compare the plans</a></p>
 
-          <div class="demo-tabs reveal" role="tablist" aria-label="Demos">
-            <button type="button" role="tab" id="tab-explain" aria-controls="demo-explain" aria-selected="true">Explain a post</button>
-            <button type="button" role="tab" id="tab-email" aria-controls="demo-email" aria-selected="false" tabindex="-1">Reply to an email</button>
-            <button type="button" role="tab" id="tab-meet" aria-controls="demo-meet" aria-selected="false" tabindex="-1">Book a meeting</button>
-            <button type="button" role="tab" id="tab-place" aria-controls="demo-place" aria-selected="false" tabindex="-1">Find a place</button>
-            <button type="button" role="tab" id="tab-movie" aria-controls="demo-movie" aria-selected="false" tabindex="-1">Plan a movie night</button>
-          </div>
-
-          <!-- 1. Cue cards: explaining a post, right beside it -->
-          <div class="demo reveal is-on" id="demo-explain" role="tabpanel" aria-labelledby="tab-explain" data-demo="explain" data-ask="“Hey Pyxi, explain this post.”" data-look="Looking at your browser" data-write="Writing a cue card" data-end="Ask a follow-up any time">
-            <ol class="demo-steps">
-              <li><b>You ask</b><span>"Hey Pyxi, explain this post."</span></li>
-              <li><b>Pyxi looks</b><span>It reads the post from your screen, wherever it is.</span></li>
-              <li><b>A cue card appears</b><span>Beside the post, never on top of what you're reading.</span></li>
-              <li><b>Each point shows its source</b><span>A numbered outline and a thread of light to the exact part it means.</span></li>
-              <li><b>The takeaway</b><span>What it means for you, in one line. Ask a follow-up any time.</span></li>
-            </ol>
-            <div class="demo-stage" role="img" aria-label="Illustration: Pyxi writes a cue card beside a social media post, with numbered outlines on the chart, the page name and the caption, and threads linking each point to them.">
-              <div class="ds">
-                <div class="ds-notch"><i></i><span></span></div>
-                <article class="post">
-                  <header><span class="post-av">DB</span><span><b class="t-name">Daily Byte</b><small>18 hours ago</small></span><span class="post-x">&times;</span></header>
-                  <p class="post-text"><span class="t-cap">Our office coffee tally is in. Launch week nearly broke the machine.</span></p>
-                  <div class="post-chart">
-                    <b>Cups of coffee per week</b>
-                    <div class="bars"><i style="--v: 0.33"><em>Wk 1</em></i><i style="--v: 0.36"><em>Wk 2</em></i><i style="--v: 0.31"><em>Wk 3</em></i><i class="t-bar" style="--v: 1"><em>Launch</em></i><i style="--v: 0.39"><em>Wk 5</em></i></div>
-                  </div>
-                  <footer><span>861 likes</span><span>109 comments</span></footer>
-                </article>
-                <aside class="fn">
-                  <h4>What this post is about</h4>
-                  <ul>
-                    <li data-for="t-bar"><span>Coffee orders tripled in launch week</span><sup>1</sup></li>
-                    <li data-for="t-name"><span>It's the office's own count</span><sup>2</sup></li>
-                    <li data-for="t-cap" class="take"><span>Impact on you: none, unless you share their kitchen</span><sup>3</sup></li>
-                  </ul>
-                </aside>
-                <svg class="ds-ink" viewBox="0 0 880 560" aria-hidden="true"></svg>
-                <span class="ds-fly"></span>
-              </div>
+          <div class="home-asks reveal">
+            <h3 class="home-asks-title">Asked first</h3>
+            <div class="home-asks-list">
+              <details class="home-q">
+                <summary><h4>Does Pyxi watch my screen all the time?</h4></summary>
+                <p>No. It looks only when you talk or type to it. If you turn on the Memory Palace, it keeps window titles, focus changes and where controls were, on your computer, for 72 hours. It never records keystrokes, and <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>P</kbd> pauses everything.</p>
+              </details>
+              <details class="home-q">
+                <summary><h4>What leaves my computer?</h4></summary>
+                <p>Your request, the masked screenshot and on-screen text, recent conversation, and the parts of files or emails a job needs go to an AI model to work out the reply, through Pyxi's server and OpenRouter. We don't sell it and don't use it to train models. Pyxi's server doesn't store what you ask, what's on your screen or your voice. The <a href="/privacy">privacy policy</a> has the full table.</p>
+              </details>
+              <details class="home-q">
+                <summary><h4>Can it really use my mouse and keyboard?</h4></summary>
+                <p>Yes, after you press Allow (once, or Always allow). It labels what it's doing beside the cursor and stops the moment you move the mouse or press <kbd>Esc</kbd>. Sending, paying, deleting, posting, signing in or out and closing apps always ask again, and it never types into password fields, never types card or government ID numbers, and never completes a payment.</p>
+              </details>
+              <details class="home-q">
+                <summary><h4>What does Pyxi cost?</h4></summary>
+                <p>The first 3 days are free. After that Pyxi is a subscription with three plans: Starter at $9 a month, Pro at $19 and Max at $39, or $90, $180 and $372 a year. Prices are in US dollars, and there's no free plan. Each plan comes with a monthly usage allowance, and a bigger plan has a bigger one. The <a href="/pricing">pricing page</a> compares them.</p>
+              </details>
+              <details class="home-q">
+                <summary><h4>How does the free trial work?</h4></summary>
+                <p>The trial is 3 days of Pro, and no card is asked for. It starts the moment you sign in with Google inside Pyxi, once for each Google account, and it comes with a small allowance of its own. When it ends, Pyxi asks you to choose a plan to keep going. There's no sign-in on this website: everything happens in the app.</p>
+              </details>
             </div>
+            <p class="fine"><a href="/faq" data-track="home-faq">All the questions</a></p>
           </div>
-
-          <!-- 2. An email reply, sent only after Allow -->
-          <div class="demo" id="demo-email" role="tabpanel" aria-labelledby="tab-email" data-demo="email" hidden>
-            <ol class="demo-steps">
-              <li><b>You ask</b><span>"Reply to Sam: thanks, the dates are right, I'll send the signed copy Friday."</span></li>
-              <li><b>Pyxi opens the email</b><span>In your own connected Gmail account.</span></li>
-              <li><b>It writes the reply</b><span>In your words, in the thread, ready to read over.</span></li>
-              <li><b>It asks first</b><span>Nothing is sent until you say so.</span></li>
-              <li><b>You press Allow</b><span>Sent. Press Don't and it stays a draft.</span></li>
-            </ol>
-            <div class="demo-stage" role="img" aria-label="Illustration: Pyxi drafts a reply to Sam in a mail app, shows an approval card, and sends it only after the user clicks Allow.">
-              <div class="ds">
-                <div class="ds-notch"><i></i><span></span></div>
-                <div class="app mail">
-                  <div class="app-bar"><i></i><i></i><i></i><span>Mail</span></div>
-                  <div class="mail-list">
-                    <div class="row sel t-sam"><b>Sam Rivera</b><span>Recommendation letter</span><small>Hi! I've attached the draft letter...</small></div>
-                    <div class="row"><b>Priya Shah</b><span>Notes from Thursday</span><small>Here's the summary we talked about...</small></div>
-                    <div class="row"><b>Weekly digest</b><span>Your week in review</span><small>Five things worth reading...</small></div>
-                  </div>
-                  <div class="mail-read">
-                    <h5>Recommendation letter</h5>
-                    <p class="from"><b>Sam Rivera</b> &lt;sam.rivera@example.com&gt;</p>
-                    <p>Hi! I've attached the draft letter. Can you check that the dates are right before I sign it?</p>
-                    <span class="att">Letter-draft.docx</span>
-                  </div>
-                  <div class="compose">
-                    <div class="c-head">Reply</div>
-                    <div class="c-row"><span>To</span>sam.rivera@example.com</div>
-                    <div class="c-row"><span>Subject</span>Re: Recommendation letter</div>
-                    <p class="c-body" data-text="Hi Sam, thank you so much! The dates are right. I'll send you the signed copy on Friday."></p>
-                    <span class="c-send">Send</span>
-                  </div>
-                </div>
-                <div class="request ds-req">
-                  <div class="req-title">Pyxi needs your OK</div>
-                  <div class="req-action">Send this reply to Sam Rivera</div>
-                  <div class="req-buttons"><span class="req-btn yes t-allow">Allow</span><span class="req-btn">Don't</span></div>
-                </div>
-                <div class="ds-toast">Sent to Sam Rivera</div>
-                <span class="ds-fly"></span>
-                <span class="ds-cursor"></span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 3. A meeting: the free slot, the event, then the invite after Allow -->
-          <div class="demo" id="demo-meet" role="tabpanel" aria-labelledby="tab-meet" data-demo="meet" hidden>
-            <ol class="demo-steps">
-              <li><b>You ask</b><span>"Book a call with Priya next Tuesday at 3, and invite her."</span></li>
-              <li><b>Pyxi checks your calendar</b><span>Tuesday at 3 is free.</span></li>
-              <li><b>It adds the event</b><span>Half an hour, titled, on your Google Calendar.</span></li>
-              <li><b>It asks before inviting</b><span>An invite reaches Priya, so it waits for you.</span></li>
-              <li><b>You press Allow</b><span>The invite is on its way.</span></li>
-            </ol>
-            <div class="demo-stage" role="img" aria-label="Illustration: Pyxi finds a free slot on Tuesday at 3 PM in a calendar, adds a call with Priya, and sends the invite only after the user clicks Allow.">
-              <div class="ds">
-                <div class="ds-notch"><i></i><span></span></div>
-                <div class="app cal">
-                  <div class="app-bar"><i></i><i></i><i></i><span>Calendar &middot; Next week</span></div>
-                  <div class="cal-grid">
-                    <div class="cal-days"><span></span><b>Mon</b><b>Tue</b><b>Wed</b><b>Thu</b><b>Fri</b></div>
-                    <div class="cal-body">
-                      <div class="cal-hours"><span>9 AM</span><span>10</span><span>11</span><span>12 PM</span><span>1</span><span>2</span><span>3</span><span>4</span></div>
-                      <div class="cal-cols">
-                        <span class="ev" style="--d: 0; --h: 1; --len: 0.5">Team standup</span>
-                        <span class="ev" style="--d: 1; --h: 4; --len: 1">Lunch with Alex</span>
-                        <span class="ev" style="--d: 2; --h: 5; --len: 1">Design review</span>
-                        <span class="ev" style="--d: 3; --h: 2; --len: 0.5">1:1</span>
-                        <span class="ev" style="--d: 4; --h: 0.5; --len: 1">Planning</span>
-                        <span class="slot t-slot" style="--d: 1; --h: 6; --len: 0.5"></span>
-                        <span class="ev new t-new" style="--d: 1; --h: 6; --len: 0.5"><b>Call with Priya</b>3:00 to 3:30 PM</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div class="request ds-req">
-                  <div class="req-title">Pyxi needs your OK</div>
-                  <div class="req-action">Send a calendar invite to priya@example.com for Tuesday at 3:00 PM</div>
-                  <div class="req-buttons"><span class="req-btn yes t-allow">Allow</span><span class="req-btn">Don't</span></div>
-                </div>
-                <div class="ds-toast">Invite sent to Priya</div>
-                <span class="ds-fly"></span>
-                <span class="ds-cursor"></span>
-              </div>
-            </div>
-          </div>
-          <!-- 4. Maps: the search, then a cue card that rings the best picks on the map -->
-          <div class="demo" id="demo-place" role="tabpanel" aria-labelledby="tab-place" data-demo="explain" data-ask="“Find coffee near me that's open now.”" data-look="Searching Google Maps" data-write="Picking the best ones" data-end="Want directions to Ember &amp; Oak?" hidden>
-            <ol class="demo-steps">
-              <li><b>You ask</b><span>"Find coffee near me that's open now."</span></li>
-              <li><b>Pyxi searches</b><span>It opens Google Maps and runs the search for you.</span></li>
-              <li><b>It reads the results</b><span>Ratings, reviews and opening hours, right off the screen.</span></li>
-              <li><b>A cue card picks the best</b><span>Each pick is ringed and numbered on the map itself.</span></li>
-              <li><b>Ask what's next</b><span>"Give me directions to the first one."</span></li>
-            </ol>
-            <div class="demo-stage" role="img" aria-label="Illustration: Pyxi searches a map for coffee open now, then a cue card lists the two best picks and rings each one on the map.">
-              <div class="ds">
-                <div class="ds-notch"><i></i><span></span></div>
-                <div class="app map">
-                  <div class="app-bar"><i></i><i></i><i></i><span>Google Maps</span></div>
-                  <div class="map-list">
-                    <div class="map-search">coffee near me open now</div>
-                    <div class="row"><b>Ember &amp; Oak</b><span><em>4.8</em> &#9733;&#9733;&#9733;&#9733;&#9733; (212)</span><small><u>Open</u> &middot; Closes 6 PM</small></div>
-                    <div class="row"><b>Little Kettle</b><span><em>4.6</em> &#9733;&#9733;&#9733;&#9733;&#9733; (98)</span><small><u>Open</u> &middot; Closes 5 PM</small></div>
-                    <div class="row"><b>Night Owl Roasters</b><span><em>4.5</em> &#9733;&#9733;&#9733;&#9733;&#9734; (301)</span><small><s>Closed</s> &middot; Opens 7 AM</small></div>
-                  </div>
-                  <div class="map-area">
-                    <i class="water"></i><i class="road r1"></i><i class="road r2"></i><i class="road r3"></i><i class="park"></i>
-                    <span class="pin t-p1" style="left: 150px; top: 250px"><b>Ember &amp; Oak</b></span>
-                    <span class="pin t-p2" style="left: 260px; top: 140px"><b>Little Kettle</b></span>
-                    <span class="pin dim" style="left: 380px; top: 300px"><b>Night Owl Roasters</b></span>
-                    <span class="pin dim" style="left: 90px; top: 110px"></span>
-                    <span class="you" style="left: 205px; top: 205px"></span>
-                  </div>
-                </div>
-                <aside class="fn map-card">
-                  <h4>Coffee spots open now</h4>
-                  <ul>
-                    <li data-for="t-p1"><span>Ember &amp; Oak: 4.8 stars, 212 reviews</span><sup>1</sup></li>
-                    <li data-for="t-p2"><span>Little Kettle: 4.6 stars, closes at 5</span><sup>2</sup></li>
-                  </ul>
-                </aside>
-                <svg class="ds-ink" viewBox="0 0 880 560" aria-hidden="true"></svg>
-                <span class="ds-fly"></span>
-              </div>
-            </div>
-          </div>
-          <!-- 5. Background research by Scout, a quiet report, then booking up to checkout -->
-          <div class="demo" id="demo-movie" role="tabpanel" aria-labelledby="tab-movie" data-demo="movie" hidden>
-            <ol class="demo-steps">
-              <li><b>You ask, mid-work</b><span>"Find what's on tonight at the closest cinema. Don't interrupt me."</span></li>
-              <li><b>Scout takes it</b><span>Pyxi hands it to Scout, who researches in its own browser window.</span></li>
-              <li><b>You keep working</b><span>Progress stays in a small card in the corner. No pop-ups.</span></li>
-              <li><b>One quiet report</b><span>The list appears under the notch when it's ready.</span></li>
-              <li><b>Book it</b><span>"Get two tickets for the 7:40." Scout picks the seats; paying always waits for you.</span></li>
-            </ol>
-            <div class="demo-stage" role="img" aria-label="Illustration: while you type in a document, Scout researches tonight's showtimes in the background, shows a short list under the notch, then books two seats and stops at checkout after you press Allow.">
-              <div class="ds">
-                <div class="ds-notch"><i></i><span></span></div>
-                <div class="notch-card">
-                  <b>Tonight at Northgate Cinema</b><small>1.2 km away &middot; found by Scout</small>
-                  <ul>
-                    <li><span>The Long Light</span><em>7:40 PM &middot; 9:15 PM</em></li>
-                    <li><span>Paper Moons</span><em>8:00 PM</em></li>
-                    <li><span>Night Bus</span><em>9:30 PM</em></li>
-                  </ul>
-                </div>
-                <div class="app doc">
-                  <div class="app-bar"><i></i><i></i><i></i><span>Docs &middot; Q4 plan</span></div>
-                  <div class="doc-page">
-                    <h5>Q4 plan</h5>
-                    <p>Goals for the quarter, in order of how much they matter.</p>
-                    <p class="doc-typed" data-text="1. Ship the beta to our first testers and hear from them every week. 2. Make setup faster. 3. Write the investor update by Friday."></p>
-                  </div>
-                </div>
-                <div class="hud"><i></i><span><b>Scout</b><em class="hud-step">Step 1</em></span><small class="hud-text">Searching cinemas near you</small></div>
-                <div class="request ds-req">
-                  <div class="req-title">Scout needs your OK</div>
-                  <div class="req-action">Book 2 seats for The Long Light at 7:40 PM, then stop at checkout</div>
-                  <div class="req-buttons"><span class="req-btn yes t-allow">Allow</span><span class="req-btn">Don't</span></div>
-                </div>
-                <div class="ds-toast">Seats F7 and F8 picked. Checkout is ready for you.</div>
-                <span class="ds-fly"></span>
-                <span class="ds-cursor"></span>
-              </div>
-            </div>
-          </div>
-          <p class="footnote">Illustrated with made-up names and addresses, using Pyxi's own cue cards and approval cards. Pyxi works in any app you can see; emails and invites go through the Google account you connect.</p>
         </div>
       </section>
 
-      <!-- ============================================================ features -->
-      <!-- ============================================================ chores -->
-      <!--include:explore-->
-
-      <!-- ============================================================ different -->
-      <!-- ============================================================ privacy -->
-      <!-- ============================================================ faq -->
       <!-- ============================================================ final cta -->
       <section class="finale" id="get" data-swarm="firefly" data-swarm-at="#spell-stage" data-say="Say hey. I'll be right beside your cursor.">
         <div class="wrap finale-inner finale-split">
