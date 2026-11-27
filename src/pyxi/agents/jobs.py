@@ -598,12 +598,20 @@ class JobManager:
             if booking or checkin
             else honest_result(result.summary, result.success)
         )
+        extra = 0.0
         if not found and not (booking or checkin) and result.status.value != "stopped":
-            # A site that shut this browser out (its bot check, a sign-in only they can do)
-            # is not the end: the same work can be done in a tab of their own browser.
-            summary = (summary or "").rstrip() + own_tab_hint(summary)
+            # A site that shut this browser out (its bot check, a refused connection) is not
+            # the end. A find-out task is answered from web search, which says so itself
+            # (agents/from_search.py); anything else can be done in a tab of their own browser.
+            from pyxi.agents.from_search import answer_from_search
+
+            rescued, extra = await answer_from_search(job.task, self.llm_factory(agent))
+            if rescued:
+                summary, found = rescued, True
+            else:
+                summary = (summary or "").rstrip() + own_tab_hint(summary)
         job.run_id, job.summary, job.data = result.run_id, summary, result.data
-        job.outputs, job.cost_usd, job.steps = result.outputs, result.usage.cost_usd, result.steps
+        job.outputs, job.cost_usd, job.steps = result.outputs, result.usage.cost_usd + extra, result.steps
         job.status = "done" if found else ("stopped" if result.status.value == "stopped" else "failed")
 
     async def _run_writer(self, job: Job, agent: AgentProfile) -> None:
