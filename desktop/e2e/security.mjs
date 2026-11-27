@@ -154,7 +154,7 @@ try {
   };
   await new Promise((r) => (tool.onopen = r));
   check("a local tool with the key connects", tool.readyState === WebSocket.OPEN);
-  await panel.locator('input[placeholder="Ask Pyxi anything"]').fill("how do you work?");
+  await panel.locator('input[placeholder^="Ask Pyxi anything"]').fill("how do you work?");
   await panel.keyboard.press("Enter");
   tool.send(JSON.stringify({ type: "e2e_card" }));
   const card = overlay.locator(".request button.yes");
