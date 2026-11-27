@@ -134,6 +134,11 @@ def test_symbols_and_units_read_naturally() -> None:
     assert speakable("A 5x5 table") == "A 5 by 5 table"
     assert speakable("3.7 km away, 7 min") == "3.7 kilometres away, 7 minutes"
     assert speakable("Select A1:C13") == "Select A1 to C13"
+    # Live: "amazon.ca" was said "amazon ka".
+    assert speakable("It's on Amazon.ca for CA$40.") == "It's on Amazon dot C A for CA$40."
+    assert speakable("Try bbc.co.uk or www.canada.ca.") == "Try bbc dot co dot U K or www dot canada dot C A."
+    assert speakable("Open example.com. In a moment.") == "Open example.com. In a moment."  # .com reads fine
+    assert speakable("That's it. Ca va?") == "That's it. Ca va?"  # a sentence end is not an address
     assert speakable("Version 10:30 AM") == "Version 10:30 AM"
 
 

@@ -99,11 +99,24 @@ _SPOKEN = [
 ]
 
 
+# A web address that ends in a country's two letters: "amazon.ca" was read as "amazon ka".
+# The letters are said one by one, and each dot as "dot": "amazon dot C A".
+_COUNTRY_SITE = re.compile(
+    r"(?<![\w@.-])((?:[A-Za-z0-9-]+\.)+)"
+    r"(ca|uk|us|au|nz|ie|in|bd|pk|de|fr|es|it|nl|se|no|ch|jp|cn|sg|ae|za|br|mx|io|ai|eu)\b(?![\w-])",
+    re.I,
+)
+
+def _site_aloud(m: re.Match[str]) -> str:
+    names = [part for part in m.group(1).split(".") if part]
+    return " dot ".join([*names, " ".join(m.group(2).upper())])
+
+
 def speakable(text: str) -> str:
     """Written shorthand reads badly aloud ('e.g.' -> 'for example', '->' -> ', then')."""
     for pattern, repl in _SPOKEN:
         text = pattern.sub(repl, text)
-    return text
+    return _COUNTRY_SITE.sub(_site_aloud, text)
 
 
 def _breathe(samples: np.ndarray, rate: int) -> np.ndarray:
