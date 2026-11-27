@@ -572,6 +572,9 @@ def create_app(
             brain._spawn(
                 brain.turn(msg["text"].strip(), picture=picture, picture_problem=problem)
             )
+        elif kind == "own_tab" and msg.get("job_id"):
+            # "Do it in my browser" on the card of a job a site turned Scout away from.
+            brain._spawn(brain.in_own_tab(str(msg["job_id"])))
         elif kind == "retry" and msg.get("job_id"):
             # Try again on a failure card: the brain runs what that card stands for, once.
             brain._spawn(brain.retry(str(msg["job_id"])))

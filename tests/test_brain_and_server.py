@@ -137,6 +137,8 @@ async def test_scout_then_quill_handoff_and_ghost_walkthrough(settings):
         await brain.jobs.wait_all()
     jobs = {e["job"]["agent_id"]: e["job"] for e in rec.of("job")}
     assert jobs["scout"]["status"] == "done" and jobs["scout"]["steps"] >= 8
+    # Where Scout ended up is kept, for the Open button on its result card.
+    assert jobs["scout"]["last_url"].startswith("http://127.0.0.1")
     assert jobs["quill"]["status"] == "done" and jobs["quill"]["parent"] == jobs["scout"]["id"]
     assert "All set!" in jobs["quill"]["context"], "Quill receives Scout's result"
     assert rec.of("handoff")[0]["target"] == "quill" and rec.of("job_frame")

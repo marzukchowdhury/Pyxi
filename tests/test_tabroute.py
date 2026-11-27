@@ -70,3 +70,59 @@ async def test_without_the_browser_it_says_both_ways_forward(settings):
     brain = made[0] if isinstance(made, tuple) else made
     note = await brain._act("errand", {"task": "What's on my calendar tomorrow?"})
     assert "connect my browser" in note and note.endswith("Claim nothing was done.")
+
+
+# ------------------------------------------------------------------ a site that turned Scout away
+async def test_a_bot_check_ends_on_a_button_not_on_wait_and_try_again(settings):
+    """Live: Expedia blocked Scout's browser, and the card said to wait a while."""
+    from pyxi import plainwords
+    from pyxi.agents.jobs import Job
+    from test_audit_tabwork import on_site
+    from test_brain_and_server import make_brain
+
+    def blocked() -> Job:
+        return Job(
+            agent_id="scout", agent_name="Scout", role="browser", status="failed",
+            task="Search Expedia.ca for round-trip flights from Vancouver to Dhaka",
+            start_url="https://www.expedia.ca/",
+            summary="Expedia's bot check page blocked my browser on the homepage, so I have no fares.",
+        )
+
+    # Pyxi is not in their browser yet: the button adds it.
+    made = make_brain(settings)
+    brain, rec = made[0], made[1]
+    await brain._job_done(blocked())
+    card = rec.of("job_ready")[-1]
+    assert card["actions"] == ["browser_setup"] and card["body"] == plainwords.SHUT_OUT_SETUP
+    assert not card["ok"] and "wait a while" not in card["body"]
+
+    # Pyxi is in their browser: the button does the same task there.
+    there, _ = on_site(settings)
+    seen = []
+    there.hub.connect(lambda text: seen.append(text) or None)
+    job = blocked()
+    there.jobs.jobs[job.id] = job
+    await there._job_done(job)
+    import json
+
+    ready = [json.loads(t) for t in seen if '"job_ready"' in t][-1]
+    assert ready["actions"] == ["own_tab"] and ready["body"] == plainwords.SHUT_OUT_TAB
+
+
+async def test_do_it_in_my_browser_runs_the_same_task_in_their_tab(settings, monkeypatch):
+    from pyxi.agents.jobs import Job
+    from pyxi.companion import tabwork
+    from test_audit_tabwork import on_site
+
+    brain, _ = on_site(settings)
+    job = Job(agent_id="scout", agent_name="Scout", role="browser", status="failed", task="Find flights to Dhaka", start_url="https://www.expedia.ca/")
+    brain.jobs.jobs[job.id] = job
+    asked = []
+
+    async def handle(brain_, name, args):
+        asked.append((name, args))
+
+    monkeypatch.setattr(tabwork, "handle", handle)
+    await brain.in_own_tab(job.id)
+    await brain.in_own_tab("job_nope")  # a card whose job is gone does nothing
+    assert asked == [("use_tab", {"task": "Find flights to Dhaka", "url": "https://www.expedia.ca/"})]

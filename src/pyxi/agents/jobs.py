@@ -86,6 +86,9 @@ class Job(BaseModel):
     steps: int = 0
     then: Handoff | None = None
     parent: str | None = None
+    # The page a browser job was on when it ended: the result card's Open button goes there,
+    # so they can carry on by hand (pick the seats, press Book) from where Scout stopped.
+    last_url: str = ""
     created_at: float = Field(default_factory=time.time)
     ended_at: float | None = None
 
@@ -571,6 +574,10 @@ class JobManager:
                 return
             if event.type == "run_started":
                 job.run_id = event.run_id
+            if event.type == "observation":
+                at = str(event.data.get("url") or "")
+                if at.startswith(("http://", "https://")):
+                    job.last_url = at[:2000]
             if event.type == "step_finished":
                 job.steps = event.data["step"]
                 job.cost_usd = event.data["budget"]["cost_usd"]
@@ -608,6 +615,7 @@ class JobManager:
             rescued, extra = await answer_from_search(job.task, self.llm_factory(agent))
             if rescued:
                 summary, found = rescued, True
+                job.last_url = ""  # the page it stopped on is the one that shut it out
             else:
                 summary = (summary or "").rstrip() + own_tab_hint(summary)
         job.run_id, job.summary, job.data = result.run_id, summary, result.data

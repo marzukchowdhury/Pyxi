@@ -3102,6 +3102,20 @@ class Brain:
             op.cancelled = True
         op.held = False
 
+    async def in_own_tab(self, job_id: str) -> None:
+        """"Do it in my browser" on the card of a job a site turned Scout away from: the same
+        task, in a tab of their own browser. They are asked about the site first, as for any
+        work in a tab."""
+        job = self.jobs.jobs.get(job_id)
+        if job is None or job.role != "browser":
+            return
+        args: dict[str, Any] = {"task": job.task[:1500]}
+        if job.start_url:
+            args["url"] = job.start_url
+        note = await tabwork.handle(self, "use_tab", args)
+        if note:  # it could not start: said, not swallowed
+            await self.hub.emit("notice", message=note.split(": ", 1)[-1][:300])
+
     def _stop_tab_work(self, words: str) -> None:
         """"Stop", "no, not that", "wait": the same words that end the mouse's work end what
         Pyxi is doing in their browser tab. Live: a tab job they had told to stop ran on for
@@ -5713,6 +5727,10 @@ class Brain:
         # sentence. Live, the address in the sentence made the notice "too long", so the same
         # words came up a second time on a card beside it.
         link = data.get("link") if job.role in specialists.ROLES else None
+        if not link and job.role == "browser" and job.status == "done" and getattr(job, "last_url", ""):
+            # Where Scout ended up, as a button: "which seats are free?" is answered, and the
+            # seat map is one press away. Live: the result was read out with no way to get there.
+            link = job.last_url
         shown = job.summary or ""
         if job.role == "documents" and data.get("links"):
             link = str(data["links"][0])
@@ -5791,6 +5809,14 @@ class Brain:
             title = f"{job.agent_name} couldn't finish"
             body = clip(job.summary or job.status, 220)
             actions = []
+        turned_away = job.status == "failed" and job.role == "browser" and plainwords.shut_out(job.summary)
+        if turned_away:
+            # A bot check turned Scout away. Not a dead end: their own browser gets through.
+            # Live: Expedia blocked Scout, and the card ended on "wait a while, then try again".
+            tabs = getattr(self, "browser", None)
+            there = bool(tabs is not None and tabs.connected)
+            actions = ["own_tab" if there else "browser_setup"]
+            body = plainwords.SHUT_OUT_TAB if there else plainwords.SHUT_OUT_SETUP
         if job.role in specialists.ROLES and data.get("title"):  # a specialist's own card
             title, body = str(data["title"])[:70], str(data.get("body") or body)[:300]
             actions = [str(a) for a in data.get("actions") or actions]
@@ -5798,7 +5824,9 @@ class Brain:
         # One place for the words. When the whole result goes up on a card (_announce), the
         # notice beside it is the title and the first sentence, not the same paragraph again.
         first = next(iter(whole_sentences(shown)), "")
-        on_card = self._gets_card(job, body, shown, own_card)
+        # A job a site turned away says its one plain line and shows its button: not Scout's
+        # own account of the bot check on a second card.
+        on_card = False if turned_away else self._gets_card(job, body, shown, own_card)
         await self.hub.emit(
             "job_ready",
             job_id=job.id,

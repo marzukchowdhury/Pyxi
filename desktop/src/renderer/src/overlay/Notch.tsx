@@ -291,6 +291,12 @@ export function Notch({ micLevel }: { micLevel: () => number }) {
       // Windows' own microphone privacy page, by name: the app opens that page and no other.
       bridge.openWindowsPage("microphone");
       done();
+    } else if (kind === "own_tab") {
+      brain.send({ type: "own_tab", job_id: result.job_id });
+      done();
+    } else if (kind === "browser_setup") {
+      brain.send({ type: "browser_setup", browser: "" });
+      done();
     } else if (kind === "retry") {
       // The brain runs what this card stands for, once (it only offers this when nothing was done).
       brain.send({ type: "retry", job_id: result.job_id });

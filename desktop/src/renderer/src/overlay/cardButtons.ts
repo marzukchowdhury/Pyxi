@@ -17,7 +17,7 @@ export interface CardFacts {
   retry?: string | null;
 }
 
-export type CardButtonKind = "update" | "google" | "account" | "settings" | "mic" | "retry" | "link" | "file" | "calendar" | "folder" | "send_back";
+export type CardButtonKind = "update" | "google" | "account" | "settings" | "mic" | "retry" | "own_tab" | "browser_setup" | "link" | "file" | "calendar" | "folder" | "send_back";
 
 export interface CardButtonSpec {
   kind: CardButtonKind;
@@ -58,6 +58,9 @@ export function cardButtons(r: CardFacts): CardButtonSpec[] {
   if (has("update")) out.push({ kind: "update", label: "Restart to update", primary: true });
   // What mends a failure: one of these at most (the brain gives a line one button).
   if (has("google")) out.push({ kind: "google", label: "Sign in to Google", primary: true });
+  // A site turned Scout away: the same work in their own browser, or adding Pyxi to it first.
+  if (has("own_tab") && !r.ok) out.push({ kind: "own_tab", label: "Do it in my browser", primary: true });
+  if (has("browser_setup") && !r.ok) out.push({ kind: "browser_setup", label: "Add Pyxi to my browser", primary: true });
   if (r.account) out.push({ kind: "account", label: r.account, primary: true });
   const settings = settingsTarget(r.actions);
   if (settings) out.push({ kind: "settings", label: settings.tab === "voice" ? "Open Voice settings" : "Open Settings", primary: true });

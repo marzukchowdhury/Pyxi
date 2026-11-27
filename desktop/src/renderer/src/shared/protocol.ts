@@ -746,6 +746,8 @@ export type ClientMessage =
   | { type: "browser_get" }
   | { type: "browser_pair" }
   | { type: "browser_setup"; browser: string }
+  /** "Do it in my browser" on the card of a job a site turned Scout away from. */
+  | { type: "own_tab"; job_id: string }
   | { type: "browser_forget"; id: string }
   | { type: "browser_site_revoke"; host: string }
   | { type: "audit_get" }

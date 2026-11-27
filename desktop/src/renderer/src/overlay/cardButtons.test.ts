@@ -65,3 +65,12 @@ describe("a result card's buttons", () => {
     expect(labels({ actions: ["folder", "send_back"], files: ["a.docx"] })).toEqual(["Open file", "Show in folder"]);
   });
 });
+
+describe("a site that turned Scout away", () => {
+  it("offers the same work in their own browser, or adding Pyxi to it", () => {
+    expect(labels({ ok: false, actions: ["own_tab"] })).toEqual(["Do it in my browser"]);
+    expect(labels({ ok: false, actions: ["browser_setup"] })).toEqual(["Add Pyxi to my browser"]);
+    // never on a result that worked
+    expect(labels({ ok: true, actions: ["own_tab"] })).toEqual([]);
+  });
+});

@@ -340,6 +340,25 @@ _SHUT_OUT = re.compile(
 )
 
 
+# What the card says when a site turned the browser teammate away, and the one button under
+# it: the same work in their own browser (where they are signed in as themselves and no bot
+# check stands in the way), or adding Pyxi to that browser first.
+SHUT_OUT_TAB = (
+    "That site doesn't let automated browsers in, so Scout was turned away. Your own browser "
+    "will get through: press the button and I'll do the same thing in a tab there."
+)
+SHUT_OUT_SETUP = (
+    "That site doesn't let automated browsers in, so Scout was turned away. Your own browser "
+    "will get through once Pyxi is added to it: press the button, I'll walk you through it, "
+    "then ask me again."
+)
+
+
+def shut_out(summary: str) -> bool:
+    """Did a site keep the browser teammate out (its bot check, an "access denied")?"""
+    return bool(_SHUT_OUT.search(summary or ""))
+
+
 def own_tab_hint(summary: str) -> str:
     """The next step when a site kept the browser teammate out (its bot check, a sign-in
     only they can do): the same thing in a tab of their own browser. "" when the failure was
