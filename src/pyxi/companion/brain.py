@@ -5013,6 +5013,14 @@ class Brain:
                     f'errand: not started. Say exactly this, and nothing about set-up: "{line}" '
                     "If they want it, write the text in a note they can copy."
                 )
+            if not self.connectors.google.connected():
+                # Their mail, calendar and Google files are still within reach: in a tab of
+                # their own browser, which is signed in already (companion/tabroute.py).
+                from pyxi.companion import tabroute
+
+                link = getattr(self, "browser", None)
+                if route := tabroute.note(task, bool(link is not None and link.connected)):
+                    return route
             if not self.connectors.tools():
                 return "errand: no accounts are connected yet; tell the user to connect one in Settings."
             if self.turns.spent_today() >= self.settings.budget.daily_cost_usd:

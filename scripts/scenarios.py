@@ -406,6 +406,11 @@ SIMPLE_SCENARIOS = [
     ("tab find here", SHOP_SCREEN, "Find wireless earbuds on this website.", "tab:use_tab"),
     ("tab add to cart", SHOP_SCREEN, "Add the first one to my cart.", "tab:use_tab"),
     ("tab read page", SHOP_SCREEN, "What does this page say about returns and refunds?", "tab:read_tab"),
+    # Google is not connected (most people cannot connect it until Google has verified Pyxi),
+    # but Pyxi is in their browser: their mail and calendar are done in their own tab, and
+    # they are never sent off to connect Google first.
+    ("no google reply mail", FIREFOX, "Find the email from Sam about the invoice and reply that I'll pay on Friday.", "tab:use_tab:nogoogle"),
+    ("no google calendar", FIREFOX, "What's on my calendar tomorrow?", "tab:use_tab:nogoogle"),
     ("simple close tabs", FIREFOX, "Close the last two tabs.", "tabs:close last 2"),
     ("simple close tab", FIREFOX, "Close this tab.", "tabs:close"),
     ("simple reopen tab", FIREFOX, "Oops, bring back the tab I just closed.", "tabs:reopen"),
@@ -605,6 +610,8 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     hub.connect(record)
     brain = Brain(settings, hub, screen=Replay(screen_from(turn_id)))
     background: list[str] = []
+    no_google = expect.endswith(":nogoogle")
+    expect = expect.removesuffix(":nogoogle")
     if expect.startswith("tab:"):
         # Their browser is connected (pretend): which route does the request take? Nothing is
         # sent to a browser: the tab tools only record what they were asked.
@@ -656,7 +663,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
     brain._watch_subscriptions = fake_subs  # type: ignore[method-assign]
     brain._cancel_subscription = fake_cancel  # type: ignore[method-assign]
     brain._watch_returns = fake_returns  # type: ignore[method-assign]
-    brain.connectors.google.connected = lambda: True  # type: ignore[method-assign]
+    brain.connectors.google.connected = lambda: not no_google  # type: ignore[method-assign]
 
     from pyxi.companion import paperwork
 
@@ -775,7 +782,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         Tool(ToolSpec("calendar_list", "What's on the user's Google Calendar soon.", {"type": "object", "properties": {}}), _calendar, info=True),
         Tool(ToolSpec("gmail_search", "Search the user's Gmail.", {"type": "object", "properties": {"query": {"type": "string"}}}), _mail, info=True),
     ]
-    brain.connectors.tools = lambda: dummies  # type: ignore[method-assign]
+    brain.connectors.tools = lambda: [] if no_google else dummies  # type: ignore[method-assign]
     brain._build_from_brief = fake_build  # type: ignore[method-assign]
     brain.jobs.start = fake_start  # type: ignore[method-assign]
     from pyxi.companion import filework
@@ -813,7 +820,7 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         if "maplewave" in Path(p).name.lower()
         else _invoice_read(p, *a, **k)
     )
-    brain.connectors.google.connected = lambda: True  # type: ignore[method-assign]
+    brain.connectors.google.connected = lambda: not no_google  # type: ignore[method-assign]
     specialist_fakes(brain, background, name)
     started = time.monotonic()
     before = None
@@ -1064,6 +1071,13 @@ async def run_one(name: str, turn_id: str, question: str, expect: str, tmp: Path
         for wrong in ("use_computer", "web_search") if want == "use_tab" else ("use_computer",):
             if wrong in tools:
                 problems.append(f"used {wrong} though their browser is connected")
+        if no_google:
+            went = " ".join(b for b in background if b.startswith("tab: use_tab"))
+            if "google.com" not in went:
+                problems.append("the tab task doesn't start at their Google page")
+            said = " ".join(e.get("text", "") for e in events if e.get("type") == "say").lower()
+            if re.search(r"connect (google|your google|it) (first|before)|can't .{0,40}until .{0,20}connect", said):
+                problems.append("told them to connect Google first")
     if expect.startswith("tabs:"):
         want = expect.split(":", 1)[1]
         got = [b.split(": ", 1)[1].lower().replace(" tabs", "").strip() for b in background if b.startswith("tabs: ")]
