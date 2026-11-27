@@ -105,7 +105,7 @@ try {
   check("the key is not in the page URL", !overlay.url().includes(key));
 
   // The windows connected: the panel shows a status other than "connecting".
-  await panel.waitForFunction(() => { const t = document.querySelector(".who .status")?.textContent ?? ""; return t && !/offline/i.test(t); }, null, { timeout: 90000 }).catch(() => undefined);
+  await panel.waitForFunction(() => { const t = document.querySelector(".who .status")?.textContent ?? ""; return t && !/offline|waking/i.test(t); }, null, { timeout: 90000 }).catch(() => undefined);
   const status = await panel.locator(".who .status").innerText();
   check("panel connected to the brain", !/offline/i.test(status), status);
 
