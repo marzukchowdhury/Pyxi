@@ -121,6 +121,24 @@ async def test_a_doubt_on_the_last_step_takes_the_done(settings):
     assert len(llm.seen) == 2
 
 
+async def test_out_of_steps_says_how_far_it_got_and_what_the_page_already_answers(settings):
+    """Live: asked which seats were free at a cinema, Pyxi reached the seat map on its last
+    step and said only "That took more steps than I expected, so I stopped where it is"."""
+    from test_browserlink import Scripted
+
+    click = act({"do": "click", "ref": "7"})
+    llm = Scripted(click, click, ("done", {"ok": False, "summary": "I got to the seat map for the 7:10 showing. Rows F to H are mostly free. Picking seats is left."}))
+    op = _OneLookLeft(llm, None, None, None, None, settle_s=0, max_steps=2)
+    out = await op._run("which seats are free on the 24th", "", "")
+    assert not out.ok
+    assert out.summary == "I ran out of steps before finishing. I got to the seat map for the 7:10 showing. Rows F to H are mostly free. Picking seats is left."
+    assert "You are out of steps: do nothing more on the page" in llm.seen[2]
+    # A model with nothing to say there leaves the plain sentence, as before.
+    quiet = Scripted(click, click, ("act", {"actions": []}))
+    again = await _OneLookLeft(quiet, None, None, None, None, settle_s=0, max_steps=2)._run("go on", "", "")
+    assert again.summary == "That took more steps than I expected, so I stopped where it is."
+
+
 async def test_done_after_a_click_that_changed_nothing_is_questioned_once(settings, quick):
     brain, _ = on_site(settings, frozen=True)
     job = await work(
