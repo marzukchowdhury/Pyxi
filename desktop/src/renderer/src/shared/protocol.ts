@@ -475,6 +475,9 @@ export interface AccountState {
   /** What Pyxi is in the middle of for the account ("" when nothing). */
   busy: "" | "sign_in" | "checkout" | "portal" | "sign_out";
   gate: AccountGate | null;
+  /** The plan they pressed on the website's pricing page before downloading, until they have a
+   * paid plan. It arrives at the end of the Google sign-in (pyxi/account_signin.py). */
+  picked?: { plan: PaidPlan; yearly: boolean } | null;
 }
 /** The account, and (when something was just tried) how that went, in words for the user. */
 export interface AccountEvent {

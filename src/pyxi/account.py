@@ -42,6 +42,7 @@ from pyxi.account_signin import SignInError
 log = logging.getLogger(__name__)
 
 FILE = "account.json"  # what this PC remembers that is not secret: warnings shown, signed out
+SITE = "https://www.heypyxi.com"  # where the plan pressed on the pricing page is fetched from
 PLANS = ("starter", "pro", "max")
 PLAN_NAMES = {"trial": "Trial", "starter": "Starter", "pro": "Pro", "max": "Max", "none": "No plan"}
 
@@ -264,8 +265,10 @@ def trial_line(info: dict[str, Any] | None) -> str:
     return "3-day trial, last day" if days <= 0 else f"3-day trial, {days} day{'' if days == 1 else 's'} left"
 
 
-def welcome(info: dict[str, Any] | None) -> str:
-    """Said once, quietly, when they sign in: where the trial or the plan stands."""
+def welcome(info: dict[str, Any] | None, pick: dict[str, Any] | None = None) -> str:
+    """Said once, quietly, when they sign in: where the trial or the plan stands. ``pick``:
+    the plan they pressed on the website before downloading, said back so they know it came
+    along."""
     if not info:
         return "You're signed in."
     if info["status"] == "trial":
@@ -273,6 +276,14 @@ def welcome(info: dict[str, Any] | None) -> str:
         # just begun reads 2: "has started" says it better than a number would.
         days = info["days_left"]
         if days is None or days >= 2:
+            if pick and pick.get("plan") in PLANS and pick["plan"] != "pro":
+                name = PLAN_NAMES[pick["plan"]]
+                return (
+                    "Your 3-day trial of Pro has started. No card needed. "
+                    f"{name}, the plan you picked, is ready for when it ends."
+                )
+            if pick and pick.get("plan") == "pro":
+                return "Your 3-day trial of Pro has started. No card needed. Pro, the plan you picked, is ready for when it ends."
             return "Your 3-day trial has started. No card needed."
         if days <= 0:
             return "Today is the last day of your 3-day trial."
@@ -338,6 +349,9 @@ class Account:
             "PYXI_SIGNIN_CLIENT_SECRET", ""
         )
         self.sign_in_timeout = account_signin.TIMEOUT_S
+        # The website that knows the plan they pressed before downloading ("" turns the step off).
+        self.site_url = os.environ.get("PYXI_SITE_URL", SITE)
+        self.pick_wait = account_signin.PICK_WAIT_S
         self.poll_s, self.poll_for_s = POLL_S, POLL_FOR_S
 
     # ------------------------------------------------------------------ what is saved
@@ -365,10 +379,21 @@ class Account:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir / FILE).write_bytes(json.dumps(flags, indent=2).encode("utf-8"))
 
+    def picked(self) -> dict[str, Any] | None:
+        """The plan they pressed on the website's pricing page, while it still matters: until
+        they have a paid plan."""
+        raw = self._flags().get("pick")
+        if not isinstance(raw, dict) or raw.get("plan") not in PLANS:
+            return None
+        if self.info and self.info["status"] in ("active", "past_due"):
+            return None
+        return {"plan": raw["plan"], "yearly": bool(raw.get("yearly"))}
+
     def public(self) -> dict[str, Any]:
         """Everything a window may know. Never a token."""
         info = self.info if self.signed_in else None
         return {
+            "picked": self.picked() if info else None,
             "offered": self.offered,
             "invite_codes": self.invite_codes,
             "signed_in": self.signed_in,
@@ -648,6 +673,17 @@ class Account:
             self._cancel = threading.Event()
             got: dict[str, Any] = {}
             http = httpx.Client(transport=self.transport, timeout=15) if self.transport else None
+
+            def onward() -> str:
+                # Only a new trial with no pick yet goes by the website: someone with a plan,
+                # or signing back in, sees the closing page at once, as before.
+                acct = got.get("account") or {}
+                fresh = acct.get("status") == "trial" and not self._flags().get("pick")
+                return self.site_url if fresh else ""
+
+            def on_pick(plan: str, yearly: bool) -> None:
+                got["pick"] = {"plan": plan, "yearly": yearly}
+
             try:
                 await asyncio.to_thread(
                     account_signin.run,
@@ -658,6 +694,9 @@ class Account:
                     cancel=self._cancel,
                     timeout=self.sign_in_timeout,
                     http=http,
+                    onward=onward,
+                    on_pick=on_pick,
+                    pick_wait=self.pick_wait,
                 )
             except SignInError as exc:
                 log.info("the Pyxi sign-in did not finish: %s", exc.why)
@@ -680,7 +719,9 @@ class Account:
             self.busy = ""
         self.info, self.gate = got.get("account"), None
         self._flag(signed_out=False)
-        await self._emit(what="sign_in", ok=True, message=welcome(self.info))
+        if got.get("pick"):
+            self._flag(pick=got["pick"])
+        await self._emit(what="sign_in", ok=True, message=welcome(self.info, self.picked()))
         self.restart()  # so every model call goes through the server, as after an invite code
         return True
 

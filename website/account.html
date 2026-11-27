@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!--include:head-->
+    <title>Your Pyxi account and plan</title>
+    <meta name="description" content="See your Pyxi plan, choose one when your trial ends, or manage your subscription. You pay on Stripe's own page." />
+    <meta name="robots" content="noindex" />
+    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/pages/account.js"></script>
+  </head>
+  <body class="page-account" data-api="{{apiUrl}}">
+    <!--include:nav-->
+    <!--include:firefly-->
+    <main id="main">
+      <section class="page-hero acct" data-say="Your plan, in one place.">
+        <div class="wrap acct-wrap">
+          <p class="kicker">Your account</p>
+          <h1 class="display-sm">Your Pyxi plan.</h1>
+
+          <!-- one of these shows at a time (account.js) -->
+          <div class="acct-card" id="acct-wait" role="status">
+            <p class="acct-line">One moment.</p>
+          </div>
+
+          <div class="acct-card" id="acct-off" hidden>
+            <p class="acct-line">You choose and change your plan inside Pyxi.</p>
+            <p class="muted">Open Pyxi, then Settings, then Account. Press <b>Choose a plan</b>, or <b>Manage subscription</b> if you already have one.</p>
+            <div class="cta-row">
+              <a class="btn btn-ghost" href="/pricing">See the plans</a>
+              <a class="btn btn-ghost" href="/download">Download Pyxi</a>
+            </div>
+          </div>
+
+          <div class="acct-card" id="acct-in" hidden>
+            <p class="acct-line">Sign in with the Google account you use in Pyxi.</p>
+            <div id="acct-google"></div>
+            <p class="acct-note" id="acct-in-note" role="status" hidden></p>
+            <p class="muted">Pyxi sees your name and email address from Google, and nothing else. New here? Your free trial starts in the app: <a href="/download">download Pyxi</a> first.</p>
+          </div>
+
+          <div class="acct-card" id="acct-you" hidden>
+            <div class="acct-kv"><span>Signed in as</span><b id="acct-email"></b></div>
+            <div class="acct-kv"><span>Plan</span><b id="acct-plan"></b></div>
+            <p class="acct-note" id="acct-note" role="status" hidden></p>
+
+            <div id="acct-paid" hidden>
+              <div class="cta-row">
+                <button class="btn btn-fly" type="button" id="acct-portal">Manage subscription</button>
+              </div>
+              <p class="muted">Change your plan, update your card, see your receipts or cancel, on Stripe's own page.</p>
+            </div>
+
+            <div id="acct-pick" hidden>
+              <div class="acct-bill" role="group" aria-label="Billing">
+                <button type="button" data-bill="month" aria-pressed="true">Monthly</button>
+                <button type="button" data-bill="year" aria-pressed="false">Yearly <i>two months free</i></button>
+              </div>
+              <div class="acct-plans" id="acct-plans"></div>
+              <p class="muted">Prices in US dollars. You pay on Stripe's page. Pyxi never sees your card. Your plan starts in Pyxi a few seconds after you pay.</p>
+            </div>
+
+            <button class="acct-out" type="button" id="acct-out">Sign out of this page</button>
+          </div>
+        </div>
+      </section>
+    </main>
+    <!--include:footer-->
+  </body>
+</html>

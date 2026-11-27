@@ -64,15 +64,37 @@ class FakeGoogle:
         self.exchanged: list[dict[str, str]] = []
         self.pages: list[str] = []
         self.threads: list[threading.Thread] = []
+        # What the website's /signed-in page finds in this browser: ("starter", True), None for
+        # no pick, "lost" for a page that never comes back, "forged" for a wrong key.
+        self.site_pick: Any = None
+        self.sent_on: list[str] = []  # where the app sent the browser after the sign-in
 
     def _get(self, url: str) -> None:
+        class Stay(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *a: Any, **k: Any) -> None:
+                return None
+
         try:
-            with urllib.request.urlopen(url, timeout=5) as r:
+            with urllib.request.build_opener(Stay).open(url, timeout=5) as r:
                 self.pages.append(r.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            if exc.code == 303:
+                self._website(exc.headers["Location"])
+                return
             self.pages.append(f"HTTP {exc.code}")
         except OSError:
             self.pages.append("closed")
+
+    def _website(self, location: str) -> None:
+        """The website's /signed-in page: back to the app with the plan pressed in this browser."""
+        self.sent_on.append(location)
+        if self.site_pick == "lost":
+            return
+        at = {k: v[0] for k, v in parse_qs(urlparse(location).fragment).items()}
+        plan, yearly = self.site_pick if isinstance(self.site_pick, tuple) else ("none", False)
+        key = "someone-elses-key-0123456789" if self.site_pick == "forged" else at["k"]
+        query = urlencode({"plan": plan, "yearly": "1" if yearly else "0", "k": key})
+        self._get(f"http://127.0.0.1:{at['p']}/pick?{query}")
 
     def open(self, url: str) -> bool:
         self.asked = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
@@ -187,6 +209,38 @@ def test_other_requests_on_the_port_are_not_the_answer():
     assert google.pages[:2] == ["HTTP 404", "HTTP 404"]
 
 
+def test_the_plan_pressed_on_the_website_comes_back_at_the_end_of_the_sign_in():
+    google, picks = FakeGoogle(), []
+    google.site_pick = ("starter", True)
+    done = sign_in_with(google, onward=lambda: "https://site.example", on_pick=lambda *a: picks.append(a))
+    assert len(done) == 1 and picks == [("starter", True)]
+    # The website's address gets this PC's port and a one-time key in the fragment only, and
+    # nothing about who signed in.
+    (went,) = google.sent_on
+    assert went.startswith("https://site.example/signed-in#p=") and "?" not in went
+    assert "one-time-code" not in went and google.asked["state"] not in went
+    assert "You're signed in to Pyxi" in google.pages[-1]
+
+
+@pytest.mark.parametrize("found", [None, "forged", "lost", ("free-forever", False)])
+def test_no_pick_a_forged_one_and_a_page_that_never_comes_back_all_still_sign_in(found):
+    google, picks = FakeGoogle(), []
+    google.site_pick = found
+    done = sign_in_with(
+        google, onward=lambda: "https://site.example", on_pick=lambda *a: picks.append(a), pick_wait=0.6
+    )
+    assert len(done) == 1 and picks == []
+    if found == "forged":
+        assert google.pages[-1] == "HTTP 404"
+
+
+def test_a_sign_in_that_failed_is_never_sent_on_to_the_website():
+    google = FakeGoogle("refused")
+    with pytest.raises(SignInError):
+        sign_in_with(google, onward=lambda: "https://site.example", on_pick=lambda *a: None)
+    assert google.sent_on == []
+
+
 def test_the_closing_page_for_pyxi_is_not_the_google_apps_one():
     mine, apps = page(True, account=True).decode(), page(True).decode()
     assert "You're signed in to Pyxi" in mine and "can't read your mail" in mine
@@ -255,6 +309,8 @@ def world(tmp_path, monkeypatch):
     acct.transport = httpx.MockTransport(server)
     acct.open_url = google.open
     acct.sign_in_timeout = 5
+    acct.site_url = ""  # no trip by the website, except in the tests that are about it
+    acct.pick_wait = 0.6
     acct.poll_s, acct.poll_for_s = 0.01, 2
     restarts: list[int] = []
     acct.restart = lambda: restarts.append(1)
@@ -387,6 +443,36 @@ async def test_signing_in_saves_the_pyxi_token_and_keeps_no_google_token(world):
     assert done["account"]["busy"] == "" and world.restarts == [1]
     never_a_token(world)
     assert cloud.apply(world.dir) and account.signed_in_here()  # the brain that starts again
+
+
+async def test_the_plan_they_pressed_on_the_website_is_kept_and_said_back(world):
+    world.account.site_url = "https://site.example"
+    world.google.site_pick = ("starter", False)
+    assert await world.account.sign_in() is True
+    done = world.rec.of("account")[-1]
+    assert done["message"] == (
+        "Your 3-day trial of Pro has started. No card needed. "
+        "Starter, the plan you picked, is ready for when it ends."
+    )
+    assert done["account"]["picked"] == {"plan": "starter", "yearly": False}
+    never_a_token(world)
+    # It is remembered on this PC, so a later sign-in does not go by the website again...
+    world.google.sent_on.clear()
+    world.account.busy = ""
+    assert await world.account.sign_in() is True
+    assert world.google.sent_on == []
+    # ...and it stops mattering once they have a plan.
+    world.account.info = an_account(status="active", plan="max")
+    assert world.account.public()["picked"] is None
+
+
+async def test_someone_who_already_has_a_plan_never_goes_by_the_website(world):
+    world.account.site_url = "https://site.example"
+    world.google.site_pick = ("starter", False)
+    world.server.account = an_account(status="active", plan="pro")
+    assert await world.account.sign_in() is True
+    assert world.google.sent_on == []
+    assert world.rec.of("account")[-1]["account"]["picked"] is None
 
 
 async def test_a_sign_in_the_server_turns_down_saves_nothing(world):

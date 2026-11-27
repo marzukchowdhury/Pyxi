@@ -79,6 +79,24 @@ export function price(plan: (typeof PLANS)[number], yearly: boolean): string {
   return yearly ? `$${plan.year} a year` : `$${plan.month} a month`;
 }
 
+/** What a year costs less than twelve months, in dollars: "save $48". */
+export function yearlySaving(plan: (typeof PLANS)[number]): number {
+  return plan.month * 12 - plan.year;
+}
+
+/** The small label beside a plan in the picker: the one they pressed on the website, and the
+ * one the trial has been running on, so the choice is not made from a blank list. */
+export function planTag(id: PaidPlan, a: Pick<AccountState, "status" | "picked" | "trial_ends_at"> | null): string {
+  if (a?.picked?.plan === id) return "Your pick";
+  if (id === "pro" && a && (a.status === "trial" || (a.status === "ended" && !!a.trial_ends_at))) return a.status === "trial" ? "Your trial is on this" : "What your trial was on";
+  return "";
+}
+
+/** The row the eye should land on: their pick when there is one, else Pro. */
+export function planLit(id: PaidPlan, a: Pick<AccountState, "picked"> | null): boolean {
+  return a?.picked ? a.picked.plan === id : id === "pro";
+}
+
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 /** "2026-12-01T00:00:00Z" as "1 December", the way the server writes dates ("" for none). In UTC, as it counts. */

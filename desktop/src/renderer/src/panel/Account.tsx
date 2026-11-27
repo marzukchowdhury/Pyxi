@@ -8,7 +8,8 @@
  * server has no sign-in on.
  */
 import { useEffect, useState } from "react";
-import { allowanceLine, allowanceShare, ask, hasPlan, planLine, PLANS, price, showPlans, useAccount } from "../shared/account";
+import { allowanceLine, allowanceShare, ask, hasPlan, planLine, planLit, PLANS, planTag, price, showPlans, useAccount, yearlySaving } from "../shared/account";
+import type { AccountState } from "../shared/protocol";
 import { brain } from "../shared/socket";
 import { usePanel } from "./store";
 
@@ -79,7 +80,7 @@ export function AccountCard() {
       </div>
       {busy === "portal" && <p role="status">Opening your subscription page.</p>}
       {message}
-      {picking && !paid && <PlanPicker busy={busy === "checkout"} />}
+      {picking && !paid && <PlanPicker busy={busy === "checkout"} account={account} />}
     </div>
   );
 }
@@ -93,9 +94,10 @@ function SignInButton({ busy, label }: { busy: boolean; label: string }) {
   );
 }
 
-/** Starter, Pro, Max; monthly or yearly. A press opens Stripe Checkout in the browser. */
-export function PlanPicker({ busy }: { busy: boolean }) {
-  const [yearly, setYearly] = useState(false);
+/** Starter, Pro, Max; monthly or yearly. A press opens Stripe Checkout in the browser. The plan
+ * they pressed on the website (if any) is marked and its billing is already chosen. */
+export function PlanPicker({ busy, account = null }: { busy: boolean; account?: AccountState | null }) {
+  const [yearly, setYearly] = useState(!!account?.picked?.yearly);
   return (
     <div className="plan-picker">
       <div className="plan-bill" role="group" aria-label="Billing">
@@ -104,12 +106,12 @@ export function PlanPicker({ busy }: { busy: boolean }) {
       </div>
       <div className="plan-list">
         {PLANS.map((p) => (
-          <div key={p.id} className={`plan-row ${p.id === "pro" ? "pro" : ""}`}>
+          <div key={p.id} className={`plan-row ${planLit(p.id, account) ? "pro" : ""}`}>
             <div className="plan-text">
-              <b>{p.name}</b>
+              <b>{p.name}{planTag(p.id, account) && <em className="plan-tag">{planTag(p.id, account)}</em>}</b>
               <span>{p.for}</span>
             </div>
-            <span className="plan-price">{price(p, yearly)}</span>
+            <span className="plan-price">{price(p, yearly)}{yearly && <i>save ${yearlySaving(p)}</i>}</span>
             <button type="button" className="primary" disabled={busy} onClick={() => ask({ type: "account", action: "checkout", plan: p.id, yearly })}>Choose</button>
           </div>
         ))}

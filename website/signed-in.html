@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!--include:head-->
+    <title>You're signed in | Pyxi</title>
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <!-- The app sends the browser here at the end of the Google sign-in, with the address of the
+         small server it opened on this PC. If a plan was pressed on the pricing page in this
+         browser, it is handed back to the app there, and the app's own closing page shows.
+         Nothing is sent to a server from this page. -->
+    <script type="module">
+      import { readPick, wayBack } from "/src/pick.js";
+      const back = wayBack(location.hash, readPick());
+      try { history.replaceState(null, "", location.pathname); } catch {}
+      if (back) location.replace(back);
+    </script>
+    <script type="module" src="/src/main.js"></script>
+  </head>
+  <body class="page-signed-in">
+    <!--include:nav-->
+    <!--include:firefly-->
+    <main id="main">
+      <section class="page-hero lost" data-say="You're in. See you in Pyxi.">
+        <div class="wrap">
+          <p class="kicker">Signed in</p>
+          <h1 class="display-sm">You're signed in.</h1>
+          <p class="lead">Go back to Pyxi. Your 3-day trial has started, and there is nothing more to do here. You can close this tab.</p>
+          <div class="cta-row">
+            <a class="btn btn-ghost" href="/pricing">See the plans</a>
+            <a class="btn btn-ghost" href="/faq">Questions</a>
+          </div>
+        </div>
+      </section>
+    </main>
+    <!--include:footer-->
+  </body>
+</html>

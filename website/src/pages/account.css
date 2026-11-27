@@ -1,0 +1,40 @@
+/* /account: one card at a time (waiting, switched off, sign in, your plan). */
+.page-hero.acct { min-height: 78vh; display: grid; align-content: center; }
+.acct-wrap { max-width: 720px; }
+.acct-card { display: grid; gap: 14px; margin-top: 26px; padding: 26px 28px 24px; border-radius: 22px; border: 1px solid var(--hair-hi); background: rgba(12, 14, 20, 0.78); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45); }
+.acct-card[hidden] { display: none; }
+.acct-card .muted { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--ink-3); }
+.acct-card .muted a { color: var(--ink-2); text-underline-offset: 3px; }
+.acct-card .cta-row { margin: 2px 0 0; }
+.acct-line { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.015em; color: var(--ink); }
+.acct-note { margin: 0; padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255, 200, 97, 0.34); background: rgba(255, 200, 97, 0.07); font-size: 14.5px; color: var(--ink); }
+.acct-kv { display: flex; justify-content: space-between; gap: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--hair); font-size: 15.5px; color: var(--ink-2); }
+.acct-kv b { color: var(--ink); font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+#acct-paid, #acct-pick { display: grid; gap: 14px; }
+#acct-paid[hidden], #acct-pick[hidden] { display: none; }
+#acct-google { min-height: 44px; color-scheme: light; }
+
+.acct-bill { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--hair); justify-self: start; }
+.acct-bill button { height: 32px; padding: 0 14px; border-radius: 9px; border: 0; background: none; color: var(--ink-2); font: 500 14px/1 var(--font); cursor: pointer; }
+.acct-bill button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.09); color: var(--ink); box-shadow: 0 0 0 1px var(--hair-hi) inset; }
+.acct-bill button i { font-style: normal; color: var(--fly); margin-left: 5px; }
+.acct-bill button:focus-visible, .acct-out:focus-visible { outline: 2px solid var(--fly); outline-offset: 2px; }
+
+.acct-plans { display: grid; gap: 8px; }
+.acct-plan { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--hair); }
+.acct-plan.lit { border-color: rgba(255, 200, 97, 0.42); background: rgba(255, 200, 97, 0.05); }
+.acct-plan > div { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.acct-plan b { font-size: 17px; font-weight: 650; letter-spacing: -0.015em; }
+.acct-plan b em { margin-left: 9px; padding: 2px 9px; border-radius: 99px; font: 600 11.5px/1.4 var(--font); letter-spacing: 0; color: var(--fly); background: rgba(255, 200, 97, 0.12); border: 1px solid rgba(255, 200, 97, 0.3); vertical-align: 2px; }
+.acct-plan div span { font-size: 14px; color: var(--ink-2); }
+.acct-price { display: grid; justify-items: end; gap: 1px; font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.acct-price i { font-style: normal; font-size: 12.5px; color: var(--fly); }
+.acct-out { justify-self: start; padding: 0; border: 0; background: none; color: var(--ink-3); font: 500 14px/1.4 var(--font); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.acct-out:hover { color: var(--ink); }
+
+@media (max-width: 620px) {
+  .acct-card { padding: 20px 18px; border-radius: 18px; }
+  .acct-plan { flex-wrap: wrap; }
+  .acct-plan > div { flex-basis: 100%; }
+  .acct-price { justify-items: start; margin-right: auto; }
+}

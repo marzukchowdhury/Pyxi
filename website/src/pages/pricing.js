@@ -5,6 +5,7 @@
  * Reduced motion: the jars are drawn once, still, and nothing counts or flies.
  */
 import "./pricing.css";
+import { savePick } from "../pick.js";
 
 if (document.body.classList.contains("page-pricing")) init();
 
@@ -23,7 +24,9 @@ function init() {
 
   // ---- monthly / yearly
   const bills = [...document.querySelectorAll("[data-bill]")];
+  let bill = "month";
   const setBill = (mode) => {
+    bill = mode;
     bills.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.bill === mode)));
     for (const p of plans) {
       const d = p.dataset;
@@ -33,6 +36,8 @@ function init() {
     }
   };
   bills.forEach((b) => b.addEventListener("click", () => setBill(b.dataset.bill)));
+  // The plan they press goes with them: the app has it ready when the trial ends (pick.js).
+  for (const p of plans) p.querySelector("a.btn")?.addEventListener("click", () => savePick(p.dataset.plan, bill === "year"));
 
   // ---- what you get: the strip follows the plan under the pointer (or the one tapped)
   const gets = document.getElementById("gets");

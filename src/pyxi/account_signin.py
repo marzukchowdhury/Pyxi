@@ -8,6 +8,13 @@ token: it is handed to ``deliver`` once (the Pyxi server checks it and answers w
 token) and is never written anywhere. The saved Google apps connection is not read or changed.
 
 Everything here blocks, so it runs in a thread (pyxi/account.py); ``cancel`` ends it early.
+
+One more step, only when asked for (``onward``): someone may have pressed a plan on the
+website's pricing page before they downloaded Pyxi. That choice lives in their browser, so
+after a good sign-in the browser is sent on to the website's /signed-in page with this PC's
+port and a one-time key (in the address's fragment, which is never sent to the website's
+server). That page sends the browser straight back here, to ``/pick``, with the plan or
+"none", and the usual closing page is shown. The website learns nothing about who signed in.
 """
 
 from __future__ import annotations
@@ -36,6 +43,8 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 SCOPES = ("openid", "email", "profile")  # who they are. Never mail, calendar or files.
 TIMEOUT_S = 300.0  # a sign-in page left open is not waited for all day
+PICK_WAIT_S = 8.0  # how long the website's page has to come back with the plan they pressed
+PICKS = ("starter", "pro", "max")
 
 
 class SignInError(Exception):
@@ -95,17 +104,56 @@ class _Landing:
     """The page Google sends the browser back to. It takes one answer: the one that carries
     this sign-in's ``state``. Anything else on the port (a favicon, another program) is not it."""
 
-    def __init__(self, state: str, finish: Callable[[str], None]) -> None:
+    def __init__(
+        self,
+        state: str,
+        finish: Callable[[str], None],
+        onward: Callable[[], str] | None = None,
+        on_pick: Callable[[str, bool], None] | None = None,
+    ) -> None:
         self.state = state
         self.finish = finish
+        self.onward = onward
+        self.on_pick = on_pick
+        self.key = secrets.token_urlsafe(24)  # the website's page must bring this back
+        self.port = 0
         self.done = False
+        self.waiting = False  # the browser went on to the website and is expected back
         self.error: SignInError | None = None
+
+    def _closing(self, start_response: Callable[..., Any], reason: str = "") -> Iterable[bytes]:
+        start_response(
+            "200 OK",
+            [
+                ("Content-type", "text/html; charset=utf-8"),
+                ("Cache-Control", "no-store"),
+                ("Referrer-Policy", "no-referrer"),
+                ("X-Content-Type-Options", "nosniff"),
+            ],
+        )
+        return [page(self.error is None, reason, account=True)]
+
+    def _pick(self, query: dict[str, list[str]], start_response: Callable[..., Any]) -> Iterable[bytes]:
+        """The browser is back from the website with the plan they pressed there (or "none")."""
+        got = {k: (query.get(k) or [""])[0] for k in ("plan", "yearly", "k")}
+        if not hmac.compare_digest(got["k"].encode(), self.key.encode()):
+            start_response("404 Not Found", [("Content-type", "text/plain; charset=utf-8")])
+            return [b"Not found"]
+        self.waiting = False
+        if got["plan"] in PICKS and self.on_pick is not None:
+            try:
+                self.on_pick(got["plan"], got["yearly"] == "1")
+            except Exception as exc:  # a pick that can't be kept never spoils the sign-in
+                log.warning("the picked plan was not kept: %s", type(exc).__name__)
+        return self._closing(start_response)
 
     def __call__(
         self, environ: dict[str, Any], start_response: Callable[..., Any]
     ) -> Iterable[bytes]:
         query = parse_qs(str(environ.get("QUERY_STRING") or ""))
         got = {k: (query.get(k) or [""])[0] for k in ("state", "code", "error")}
+        if self.waiting and str(environ.get("PATH_INFO") or "/") == "/pick":
+            return self._pick(query, start_response)
         if self.done or str(environ.get("PATH_INFO") or "/") != "/" or not any(got.values()):
             start_response("404 Not Found", [("Content-type", "text/plain; charset=utf-8")])
             return [b"Not found"]
@@ -126,16 +174,27 @@ class _Landing:
             except Exception as exc:  # never a stack on their screen
                 log.warning("the Pyxi sign-in failed: %s", type(exc).__name__)
                 self.error = SignInError("failed", type(exc).__name__)
-        start_response(
-            "200 OK",
-            [
-                ("Content-type", "text/html; charset=utf-8"),
-                ("Cache-Control", "no-store"),
-                ("Referrer-Policy", "no-referrer"),
-                ("X-Content-Type-Options", "nosniff"),
-            ],
-        )
-        return [page(self.error is None, reason, account=True)]
+        site = ""
+        if self.error is None and self.onward is not None:
+            try:
+                site = self.onward().rstrip("/")
+            except Exception:
+                site = ""
+        if site.startswith(("https://", "http://127.0.0.1", "http://localhost")):
+            # Signed in. On to the website's page, which knows the plan they pressed there and
+            # comes straight back with it. The port and key ride in the fragment: the browser
+            # keeps that to itself, so the website's server never sees them.
+            self.waiting = True
+            start_response(
+                "303 See Other",
+                [
+                    ("Location", f"{site}/signed-in#p={self.port}&k={self.key}"),
+                    ("Cache-Control", "no-store"),
+                    ("Referrer-Policy", "no-referrer"),
+                ],
+            )
+            return [b""]
+        return self._closing(start_response, reason)
 
 
 def run(
@@ -149,13 +208,21 @@ def run(
     http: httpx.Client | None = None,
     auth_url: str = AUTH_URL,
     token_url: str = TOKEN_URL,
+    onward: Callable[[], str] | None = None,
+    on_pick: Callable[[str, bool], None] | None = None,
+    pick_wait: float = PICK_WAIT_S,
 ) -> None:
     """Open Google's sign-in page and wait for it to come back to this PC, then swap the
     one-time code for an ID token and hand that to ``deliver``. Raises :class:`SignInError`
     when it does not finish. The closing page says "signed in" only once ``deliver`` returned.
 
     ``client_secret``: Google asks for one from a "Desktop app" client even with PKCE (it is
-    not a secret there: it ships inside every installed app). Empty: none is sent."""
+    not a secret there: it ships inside every installed app). Empty: none is sent.
+
+    ``onward``: asked after a good sign-in; when it answers with the website's address, the
+    browser goes there to fetch the plan pressed on the pricing page and ``on_pick(plan,
+    yearly)`` is called with it. The wait for that is short (``pick_wait``) and never fails
+    the sign-in: they are signed in either way."""
     if not client_id:
         raise SignInError("failed", "no client id")
     cancel = cancel or threading.Event()
@@ -189,9 +256,10 @@ def run(
             raise SignInError("state", "nonce")
         deliver(id_token)  # used once, kept nowhere
 
-    landing = _Landing(state, finish)
+    landing = _Landing(state, finish, onward, on_pick)
     server = wsgiref.simple_server.make_server("127.0.0.1", 0, landing, handler_class=_Quiet)
     try:
+        landing.port = server.server_port
         redirect.append(f"http://127.0.0.1:{server.server_port}")
         server.timeout = 0.25
         open_browser(auth_address(client_id, redirect[0], state, challenge, nonce, auth_url))
@@ -201,6 +269,10 @@ def run(
                 raise SignInError("cancelled")
             if time.monotonic() >= deadline:
                 raise SignInError("timeout")
+            server.handle_request()
+        # Signed in. The website's page may still be on its way back with the plan they pressed.
+        back_by = time.monotonic() + pick_wait
+        while landing.waiting and time.monotonic() < back_by and not cancel.is_set():
             server.handle_request()
     finally:
         server.server_close()

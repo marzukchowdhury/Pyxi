@@ -127,3 +127,20 @@ describe("the account store", () => {
     expect(wire.sent).toHaveLength(1);
   });
 });
+
+describe("the plan picker's labels", () => {
+  it("marks the plan pressed on the website, and what the trial runs on", async () => {
+    const { planLit, PLANS, planTag, yearlySaving } = await import("./account");
+    const trial = { status: "trial" as const, trial_ends_at: "2026-11-29T12:00:00Z", picked: { plan: "starter" as const, yearly: true } };
+    expect(planTag("starter", trial)).toBe("Your pick");
+    expect(planTag("pro", trial)).toBe("Your trial is on this");
+    expect(planTag("max", trial)).toBe("");
+    expect(planLit("starter", trial)).toBe(true);
+    expect(planLit("pro", trial)).toBe(false);
+    // no pick: Pro is the row that stands out, as before
+    expect(planLit("pro", { picked: null })).toBe(true);
+    expect(planTag("pro", { status: "ended", trial_ends_at: "2026-11-29T12:00:00Z", picked: null })).toBe("What your trial was on");
+    expect(planTag("pro", { status: "ended", trial_ends_at: null, picked: null })).toBe("");
+    expect(PLANS.map(yearlySaving)).toEqual([18, 48, 96]);
+  });
+});
